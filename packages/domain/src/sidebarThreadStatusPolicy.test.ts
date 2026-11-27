@@ -16,6 +16,7 @@ function thread(overrides: Partial<SidebarThreadStatusInput> = {}): SidebarThrea
     working: overrides.working ?? false,
     attention: overrides.attention ?? false,
     limited: overrides.limited ?? false,
+    waiting: overrides.waiting ?? false,
     woke: overrides.woke ?? false,
     unread: overrides.unread ?? false,
   };
@@ -47,6 +48,14 @@ describe("resolveSidebarThreadStatus", () => {
     expect(resolveSidebarThreadStatus(thread({ attention: true, woke: true, unread: true }))).toBe(
       "attention",
     );
+  });
+
+  it("shows a thread waiting on a pull request only when nothing else is to say", () => {
+    // A watch stays on after it wakes the thread, so the turn it started must
+    // still read as new activity.
+    expect(resolveSidebarThreadStatus(thread({ waiting: true, unread: true }))).toBe("unread");
+    expect(resolveSidebarThreadStatus(thread({ waiting: true, woke: true }))).toBe("woke");
+    expect(resolveSidebarThreadStatus(thread({ waiting: true }))).toBe("waiting");
   });
 
   it("shows an ended snooze ahead of unread activity", () => {

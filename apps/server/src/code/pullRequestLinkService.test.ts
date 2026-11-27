@@ -135,6 +135,7 @@ function switchFixture(input: {
             `${target.repositoryOwner.toLowerCase()}/${target.repositoryName.toLowerCase()}#${target.number}`,
           ) ?? [],
       }),
+      connectionRevoked: () => false,
       linkedPullRequests: async (_windowId, threadId) =>
         input.linkedPullRequestsByThread.get(String(threadId)) ?? [],
     },

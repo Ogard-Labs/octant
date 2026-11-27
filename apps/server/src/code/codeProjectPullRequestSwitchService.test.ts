@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   decodeCodeProjectPullRequestSwitchTarget,
   decodeCodeProjectPullRequestView,
+  decodeEventActor,
   decodeUtcTimestamp,
   decodeWindowId,
   type CodeProjectPullRequestMergeMethod,
@@ -22,6 +23,7 @@ import {
   type PullRequestSwitchForge,
   type PullRequestSwitchLimits,
 } from "./codeProjectPullRequestSwitchService";
+import { PullRequestLinkService, type PullRequestLinkOwner } from "./pullRequestLinkService";
 import type {
   GhAutoFixFailureDetail,
   GhPullRequestActivity,
@@ -30,6 +32,7 @@ import type {
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+const bystanderThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000003");
 const target = decodeCodeProjectPullRequestSwitchTarget({
   projectId: "10000000-0000-4000-8000-000000000001",
   repositoryOwner: "octant",
@@ -91,6 +94,8 @@ function fixture(
     readonly limits?: () => PullRequestSwitchLimits;
     readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
+    readonly pullRequestLinks?: (journal: Journal) => PullRequestLinkOwner;
+    readonly onWaitResumed?: () => void;
   } = {},
 ) {
   let authority: "authorized" | "not-authorized" | "disconnected" = "authorized";
@@ -145,9 +150,12 @@ function fixture(
     readFollowUp: vi.fn<NonNullable<PullRequestAutoFixThreads["readFollowUp"]>>(),
     notifyPerson: vi.fn<PullRequestAutoFixThreads["notifyPerson"]>(async () => undefined),
   };
+  const pullRequestLinks = options.pullRequestLinks?.(journal);
   const create = () =>
     new CodeProjectPullRequestSwitchService({
+      ...(pullRequestLinks && { pullRequestLinks }),
       ...(options.limits && { limits: options.limits }),
+      ...(options.onWaitResumed && { onWaitResumed: options.onWaitResumed }),
       ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
         authorizePullRequest:
@@ -157,6 +165,7 @@ function fixture(
               ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
               : { status: authority }),
         linkedPullRequests: async () => options.threadPullRequests ?? [target],
+        connectionRevoked: () => authority === "disconnected",
       },
       forge,
       threads,
@@ -1264,6 +1273,249 @@ describe("a thread watching its own pull request", () => {
     expect(await f.service.unwatch({ threadId, providerInstanceId })).toEqual({
       status: "not-watching",
     });
+  });
+
+  it("lists a thread's own watch with its spent wakes and its end, and no other thread's", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe(activity({ checks: "failed" }));
+    await f.service.tick(signal);
+
+    expect(f.service.threadWaits(threadId)).toEqual([
+      {
+        kind: "watch",
+        target,
+        since: "2026-10-31T10:00:00.000Z",
+        paused: false,
+        wakes: 1,
+        wakeLimit: 10,
+        endsAt: "2026-11-03T10:00:00.000Z",
+      },
+    ]);
+    expect(f.service.threadWaits(bystanderThreadId)).toEqual([]);
+    // The sidebar reads every thread's start in one pass.
+    expect(f.service.threadsWaitingSince()).toEqual(
+      new Map([[String(threadId), "2026-10-31T10:00:00.000Z"]]),
+    );
+  });
+
+  it("lists Auto-fix and babysitting under the thread that repairs the pull request", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "auto-fix", target, paused: false },
+    ]);
+    await f.service.setAutoFix(windowId, { kind: "disable", target, threadId }, "user");
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "babysit", target, paused: false, wakes: 0, wakeLimit: 10 },
+    ]);
+  });
+
+  it("reads a watch nobody vouches for after a restart as paused, and reading it vouches for nothing", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+
+    f.observe(activity({ checks: "failed" }));
+    await restarted.tick(signal);
+    expect(f.threads.startTurn).not.toHaveBeenCalled();
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+  });
+
+  it("raises one follow-up notice when opening the pull request resumes a watch after a restart", async () => {
+    const onWaitResumed = vi.fn();
+    const f = fixture({ onWaitResumed });
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    onWaitResumed.mockClear();
+
+    await restarted.query(windowId, target);
+    expect(restarted.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: false }]);
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+
+    await restarted.query(windowId, target);
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises a follow-up notice when the thread's agent asking again resumes its watch", async () => {
+    const onWaitResumed = vi.fn();
+    const f = fixture({ onWaitResumed });
+    f.observe(activity());
+    await watching(f);
+    const restarted = f.restart();
+    onWaitResumed.mockClear();
+
+    await watching({ ...f, service: restarted });
+    expect(onWaitResumed).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["with nothing else on", "while the watch stays on"])(
+    "shows no earlier pause reason on Auto-fix turned back on %s",
+    async (scenario) => {
+      const f = fixture();
+      f.observe(activity({}, { failures: [lint] }));
+      if (scenario === "while the watch stays on") await watching(f);
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+      f.setTurnActive(true);
+      await f.service.tick(signal);
+      expect((await f.service.query(windowId, target)).autoFix).toMatchObject({
+        pausedFor: "turn-active",
+      });
+
+      await f.service.setAutoFix(windowId, { kind: "disable", target }, "user");
+      await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+
+      expect((await f.service.query(windowId, target)).autoFix).not.toHaveProperty("pausedFor");
+    },
+  );
+
+  it("reads babysitting whose connection was lost as paused", async () => {
+    const f = fixture();
+    await f.service.setAutoFix(
+      windowId,
+      { kind: "enable", target, threadId, babysit: { checks: "required" } },
+      "user",
+    );
+    f.setAuthority("disconnected");
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([{ kind: "babysit", paused: true }]);
+  });
+
+  it("reads a watch and Auto-fix as paused from the moment GitHub is disconnected until it is back", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+
+    f.setAuthority("disconnected");
+    const disconnected = [
+      { kind: "watch", paused: true, pausedBy: "github-disconnected" },
+      { kind: "auto-fix", paused: true, pausedBy: "github-disconnected" },
+    ];
+    expect(f.service.threadWaits(threadId)).toMatchObject(disconnected);
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject(disconnected);
+
+    f.setAuthority("authorized");
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "watch", paused: false },
+      { kind: "auto-fix", paused: false },
+    ]);
+  });
+
+  it("reads a watch the last pass could not read as paused until a pass reads it again", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe({ status: "unavailable" });
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "watch", paused: true, pausedBy: "unreachable" },
+    ]);
+
+    f.observe(activity());
+    await f.service.tick(signal);
+    const [wait] = f.service.threadWaits(threadId);
+    expect(wait).toMatchObject({ kind: "watch", paused: false });
+    expect(wait).not.toHaveProperty("pausedBy");
+  });
+
+  it("keeps Auto-fix waiting when another thread's watch on the same pull request loses its link", async () => {
+    const other = decodeCodeThreadId("22222222-2222-4222-8222-2222222222ff");
+    const linked = [String(threadId), String(other)];
+    const f = fixture({ linked });
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId: other }, "user");
+    linked.splice(0, 1);
+    await f.service.tick(signal);
+
+    expect(f.service.threadWaits(other)).toMatchObject([{ kind: "auto-fix", paused: false }]);
+    expect(f.service.threadWaits(threadId)).toMatchObject([{ kind: "watch", paused: true }]);
+  });
+
+  it("looks up no pull-request link for a stopped switch when the sidebar reads who waits", async () => {
+    let resolved = 0;
+    const f = fixture({
+      pullRequestLinks: (journal) => {
+        const links = new PullRequestLinkService({ journal, uuid: randomUUID });
+        const resolveLink = links.resolveLink.bind(links);
+        vi.spyOn(links, "resolveLink").mockImplementation((input) => {
+          resolved += 1;
+          return resolveLink(input);
+        });
+        return links;
+      },
+    });
+    f.observe(activity());
+    await watching(f);
+    await f.service.unwatch({ threadId, providerInstanceId });
+    resolved = 0;
+
+    expect(f.service.threadsWaitingSince()).toEqual(new Map());
+    expect(resolved).toBe(0);
+  });
+
+  it("stops the thread's own watch for the person and journals who stopped it", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    const [wait] = f.service.threadWaits(threadId);
+    const person = { kind: "local-user" as const, actorId: "10000000-0000-4000-8000-0000000000aa" };
+    const stop = (over: Partial<Parameters<typeof f.service.stopThreadWait>[0]> = {}) =>
+      f.service.stopThreadWait({
+        threadId,
+        wait: "watch",
+        target,
+        since: wait?.since ?? "",
+        actor: decodeEventActor(person),
+        ...over,
+      });
+
+    // Another thread's name, the other kind, or a watch begun since stops nothing.
+    expect(stop({ threadId: bystanderThreadId })).toBe(false);
+    expect(stop({ wait: "auto-fix" })).toBe(false);
+    expect(stop({ since: "2026-10-30T10:00:00.000Z" })).toBe(false);
+    expect(f.service.watching).toBe(true);
+
+    expect(stop()).toBe(true);
+    expect(f.service.watching).toBe(false);
+    expect(f.recorded(WATCH).at(-1)).toMatchObject({
+      actor: person,
+      payload: { change: { kind: "disabled" } },
+    });
+    expect(stop()).toBe(false);
+  });
+
+  it("stops Auto-fix for the thread that repairs the pull request, and leaves its watch on", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+    const autoFix = f.service.threadWaits(threadId).find((wait) => wait.kind === "auto-fix");
+    expect(
+      f.service.stopThreadWait({
+        threadId,
+        wait: "auto-fix",
+        target,
+        since: autoFix?.since ?? "",
+        actor: decodeEventActor({
+          kind: "local-user",
+          actorId: "10000000-0000-4000-8000-0000000000aa",
+        }),
+      }),
+    ).toBe(true);
+    expect(f.service.threadWaits(threadId).map((wait) => wait.kind)).toEqual(["watch"]);
   });
 
   it("answers a second watch of the same pull request without journaling it again", async () => {

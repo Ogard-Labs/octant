@@ -325,6 +325,8 @@ describe("remote route policy", () => {
       { path: "/api/mcp-plan-read-only", method: "GET" },
       { path: "/api/mcp-plan-read-only/commands", method: "POST" },
       { path: "/api/code-live-tasks?threadId=t1", method: "GET" },
+      { path: "/api/code-thread-waits?threadId=t1", method: "GET" },
+      { path: "/api/code-thread-waits/stop", method: "POST" },
       { path: "/api/work-live-tasks?threadId=t1", method: "GET" },
       { path: "/api/agent-runs/parent-summary?parentThreadId=t1", method: "GET" },
       { path: "/api/agent-runs/cancel", method: "POST" },

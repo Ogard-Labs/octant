@@ -40,6 +40,9 @@ export const SIDEBAR_THREAD_STATUS_ORDER = [
   "limited",
   "woke",
   "unread",
+  // Last: a watch stays on after it wakes the thread, so ranking the wait
+  // above new activity would hide every turn it started behind "Waiting".
+  "waiting",
 ] as const satisfies ReadonlyArray<SidebarThreadStatus>;
 
 /**
@@ -51,6 +54,7 @@ export const SIDEBAR_THREAD_STATUS_LABEL: Readonly<Record<SidebarThreadStatus, s
   working: "Working",
   attention: "Needs attention",
   limited: "Limited",
+  waiting: "Waiting",
   woke: "Snooze ended",
   unread: "New activity",
 };
@@ -67,6 +71,12 @@ export interface SidebarThreadStatusInput {
   readonly attention: boolean;
   /** A provider usage limit holds the latest turn, and its reset has not passed. */
   readonly limited: boolean;
+  /**
+   * Between turns the thread waits on something outside it, such as a pull
+   * request its agent watches. Optional: a mode that has no such wait says
+   * nothing rather than false.
+   */
+  readonly waiting?: boolean;
   /** A snooze ended but the thread has not been opened since. */
   readonly woke: boolean;
   /** The thread has activity past what this client has read. */

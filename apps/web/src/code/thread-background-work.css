@@ -1,0 +1,123 @@
+.thread-background-work {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+/* One quiet line above the composer: a glyph, what the thread is doing, a
+   muted list of what it runs or waits on, and the two plain-word actions. */
+.thread-background-work__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 24px;
+}
+.thread-background-work__icon {
+  flex: none;
+  color: var(--octant-text-muted);
+}
+.thread-background-work__summary {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+.thread-background-work__state {
+  flex: none;
+  color: var(--octant-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+/* The list stays on one line and ends in an ellipsis; Details names every entry. */
+.thread-background-work__list {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  list-style: none;
+  color: var(--octant-text-muted);
+}
+.thread-background-work__list li {
+  display: inline;
+}
+.thread-background-work__list li:not(:last-child)::after {
+  content: ", ";
+}
+.thread-background-work__list--one li::before {
+  content: "·";
+  margin-inline-end: var(--oct-space-1);
+}
+.thread-background-work__command {
+  font-family: var(--oct-font-mono);
+}
+.thread-background-work__actions {
+  display: flex;
+  flex: none;
+  gap: var(--oct-space-2);
+}
+.thread-background-work__action {
+  height: auto;
+  padding: 2px;
+  border-radius: var(--oct-radius-sm);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+.thread-background-work__action:hover:not(:disabled) {
+  color: var(--octant-text-secondary);
+}
+.thread-background-work__action:disabled {
+  color: var(--octant-text-muted);
+}
+.thread-background-work__message {
+  margin: 0.25rem 0 0;
+}
+.thread-background-work__empty {
+  margin: var(--oct-space-3) 0 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+}
+/* Entries share the list's columns, so every state lines up and every Stop
+   lines up, even beside tasks that share the last task's one Stop. */
+.thread-background-work__entries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: var(--oct-space-3);
+  margin: var(--oct-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.thread-background-work__entry {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding-block: var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+  color: var(--octant-text-primary);
+}
+.thread-background-work__entry .thread-background-work__state {
+  justify-self: end;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}
+.thread-background-work__entry .thread-background-work__action {
+  justify-self: end;
+  font-size: var(--oct-text-xs);
+}
+.thread-background-work__entry .thread-background-work__command {
+  font-size: var(--oct-text-xs);
+}
+.thread-background-work__entry-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.thread-background-work__entry-detail {
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+}

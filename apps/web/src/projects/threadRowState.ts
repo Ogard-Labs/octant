@@ -11,7 +11,7 @@ import {
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
-import { CircleAlert, Clock, LoaderCircle } from "../ui/icons";
+import { CircleAlert, Clock, ClockFading, LoaderCircle } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import type { SidebarThreadRowState } from "./SidebarThreadRowContent";
 import { threadRowShortAge } from "./threadRowShortAge";
@@ -28,6 +28,8 @@ export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconCompon
     case "attention":
     case "limited":
       return CircleAlert;
+    case "waiting":
+      return ClockFading;
     case "woke":
       return Clock;
     default:
@@ -71,6 +73,8 @@ export function threadRowState(props: {
   readonly shelf?: ChatThreadNavigationItem["shelf"] | undefined;
   /** The row's minute clock, which the elapsed and remaining times read. */
   readonly now?: number | undefined;
+  /** When the thread began waiting between turns; absent when it is not. */
+  readonly waitingSince?: string | undefined;
 }): ThreadRowStateReading {
   const now = props.now ?? Date.now();
   const facts = sidebarThreadStatusInput({ ...props, now });
@@ -81,15 +85,15 @@ export function threadRowState(props: {
     ...(props.followUp === true ? ["Follow-up"] : []),
   ].join(", ");
   if (status === "unread") return { unread: true, label };
-  const elapsed =
-    status === "working" && props.startedAt !== undefined
-      ? threadRowShortAge(props.startedAt, now)
-      : undefined;
+  const since =
+    status === "working" ? props.startedAt : status === "waiting" ? props.waitingSince : undefined;
+  const elapsed = since === undefined ? undefined : threadRowShortAge(since, now);
+  const word = SIDEBAR_THREAD_STATUS_LABEL[status];
   const text =
-    status === "working"
+    status === "working" || status === "waiting"
       ? elapsed === undefined || elapsed === "now"
-        ? "Working"
-        : `Working ${elapsed}`
+        ? word
+        : `${word} ${elapsed}`
       : status === "attention"
         ? "Needs you"
         : status === "limited"

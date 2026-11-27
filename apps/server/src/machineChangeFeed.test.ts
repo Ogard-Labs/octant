@@ -6,6 +6,7 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
 } from "@octant/contracts";
 import { MachineChangeFeed } from "./machineChangeFeed";
+import { CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE } from "@octant/contracts/code-project-pull-request-switches";
 
 describe("MachineChangeFeed", () => {
   it("coalesces committed domains into cursor-ordered invalidations", async () => {
@@ -513,6 +514,19 @@ describe("MachineChangeFeed", () => {
     feed.publishCommitted({ events: [{ aggregateType: "thread-wakeup" }] });
     await expect(stream.next()).resolves.toMatchObject({
       value: { kind: "changed", topics: ["thread-follow-ups"] },
+    });
+    controller.abort();
+  });
+
+  it("tells the thread's follow-up readers when a pull-request switch changes", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    feed.publishCommitted({
+      events: [{ aggregateType: CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE }],
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["thread-follow-ups", "code-navigation"] },
     });
     controller.abort();
   });

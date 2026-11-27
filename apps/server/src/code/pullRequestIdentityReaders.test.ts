@@ -1529,6 +1529,7 @@ describe("pull request readers use the single forge identity owner", () => {
             canonicalTarget: target,
             linkedThreadIds: [String(threadA), String(threadB)],
           }),
+          connectionRevoked: () => false,
           linkedPullRequests: async (_wid, tid) =>
             String(tid) === String(threadA) ? [oldTarget42] : [newTarget42],
         },
@@ -1900,6 +1901,7 @@ exit 1
             canonicalTarget: target,
             linkedThreadIds: [String(threadA), String(threadB)],
           }),
+          connectionRevoked: () => false,
           linkedPullRequests: async (_wid, tid) =>
             String(tid) === String(threadA) ? [oldTarget] : [newTarget],
         },

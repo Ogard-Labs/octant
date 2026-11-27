@@ -289,6 +289,28 @@ describe("ProjectThreadRows", () => {
     expect(within(row).getByText("Working 14m")).toBeVisible();
   });
 
+  it("says how long an idle thread has waited on its pull request, once its new activity is read", () => {
+    const sixMinutesAgo = new Date(Date.now() - 6 * 60_000).toISOString();
+    const { rerender } = render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, activity: "unread", unread: true, waitingSince: sixMinutesAgo }]}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(row.querySelector(".sidebar-navigation__thread-unread-dot")).not.toBeNull();
+    expect(row).toHaveAccessibleName("Controller foundation, New activity, Waiting");
+
+    rerender(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, activity: "idle", waitingSince: sixMinutesAgo }]}
+      />,
+    );
+    expect(within(row).getByText("Waiting 6m")).toBeVisible();
+    expect(row).toHaveAccessibleName("Controller foundation, Waiting");
+  });
+
   it("marks an unread thread with a named dot beside its time and clears it when read", () => {
     const { rerender } = render(
       <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, unread: true }]} />,

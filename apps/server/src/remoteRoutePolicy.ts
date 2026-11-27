@@ -1811,10 +1811,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
   },
-  // Kept provider sessions and background live tasks in Code and Work, for a
-  // device the host's own person paired; each route refuses restricted devices.
+  // Kept provider sessions, background live tasks, and what a Code thread waits
+  // on, for a device the host's own person paired; each route refuses
+  // restricted devices.
   ...[
     "/api/code-live-tasks",
+    "/api/code-thread-waits",
     "/api/code-native-sessions",
     "/api/work-live-tasks",
     "/api/work-native-sessions",
@@ -1827,6 +1829,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   })),
   ...[
     "/api/code-live-tasks/stop",
+    "/api/code-thread-waits/stop",
     "/api/code-native-sessions/adopt",
     "/api/work-live-tasks/stop",
     "/api/work-native-sessions/adopt",

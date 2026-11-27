@@ -79,6 +79,7 @@ import {
   type CodeAttachmentReference,
   EventId,
   UtcTimestamp,
+  decodeUtcTimestamp,
   decodeCodeCommand,
   decodeCodeThreadActivity,
   decodeCodeCheckoutHead,
@@ -843,6 +844,12 @@ export interface CodeServiceExecutionContext {
 }
 
 export interface CodeServiceOptions {
+  /**
+   * When each thread began waiting on a pull request, by thread id. GitHub is
+   * a separable integration, so the composition root binds this; absent, no
+   * row says so.
+   */
+  readonly threadsWaitingSince?: () => ReadonlyMap<string, string>;
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
@@ -1146,6 +1153,19 @@ function threadStrictChoice(
  * dropped rather than stored as "not any more", so a thread that was never
  * put away and one that came back are the same record.
  */
+function readWaitingSince(
+  waits: ReadonlyMap<string, string> | undefined,
+  threadId: CodeThreadId,
+): UtcTimestamp | undefined {
+  const since = waits?.get(String(threadId));
+  if (since === undefined) return undefined;
+  try {
+    return decodeUtcTimestamp(since);
+  } catch {
+    return undefined;
+  }
+}
+
 function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
   thread: T,
 ): Omit<T, "completedAt" | "snooze"> {
@@ -1343,6 +1363,7 @@ export class CodeService {
   readonly #putAwayWhenDone: () => boolean;
   readonly #unfinishedWork: ((threadId: string) => ThreadUnfinishedWork | undefined) | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
+  readonly #threadsWaitingSince: (() => ReadonlyMap<string, string>) | undefined;
   readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #turnAwaiting: CodeServiceOptions["turnAwaiting"];
   readonly #issueContext?: GithubIssueContextPort;
@@ -1416,6 +1437,7 @@ export class CodeService {
     this.#touchedIssues = options.touchedIssues;
     this.#linkedIssues = options.linkedIssues;
     this.#liveTurns = options.liveTurns;
+    this.#threadsWaitingSince = options.threadsWaitingSince;
     this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     this.#turnAwaiting = options.turnAwaiting;
     this.#projectReportPage = options.projectReportPage;
@@ -1805,6 +1827,7 @@ export class CodeService {
     threads: ReadonlyArray<CodeThread>,
     pullRequests: ThreadBoardPullRequestSnapshot | undefined,
   ): ReadonlyArray<CodeNavigationRuntime> {
+    const waits = this.#threadsWaitingSince?.();
     return threads.map((thread) => {
       // Read once per row: each read decodes the thread's whole work list.
       const works = this.#persistence.readCodeRuntimeWorks(thread.id);
@@ -1825,6 +1848,19 @@ export class CodeService {
         pullRequestSummaries !== undefined &&
         (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
       const parked = awaitingKind !== undefined;
+      const live = parked ? undefined : this.#liveTurns?.read(String(thread.id));
+      // A thread waits between turns only: a turn running or parked on the
+      // person already says more. A settled or archived thread waits on
+      // nothing even while its watch has not yet read it as gone, which an
+      // unvouched watch after a restart may not do for days.
+      const waitingSince =
+        parked ||
+        executing ||
+        live !== undefined ||
+        thread.lifecycle !== "active" ||
+        thread.completedAt !== undefined
+          ? undefined
+          : readWaitingSince(waits, thread.id);
       return {
         threadId: thread.id,
         executing,
@@ -1840,7 +1876,8 @@ export class CodeService {
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
-        ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
+        ...(parked ? {} : live),
+        ...(waitingSince === undefined ? {} : { waitingSince }),
       };
     });
   }

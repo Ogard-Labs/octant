@@ -1054,7 +1054,10 @@ export function wireCode(deps: CodeDependencies) {
     // merge-back, so the runtime's area builds the service once the runtime
     // exists; everything else the service reads is this area's.
     const serverGitHistories = new Map<string, GitHistoryPort>();
-    const buildCodeService = (codeOperationRuntime: CodeOperationRuntime | undefined) => {
+    const buildCodeService = (
+      codeOperationRuntime: CodeOperationRuntime | undefined,
+      threadsWaitingSince?: () => ReadonlyMap<string, string>,
+    ) => {
       archivedWorktreeTurns = codeOperationRuntime;
       const codeService =
         options.codeService ??
@@ -1065,6 +1068,7 @@ export function wireCode(deps: CodeDependencies) {
               .coordinatorsPerProject,
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
+          ...(threadsWaitingSince === undefined ? {} : { threadsWaitingSince }),
           awaitsHarnessApproval: threadAwaitsHarnessApproval,
           unfinishedWork: threadUnfinishedWork,
           turnAwaiting: (threadId) => codeOperationRuntime?.turnAwaiting?.(threadId),

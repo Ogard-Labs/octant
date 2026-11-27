@@ -104,7 +104,8 @@ import { ThreadVideoClips } from "../video/ThreadVideoClips";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
-import { CodeLiveTasks } from "./CodeLiveTasks";
+import { ThreadBackgroundWork } from "./ThreadBackgroundWork";
+import { createThreadWaitClient, type ThreadWaitClient } from "./threadWaitClient";
 import { CodeNativeSession } from "./CodeNativeSession";
 import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
@@ -420,6 +421,8 @@ export interface CodeThreadWorkspaceProps {
   /** The thread's wake-ups; absent builds one from the server address. */
   readonly wakeupClient?: ThreadWakeupClient;
   readonly codeSessionClient?: CodeSessionClient;
+  /** The pull requests the thread waits on; absent builds one from the server address. */
+  readonly threadWaitClient?: ThreadWaitClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -795,6 +798,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ? undefined
         : createCodeSessionClient({ serverUrl, windowCapability })),
     [codeSessionClient, serverUrl, windowCapability],
+  );
+  const { threadWaitClient } = props;
+  const waitClient = useMemo(
+    () =>
+      threadWaitClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createThreadWaitClient({ serverUrl, windowCapability })),
+    [threadWaitClient, serverUrl, windowCapability],
   );
   const messageQueue = useThreadMessageQueue({
     mode: "code",
@@ -3124,7 +3136,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
               />
-              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <ThreadBackgroundWork
+                threadId={props.threadId}
+                client={sessionClient}
+                pullRequests={{
+                  threadId: props.threadId,
+                  client: waitClient,
+                  turnRunning: busy,
+                  resting: thread.lifecycle !== "active" || thread.completedAt !== undefined,
+                }}
+              />
               <CodeNativeSession
                 threadId={props.threadId}
                 client={sessionClient}

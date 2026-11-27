@@ -119,7 +119,7 @@ import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
-import { CodeLiveTasks } from "../code/CodeLiveTasks";
+import { ThreadBackgroundWork } from "../code/ThreadBackgroundWork";
 import { CodeNativeSession } from "../code/CodeNativeSession";
 import type { ThreadSessionClient } from "../code/codeSessionClient";
 import { createWorkSessionClient } from "./workSessionClient";
@@ -3659,7 +3659,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
               />
-              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <ThreadBackgroundWork threadId={props.threadId} client={sessionClient} />
               <CodeNativeSession
                 threadId={props.threadId}
                 client={sessionClient}

@@ -304,6 +304,9 @@ describe("DevicePane", () => {
     screen.getByRole("button", { name: "More" }).focus();
     await user.keyboard("{Enter}");
     await user.click(await screen.findByRole("menuitem", { name: "Volume up" }));
+    // The menu leaves the page after its close: reopening early can find the
+    // closing menu's "Volume down", whose click sends nothing.
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     screen.getByRole("button", { name: "More" }).focus();
     await user.keyboard("{Enter}");
     await user.click(await screen.findByRole("menuitem", { name: "Volume down" }));
