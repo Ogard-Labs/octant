@@ -72,11 +72,18 @@ const inputSchema = Schema.Struct({
   ),
   help: Schema.Struct({ tool: Schema.String, help: Schema.String }),
 });
+const projectInputSchema = Schema.Union(
+  inputSchema,
+  Schema.Struct({ status: Schema.Literal("unsupported"), reason: Schema.String }),
+);
 export const decodeInputs = Schema.decodeUnknownSync(
   Schema.Struct({
     status: inputSchema,
     assign: inputSchema,
     revise: inputSchema,
+    projectQuestion: projectInputSchema,
+    projectAssign: projectInputSchema,
+    projectRevise: projectInputSchema,
   }),
 );
 
@@ -86,7 +93,7 @@ const defaultInstructions =
 const configuration = { temperature: 0, seed: 42, max_tokens: 768 };
 const maxRounds = 6;
 
-type Inputs = ReturnType<typeof decodeInputs>;
+type Input = Schema.Schema.Type<typeof inputSchema>;
 
 function run(cwd: string, command: string[]): string {
   const result = Bun.spawnSync(command, { cwd, stderr: "inherit" });
@@ -145,7 +152,7 @@ export async function sample(
   endpoint: URL,
   model: string,
   fixture: EvaluationCase,
-  input: Inputs[keyof Inputs],
+  input: Input,
   decodeStart: StartDecoder,
 ): Promise<Sample> {
   const actions: Action[] = [];
@@ -178,7 +185,8 @@ export async function sample(
         return { status: "incomplete", reason: finish_reason, actions };
       }
       messages.push({ role: "assistant", ...message });
-      for (const [index, action] of returned.entries()) {
+      for (const [index, decision] of returned.entries()) {
+        let action = decision;
         const call = calls[index];
         if (call === undefined) throw new Error("Missing tool call for a recorded decision.");
         let result: object = {
@@ -192,6 +200,10 @@ export async function sample(
           const reference = `${id}@${fixtureProjectId}`;
           workers.push({ id, reference, title: action.title, state: "working" });
           result = { status: "started", reference };
+          if (fixture.projectConversation === true) {
+            result = { ...result, firstTurn: "started" };
+            action = { ...action, startedReference: reference };
+          }
         }
         if (
           action.operation === "send" &&
@@ -262,17 +274,26 @@ async function main() {
   const results = [];
   for (const name of Object.keys(cases) as (keyof typeof cases)[]) {
     const fixture = cases[name];
+    const beforeInput = baseline.inputs[name];
+    const afterInput = candidate.inputs[name];
     const before: Sample[] = [];
     const after: Sample[] = [];
     for (let index = 0; index < Number(count); index += 1) {
-      before.push(
-        await sample(endpoint, model, fixture, baseline.inputs[name], baseline.decodeStart),
-      );
-      after.push(
-        await sample(endpoint, model, fixture, candidate.inputs[name], candidate.decodeStart),
-      );
+      if (!("status" in beforeInput)) {
+        before.push(await sample(endpoint, model, fixture, beforeInput, baseline.decodeStart));
+      }
+      if (!("status" in afterInput)) {
+        after.push(await sample(endpoint, model, fixture, afterInput, candidate.decodeStart));
+      }
     }
-    results.push({ name, expected: fixture.expected, ...compareSamples(before, after) });
+    const comparison = compareSamples(before, after);
+    results.push({
+      name,
+      expected: fixture.expected,
+      ...comparison,
+      baseline: { ...comparison.baseline, ...("status" in beforeInput ? beforeInput : {}) },
+      candidate: { ...comparison.candidate, ...("status" in afterInput ? afterInput : {}) },
+    });
   }
   console.log(
     JSON.stringify(

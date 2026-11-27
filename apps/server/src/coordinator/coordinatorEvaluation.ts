@@ -8,6 +8,7 @@ const palette = worker("20000000-0000-4000-8000-000000000002", "Update the palet
 const typography = worker("20000000-0000-4000-8000-000000000003", "Update typography", "idle");
 
 export interface EvaluationCase {
+  readonly projectConversation?: true;
   readonly prompt: string;
   readonly workers: ReadonlyArray<ReturnType<typeof worker>>;
   readonly expected: {
@@ -40,12 +41,37 @@ export const cases = {
       messageIncludes: ["dark blue", "primary button"],
     },
   },
+  projectQuestion: {
+    projectConversation: true,
+    prompt: "Can the palette work continue while typography is idle?",
+    workers: [palette, typography] as const,
+    expected: { action: "answer", targets: [], workerCount: 0 },
+  },
+  projectAssign: {
+    projectConversation: true,
+    prompt:
+      "The CSV parser mishandles quoted commas and the changelog still needs this release’s entries. Please get both done.",
+    workers: [],
+    expected: { action: "start", targets: ["parser", "changelog"], workerCount: 2 },
+  },
+  projectRevise: {
+    projectConversation: true,
+    prompt: "Change the palette assignment to use dark blue for the primary button.",
+    workers: [palette, typography],
+    expected: {
+      action: "send",
+      targets: [palette.reference],
+      workerCount: 1,
+      messageIncludes: ["dark blue", "primary button"],
+    },
+  },
 } satisfies Record<string, EvaluationCase>;
 
 export interface Action {
   readonly operation: string;
   readonly title?: string;
   readonly prompt?: string;
+  readonly startedReference?: string;
   readonly recipients?: ReadonlyArray<string>;
   readonly message?: string;
 }
@@ -73,6 +99,20 @@ export function score(
     );
   }
   if (decisions.length !== workerCount) return false;
+  if (fixture.projectConversation === true) {
+    const recap = answer.toLowerCase();
+    if (
+      !decisions.every(
+        ({ title, startedReference }) =>
+          title?.trim() &&
+          startedReference !== undefined &&
+          recap.includes(title.toLowerCase()) &&
+          recap.includes(startedReference),
+      )
+    ) {
+      return false;
+    }
+  }
   const assignments = decisions.map(({ title, prompt }) => {
     if (!title?.trim() || !prompt?.trim()) return [];
     const titleMatches = targets.filter((target) => title.toLowerCase().includes(target));

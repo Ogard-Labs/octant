@@ -41,9 +41,35 @@ it("detects unnecessary starts, missing assignments, duplicate assignments and m
   expect(score(cases.revise, [send(palette, "Use dark blue for the background.")], "")).toBe(false);
 });
 
+it("requires the Project conversation to name and link each confirmed worker", () => {
+  const actions = [
+    {
+      operation: "start",
+      title: "CSV parser",
+      prompt: "Fix CSV parsing.",
+      startedReference: "parser@project",
+    },
+    {
+      operation: "start",
+      title: "Changelog",
+      prompt: "Update the changelog.",
+      startedReference: "changelog@project",
+    },
+  ];
+  expect(score(cases.projectAssign, actions, "Started CSV parser and Changelog.")).toBe(false);
+  expect(
+    score(
+      cases.projectAssign,
+      actions,
+      "Started CSV parser (parser@project) and Changelog (changelog@project).",
+    ),
+  ).toBe(true);
+});
+
 it("passes changed orchestration instructions, production roster and offered tool schema to the model", async () => {
   const first = await assembleCase(cases.revise, "Answer status questions inline.");
   const edited = await assembleCase(cases.revise, "Start workers for status questions.");
+  if ("status" in first || "status" in edited) throw new Error("Named coordinator unavailable.");
   expect(first.messages[0]?.content).toContain("Answer status questions inline.");
   expect(first.messages[0]?.content).toContain("The person's orchestration instructions");
   expect(edited.messages[0]?.content).toContain("Start workers for status questions.");
@@ -51,6 +77,23 @@ it("passes changed orchestration instructions, production roster and offered too
   expect(first.messages[1]?.content).toContain(cases.revise.workers[0].reference);
   expect(first.tools[0]?.function.description).toContain("send takes recipients");
   expect(first.tools[0]?.function.description).toContain("start creates a worker");
+});
+
+it("uses the checkout's Project conversation context and keeps named coordinator input distinct", async () => {
+  const named = await assembleCase(cases.status, "Use the roster.");
+  const project = await assembleCase(cases.projectQuestion, "Use the roster.");
+  if ("status" in named) throw new Error("Named coordinator unavailable.");
+  expect(named.messages[1]?.content).not.toContain("lasting Project conversation");
+  if ("status" in project) {
+    expect(project.reason).toBe("This revision does not supply Project conversation context.");
+  } else {
+    expect(project.messages[1]?.content).toContain("This is the lasting Project conversation.");
+    expect(project.messages[1]?.content).toContain(
+      "Give each confirmed worker’s title and reference.",
+    );
+    expect(project.messages[1]?.content).toContain(cases.projectQuestion.workers[0].reference);
+    expect(project.tools[0]?.function.description).toContain("start creates a worker");
+  }
 });
 
 it("reports incomplete runs and errors separately from completed decisions", () => {
@@ -153,7 +196,15 @@ it("loads each checkout’s hoisted worker-start contract from its server worksp
 
 it("checks the model input emitted by each checkout", async () => {
   const input = await assembleCase(cases.revise, "Use the roster.");
-  const bundle = { status: input, assign: input, revise: input };
+  const unsupported = { status: "unsupported", reason: "No Project conversation" };
+  const bundle = {
+    status: input,
+    assign: input,
+    revise: input,
+    projectQuestion: unsupported,
+    projectAssign: unsupported,
+    projectRevise: unsupported,
+  };
   expect(decodeInputs(bundle)).toEqual(bundle);
   expect(() =>
     decodeInputs({ ...bundle, revise: { ...input, tools: [{ function: {} }] } }),
@@ -162,7 +213,15 @@ it("checks the model input emitted by each checkout", async () => {
 
 it("returns production help and per-recipient send receipts to the model", async () => {
   const assembled = await assembleCase(cases.revise, "Use the roster.");
-  const input = decodeInputs({ status: assembled, assign: assembled, revise: assembled }).revise;
+  if ("status" in assembled) throw new Error("Named coordinator unavailable.");
+  const input = decodeInputs({
+    status: assembled,
+    assign: assembled,
+    revise: assembled,
+    projectQuestion: assembled,
+    projectAssign: assembled,
+    projectRevise: assembled,
+  }).revise;
   const name = input.tools[0].function.name;
   const recipient = cases.revise.workers[0].reference;
   const response = (id: string, raw: object) =>

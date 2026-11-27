@@ -1,4 +1,9 @@
-import { decodeCodeThread, decodeEventActor, decodeWindowId } from "@octant/contracts";
+import {
+  decodeCodeThread,
+  decodeEventActor,
+  decodeProject,
+  decodeWindowId,
+} from "@octant/contracts";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +23,7 @@ import { fixtureProjectId, type EvaluationCase } from "./coordinatorEvaluation";
 import { CoordinatorService } from "./coordinatorService";
 
 const coordinatorId = "20000000-0000-4000-8000-000000000001";
+const bindingRevisionId = "70000000-0000-4000-8000-000000000001";
 const now = "2026-11-10T12:00:00.000Z";
 
 export async function assembleCase(fixture: EvaluationCase, orchestration: string) {
@@ -27,7 +33,7 @@ export async function assembleCase(fixture: EvaluationCase, orchestration: strin
   ].map((thread) =>
     decodeCodeThread({
       projectId: fixtureProjectId,
-      bindingRevisionId: "70000000-0000-4000-8000-000000000001",
+      bindingRevisionId,
       repositoryId: `repo_${"a".repeat(64)}`,
       checkoutId: "30000000-0000-4000-8000-000000000001",
       providerInstanceId: "60000000-0000-4000-8000-000000000001",
@@ -52,10 +58,50 @@ export async function assembleCase(fixture: EvaluationCase, orchestration: strin
   const unavailable = (): never => {
     throw new Error("Evaluation fixtures have no side effects.");
   };
+  const actor = decodeEventActor({ kind: "local-user", actorId: coordinatorId });
+  const binding = { canonicalRoot: "/fixture" };
+  const project =
+    fixture.projectConversation === true
+      ? decodeProject({
+          id: fixtureProjectId,
+          name: "Fixture",
+          type: "code",
+          lifecycle: "active",
+          pinned: false,
+          rank: "0/1",
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+          binding,
+          bindingHistory: [
+            {
+              revisionId: bindingRevisionId,
+              revision: 1,
+              currentBinding: binding,
+              actor,
+              changedAt: now,
+            },
+          ],
+          codeAccessPersistence: "current-session",
+        })
+      : undefined;
+  let projectConversationChecked = false;
+  // A spread lets old port types accept the fixture without changing that checkout's service.
+  const conversationIdentity = {
+    isProjectConversation: (thread: (typeof threads)[number]) => {
+      const matches =
+        project !== undefined &&
+        thread.projectId === project.id &&
+        String(thread.id) === coordinatorId;
+      if (matches) projectConversationChecked = true;
+      return matches;
+    },
+  };
   const coordinator = new CoordinatorService({
+    ...conversationIdentity,
     readThread: (id) => threads.find((thread) => String(thread.id) === id),
     readThreads: () => threads,
-    readProject: () => undefined,
+    readProject: (id) => (id === project?.id ? project : undefined),
     readSettings: () => undefined,
     isDesignatedPlanner: () => false,
     isMarked: () => false,
@@ -80,6 +126,12 @@ export async function assembleCase(fixture: EvaluationCase, orchestration: strin
   const level = coordinator.levelOf(coordinatorId);
   if (roster === undefined || level === undefined)
     throw new Error("Coordinator fixture lost its roster or level.");
+  if (fixture.projectConversation === true && !projectConversationChecked) {
+    return {
+      status: "unsupported",
+      reason: "This revision does not supply Project conversation context.",
+    } as const;
+  }
   const { definitions, execute } = createThreadsTools({
     mode: "code",
     windowId: decodeWindowId("10000000-0000-4000-8000-000000000001"),
@@ -113,7 +165,7 @@ export async function assembleCase(fixture: EvaluationCase, orchestration: strin
       const result = store.change(
         { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration },
         {
-          actor: decodeEventActor({ kind: "local-user", actorId: coordinatorId }),
+          actor,
           actsAsHostPerson: true,
         },
       );

@@ -710,19 +710,25 @@ for viewing, adding, removing, and clearing items in the coordinator controls.
 Use `coordinator:eval` when changing coordinator instructions or the threads
 tool. It compares the same synthetic cases on two checked-out revisions:
 answer a status question, start two separate assignments, and send a revision
-to the worker already assigned. Each checkout assembles its own roster,
+to the worker already assigned. The named coordinator cases exercise these
+decisions with explicit requests. The Project conversation cases ask a
+question about work in progress, request two pieces of work without telling
+the model how to delegate, and revise an assignment by title. Each checkout assembles its own roster,
 orchestration block, and registered threads tool through the production
 coordinator service, instruction store, and tool registration. This exercises
 the coordinator inputs through an OpenAI-compatible adapter. The runner
 uses each checkout’s help response and validates worker starts with that checkout’s
 contracts. It simulates list, start, and send replies, including per-recipient
-send receipts.
+send receipts. Project conversation cases carry the roster instructions
+from the checkout's Project conversation path. A revision without that path
+reports those cases as unsupported with zero samples. The other revision can
+still run them, and a pass-rate delta requires completed samples on both sides.
 
 Prepare two clean, separate Git checkouts and run `bun install --frozen-lockfile`
 in each. Copy `coordinatorEvaluation.ts` and `coordinatorEvaluationInput.test-support.ts` from
 the evaluator's `apps/server/src/coordinator/` into that same directory in each
-checkout if they are missing. The runner checks that both copies match. Older
-revisions need the production interfaces those two files import.
+checkout. The runner checks that both copies match. Older revisions need the
+production interfaces those two files import.
 
 Start a local tool-capable model with an OpenAI-compatible chat completions
 endpoint on `127.0.0.1`. Use the same server and model settings throughout. From
@@ -743,7 +749,9 @@ service requires explicit approval before use.
 The JSON report records both SHAs, SHA-256 digests of the assembled case inputs
 including tool metadata, model request settings, observations, and per-case
 pass rates. A start is matched to its assignment by a keyword in the title, falling back
-to the brief when the title has no unique match. A send must name the exact
+to the brief when the title has no unique match. A Project conversation's
+dispatch reply must also give each confirmed worker's title and reference.
+A send must name the exact
 recipient and include the requested color and button. Both “primary button” and
 “primary action button” identify the target. Refused calls fail the score.
 A direct answer needs text and no decision tool calls. List and help calls are allowed
