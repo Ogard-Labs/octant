@@ -61,6 +61,15 @@ it("requires the Project conversation to name and link each confirmed worker", (
   for (const swapped of [false, true]) {
     const parserRef = swapped ? "changelog@project" : "parser@project";
     const changelogRef = swapped ? "parser@project" : "changelog@project";
+    for (const separator of [": ", " — ", " – ", " - "]) {
+      const aboutChangelog = "  **Changelog**" + separator + "waits on this.";
+      const aboutParser = "  CSV parser" + separator + "waits on this.";
+      for (const recap of [
+        `- **CSV parser**\n${aboutChangelog}\n  Reference: ${parserRef}\n- **Changelog**\n${aboutParser}\n  Reference: ${changelogRef}`,
+        `- ${parserRef}\n${aboutChangelog}\n  Worker: CSV parser\n- ${changelogRef}\n${aboutParser}\n  Worker: Changelog`,
+      ])
+        expect.soft(score(cases.projectAssign, actions, recap), recap).toBe(!swapped);
+    }
     const titledActions = actions.map((action) => ({
       ...action,
       title: action.title === "CSV parser" ? "CSV parser (quoted commas)" : action.title,
@@ -75,6 +84,7 @@ it("requires the Project conversation to name and link each confirmed worker", (
       )
       .toBe(!swapped);
     for (const recap of [
+      `**CSV parser** — running\n${parserRef}\n**Changelog** — running\n${changelogRef}`,
       `- **CSV parser**\n${parserRef} — running\nSee changelog@project for release notes.\n- **Changelog**\n${changelogRef} — running\nSee parser@project for changes.`,
       `${parserRef}\nCSV parser is fixing quoted commas.\n\nChangelog: ${changelogRef}`,
       `**CSV parser**\n\`${parserRef}\`\n${changelogRef} — Changelog`,

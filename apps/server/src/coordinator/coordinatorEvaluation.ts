@@ -124,7 +124,7 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
   }
 
   const entries: string[] = [];
-  let pending: { part: "title" | "reference"; value: string } | undefined;
+  let pending: { part: "title" | "reference"; value: string; indent: number } | undefined;
   const implicit = new Set<string>();
   const referenceLines = new Set<string>();
   // An unlabelled continuation can supply the missing value. Keep it as a
@@ -140,6 +140,7 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
   for (const raw of answer.toLowerCase().split("\n")) {
     const line = raw.trim();
     if (!line) continue;
+    const indent = raw.length - raw.trimStart().length;
     const marker = /^(?:[-+*]|\d+[.)]|#{1,6})\s+/.exec(line);
     const content = line.slice(marker?.[0].length ?? 0);
     const field = /^(?:\*\*|__)?(worker|reference)(?:\*\*|__)?\s*:(?:\*\*|__)?\s*/.exec(content);
@@ -156,8 +157,12 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     const entryTitle = titles.find(({ title }) => {
       if (!lead.startsWith(title)) return false;
       const tail = lead.slice(title.length).replace(/^[`*_\])>\s]+/, "");
-      if (!tail || /^(?:[:–—]|-\s)/.test(tail)) return true;
-      const link = tail.replace(/^[\s`*_[(<]+/, "");
+      if (!tail || tail === ":") return true;
+      // A punctuated name can introduce a caption or a dependency note.
+      // Keep it inside an unfinished item unless it carries an inline pair.
+      const canStartCaption = !pending || (referenceLines.size > 0 && indent <= pending.indent);
+      if (canStartCaption && /^(?:[:–—]|-\s)/.test(tail)) return true;
+      const link = tail.replace(/^[\s`*_[(<:–—-]+/, "");
       return refs.some(({ reference }) => link.startsWith(reference));
     });
     const standaloneRef = refs.find(({ reference }) => standalone === reference);
@@ -203,9 +208,9 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     entries.push(value);
     const title = titleHeading ?? (titles.length === 1 ? titles[0] : undefined);
     if (refs.length === 0 && title && (marker || field || entryTitle)) {
-      pending = { part: "title", value: title.title };
+      pending = { part: "title", value: title.title, indent };
     } else if (refs.length === 1 && titles.length === 0 && leadingRef) {
-      pending = { part: "reference", value: leadingRef.reference };
+      pending = { part: "reference", value: leadingRef.reference, indent };
     }
   }
   finishItem();
