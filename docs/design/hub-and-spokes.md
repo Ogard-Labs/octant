@@ -115,8 +115,8 @@ On 2026-11-26 the maintainer added one narrow
 triggers, and the person's own paired devices away from the private network,
 with failover and no Octant-run service, and settled
 [decisions H29 to H36](#decisions); slices 21 to 26 are built as the
-delivery plan records, run only on loopback, and slice 27 is designed, not
-built.
+delivery plan records, run only on loopback, and slice 27 is partly built: the
+server side and a Node client, with no phone or desktop app using it yet.
 
 ## Outcome
 
@@ -166,9 +166,8 @@ in a browser at its Tailscale name. After that:
     webhook delivery runs twice and visitor links keep working
     ([The public entrance during failover](#the-public-entrance-during-failover)).
 
-Items 10, 11 and 13 are built and run only on loopback, as the
-[delivery plan](#delivery-plan) records; item 12 is designed, not built
-(maintainer decision, 2026-11-26).
+Items 10 to 13 were added by maintainer decision on 2026-11-26; each one's
+section says what is built, all of it run only on loopback.
 
 **Not in scope:** members that are not the person's own devices (teams, shared
 machines, other people's computers), cloud machines Octant provisions, an
@@ -1151,21 +1150,21 @@ spoke checks it on every hub request. A standby hub acting as hub uses the
 same grant, except Status and Usage (below), only on spokes that ticked
 Standby:
 
-| Hub grant item | Lets the hub                                                                                                                                                                                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                                                                                      |
-| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                                                                              |
-| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                                                                                        |
-| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                                                                           |
-| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                                                                          |
-| Standby        | Let a standby hub the person named use this same grant, except Status and Usage, while it stands in for the hub (see [Failover](#failover))                                                                                                                    |
-| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                                                                                    |
-| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions))                                                           |
-| Sign-in        | Ask this spoke's person to sign in to a provider account on this spoke. Nothing starts until a person on the spoke accepts; the hub learns one outcome word (see [Shared sign-ins](#shared-sign-ins))                                                          |
-| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                                                                             |
-| Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost                                                                    |
-| Public         | Hold this spoke's visitor-link grants and sealed webhook secrets, and carry visitor traffic and webhook deliveries between the [public entrance](#public-entrance) and this spoke. The spoke still checks every fetch and owns every run (designed, not built) |
-| Relay          | Carry this spoke's own paired devices to it through the public entrance as ciphertext the hub cannot read ([Your own devices through the hub](#your-own-devices-through-the-hub); designed, not built)                                                         |
+| Hub grant item | Lets the hub                                                                                                                                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Roster         | The hub's signed list of members; its fields are listed once, under [Discovery](#spoke-to-spoke-discovery-and-delegation)                                                                                                                                              |
+| Status         | Read host resources, running threads' titles and states, waiting approvals (count and kind), and update status, the same read a paired device has                                                                                                                      |
+| Introduce      | Introduce other members to this spoke; each becomes a full member here (decision H2). Ticked by default                                                                                                                                                                |
+| Wake           | Hold this spoke's routine wake times and wake it (see [Wake service](#wake-service))                                                                                                                                                                                   |
+| Owners         | Let the person's owner devices act on this spoke with a window's powers after a fresh unlock (see [Owner devices](#owner-devices)). Ticked by default                                                                                                                  |
+| Standby        | Let a standby hub the person named use this same grant, except Status and Usage, while it stands in for the hub (see [Failover](#failover))                                                                                                                            |
+| Push           | Receive this spoke's sealed phone notifications and send them through the hub's push sender                                                                                                                                                                            |
+| Provision      | Offer configuration (below). Every offer lands on the spoke as a proposal the person on the spoke applies, unless the person turned on auto-apply for that kind of offer ([decision H5](#decisions))                                                                   |
+| Sign-in        | Ask this spoke's person to sign in to a provider account on this spoke. Nothing starts until a person on the spoke accepts; the hub learns one outcome word (see [Shared sign-ins](#shared-sign-ins))                                                                  |
+| Act            | Act on the spoke as a paired device would, within the Projects the person names: create threads, send turns, answer questions. Approvals stay on the spoke (below)                                                                                                     |
+| Usage          | Read the spoke's provider plan-limit readings, the windows its own Limits view shows, through `GET /api/hub/usage` (maintainer decision C, 2026-11-26). Never a credential, thread, or cost                                                                            |
+| Public         | Hold this spoke's visitor-link grants and sealed webhook secrets, and carry visitor traffic and webhook deliveries between the [public entrance](#public-entrance) and this spoke. The spoke still checks every fetch and owns every run (built, run only on loopback) |
+| Relay          | Carry this spoke's own paired devices to it through the public entrance as ciphertext the hub cannot read ([Your own devices through the hub](#your-own-devices-through-the-hub); built on the server, the apps are not wired yet)                                     |
 
 **Status and Usage stay with the hub itself.** A standby standing in uses
 the spoke's grant for what keeps the network running (the roster, wakes,
@@ -2954,7 +2953,7 @@ the path.
   Tailscale Funnel switch, or a tunnel or proxy the person runs themselves
   (decision H29). It is off by default, and nothing on it reaches a private,
   pairing, administration, or member-to-member route (built, run only on
-  loopback; the device relay is designed, not built; maintainer decision,
+  loopback; the device relay is partly built, on the server; maintainer decision,
   2026-11-26).
 - **No Octant relay, no port forwarding.** No traffic goes through a relay or
   tunnel Octant runs, and no member opens or asks for a port on the person's
@@ -3180,8 +3179,10 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
 
 A paired phone or computer away from the private network can reach the hosts
 it paired with through the hub's public entrance, so the hub is the person's
-own relay and no Octant-run relay is needed (decision H36; designed, not
-built).
+own relay and no Octant-run relay is needed (decision H36). Partly built: the
+hub's admission, the host's list and tunnel, the refusals, and a client for a
+device on Node are built and run between hosts on loopback; the phone and
+desktop apps do not use the client yet (below).
 
 - **Pinned end to end.** The device opens a WebSocket to the entrance's relay
   route and names one host. The hub carries the bytes to that host over the
@@ -3198,10 +3199,47 @@ built).
   challenge with that key. A host serves relayed connections only for the
   routes a paired device already reaches, and refuses pairing and listener
   administration on them: pairing still happens on the private network or by
-  QR.
+  QR. A session inside a relay must be the session of the device whose key
+  admitted it, so a second credential the caller holds cannot ride that
+  device's tunnel. A host the hub's roster no longer lists keeps no relay:
+  the hub forgets its device keys and ends its open tunnels. Only the hub's
+  own roster decides this: a former hub that joined another hub keeps its
+  own hosts' keys, so turning its role back on restores their relays. A spoke the
+  hub removed ends the relayed tunnels it still holds. A spoke that follows
+  a promoted hub sends that hub its device keys again.
 - **Off by default.** The hub's Device relay switch, each host's Relay
   hub-grant item, and each device's own per-host choice. A browser cannot
-  check a pin, so the relay serves only the phone and desktop apps.
+  check a pin, so the relay serves only the phone and desktop apps. Until a
+  device can make its own choice, the host's person makes it on the host
+  (`octant hub relay allow <device-id>`): only a device the host's own window
+  allowed is listed, and the hub learns only its key's fingerprint.
+- **How it is built.** The device answers the hub's challenge with
+  `octant/relay/v1|<challenge>|<host>|<hub>` signed by its device key; the
+  hub admits it only if that host listed the key's fingerprint, then opens a
+  WebSocket on the host's listener at `/api/hub/relay/<fingerprint>`, signed
+  like any hub request over the pinned private transport. The host checks
+  its own list, its Relay item and its pause again, and serves the bytes
+  with its own listener certificate through the same remote boundary, with
+  each relayed device on its own admission key. A relayed request reaches
+  only the routes a paired device uses with its session: the signed hello,
+  negotiation and device sign-in, then the authenticated product routes.
+  Pairing, member and window routes, agent access, the server proxy, any
+  change to the device list or the pause, and any target with a dot segment
+  (plain or percent-encoded), a backslash, or another origin answer
+  `relayed-admin-refused` before routing. At most 32 tunnels are open at
+  once on the hub and on each host. The hub ends open tunnels when its
+  entrance or relay switch goes off, its hub role ends, remote access
+  pauses, or a host withdraws that device's key; a host ends a device's open
+  tunnels when its Relay item, its allowance for that device, or the device
+  itself goes, or remote access pauses there. Revoking a device takes its
+  key off the hub's list at once.
+- **Not built yet:** the phone and desktop apps using the relay (the Node
+  client in `packages/client-runtime` exists, with no app wiring) and the
+  device's own per-host choice; WebSocket routes inside a relay (a host
+  answers them 501); a relay through a forwarding member or a standing-in
+  standby (only the acting hub admits relays, and a forwarding member answers
+  the relay route 404); a window control for the switch and the device list
+  (the CLI and loopback routes have them).
 - **Phone push is separate.** The relay carries a device's own connection,
   not notifications. The store build of the phone app still gets push through
   the minimal Octant push gateway
@@ -3480,8 +3518,7 @@ new device. Owner powers move the main risk to
 the unlock key; it lives in each device's secure hardware and is used only
 after the person proves presence.
 
-The public entrance (built except the device relay) adds internet reach to
-the hub,
+The public entrance (built, run only on loopback) adds internet reach to the hub,
 which the private-network argument above no longer covers for those routes.
 Its own locks are: a route table with no private, pairing or administration
 route on it; a spoke-signed grant and a fragment-only secret per visitor
@@ -3516,14 +3553,14 @@ choice to the design, the design's recommendation was taken.
 | H26 | May a computer be added as a member over SSH without visiting it?           | Yes, as an option: the person's window, or a device the host's person paired directly, runs the signed headless installer over SSH after the person confirms, as a user service with no sudo, then the computer joins with a join code passed in the same session. The SSH login is the person on that machine, so only the spoke joins. The install dialog's confirmation also approves that one join in advance; the comparison code exists only once the installed computer's listener runs and the join opens, so the window then reads it from the computer over the pinned SSH connection and completes the join only if it matches the hub's, refusing it otherwise without asking again. The headless build carries its own runtime, Octant never runs sudo, and the install is journaled. Updates drain, swap and roll back after a failed handshake (2026-11-19) |
 | H27 | Who is told when a new device joins or pairs?                               | Every device connected to the hub or the host: the hub, spokes, guests and paired devices, each with the new device's name and private-network IP address, key fingerprint and role, Remove one tap away, and a push notification on phones (2026-11-19)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | H28 | How does a person bootstrap a local repository onto another computer?       | From one modal over the pinned direct paired session (never via the hub), limited to computers where the caller acts as that computer's own person: derive SSH and HTTPS clone URLs from `origin` (never `file://` or `ext::`), clone non-interactively into an empty/new folder (`~/<repo>` default) with hooks/templates suppressed and strict SSH host-key checking, bind the Code Project with a one-time receipt, and optionally copy only explicitly ticked plain gitignored files afterwards (0 selected by default; whole ignored directories, OS junk, symlinks, `.git/**`, and special permission bits excluded; secret-guard matches badged; partial copy keeps the clone and names failed paths) (2026-11-24)                                                                                                                                                  |
-| H29 | What carries internet traffic to the hub's public entrance?                 | A built-in Tailscale Funnel switch on the hub (TLS ends on the hub, no port forwarding at home), and, documented, a front the person runs themselves (their own Cloudflare Tunnel, or Caddy on a VPS in the tailnet) pointed at the entrance. Rejected: a router port forward, which exposes the home address, and making `apps/share` a live relay (2026-11-26; the Funnel switch is built, a front on another machine designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| H29 | What carries internet traffic to the hub's public entrance?                 | A built-in Tailscale Funnel switch on the hub (TLS ends on the hub, no port forwarding at home), and, documented, a front the person runs themselves (their own Cloudflare Tunnel, or Caddy on a VPS in the tailnet) pointed at the entrance. Rejected: a router port forward, which exposes the home address, and making `apps/share` a live relay (2026-11-26; built, run only on loopback; a front on another machine designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | H30 | How does the public address survive failover?                               | Every member's entrance forwards to the acting hub over the pinned private transport, and only the acting hub serves, so a front with connectors on the hub and the standby keeps one address. With Funnel alone, a Funnel the standby's own person turned on stays on and forwards to the acting hub; the standby serves through it only while it stands in, and `octant hub public status` lists that URL for senders that accept a fallback. Octant runs no Tailscale command at the start or end of a stand-in (2026-11-26; built, run only on loopback; reconciled on build: the standby never turns Funnel on by itself, so no command runs that the person did not turn on)                                                                                                                                                                                         |
 | H31 | What are the outside person and the link called?                            | A **visitor** and a **visitor link**; "guest" stays the person's own phone or browser (2026-11-26)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | H32 | Who signs a visitor link?                                                   | The spoke that owns the thread, with its host identity key. The hub and standbys verify it against the roster's key, and the spoke checks revocation on every fetch (2026-11-26; built, run only on loopback)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | H33 | Who holds a webhook secret?                                                 | The spoke that owns the routine mints and keeps it and seals it to the hub and each standby. The acting hub drops a forged request before queueing, and the spoke verifies the original bytes again. GitHub, which signs no timestamp, is deduped by delivery id and body digest for seven days. Residual risk: a compromised hub can forge a delivery, only into a routine the person defined and only as outside content (2026-11-26; built, run only on loopback)                                                                                                                                                                                                                                                                                                                                                                                                       |
 | H34 | How much may a run a webhook starts do?                                     | Never Full access: Code runs approval-gated at most, and Work at its default level (2026-11-26; built, run only on loopback)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | H35 | What are the public entrance's limits?                                      | A webhook endpoint takes 60 requests a minute and a 256 KiB body, and holds at most 500 deliveries or 32 MiB for at most 24 hours while its spoke is away. A visitor link expires after 24 hours by default, 7 days at most, and is bound to the first browser that opens it with its secret, which the spoke checks before it binds; each browser key on a link takes 120 requests and 10 comments a minute and holds at most 4 of the entrance's 64 streams (2026-11-26; built, run only on loopback)                                                                                                                                                                                                                                                                                                                                                                    |
-| H36 | Can the person's own devices reach their hosts without the tailnet?         | Yes, through the hub's public entrance as an end-to-end encrypted channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing still happens on the private network or by QR; off by default. The hub is the person's own relay and Octant runs none. Phone push for the store build still goes through the minimal Octant push gateway (2026-11-26; designed, not built)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| H36 | Can the person's own devices reach their hosts without the tailnet?         | Yes, through the hub's public entrance as an end-to-end encrypted channel pinned to the host key and certificate from pairing, so the hub and the front see only ciphertext; pairing still happens on the private network or by QR; off by default. The hub is the person's own relay and Octant runs none. Phone push for the store build still goes through the minimal Octant push gateway (2026-11-26; partly built: the hub and host side, run only on loopback; the apps are not wired yet)                                                                                                                                                                                                                                                                                                                                                                          |
 | H14 | Does a host fetch its own Tailscale certificate for the web app?            | Yes, on the hub and on each spoke a browser reaches directly, through the local Tailscale daemon, off until the person turns it on after the certificate-transparency note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | H15 | How does a browser guest reach a spoke?                                     | Directly: each spoke serves its own web app at its own Tailscale name, and the hub's web app links to it, so the hub never sees spoke traffic                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | H16 | Do spokes honor owner devices by default?                                   | Yes: ticked at join, clearly labeled, and untickable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -4701,7 +4738,12 @@ limits, and the device relay's channel design.
     desktop apps. Acceptance: a paired device reaches its host through the
     entrance with its pin checked, the hub sees only ciphertext, and an
     unlisted key or a pairing route is refused. **Linux container: yes**
-    for the server; a phone on mobile data is a maintainer gate.
+    for the server; a phone on mobile data is a maintainer gate. Partly
+    built: the server side, the CLI and loopback routes, and the Node client,
+    proved by a two-host loopback smoke over real TLS in which a recording
+    front never sees the request or its answer; not built yet: the apps'
+    use of the client, the device's own choice, and a relay through a
+    standby ([Your own devices through the hub](#your-own-devices-through-the-hub)).
 
 Any slice that would deploy an Octant-operated service, create an account, or
 spend money stops for a separate maintainer action.

@@ -544,6 +544,28 @@ export const HubVisitorHubState = Schema.Struct({
 }).annotations(strict);
 export type HubVisitorHubState = typeof HubVisitorHubState.Type;
 
+const keyDigest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+
+/** What the acting hub holds for the device relay: its switch and each host's listed device keys. */
+export const HubRelayHubState = Schema.Struct({
+  enabled: Schema.Boolean,
+  hosts: Schema.Array(
+    Schema.Struct({
+      memberId: HubMemberId,
+      fingerprints: Schema.Array(keyDigest).pipe(Schema.maxItems(256)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(256)),
+}).annotations(strict);
+export type HubRelayHubState = typeof HubRelayHubState.Type;
+
+/** The paired devices this host's person lets through the hub's device relay. */
+export const SpokeRelayState = Schema.Struct({
+  deviceIds: Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(Schema.maxItems(256)),
+  /** The hub has not taken the current list yet; the next look sends it again. */
+  unpublished: Schema.optional(Schema.Literal(true)),
+}).annotations(strict);
+export type SpokeRelayState = typeof SpokeRelayState.Type;
+
 export const HubState = Schema.Struct({
   hub: Schema.optional(HubSideState),
   link: Schema.optional(HubLinkState),
@@ -556,6 +578,10 @@ export const HubState = Schema.Struct({
   visitorHub: Schema.optional(HubVisitorHubState),
   /** This spoke's own visitor links and the comments waiting on them. */
   visitors: Schema.optional(SpokeVisitorState),
+  /** The acting hub's device relay switch and listed keys (decision H36). */
+  relayHub: Schema.optional(HubRelayHubState),
+  /** This host's own devices allowed through the relay. */
+  relays: Schema.optional(SpokeRelayState),
   /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
   pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
   /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */

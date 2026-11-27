@@ -1572,3 +1572,26 @@ describe("octant hub visitor", () => {
     expect(printed.trimEnd().split("\n")).toHaveLength(1);
   });
 });
+
+describe("octant hub relay", () => {
+  it("reads the hub's switch, the list, and a device's allow or forget", () => {
+    expect(resolveHubCliCommand(["relay", "on"], {})).toEqual({ action: "relay", mode: "on" });
+    expect(resolveHubCliCommand(["relay", "list"], {})).toEqual({ action: "relay", mode: "list" });
+    expect(resolveHubCliCommand(["relay", "allow", "device-1"], {})).toEqual({
+      action: "relay",
+      mode: "allow",
+      deviceId: "device-1",
+    });
+    expect(resolveHubCliCommand(["relay", "allow"], {})).toBeUndefined();
+    expect(resolveHubCliCommand(["relay", "on", "extra"], {})).toBeUndefined();
+  });
+
+  it("lets one paired device through the hub from this computer's own window route", async () => {
+    const allowed = await fixture(() => ok({ status: "changed", allowed: true }));
+    expect(await allowed.run({ action: "relay", mode: "allow", deviceId: "device-1" })).toBe(0);
+    expect(allowed.sent[0]).toMatchObject({
+      path: "/api/desktop/hub/relay/devices",
+      body: { deviceId: "device-1", allowed: true },
+    });
+  });
+});

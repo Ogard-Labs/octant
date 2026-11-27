@@ -33,6 +33,7 @@ import {
   decodeHubWebhookHandback,
   decodeWebhookDeliveryEnvelope,
   decodeHubVisitorGrantsUpdate,
+  decodeHubRelayDevicesUpdate,
   decodeVisitorFetchRequest,
 } from "@octant/contracts";
 import type { FailoverService } from "./failoverService";
@@ -43,6 +44,8 @@ import type { HubWebhookService } from "./hubWebhookService";
 import type { PublicEntranceService } from "./publicEntranceService";
 import type { SpokeWebhookService } from "./spokeWebhookService";
 import type { HubVisitorService } from "./hubVisitorService";
+import type { HubRelayService } from "./hubRelayService";
+import type { SpokeRelayService } from "./spokeRelayService";
 import type { SpokeVisitorService } from "./spokeVisitorService";
 import { readForwardedRequest } from "./publicEntranceForwarding";
 import { copyHolderMemberKey, isNamedStandby, servesPublicEntrance } from "./publicStandIn";
@@ -112,7 +115,13 @@ export const HUB_LINK_ROUTES = {
   publicVisitorFetch: "/api/hub/public/visitor-fetch",
   /** A standby that stood in hands the hub back one webhook delivery it still queues. */
   publicWebhookHandback: "/api/hub/public/webhook-handback",
+  /** A host whose person ticked Relay hands the hub the device keys it lets through. */
+  publicRelayDevices: "/api/hub/public/relay-devices",
 } as const;
+
+/** The hub opens one device's relay tunnel at this prefix and the device key's fingerprint. */
+export const HUB_RELAY_TUNNEL_PREFIX = "/api/hub/relay/";
+const RELAY_TUNNEL_PATH = /^\/api\/hub\/relay\/([0-9a-f]{64})$/;
 
 const decodeHubMemberId = Schema.decodeUnknownSync(HubMemberId);
 const encodeProviderUsageLimitsSnapshot = Schema.encodeSync(ProviderUsageLimitsSnapshot);
@@ -163,6 +172,10 @@ export interface HubLinkRouteOptions {
   readonly visitors?: Pick<HubVisitorService, "receiveGrants">;
   /** This host's own visitor links, as a spoke. */
   readonly spokeVisitors?: Pick<SpokeVisitorService, "fetch">;
+  /** The acting hub's device relay: the keys each host lets through. */
+  readonly relay?: Pick<HubRelayService, "receiveDevices">;
+  /** This host's side of the device relay: it opens a tunnel the hub asks for. */
+  readonly spokeRelay?: Pick<SpokeRelayService, "openTunnel">;
   readonly now?: () => number;
 }
 
@@ -195,8 +208,38 @@ export function createHubLinkRouteHandler(
   facts?: { readonly privateAddress?: string },
 ) => Promise<Response | undefined> {
   const memberVerifier = new HubLinkVerifier({ now: options.now ?? Date.now });
+  /**
+   * The hub opens a device's tunnel. Only the hub this host joined may ask,
+   * signed over the path that names the device key; the host's own relay
+   * service then decides with its own list, grant and pause.
+   */
+  const openRelayTunnelRoute = async (
+    request: Request,
+    deviceFingerprint: string,
+    facts: { readonly privateAddress?: string } | undefined,
+  ): Promise<Response> => {
+    if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return refused(405, "invalid");
+    }
+    if (options.spokeRelay === undefined) return refused(404, "invalid");
+    const authenticated = options.spoke.authenticateHub({
+      header: request.headers.get(HUB_LINK_HEADER),
+      method: "GET",
+      path: new URL(request.url).pathname,
+      body: "",
+    });
+    if (authenticated.status === "refused") return refused(401, authenticated.kind);
+    const opened = options.spokeRelay.openTunnel({
+      deviceFingerprint,
+      hubAddress: facts?.privateAddress,
+    });
+    return opened.status === "accepted" ? opened.response : refused(403, opened.kind);
+  };
   return async (request, facts) => {
     const url = new URL(request.url);
+    const tunnel = RELAY_TUNNEL_PATH.exec(url.pathname);
+    if (tunnel?.[1] !== undefined) return openRelayTunnelRoute(request, tunnel[1], facts);
+    if (url.pathname.startsWith(HUB_RELAY_TUNNEL_PREFIX)) return refused(404, "invalid");
     const route = (Object.values(HUB_LINK_ROUTES) as ReadonlyArray<string>).includes(url.pathname)
       ? (url.pathname as RouteValue)
       : undefined;
@@ -601,6 +644,31 @@ export function createHubLinkRouteHandler(
       }
       // A spoke hands over only grants it signed for itself; any other is dropped.
       return Response.json(options.visitors.receiveGrants(verified.senderMemberId, update), {
+        headers: NO_STORE,
+      });
+    }
+
+    if (route === HUB_LINK_ROUTES.publicRelayDevices) {
+      // Only the acting hub holds the relay's list; a standby never relays.
+      if (!options.hub.status().enabled || options.relay === undefined) {
+        return refused(403, "hub-role-off");
+      }
+      const verified = memberVerifier.verify({
+        header,
+        method: request.method,
+        path: route,
+        body,
+        recipientMemberId: options.hub.hubMemberId(),
+        publicKeyFor: (sender) => options.hub.memberKey(sender, presentedKey ?? undefined),
+      });
+      if (verified.status === "refused") return refused(401, verified.kind);
+      let update;
+      try {
+        update = decodeHubRelayDevicesUpdate(JSON.parse(body));
+      } catch {
+        return refused(400, "invalid");
+      }
+      return Response.json(options.relay.receiveDevices(verified.senderMemberId, update), {
         headers: NO_STORE,
       });
     }

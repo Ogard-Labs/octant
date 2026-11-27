@@ -183,6 +183,8 @@ export interface RequestTransportFacts {
   readonly sourceClass: "loopback" | "lan-private" | "tailscale" | "unknown";
   readonly sourceKey: string;
   readonly privateAddress?: string;
+  /** Set on a request a device relay carried: the key fingerprint of that relay's device. */
+  readonly relayedDeviceFingerprint?: string;
 }
 
 export interface RemoteVerifiedRequestFacts {
@@ -313,6 +315,8 @@ interface RemoteRequestVerifier {
 
 export interface RemoteHttpAuthenticationOptions {
   readonly proofService: RemoteRequestProofService;
+  /** A paired device's key fingerprint, for tying a relayed session to its relay's device. */
+  readonly pairedDeviceKeyFingerprint?: (deviceId: string) => string | undefined;
   readonly signNegotiationMetadata: (payload: string) => string;
   readonly admission?: RemoteAdmissionPort;
   readonly credentialSelfService?: RemoteCredentialSelfServicePort;
@@ -606,6 +610,16 @@ export function createRemoteHttpAuthentication(
       const sessionFacts = options.proofService.describeSession(sessionId);
       if (sessionFacts === undefined) {
         throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+      }
+      // The hub admitted the relay for one listed device; a session of any
+      // other device the caller holds is refused inside it, so an unlisted
+      // credential never reaches the host through that device's tunnel.
+      if (
+        transport.relayedDeviceFingerprint !== undefined &&
+        options.pairedDeviceKeyFingerprint?.(String(sessionFacts.deviceId)) !==
+          transport.relayedDeviceFingerprint
+      ) {
+        throw new RemoteHttpAuthFailure(403, "unauthorized");
       }
       // Checked before anything the request asks is read or done, for every
       // authenticated route, the device's own self-service included.

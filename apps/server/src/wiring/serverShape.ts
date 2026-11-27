@@ -99,6 +99,14 @@ export interface RequestTransportFacts {
   readonly sourceKey: string;
   /** The peer's address, only when it is on the private network: shown in a new-device alert, never journaled. */
   readonly privateAddress?: string;
+  /** Set only on a request a paired device sent through its hub's device relay. */
+  readonly relayed?: true;
+  /**
+   * The key fingerprint of the device whose relay carried the request. A
+   * session inside that relay must belong to the same device, so a second
+   * credential cannot ride a listed device's tunnel.
+   */
+  readonly relayedDeviceFingerprint?: string;
 }
 
 export interface ServeOptions {

@@ -133,6 +133,7 @@ interface SetupOptions {
   readonly deviceAdmittedBy?: (deviceId: string) => "host-person" | "hub-roster";
   readonly deviceAccessLevel?: (deviceId: string) => "full" | "approve-and-steer" | "read-only";
   readonly remoteAccessPaused?: () => boolean;
+  readonly pairedDeviceKeyFingerprint?: (deviceId: string) => string | undefined;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -287,6 +288,9 @@ function setup(options: SetupOptions = {}) {
     ...(options.remoteAccessPaused === undefined
       ? {}
       : { remoteAccessPaused: options.remoteAccessPaused }),
+    ...(options.pairedDeviceKeyFingerprint === undefined
+      ? {}
+      : { pairedDeviceKeyFingerprint: options.pairedDeviceKeyFingerprint }),
   });
   return {
     connection,
@@ -654,6 +658,35 @@ describe("remote HTTP authentication boundary", () => {
       connection.close();
     },
   );
+
+  it("refuses a session through a device relay unless it is the relayed device's own", async () => {
+    const { auth, privateKey, dispatched, connection } = setup({
+      withDispatch: true,
+      pairedDeviceKeyFingerprint: () => "f".repeat(64),
+    });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const read = () => productRequest(session, privateKey, { method: "GET" });
+    // The relay was admitted for another listed device's key.
+    expect(
+      (
+        await auth.handleAuthenticated(read(), {
+          ...transport,
+          relayedDeviceFingerprint: "e".repeat(64),
+        })
+      ).status,
+    ).toBe(403);
+    expect(dispatched).toHaveLength(0);
+    // The same session through its own device's relay is served.
+    expect(
+      (
+        await auth.handleAuthenticated(read(), {
+          ...transport,
+          relayedDeviceFingerprint: "f".repeat(64),
+        })
+      ).status,
+    ).toBe(200);
+    connection.close();
+  });
 
   it("authenticates a signed read and hands a strict remote principal to dispatch", async () => {
     const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });

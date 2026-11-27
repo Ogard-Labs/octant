@@ -924,6 +924,8 @@ function assembleServices(
     sessionNow: now,
     deviceAdmittedBy,
     deviceAccessLevel,
+    pairedDeviceKeyFingerprint: (deviceId) =>
+      lifecycle.listDevices().find((device) => device.deviceId === deviceId)?.deviceKeyFingerprint,
     remoteAccessPaused,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
     ...(proxySessions === undefined || remoteServerGrants === undefined
@@ -1007,6 +1009,10 @@ function assembleServices(
       agentAccessPauseSignal: remoteAccessPaused()
         ? AbortSignal.abort()
         : outsideAgentAccess.signal,
+      ...(transportFacts.relayed === true ? { relayed: true } : {}),
+      ...(transportFacts.relayedDeviceFingerprint === undefined
+        ? {}
+        : { relayedDeviceFingerprint: transportFacts.relayedDeviceFingerprint }),
       ...(transportFacts.privateAddress === undefined
         ? {}
         : { privateAddress: transportFacts.privateAddress }),
@@ -1232,6 +1238,11 @@ async function handleAuthenticatedRoute(
     listenerTrust: "remote",
     sourceClass: facts.sourceClass,
     sourceKey: facts.sourceKey,
+    // A relayed request names the device whose tunnel carried it; anything
+    // else that came through a relay fails closed in the session check.
+    ...(facts.relayed === true
+      ? { relayedDeviceFingerprint: facts.relayedDeviceFingerprint ?? "" }
+      : {}),
   };
   return auth.handleAuthenticated(request, transport, route);
 }

@@ -23,6 +23,7 @@ import {
   SERVICE_OFFERS_PATH,
   SERVICE_OFFER_DECISION_MAX_BYTES,
   WORK_ATTACHMENT_MEDIA_TYPES,
+  RELAYED_ADMIN_REFUSED,
 } from "@octant/contracts";
 import { REPOSITORY_BOOTSTRAP_LAND_FILES_MAX_BODY_BYTES } from "@octant/contracts/repository-bootstrap";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
@@ -35,6 +36,7 @@ import { PAIRED_DEVICE_ADMINISTRATION_ROUTES } from "./remote/localDeviceAdminis
 import { PAIRED_DEVICE_ACCESS_ACTIVITY_ROUTES } from "./remote/accessActivityRoutes";
 import { PAIRED_THREAD_SECRETS_PATH } from "./threadSecrets/threadSecretRoutes";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
+import { carriesWebSocketUpgrade } from "./webSocketRelay";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
@@ -240,6 +242,8 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   publicVisitorGrants: "hub-link-public-visitor-grants",
   publicVisitorFetch: "hub-link-public-visitor-fetch",
   publicWebhookHandback: "hub-link-public-webhook-handback",
+  publicRelayDevices: "hub-link-public-relay-devices",
+  relayTunnel: "hub-link-relay-tunnel",
   owner: "hub-link-owner",
   delegate: "hub-link-delegate",
   delegationStatus: "hub-link-delegation-status",
@@ -633,6 +637,31 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 262_144,
     maxResponseBytes: 4_096,
+  },
+  // The device relay (decision H36): a host lists the device keys the hub may
+  // admit, and the hub opens one device's tunnel here, a WebSocket whose bytes
+  // are that device's own TLS to this listener.
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.publicRelayDevices,
+    match: { kind: "exact", path: "/api/hub/public/relay-devices" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type", HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 32_768,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: REMOTE_HUB_LINK_ROUTE_IDS.relayTunnel,
+    match: { kind: "prefix", path: "/api/hub/relay" },
+    surface: "pre-auth",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: [HUB_LINK_HEADER, HUB_PEER_KEY_HEADER],
+    maxBodyBytes: 1_024,
+    maxResponseBytes: 4_096,
+    opensDeviceRelay: true,
   },
   {
     id: REMOTE_HUB_LINK_ROUTE_IDS.publicVisitorFetch,
@@ -1945,6 +1974,12 @@ export interface RemoteRouteDefinition {
    */
   readonly relaysDevServer?: true;
   /**
+   * Set only on the device relay's tunnel route. An answer that accepted the
+   * WebSocket upgrade passes as it is, so the listener's transport can take
+   * the acceptance; the hub's own tunnel cap bounds how many stay open.
+   */
+  readonly opensDeviceRelay?: true;
+  /**
    * Set only on a mode's attachment upload route. Its body budget is its own,
    * above the listener's default, so a phone photo fits; its media types are
    * still the route's own.
@@ -2062,6 +2097,40 @@ export interface RemoteRouteFacts {
   readonly privateAddress?: string;
   /** The remote-access state when the gateway first admitted an agent request. */
   readonly agentAccessPauseSignal?: AbortSignal;
+  /** Set only on a request a paired device sent through its hub's device relay. */
+  readonly relayed?: true;
+  /** The relayed device's key fingerprint; a session there must be that device's. */
+  readonly relayedDeviceFingerprint?: string;
+}
+
+/**
+ * The pre-auth routes a paired device uses to reach its session: the signed
+ * host hello, negotiation, and the device-key sign-in. Every other pre-auth
+ * route (pairing, hub member routes, agent access, push, the server proxy's
+ * own sign-in) is for the private network, never for the relay.
+ */
+const RELAYED_PRE_AUTH_PATHS: ReadonlySet<string> = new Set([
+  "/health",
+  "/api/remote/hello",
+  "/api/remote/negotiate",
+  "/api/remote/auth/challenge",
+  "/api/remote/auth/session",
+]);
+
+/**
+ * Whether a request that arrived through the device relay may reach this
+ * route at all: only what a paired device reaches with its session, never
+ * by default because a route exists.
+ */
+function relayedMayReach(decision: Extract<RemoteRouteDecision, { readonly kind: "allow" }>) {
+  if (decision.surface === "authenticated-product" || decision.surface === "web-assets")
+    return true;
+  const match = decision.route?.match;
+  return (
+    decision.surface === "pre-auth" &&
+    match?.kind === "exact" &&
+    RELAYED_PRE_AUTH_PATHS.has(match.path)
+  );
 }
 
 export const REMOTE_SECURITY_POLICY = {
@@ -2164,6 +2233,13 @@ export function createRemoteRouteHandler(
     if (decision.kind === "reject") return decision.response;
     if (decision.kind === "preflight")
       return new Response(null, { status: 204, headers: decision.headers });
+    if (facts?.relayed === true && !relayedMayReach(decision)) {
+      await request.body?.cancel().catch(() => undefined);
+      return Response.json(
+        { status: "refused", kind: RELAYED_ADMIN_REFUSED },
+        { status: 403, headers: decision.headers },
+      );
+    }
 
     let maxBodyBytes = decision.maxBodyBytes;
     let releaseUnauthenticated: (() => void) | undefined;
@@ -2257,6 +2333,10 @@ export function createRemoteRouteHandler(
       // The dev server's own response: its headers stand and its body streams
       // uncapped, holding this request's slot until it ends.
       return withAdmissionRelease(response, release);
+    }
+    if (decision.route?.opensDeviceRelay === true && carriesWebSocketUpgrade(response)) {
+      release();
+      return response;
     }
     if (
       decision.route?.streamsNdjson === true &&

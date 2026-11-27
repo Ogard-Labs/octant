@@ -362,3 +362,40 @@ describe("streaming answers", () => {
     expect(seen.cancelled).toBe(true);
   });
 });
+
+describe("relayed connections", () => {
+  it("closing the entrance ends an open relay instead of waiting for the device to leave", async () => {
+    const entrance = await startPublicEntrance({
+      port: 0,
+      role: () => "serve",
+      handlers: {
+        // A relay that keeps its upgraded socket open, as an idle tunnel does.
+        relay: (_request, socket) => {
+          socket.write(
+            "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n",
+          );
+        },
+      },
+    });
+    const device = await new Promise<{ readonly ended: Promise<void> }>((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port: entrance.port,
+        path: "/relay/v1",
+        headers: { connection: "Upgrade", upgrade: "websocket" },
+      });
+      request.on("upgrade", (_response, socket) => {
+        socket.on("error", () => undefined);
+        resolve({ ended: new Promise<void>((done) => socket.on("close", () => done())) });
+      });
+      request.on("error", reject);
+      request.end();
+    });
+    const closed = await Promise.race([
+      entrance.close().then(() => "closed" as const),
+      new Promise<"stalled">((resolve) => setTimeout(() => resolve("stalled"), 2_000)),
+    ]);
+    expect(closed).toBe("closed");
+    await device.ended;
+  });
+});
