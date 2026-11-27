@@ -1,6 +1,10 @@
 import { forReceipt, waitForSurvivingGit } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
-import type { ManagedWorktreeReceipt, ManagedWorktreeReclaim } from "./managedWorktreeReceiptStore";
+import {
+  isImportedReceipt,
+  type ManagedWorktreeReceipt,
+  type ManagedWorktreeReclaim,
+} from "./managedWorktreeReceiptStore";
 import {
   branchRef,
   managedTargetPath,
@@ -261,6 +265,7 @@ export class ManagedWorktreeReclaimService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    if (isImportedReceipt(receipt)) return { status: "refused", reason: "imported-from-octant" };
     if (receipt.state === "reclaimed") return { status: "reclaimed", receipt };
     const resuming = receipt.state === "cleanup-pending" && receipt.reclaim !== undefined;
     if (receipt.state !== "ready" && !resuming) return { status: "refused", reason: "mismatched" };

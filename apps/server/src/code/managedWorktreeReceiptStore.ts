@@ -101,6 +101,12 @@ export interface ManagedWorktreeReceipt extends CreateManagedWorktreeReceiptInpu
    * removing a worktree they just restored.
    */
   readonly readyAgainAt?: string;
+  /**
+   * Set when this receipt arrived with data imported from Octant. The folder is
+   * Octant's checkout, so this host never removes it: no transition leaves the
+   * receipt for a cleanup, and every write keeps the field.
+   */
+  readonly importedFrom?: "octant";
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -200,7 +206,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
   if (
     !isRecord(value) ||
     Object.keys(value).length < requiredReceiptFields.length ||
-    Object.keys(value).length > requiredReceiptFields.length + 7 ||
+    Object.keys(value).length > requiredReceiptFields.length + 8 ||
     requiredReceiptFields.some((field) => !(field in value)) ||
     Object.keys(value).some(
       (field) =>
@@ -211,7 +217,8 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
         field !== "currentBranch" &&
         field !== "currentHead" &&
         field !== "reclaim" &&
-        field !== "readyAgainAt",
+        field !== "readyAgainAt" &&
+        field !== "importedFrom",
     ) ||
     value.version !== RECEIPT_VERSION ||
     !isUuid(value.receiptId) ||
@@ -231,6 +238,7 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     (value.source !== undefined && !isSource(value.source)) ||
     (value.reclaim !== undefined && !isReclaim(value.reclaim)) ||
     (value.readyAgainAt !== undefined && !isTimestamp(value.readyAgainAt)) ||
+    (value.importedFrom !== undefined && value.importedFrom !== "octant") ||
     (value.currentBranch !== undefined && !isIntent(value.currentBranch, 255)) ||
     (value.currentHead !== undefined &&
       (typeof value.currentHead !== "string" ||
@@ -264,7 +272,13 @@ function decodeReceipt(value: unknown): ManagedWorktreeReceipt {
     ...(value.readyAgainAt === undefined ? {} : { readyAgainAt: value.readyAgainAt as string }),
     ...(value.currentBranch === undefined ? {} : { currentBranch: value.currentBranch as string }),
     ...(value.currentHead === undefined ? {} : { currentHead: value.currentHead as string }),
+    ...(value.importedFrom === undefined ? {} : { importedFrom: "octant" as const }),
   };
+}
+
+/** Whether this host must leave the receipt's folder alone; see `importedFrom`. */
+export function isImportedReceipt(receipt: Pick<ManagedWorktreeReceipt, "importedFrom">): boolean {
+  return receipt.importedFrom === "octant";
 }
 
 function canTransition(
@@ -380,6 +394,11 @@ export class ManagedWorktreeReceiptStore {
       throw new Error("invalid managed worktree receipt transition");
     }
     if (current.state === state) return current;
+    // The backstop for a caller that did not check first: an imported folder is
+    // never headed for removal.
+    if (isImportedReceipt(current) && state === "cleanup-pending") {
+      throw new Error("managed worktree receipt imported from Octant is never cleaned up");
+    }
 
     // Once the checkout is back, or gone for good, the record of how to bring
     // it back is spent.
@@ -415,6 +434,9 @@ export class ManagedWorktreeReceiptStore {
       !(current.state === "ready" || (current.state === "cleanup-pending" && sameRecord))
     ) {
       throw new Error("invalid managed worktree receipt transition");
+    }
+    if (isImportedReceipt(current)) {
+      throw new Error("managed worktree receipt imported from Octant is never cleaned up");
     }
     if (current.state === "cleanup-pending") return current;
     const next = decodeReceipt({

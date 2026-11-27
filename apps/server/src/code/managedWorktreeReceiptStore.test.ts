@@ -175,6 +175,39 @@ describe("ManagedWorktreeReceiptStore", () => {
     });
   });
 
+  it("keeps an imported receipt's mark on every write and never lets it head for removal", async () => {
+    const directory = await dataDirectory();
+    const receipts = store(directory);
+    await receipts.create(input);
+    const file = receiptPath(directory);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(file, `${JSON.stringify({ ...stored, importedFrom: "octant" })}\n`);
+
+    await expect(receipts.transition(receiptId, "ready")).resolves.toMatchObject({
+      importedFrom: "octant",
+    });
+    await expect(
+      receipts.recordVerifiedBranch(receiptId, "octant/other", "b".repeat(40)),
+    ).resolves.toMatchObject({ importedFrom: "octant" });
+    await expect(receipts.transition(receiptId, "cleanup-pending")).rejects.toThrow(
+      "never cleaned up",
+    );
+    await expect(
+      receipts.beginReclaim(receiptId, { branch: "octant/other", head: "b".repeat(40) }),
+    ).rejects.toThrow("never cleaned up");
+    await expect(receipts.load(receiptId)).resolves.toMatchObject({
+      state: "ready",
+      importedFrom: "octant",
+    });
+  });
+
+  it("decodes a receipt written before the imported mark existed", async () => {
+    const directory = await dataDirectory();
+    const receipts = store(directory);
+    await receipts.create(input);
+    expect((await receipts.load(receiptId))?.importedFrom).toBeUndefined();
+  });
+
   it("records the verified branch and head a host switch landed on, never the owned intent", async () => {
     const directory = await dataDirectory();
     const receipts = store(directory);

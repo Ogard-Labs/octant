@@ -17,12 +17,13 @@ import {
   type ManagedRootParent,
   type ManagedRootGrantStore,
 } from "./managedRootGrantStore";
-import type {
-  CreateManagedWorktreeReceiptInput,
-  ManagedWorktreeReceipt,
-  ManagedWorktreeReceiptLookup,
-  ManagedWorktreeReceiptState,
-  ManagedWorktreeSourceProvenance,
+import {
+  isImportedReceipt,
+  type CreateManagedWorktreeReceiptInput,
+  type ManagedWorktreeReceipt,
+  type ManagedWorktreeReceiptLookup,
+  type ManagedWorktreeReceiptState,
+  type ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
 import { forReceipt } from "./boundedGit";
 import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
@@ -296,6 +297,7 @@ export type ManagedWorktreeRefusalReason =
   | "not-reclaimed"
   | "restore-mismatch"
   | "unowned"
+  | "imported-from-octant"
   | "unrecoverable-files"
   | "unsupported-checkout"
   | "unverified"
@@ -657,7 +659,7 @@ export class ManagedWorktreeService {
     } catch {
       return { status: "interrupted" };
     }
-    if (receipt === undefined) return { status: "refused" };
+    if (receipt === undefined || isImportedReceipt(receipt)) return { status: "refused" };
     if (receipt.state === "removed") return { status: "removed" };
     if (receipt.state !== "creating" && receipt.state !== "ready") return { status: "refused" };
 
@@ -851,6 +853,7 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    if (isImportedReceipt(receipt)) return { status: "refused", reason: "imported-from-octant" };
     // A restorable cleanup keeps what a restore needs; finishing it as a
     // removal here would throw that away, so only the reclaim path touches it.
     if (
