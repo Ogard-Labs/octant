@@ -693,6 +693,22 @@ describe("GitMutationPort", () => {
     expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
   });
 
+  it("skips an ignored folder whose name contains glob characters even when a tracked file matches the glob", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "x\\*/\n");
+    mkdirSync(join(repository, "vendor"), { recursive: true });
+    writeFileSync(join(repository, "vendor", "xa"), "tracked\n");
+    git(repository, "add", ".gitignore", "vendor/xa");
+    git(repository, "commit", "-m", "track vendor/xa and ignore literal x* dir");
+    const ignoredRepository = join(repository, "vendor", "sub", "x*", "cache");
+    mkdirSync(ignoredRepository, { recursive: true });
+    git(ignoredRepository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "vendor", "sub", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+  });
+
   it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, ".gitignore"), "build/\n");
@@ -820,6 +836,32 @@ describe("GitMutationPort", () => {
     // The undo point a restore hands back is built with `git add -A`, which
     // skips ignored files, so overwriting this would have been irreversible.
     expect(readFileSync(join(repository, "secrets.env"), "utf8")).toBe("the only copy\n");
+  });
+
+  it("refuses a restore over an ignored file whose name contains glob characters even when a tracked file matches the glob", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    writeFileSync(join(repository, "xa.log"), "tracked\n");
+    writeFileSync(join(repository, "x*.log"), "checkpointed\n");
+    git(repository, "add", "--", "xa.log", "x*.log");
+    git(repository, "commit", "-m", "add logs");
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    // Keep `xa.log` tracked while taking only the literal `x*.log` out of the
+    // index; without `--literal-pathspecs`, `git rm` itself expands `x*.log`.
+    git(repository, "--literal-pathspecs", "rm", "--cached", "--", "x*.log");
+    writeFileSync(join(repository, ".gitignore"), "*.log\n");
+    git(repository, "add", "--", ".gitignore");
+    git(repository, "commit", "-m", "ignore logs while keeping xa.log tracked");
+    expect(gitOutput(repository, "ls-files", "--", "xa.log").trim()).toBe("xa.log");
+    writeFileSync(join(repository, "x*.log"), "local ignored copy\n");
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "rejected", reason: "ignored-path-collision" });
+    expect(readFileSync(join(repository, "x*.log"), "utf8")).toBe("local ignored copy\n");
   });
 
   it("restores over an ignored path the snapshot carries when nothing is there to lose", async () => {
