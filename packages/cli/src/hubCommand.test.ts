@@ -1623,6 +1623,13 @@ describe("octant hub visitor", () => {
       threadId: "t",
       scope: "read",
     });
+    expect(resolveHubCliCommand(["visitor", "share", "work", "t"], {})).toEqual({
+      action: "visitor",
+      mode: "share",
+      threadMode: "work",
+      threadId: "t",
+      scope: "read",
+    });
     expect(resolveHubCliCommand(["visitor", "list"], {})).toEqual({
       action: "visitor",
       mode: "list",
@@ -1638,7 +1645,6 @@ describe("octant hub visitor", () => {
       mode: "send",
       id: "BBBBBBBBBBBBBBBBBBBBBB",
     });
-    expect(resolveHubCliCommand(["visitor", "share", "work", "t"], {})).toBeUndefined();
     expect(
       resolveHubCliCommand(["visitor", "share", "code", "t"], { hours: "200" }),
     ).toBeUndefined();

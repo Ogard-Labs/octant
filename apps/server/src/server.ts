@@ -2435,6 +2435,8 @@ export function startOctantServer(
       windowAuthorityStore,
       workAttachments,
       workThreadProjection,
+      workTurnProjection,
+      observeWorkThreadRuntime,
       workThreadServiceWithWorkflows,
       workTurnService,
       agentRunAdmission,

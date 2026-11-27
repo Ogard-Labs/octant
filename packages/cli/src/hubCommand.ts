@@ -99,7 +99,7 @@ export type HubCliCommand =
   | {
       readonly action: "visitor";
       readonly mode: "share";
-      readonly threadMode: "code" | "chat";
+      readonly threadMode: "code" | "chat" | "work";
       readonly threadId: string;
       readonly scope: "read" | "comment";
       readonly hours?: number;
@@ -364,7 +364,9 @@ export function resolveHubCliCommand(
           : undefined;
       }
       if (mode !== "share" || rest.length !== 3 || !only("comment", "hours")) return undefined;
-      if ((first !== "code" && first !== "chat") || second === undefined) return undefined;
+      if ((first !== "code" && first !== "chat" && first !== "work") || second === undefined) {
+        return undefined;
+      }
       if (flags.comment !== undefined && !isSwitch(flags.comment)) return undefined;
       // A bare --hours parses as true, which Number would read as one hour.
       if (flags.hours !== undefined && typeof flags.hours !== "string") return undefined;

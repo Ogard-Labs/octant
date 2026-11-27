@@ -393,6 +393,7 @@ export type RemoteDependencies = {
     | "workThreadServiceWithWorkflows"
     | "workThreadService"
     | "workTurnService"
+    | "observeWorkThreadRuntime"
   > &
   Pick<
     CanvasWiring,
@@ -412,7 +413,7 @@ export type RemoteDependencies = {
     | "pushNotificationTokenStore"
   > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
-  Pick<FoundationsWiring, "workThreadProjection" | "resolveThreadStrict"> &
+  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection" | "resolveThreadStrict"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService" | "onCodeTurnCancelled"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
@@ -1462,6 +1463,11 @@ export function wireRemote(deps: RemoteDependencies) {
       () => persistence.connection,
       (threadId) =>
         deps.codeService instanceof CodeService ? deps.codeService.threadActivity(threadId) : {},
+      {
+        thread: (threadId) => deps.workThreadProjection.read(threadId),
+        turns: (threadId) => deps.workTurnProjection.listForThread(threadId),
+        activity: (threadId) => deps.observeWorkThreadRuntime(threadId),
+      },
     ),
     taint: (input) => {
       const result = visitorTaint.record({

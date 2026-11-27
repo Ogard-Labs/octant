@@ -1,6 +1,12 @@
 import type { ChatAttemptOutcome } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { chatVisitorState, codeVisitorState } from "./visitorThreadSources";
+import {
+  chatVisitorState,
+  codeVisitorState,
+  visitorThreadSource,
+  workVisitorState,
+  type WorkVisitorThreads,
+} from "./visitorThreadSources";
 
 const ran = (outcome: ChatAttemptOutcome) => ({ outcome, usageLimitStop: false });
 const limitStop = { outcome: "waiting", usageLimitStop: true } as const;
@@ -40,5 +46,102 @@ describe("a visitor's thread state follows the run, not the messages", () => {
       "owner-deciding",
     );
     expect(codeVisitorState("waiting", { executing: false })).toBe("owner-deciding");
+  });
+});
+
+describe("a Work thread as a visitor reads it", () => {
+  const idle = { executing: false, awaitingInput: false };
+
+  it("reads a Work turn still executing as working, a question or approval as the owner deciding, and a stopped turn as idle", () => {
+    expect(workVisitorState({ executing: true, awaitingInput: false }, undefined, false)).toBe(
+      "working",
+    );
+    expect(workVisitorState({ executing: false, awaitingInput: true }, undefined, false)).toBe(
+      "owner-deciding",
+    );
+    expect(workVisitorState({ executing: true, awaitingInput: true }, undefined, false)).toBe(
+      "owner-deciding",
+    );
+    expect(workVisitorState(idle, undefined, false)).toBe("idle");
+  });
+
+  it("reads a usage-limit stop as the owner deciding only while no move to another account released it", () => {
+    const parked = { executing: false, awaitingInput: true, waitsOnTurnAlone: true } as const;
+    expect(workVisitorState(parked, { usageLimitStop: true }, false)).toBe("owner-deciding");
+    expect(workVisitorState(parked, { usageLimitStop: true }, true)).toBe("idle");
+    // A released stop does not hide a request that is open beside it.
+    expect(
+      workVisitorState({ executing: false, awaitingInput: true }, { usageLimitStop: true }, true),
+    ).toBe("owner-deciding");
+  });
+
+  const unusedConnection = () => {
+    throw new Error("A Work read uses no database.");
+  };
+
+  function workThreads(overrides: Partial<WorkVisitorThreads> = {}): WorkVisitorThreads {
+    const turn = {
+      turnId: "turn-1",
+      status: "completed",
+      transcript: [
+        { role: "user", text: "Summarise the contract in /Users/ada/Contracts/acme.pdf" },
+        { role: "assistant", text: "It runs for two years." },
+      ],
+      // Never part of what a visitor reads.
+      toolSteps: [{ name: "read_file", state: "completed", message: "TOOL OUTPUT: clause 7" }],
+      wroteFiles: { paths: ["/Users/ada/Contracts/summary.md"], truncated: false },
+      response: "It runs for two years.",
+    } as const;
+    return {
+      thread: () => ({ title: "Read the Acme contract", lifecycle: "active" }),
+      turns: () => [turn],
+      activity: () => idle,
+      ...overrides,
+    };
+  }
+
+  it("shows a Work thread's messages and state, and never its tool output or files", () => {
+    const source = visitorThreadSource(unusedConnection, () => ({}), workThreads());
+    const read = source.read("work", "11111111-1111-4111-8111-111111111111");
+    expect(read).toEqual({
+      status: "found",
+      title: "Read the Acme contract",
+      archived: false,
+      state: "idle",
+      messages: [
+        { role: "person", text: "Summarise the contract in /Users/ada/Contracts/acme.pdf" },
+        { role: "agent", text: "It runs for two years." },
+      ],
+    });
+    expect(JSON.stringify(read)).not.toContain("TOOL OUTPUT");
+    expect(JSON.stringify(read)).not.toContain("summary.md");
+  });
+
+  it("finds no Work thread that is gone, being deleted, or not a Work thread id", () => {
+    const gone = visitorThreadSource(
+      unusedConnection,
+      () => ({}),
+      workThreads({ thread: () => undefined }),
+    );
+    expect(gone.read("work", "11111111-1111-4111-8111-111111111111")).toEqual({
+      status: "missing",
+    });
+    const deleting = visitorThreadSource(
+      unusedConnection,
+      () => ({}),
+      workThreads({ thread: () => ({ title: "Old", lifecycle: "deleting" }) }),
+    );
+    expect(deleting.read("work", "11111111-1111-4111-8111-111111111111")).toEqual({
+      status: "missing",
+    });
+    expect(
+      visitorThreadSource(unusedConnection, () => ({}), workThreads()).read("work", "not an id"),
+    ).toEqual({ status: "missing" });
+    expect(
+      visitorThreadSource(unusedConnection, () => ({})).read(
+        "work",
+        "11111111-1111-4111-8111-111111111111",
+      ),
+    ).toEqual({ status: "missing" });
   });
 });

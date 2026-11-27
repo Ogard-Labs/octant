@@ -3054,9 +3054,9 @@ person's work without any service Octant runs (maintainer decision,
 
 #### Visitor links
 
-Built for a hub and its spokes, for Code and Chat threads, from `octant hub
-visitor` (slice 25); a Work thread, the window's Share menu and Request
-card are not built yet. A standing-in standby serves them too (slice 26).
+Built for a hub and its spokes, for Code, Chat and Work threads, from
+`octant hub visitor` (slice 25); the window's Share menu and Request card
+are not built yet. A standing-in standby serves them too (slice 26).
 
 - **Sharing.** In a thread's Share menu on the spoke that owns it, **Share
   with visitor** makes a read-only or comment-only link with an expiry, and
@@ -3095,7 +3095,8 @@ card are not built yet. A standing-in standby serves them too (slice 26).
   viewer the hub serves, separate from the web app, that runs no script from
   the thread: it writes every message as text. Built: the thread's title,
   its state (working, idle, or the owner deciding), and its messages (Code's
-  prompts and replies, Chat's messages and replies) with paths and
+  prompts and replies, Chat's messages and replies, Work's prompts and
+  replies from each turn's transcript) with paths and
   secret-shaped values replaced; the stream asks the spoke again every two
   seconds and ends when the spoke refuses. Not built yet: step titles and
   states.
@@ -4741,12 +4742,11 @@ limits, and the device relay's channel design.
     browser binding on the hub, reusing the token and rate-limit patterns of
     `apps/share` and leaving it unchanged. Acceptance: a revoked link stops
     on the next fetch on the hub and the standby; a comment-only visitor
-    cannot answer an approval. Built for Code and Chat threads from the
-    CLI and loopback administration, with server tests and a headless
+    cannot answer an approval. Built for Code, Chat and Work threads from
+    the CLI and loopback administration, with server tests and a headless
     Chromium check of the viewer at 1280 and 390 pixels in light and dark
     (no horizontal scroll) and of two tabs opening one link at once (one
-    key); not built: Work
-    threads, the window's Share menu and Request card (the renderer has no
+    key); not built: the window's Share menu and Request card (the renderer has no
     room left for them outside a lazy chunk), step titles in the projection,
     and Send posting into the thread itself. **Linux container: yes**, with
     a rendered check; a phone outside the tailnet is a maintainer gate.

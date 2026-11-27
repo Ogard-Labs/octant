@@ -1075,7 +1075,7 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
   },
   { octant: "hub webhook rotate|remove|secret <endpoint-id>" },
   { octant: "hub visitor on|off|list" },
-  { octant: "hub visitor share code|chat <thread-id> [--comment] [--hours <1-168>]" },
+  { octant: "hub visitor share code|chat|work <thread-id> [--comment] [--hours <1-168>]" },
   { octant: "hub visitor stop <link-id> | send|dismiss <comment-id>" },
   { octant: "hub relay on|off|list | allow|forget <device-id>" },
   { octant: "hub provision on|off" },

@@ -350,7 +350,7 @@ export const HubWebhookEndpointRequest = Schema.Struct({
 export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(HubWebhookEndpointRequest);
 
 /** A thread a visitor link shares, as only the spoke that owns it knows it. */
-export const VisitorThreadMode = Schema.Literal("chat", "code");
+export const VisitorThreadMode = Schema.Literal("chat", "code", "work");
 export type VisitorThreadMode = typeof VisitorThreadMode.Type;
 
 /** Everything one spoke lets the hub hold for visitor links: it replaces what the hub held for it. */

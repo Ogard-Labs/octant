@@ -10,7 +10,12 @@ import { VISITOR_PROJECTION_MAX_BYTES } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
-import { SpokeVisitorService, type VisitorThreadRead } from "./spokeVisitorService";
+import {
+  SpokeVisitorService,
+  type VisitorThreadRead,
+  type VisitorThreadSource,
+} from "./spokeVisitorService";
+import { visitorThreadSource } from "./visitorThreadSources";
 
 // Lets a test make the next random id one that base64url would start with "-".
 const randomness = vi.hoisted(() => ({ dashFirst: 0 }));
@@ -56,6 +61,7 @@ function setup(
     paused?: () => boolean;
     sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
     hubMemberId?: () => string;
+    source?: VisitorThreadSource;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -77,7 +83,7 @@ function setup(
         }),
     },
     signing: () => key,
-    source: {
+    source: options.source ?? {
       read: () =>
         options.thread?.() ?? {
           status: "found",
@@ -253,6 +259,57 @@ describe("sharing a thread with a visitor", () => {
       "state",
       "messages",
     ]);
+  });
+});
+
+describe("sharing a Work thread", () => {
+  it("a Work thread can be shared, and its visitor reads only redacted messages and state", async () => {
+    const turn = {
+      turnId: "turn-1",
+      status: "waiting",
+      failure: { category: "rate-limited", message: "Limit reached.", usageLimit: {} },
+      transcript: [
+        { role: "user", text: "Draft the reply to /Users/ada/Mail/acme.eml" },
+        { role: "assistant", text: "Here is a draft." },
+      ],
+      toolSteps: [{ name: "read_file", state: "completed", message: "TOOL OUTPUT: inbox" }],
+    } as const;
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Answer Acme", lifecycle: "active" }),
+          turns: () => [turn],
+          activity: () => ({ executing: false, awaitingInput: true, waitsOnTurnAlone: true }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer).toMatchObject({
+      status: "ok",
+      projection: {
+        title: "Answer Acme",
+        state: "owner-deciding",
+        messages: [
+          { role: "person", text: "Draft the reply to [path]" },
+          { role: "agent", text: "Here is a draft." },
+        ],
+      },
+    });
+    expect(JSON.stringify(answer)).not.toContain("TOOL OUTPUT");
+    expect(JSON.stringify(answer)).not.toContain("/Users/ada");
   });
 });
 

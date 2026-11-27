@@ -1,8 +1,9 @@
 // What a visitor link reads of a thread on this spoke, per mode. Only message
 // text leaves here: Code's prompts and replies from its message-search view,
-// and Chat's messages and replies from its thread view. Tool calls, diffs,
-// files, attachments and approvals never enter these reads; an approval shows
-// only as the thread's state. A Work thread has no such read yet.
+// Chat's messages and replies from its thread view, and Work's prompts and
+// replies from its turns' transcripts. Tool calls, diffs, files, attachments
+// and approvals never enter these reads; an approval shows only as the
+// thread's state.
 //
 // The state follows the run, not the messages: a reply that is still streaming
 // is working, and a turn stopped before it replied is idle.
@@ -10,9 +11,13 @@
 import {
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   type ChatAttemptOutcome,
   type CodeThread,
   type CodeThreadId,
+  type WorkThread,
+  type WorkThreadId,
+  type WorkTurnState,
 } from "@octant/contracts";
 import { activeChatTurns, parkedStopReleased } from "@octant/domain";
 import { readChatThreadView } from "../persistence/chatProjection";
@@ -71,6 +76,93 @@ export function chatVisitorState(
     return index === latest.length - 1 && !lastStopReleased;
   });
   return deciding ? "owner-deciding" : "idle";
+}
+
+/** What a Work thread's state is read from: the same activity its board row shows. */
+export type WorkTurnActivity = {
+  readonly executing: boolean;
+  readonly awaitingInput: boolean;
+  /** `awaitingInput` is only because the latest turn is parked, as on a usage-limit stop. */
+  readonly waitsOnTurnAlone?: boolean;
+};
+
+/**
+ * A Work thread's state as a visitor reads it. A question, an approval, or a
+ * waiting child is the owner deciding, as on Code. A usage-limit stop parks
+ * the latest turn as waiting: it waits on the owner until a move to another
+ * account released it, as on Chat, and is idle after.
+ */
+export function workVisitorState(
+  activity: WorkTurnActivity,
+  latest: { readonly usageLimitStop: boolean } | undefined,
+  latestStopReleased: boolean,
+): VisitorThreadState {
+  const releasedLimitStop =
+    activity.waitsOnTurnAlone === true && latest?.usageLimitStop === true && latestStopReleased;
+  if (activity.awaitingInput && !releasedLimitStop) return "owner-deciding";
+  return activity.executing ? "working" : "idle";
+}
+
+/**
+ * The Work threads and turns this host holds in memory, and each thread's
+ * activity. Only the fields named here are read; a turn's tool steps, files,
+ * attachments and response record are never looked at.
+ */
+export interface WorkVisitorThreads {
+  readonly thread: (
+    threadId: WorkThreadId,
+  ) => Pick<WorkThread, "title" | "lifecycle" | "providerHandoff"> | undefined;
+  readonly turns: (threadId: WorkThreadId) => ReadonlyArray<{
+    readonly turnId: string;
+    readonly status: WorkTurnState["status"];
+    readonly failure?: { readonly usageLimit?: unknown } | undefined;
+    readonly transcript: ReadonlyArray<{
+      readonly role: "user" | "assistant";
+      readonly text: string;
+    }>;
+  }>;
+  readonly activity: (threadId: WorkThreadId) => WorkTurnActivity;
+}
+
+function readWork(work: WorkVisitorThreads | undefined, threadId: string): VisitorThreadRead {
+  if (work === undefined) return MISSING;
+  let id;
+  try {
+    id = decodeWorkThreadId(threadId);
+  } catch {
+    return MISSING;
+  }
+  const thread = work.thread(id);
+  if (thread === undefined || thread.lifecycle === "deleting" || thread.lifecycle === "deleted") {
+    return MISSING;
+  }
+  const turns = work.turns(id);
+  const messages: Message[] = turns.flatMap((turn) =>
+    turn.transcript
+      .filter((entry) => entry.text.trim() !== "")
+      .map(
+        (entry): Message => ({
+          role: entry.role === "user" ? "person" : "agent",
+          text: entry.text,
+        }),
+      ),
+  );
+  const latest = turns.at(-1);
+  return {
+    status: "found",
+    title: thread.title,
+    archived: thread.lifecycle === "archived",
+    state: workVisitorState(
+      work.activity(id),
+      latest === undefined
+        ? undefined
+        : {
+            usageLimitStop: latest.status === "waiting" && latest.failure?.usageLimit !== undefined,
+          },
+      parkedStopReleased(thread, latest === undefined ? undefined : String(latest.turnId)),
+    ),
+    messages: messages.slice(-MAX_MESSAGES),
+  };
 }
 
 function readCode(
@@ -169,15 +261,22 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
   };
 }
 
-/** Reads Code and Chat threads from this host's projections, and Code's turn activity from its service. */
+/**
+ * Reads Code and Chat threads from this host's projections, Code's turn
+ * activity from its service, and Work threads from Work's own projections;
+ * without them a Work thread is missing.
+ */
 export function visitorThreadSource(
   connection: () => SqliteConnection,
   codeActivity: CodeTurnActivity,
+  work?: WorkVisitorThreads,
 ): VisitorThreadSource {
   return {
     read: (mode, threadId) =>
       mode === "code"
         ? readCode(connection(), codeActivity, threadId)
-        : readChat(connection(), threadId),
+        : mode === "work"
+          ? readWork(work, threadId)
+          : readChat(connection(), threadId),
   };
 }
