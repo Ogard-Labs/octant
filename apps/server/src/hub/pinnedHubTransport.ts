@@ -13,6 +13,9 @@ import { classifyRemoteListenerAddress } from "@octant/domain";
 import { digestFromListenerPin } from "./hubCrypto";
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+// A host that drops packets silently never answers the dial; without its own
+// limit the dial outlives the request's deadline.
+const DIAL_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 256 * 1_024;
 
 export type HubFetchInit = {
@@ -65,6 +68,39 @@ const SYSTEM_NETWORK: HubNetwork = {
     }),
 };
 
+/**
+ * Dials within the timeout and the caller's signal. A connection that arrives
+ * after either gave up is closed, so nothing holds it open.
+ */
+async function dialWithin(
+  network: HubNetwork,
+  address: string,
+  port: number,
+  signal: AbortSignal | undefined,
+): Promise<Socket> {
+  signal?.throwIfAborted();
+  const dialled = network.dial(address, port);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const gaveUp = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("dial timed out")), DIAL_TIMEOUT_MS);
+    onAbort = () => reject(signal?.reason);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([dialled, gaveUp]);
+  } catch (error) {
+    dialled.then(
+      (socket) => socket.destroy(),
+      () => undefined,
+    );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 const isPrivateAddress = (address: string): boolean => {
   const sourceClass = classifyRemoteListenerAddress(address.replace(/^::ffff:/, ""));
   return sourceClass === "lan-private" || sourceClass === "tailscale";
@@ -91,7 +127,7 @@ export async function openPinnedSocket(
   if (first === undefined || !addresses.every(isPrivateAddress)) {
     throw new HubTransportRefused("not-private");
   }
-  const tcp = await network.dial(first, Number(url.port || 443));
+  const tcp = await dialWithin(network, first, Number(url.port || 443), signal);
   if (tcp.remoteAddress !== undefined && !isPrivateAddress(tcp.remoteAddress)) {
     tcp.destroy();
     throw new HubTransportRefused("not-private");
