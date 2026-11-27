@@ -163,6 +163,10 @@ export function createExchangeListenerFetch(options: {
       } catch {
         throw new ListenerUnreachable();
       }
+      // The phone's modules answer a name that no longer resolves, as a
+      // private DNS name does away from home, with no addresses rather than a
+      // failure. There is no address to refuse and nothing was sent.
+      if (addresses.length === 0) throw new ListenerUnreachable();
       const judgement = judgeListenerAddresses(addresses);
       if (judgement.status === "refused") throw new ListenerTrustRefused(judgement.reason);
       judged = judgement;

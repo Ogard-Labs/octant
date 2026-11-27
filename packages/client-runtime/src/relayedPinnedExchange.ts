@@ -40,6 +40,11 @@ export interface PinnedTlsStreamPort {
 
 let nextStream = 0;
 
+/** Read afresh at each ask: the signal changes across an await, which narrowing does not see. */
+function givenUp(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
 /**
  * An exchange port whose connection is a relay tunnel to `route`'s host. The
  * address and port it is given are not dialled: the hub carries the bytes,
@@ -55,8 +60,7 @@ export function createRelayedExchangePort(input: {
       throw new TypeError("A relayed exchange resolves nothing.");
     },
     open: async (request): Promise<PinnedListenerExchangeOpening> => {
-      if (request.signal?.aborted === true)
-        return { status: "failed", reason: "connection-failed" };
+      if (givenUp(request.signal)) return { status: "failed", reason: "connection-failed" };
       nextStream += 1;
       const id = `relay-${nextStream}`;
       const tunnel = await openRelayTunnel(
@@ -68,6 +72,12 @@ export function createRelayedExchangePort(input: {
         input.WebSocket,
       );
       if (tunnel === undefined) return { status: "failed", reason: "unreachable" };
+      // Admission took a round trip to the hub, and no listener was watching
+      // the signal meanwhile; a request given up on then is never written.
+      if (givenUp(request.signal)) {
+        tunnel.close();
+        return { status: "failed", reason: "connection-failed" };
+      }
       const close = (): void => {
         input.stream.cancel(id);
         tunnel.close();

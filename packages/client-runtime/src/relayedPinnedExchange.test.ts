@@ -87,3 +87,48 @@ describe("a request through the relay that fails while opening", () => {
     );
   });
 });
+
+describe("a request given up on while the hub is admitting the device", () => {
+  it("closes the tunnel and sends nothing through it", async () => {
+    const controller = new AbortController();
+    const opened: string[] = [];
+    const sockets: AdmittingSocket[] = [];
+    class WatchedSocket extends AdmittingSocket {
+      constructor() {
+        super();
+        sockets.push(this);
+      }
+    }
+    const port = createRelayedExchangePort({
+      route: {
+        url: "wss://hub.example.com/relay/v1",
+        targetMemberId: HOST,
+        admit: async () => {
+          controller.abort();
+          return { signature: "s".repeat(86), deviceSpki: "k".repeat(91) };
+        },
+      },
+      WebSocket: WatchedSocket as unknown as RelayWebSocketConstructor,
+      stream: {
+        open: (id) => void opened.push(id),
+        push: () => undefined,
+        pushEnd: () => undefined,
+        pull: async () => ({ status: "end" }),
+        cancel: () => undefined,
+      },
+    });
+
+    const opening = await port.open({
+      address: "laptop.tail1234.ts.net",
+      port: 8443,
+      serverName: undefined,
+      pins: [PIN],
+      request: new TextEncoder().encode("POST /api/work/turns HTTP/1.1\r\n\r\n"),
+      signal: controller.signal,
+    });
+
+    expect(opening).toEqual({ status: "failed", reason: "connection-failed" });
+    expect(opened).toEqual([]);
+    expect(sockets.map((socket) => socket.readyState)).toEqual([3]);
+  });
+});

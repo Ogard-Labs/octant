@@ -93,7 +93,12 @@ export async function learnRelayAddresses(input: {
       const transport = input.transports.remoteTransportFor(slot.hostId);
       if (origin === undefined || transport === undefined) return;
       const learned = await relayAddressFromResponse(
-        await transport.authenticatedFetch({ method: "GET", path: REMOTE_RELAY_ADDRESS_PATH }),
+        await transport.authenticatedFetch({
+          method: "GET",
+          // Written out for the wiring check, which finds a route's callers by
+          // their literal paths; the type keeps it equal to the contract's.
+          path: "/api/remote/relay-address" satisfies typeof REMOTE_RELAY_ADDRESS_PATH,
+        }),
       );
       if (learned !== "unchanged") await input.remember(origin, learned);
     }),
