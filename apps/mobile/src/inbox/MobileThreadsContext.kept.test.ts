@@ -20,6 +20,8 @@ const phone = vi.hoisted(() => {
       offline: [] as ReadonlyArray<string>,
     },
     projects: [{ projectId: "travel", name: "Travel" }] as ReadonlyArray<unknown>,
+    /** Times a launch has applied what it read of the kept list. */
+    restores: 0,
     // The shared packages are the same through a restart, and slow to load again.
     runtime: undefined as typeof import("@octant/client-runtime") | undefined,
     contracts: undefined as typeof import("@octant/contracts") | undefined,
@@ -47,6 +49,18 @@ vi.mock("../outbox/sealedFile", () => ({
     remove: () => void phone.files.delete(name),
   }),
 }));
+// The app applies the kept list in the same step as it reads it, so a count
+// here says a launch is past restoring, whatever it restored.
+vi.mock("./keptThreads", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./keptThreads")>();
+  return {
+    ...actual,
+    restoreKeptThreads: (...args: Parameters<typeof actual.restoreKeptThreads>) => {
+      phone.restores += 1;
+      return actual.restoreKeptThreads(...args);
+    },
+  };
+});
 vi.mock("./readCursorFile", () => ({
   loadReadCursors: () => null,
   keepReadCursors: () => undefined,
@@ -170,6 +184,17 @@ async function runOnce() {
   app.quit();
 }
 
+/**
+ * Starts the app afresh and waits until it has restored the kept list. A check
+ * that a row is absent means nothing before then.
+ */
+async function launchRestored() {
+  phone.restores = 0;
+  const app = await launch();
+  await settled(() => expect(phone.restores).toBeGreaterThan(0));
+  return app;
+}
+
 /** Waits for the app's own reads and writes, which a launch does not await. */
 const settled = (check: () => void | Promise<void>) =>
   vi.waitFor(
@@ -243,7 +268,7 @@ describe("the thread list after a restart", { timeout: 60_000 }, () => {
     later.quit();
 
     pairedWith("key-2");
-    const repaired = await launch();
+    const repaired = await launchRestored();
     expect(repaired.threads().lastStanding(studio)).toBeUndefined();
     repaired.quit();
   });
@@ -302,7 +327,7 @@ describe("the thread list after a restart", { timeout: 60_000 }, () => {
     await runOnce();
 
     phone.inbox = { rows: [], reachable: true, offline: [] };
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -314,7 +339,7 @@ describe("the thread list after a restart", { timeout: 60_000 }, () => {
 
     pairedWith("key-2");
     phone.inbox = { rows: [], reachable: false, offline: [] };
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -323,13 +348,14 @@ describe("the thread list after a restart", { timeout: 60_000 }, () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const running = await launch();
+    await vi.waitFor(() => expect(running.threads().rows).toHaveLength(1));
     phone.inbox = { rows: [], reachable: false, offline: [] };
     pairedWith("key-2");
     await running.again();
     expect(running.threads().rows).toEqual([]);
     running.quit();
 
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -341,7 +367,7 @@ describe("the thread list after a restart", { timeout: 60_000 }, () => {
 
     phone.inbox = { rows: [], reachable: true, offline: [] };
     phone.projects = [];
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().projects).toEqual([]);
     later.quit();
   });
