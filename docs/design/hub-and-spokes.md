@@ -3343,7 +3343,11 @@ between hosts on loopback; what is not built is listed below.
   listed and active, and the address names the hub it follows. The route
   answers only on the private network: through the relay it is refused
   (`relayed-admin-refused`), so a device keeps the address it learned at home
-  and uses it when away. The signed host hello is unchanged. Rejected: a new
+  and uses it when away. The phone asks each paired computer when its
+  connection becomes ready, every ten minutes while it stays so, and when the
+  person turns that computer's switch on, so an approval given after an
+  earlier "unavailable" answer is learned while still at home. The signed host
+  hello is unchanged. Rejected: a new
   field in the signed hello (it changes a signed contract), and typing the
   address into each device (error-prone).
 - **On the desktop and the phone.** The desktop's main process runs the

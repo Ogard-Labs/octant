@@ -59,6 +59,32 @@ describe("the phone's choice to reach a computer through its hub", () => {
     expect(container.textContent).toContain("reaches it through its hub");
   });
 
+  it("shows the address as soon as it is learned, without reopening the list", async () => {
+    const choices = createRelayChoiceStore(createInMemoryMobileHostRegistryStorage());
+    await choices.setEnabled(ORIGIN, true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          children: createElement(RelayChoicePanel, {
+            hostLabel: "Studio Mac",
+            origin: ORIGIN,
+            choices,
+            testIdSuffix: "studio",
+          }),
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("hasn't told this phone");
+    await act(async () => choices.rememberAddress(ORIGIN, ADDRESS));
+    await act(async () => Promise.resolve());
+    expect(container.textContent).toContain("reaches it through its hub");
+    await act(async () => root.unmount());
+  });
+
   it("forgets an address the computer no longer names, and keeps the choice itself", async () => {
     const choices = createRelayChoiceStore(createInMemoryMobileHostRegistryStorage());
     await choices.rememberAddress(ORIGIN, ADDRESS);

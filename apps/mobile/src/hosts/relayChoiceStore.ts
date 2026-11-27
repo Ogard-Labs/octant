@@ -15,6 +15,8 @@ export interface RelayChoiceStore {
   readonly setEnabled: (origin: string, enabled: boolean) => Promise<void>;
   readonly rememberAddress: (origin: string, address: RelayAddress | undefined) => Promise<void>;
   readonly forget: (origin: string) => Promise<void>;
+  /** Hears of every kept change, so a shown choice follows an address learned later. */
+  readonly subscribe: (listener: () => void) => () => void;
 }
 
 export function createRelayChoiceStore(storage: MobileHostRegistryStorage): RelayChoiceStore {
@@ -56,8 +58,13 @@ export function createRelayChoiceStore(storage: MobileHostRegistryStorage): Rela
   // One change at a time: each reads every choice and writes them all back, so
   // two that overlapped could bring a forgotten computer's choice back.
   let last: Promise<unknown> = Promise.resolve();
+  const listeners = new Set<() => void>();
   const change = (...args: Parameters<typeof write>): Promise<void> => {
-    const run = last.then(() => write(...args));
+    const run = last
+      .then(() => write(...args))
+      .then(() => {
+        for (const listener of listeners) listener();
+      });
     last = run.catch(() => undefined);
     return run;
   };
@@ -74,5 +81,9 @@ export function createRelayChoiceStore(storage: MobileHostRegistryStorage): Rela
         ...(address === undefined ? {} : { address }),
       })),
     forget: (origin) => change(origin, () => undefined),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
   };
 }

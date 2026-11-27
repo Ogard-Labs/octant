@@ -8,7 +8,7 @@ import type { RelayChoiceStore } from "./relayChoiceStore";
 export interface RelayChoicePanelProps {
   readonly hostLabel: string;
   readonly origin: string;
-  readonly choices: Pick<RelayChoiceStore, "read" | "setEnabled">;
+  readonly choices: Pick<RelayChoiceStore, "read" | "setEnabled" | "subscribe">;
   readonly testIdSuffix: string;
 }
 
@@ -24,14 +24,19 @@ export function RelayChoicePanel(props: RelayChoicePanelProps) {
   const { choices, origin } = props;
   useEffect(() => {
     let current = true;
-    void choices
-      .read(origin)
-      .then((read) => {
-        if (current) setChoice(read);
-      })
-      .catch(() => undefined);
+    const show = (): void => {
+      void choices
+        .read(origin)
+        .then((read) => {
+          if (current) setChoice(read);
+        })
+        .catch(() => undefined);
+    };
+    show();
+    const unsubscribe = choices.subscribe(show);
     return () => {
       current = false;
+      unsubscribe();
     };
   }, [choices, origin]);
 
