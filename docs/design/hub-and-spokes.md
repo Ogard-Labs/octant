@@ -3155,6 +3155,13 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   endpoint id another member already holds stays that member's. A spoke
   sends one list at a time, and a list that was out while an endpoint
   changed does not count as the newer one sent.
+- **A new scheme needs the hub updated first.** The hub and every named
+  standby must run a build that knows Stripe before a spoke makes a Stripe
+  endpoint. An older one refuses the spoke's whole endpoint list once one
+  entry uses `stripe`, so it keeps the list it last took and no later change
+  to any of that spoke's endpoints reaches it, and the spoke shows the list as
+  not published. There is no version negotiation: update the hub and
+  standbys, or remove the Stripe endpoint.
 - **Verify, queue, forward.** The acting hub checks each delivery's
   signature and timestamp on the raw bytes before it queues anything, and
   answers a forged one 401, a stale one 400, a repeat of one it still holds
