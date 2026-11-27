@@ -30,8 +30,9 @@ import type { HubStatePort, HubWebhookQueued } from "./hubStateStore";
 import type { PublicAnswer, PublicRequest } from "./publicEntrance";
 import {
   makeSealingKeyPair,
+  openPreviousWebhookSecret,
   openWebhookSecret,
-  verifiedWebhookDelivery,
+  verifiedWebhookDeliveryByAny,
 } from "./publicEntranceCrypto";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -183,8 +184,8 @@ export class HubWebhookService {
         String(entry.spokeMemberId) === String(queued.spokeMemberId),
     );
     if (endpoint === undefined) return { status: "unknown-endpoint" };
-    const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
-    if (secret === undefined) return { status: "unknown-endpoint" };
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey);
+    if (secrets.length === 0) return { status: "unknown-endpoint" };
     const body = Buffer.from(queued.envelope.body, "base64");
     const reading = readWebhookHeaders(endpoint.scheme, queued.envelope.headers);
     const receivedAt = queued.envelope.receivedAt;
@@ -196,7 +197,12 @@ export class HubWebhookService {
     ) {
       return { status: "refused" };
     }
-    const verified = verifiedWebhookDelivery({ scheme: endpoint.scheme, secret, reading, body });
+    const verified = verifiedWebhookDeliveryByAny({
+      scheme: endpoint.scheme,
+      secrets,
+      reading,
+      body,
+    });
     if (verified !== undefined && verified.deliveryId !== queued.envelope.deliveryId) {
       return { status: "refused" };
     }
@@ -339,11 +345,11 @@ export class HubWebhookService {
       this.#count("refused");
       return answer(401, { error: reading.kind });
     }
-    const secret = this.#secretFor(endpoint, hub.sealingKey.privateKey);
-    if (secret === undefined) return NOT_FOUND;
-    const verified = verifiedWebhookDelivery({
+    const secrets = this.#secretsFor(endpoint, hub.sealingKey.privateKey);
+    if (secrets.length === 0) return NOT_FOUND;
+    const verified = verifiedWebhookDeliveryByAny({
       scheme: endpoint.scheme,
-      secret,
+      secrets,
       reading,
       body: body.bytes,
     });
@@ -446,13 +452,31 @@ export class HubWebhookService {
     for (const spoke of unreachable) await this.#wake(spoke);
   }
 
-  #secretFor(endpoint: HubWebhookEndpoint, privateKey: string): string | undefined {
-    const sealed = endpoint.sealedSecrets.find(
+  /**
+   * This host's copy of the endpoint's secret, then, for a Stripe endpoint
+   * whose person pasted a new one within the day, the one it replaced: a
+   * delivery held signed with the old secret was answered and will not come
+   * again. Empty when nothing here opens.
+   */
+  #secretsFor(endpoint: HubWebhookEndpoint, privateKey: string): ReadonlyArray<string> {
+    const [current, ...replaced] = endpoint.sealedSecrets.filter(
       (entry) => String(entry.recipientMemberId) === this.#options.hubMemberId(),
     );
-    return sealed === undefined
-      ? undefined
-      : openWebhookSecret({ sealed, endpointId: String(endpoint.endpointId), privateKey });
+    const endpointId = String(endpoint.endpointId);
+    const secret =
+      current === undefined
+        ? undefined
+        : openWebhookSecret({ sealed: current, endpointId, privateKey });
+    if (secret === undefined) return [];
+    if (endpoint.scheme !== "stripe") return [secret];
+    const now = this.#options.now();
+    return [
+      secret,
+      ...replaced.flatMap((sealed) => {
+        const previous = openPreviousWebhookSecret({ sealed, endpointId, privateKey });
+        return previous !== undefined && now < previous.until ? [previous.secret] : [];
+      }),
+    ];
   }
 
   #takeRate(endpointId: string, now: number): boolean {

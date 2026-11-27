@@ -475,6 +475,16 @@ export const SpokeWebhookEndpoint = Schema.Struct({
   scheme: WebhookSignatureScheme,
   /** Absent only for a Stripe endpoint whose person has not pasted Stripe's secret yet. */
   secret: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
+  /**
+   * The Stripe secret a newer paste replaced, still taken until `until`: a day
+   * after the paste, so a delivery the hub held, already answered, still runs.
+   */
+  previousSecret: Schema.optional(
+    Schema.Struct({
+      secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+      until: Schema.Int.pipe(Schema.nonNegative()),
+    }).annotations(strict),
+  ),
   label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
   createdAt: Schema.Int.pipe(Schema.nonNegative()),
   /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */

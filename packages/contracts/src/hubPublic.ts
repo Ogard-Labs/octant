@@ -131,6 +131,13 @@ export const HubWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
   spokeMemberId: HubMemberId,
   scheme: WebhookSignatureScheme,
+  /**
+   * One copy per recipient, current secret first. A Stripe endpoint whose
+   * person pasted a new secret within the last day also carries, after it,
+   * the replaced secret sealed to the same recipient with its end time inside
+   * the seal; a holder that opens only the first copy for its member id keeps
+   * working unchanged.
+   */
   sealedSecrets: Schema.Array(SealedWebhookSecret).pipe(Schema.minItems(1), Schema.maxItems(16)),
 }).annotations(strict);
 export type HubWebhookEndpoint = typeof HubWebhookEndpoint.Type;

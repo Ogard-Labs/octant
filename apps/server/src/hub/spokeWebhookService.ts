@@ -41,8 +41,9 @@ import type {
 import {
   mintPublicId,
   mintWebhookSecret,
+  sealPreviousWebhookSecret,
   sealWebhookSecret,
-  verifiedWebhookDelivery,
+  verifiedWebhookDeliveryByAny,
 } from "./publicEntranceCrypto";
 
 const decodeEndpointId = Schema.decodeUnknownSync(WebhookEndpointId);
@@ -232,7 +233,9 @@ export class SpokeWebhookService {
   /**
    * Takes the secret Stripe minted for one of this spoke's Stripe endpoints,
    * first or after the person rolled it in Stripe, and hands the hub its
-   * sealed copy. No other scheme takes a pasted secret.
+   * sealed copy. No other scheme takes a pasted secret. A replaced secret is
+   * still taken for a day, as Stripe itself does: the hub answered Stripe for
+   * what it holds, and Stripe will not send those deliveries again.
    */
   async setSecret(endpointId: string, secret: string): Promise<SpokeWebhookSecretSet> {
     if (!this.#options.publicGranted()) return { status: "refused", kind: "public-not-granted" };
@@ -242,11 +245,23 @@ export class SpokeWebhookService {
     if (endpoint.scheme !== "stripe") return { status: "refused", kind: "scheme-mints-its-own" };
     const trimmed = secret.trim();
     if (!STRIPE_SECRET.test(trimmed)) return { status: "refused", kind: "invalid-secret" };
+    const now = this.#options.now();
+    const previousSecret =
+      endpoint.secret === undefined || endpoint.secret === trimmed
+        ? livePrevious(endpoint, now)
+        : { secret: endpoint.secret, until: now + WEBHOOK_HOLD_MS };
+    const { previousSecret: _replaced, ...rest } = endpoint;
     this.#revision += 1;
     this.#save({
       ...held,
       endpoints: held.endpoints.map((entry) =>
-        entry === endpoint ? { ...entry, secret: trimmed } : entry,
+        entry === endpoint
+          ? {
+              ...rest,
+              secret: trimmed,
+              ...(previousSecret === undefined ? {} : { previousSecret }),
+            }
+          : entry,
       ),
       unpublished: true,
     });
@@ -309,6 +324,7 @@ export class SpokeWebhookService {
     const epoch = hub.copyEpoch?.() ?? "";
     const revision = this.#revision;
     const held = this.#load();
+    const now = this.#options.now();
     // A Stripe endpoint still waiting for its secret has nothing the hub could check.
     const endpoints = this.#options.publicGranted()
       ? held.endpoints.flatMap((endpoint) =>
@@ -346,14 +362,22 @@ export class SpokeWebhookService {
               endpointId: endpoint.endpointId,
               spokeMemberId,
               scheme: endpoint.scheme,
-              sealedSecrets: [
-                sealWebhookSecret({
-                  secret: endpoint.secret,
+              sealedSecrets: (() => {
+                const recipient = {
                   endpointId: String(endpoint.endpointId),
                   recipientMemberId: decodeMemberId(String(key.memberId)),
                   recipientPublicKey: key.sealingPublicKey,
-                }),
-              ],
+                };
+                const previous = livePrevious(endpoint, now);
+                // The current copy comes first: a holder that opens only the
+                // first one for its member id checks with the current secret.
+                return [
+                  sealWebhookSecret({ ...recipient, secret: endpoint.secret }),
+                  ...(previous === undefined
+                    ? []
+                    : [sealPreviousWebhookSecret({ ...recipient, ...previous })]),
+                ];
+              })(),
             })),
     });
     const granted = this.#options.publicGranted();
@@ -386,6 +410,7 @@ export class SpokeWebhookService {
 
   /** Sends the list again when the hub has not taken it, or when the Public item changed since. */
   async look(): Promise<void> {
+    this.#dropEndedPrevious();
     const granted = this.#options.publicGranted();
     const recipients = (this.#options.hub?.targets() ?? []).map((target) => target.memberId);
     if (
@@ -430,7 +455,13 @@ export class SpokeWebhookService {
     };
     const reading = readWebhookHeaders(endpoint.scheme, envelope.headers);
     if (reading.status === "refused") return outcome({ status: "refused", kind: reading.kind });
-    const verified = verifiedWebhookDelivery({ scheme: endpoint.scheme, secret, reading, body });
+    const previous = livePrevious(endpoint, now);
+    const verified = verifiedWebhookDeliveryByAny({
+      scheme: endpoint.scheme,
+      secrets: previous === undefined ? [secret] : [secret, previous.secret],
+      reading,
+      body,
+    });
     const claimed = new Set(
       held.claimed
         .filter((entry) => entry.key.startsWith(`${endpointId}|`))
@@ -580,6 +611,30 @@ export class SpokeWebhookService {
     return true;
   }
 
+  /** Forgets each replaced Stripe secret whose day is over, and withdraws its sealed copies. */
+  #dropEndedPrevious(): void {
+    const held = this.#load();
+    const now = this.#options.now();
+    if (
+      !held.endpoints.some(
+        (entry) => entry.previousSecret !== undefined && livePrevious(entry, now) === undefined,
+      )
+    ) {
+      return;
+    }
+    this.#revision += 1;
+    this.#save({
+      ...held,
+      endpoints: held.endpoints.map((entry) => {
+        if (entry.previousSecret === undefined || livePrevious(entry, now) !== undefined)
+          return entry;
+        const { previousSecret: _ended, ...rest } = entry;
+        return rest;
+      }),
+      unpublished: true,
+    });
+  }
+
   #prune(held: SpokeWebhookState, now: number): SpokeWebhookState {
     const cutoff = now - WEBHOOK_DEDUPE_RETENTION_MS;
     return {
@@ -596,6 +651,17 @@ export class SpokeWebhookService {
   #save(webhooks: SpokeWebhookState): void {
     this.#options.state.save({ ...this.#options.state.load(), webhooks });
   }
+}
+
+/** The secret a Stripe paste replaced, while it is still taken. */
+function livePrevious(
+  endpoint: SpokeWebhookEndpoint,
+  now: number,
+): { readonly secret: string; readonly until: number } | undefined {
+  const previous = endpoint.previousSecret;
+  return endpoint.scheme === "stripe" && previous !== undefined && now < previous.until
+    ? previous
+    : undefined;
 }
 
 /** Trims the oldest deliveries a routine already read, never one it has not. */

@@ -241,6 +241,43 @@ export function sealWebhookSecret(input: {
   };
 }
 
+/**
+ * The Stripe secret an endpoint's person replaced, sealed like the current one
+ * and sent after it for the same recipient, with the time it stops being taken
+ * inside the seal. Stripe has already been answered for a delivery the hub
+ * holds, and will not send it again, so the old secret keeps verifying for the
+ * hold; a hub that reads only the first copy for its member id never sees it.
+ */
+export function sealPreviousWebhookSecret(
+  input: Parameters<typeof sealWebhookSecret>[0] & { readonly until: number },
+): SealedWebhookSecret {
+  return sealWebhookSecret({ ...input, secret: `previous|${input.until}|${input.secret}` });
+}
+
+/** Opens a copy {@link sealPreviousWebhookSecret} made, or undefined for any other seal. */
+export function openPreviousWebhookSecret(
+  input: Parameters<typeof openWebhookSecret>[0],
+): { readonly secret: string; readonly until: number } | undefined {
+  const match = /^previous\|(\d{1,15})\|(.+)$/s.exec(openWebhookSecret(input) ?? "");
+  const until = match?.[1];
+  const secret = match?.[2];
+  return until === undefined || secret === undefined ? undefined : { secret, until: Number(until) };
+}
+
+/** The first of these secrets that verifies the delivery, as {@link verifiedWebhookDelivery} reads it. */
+export function verifiedWebhookDeliveryByAny(input: {
+  readonly scheme: WebhookSignatureScheme;
+  readonly secrets: ReadonlyArray<string>;
+  readonly reading: Extract<WebhookHeaderReading, { status: "read" }>;
+  readonly body: Uint8Array;
+}): ReturnType<typeof verifiedWebhookDelivery> {
+  for (const secret of input.secrets) {
+    const verified = verifiedWebhookDelivery({ ...input, secret });
+    if (verified !== undefined) return verified;
+  }
+  return undefined;
+}
+
 /** Opens a sealed secret, or undefined for any other key, endpoint, or a tampered seal. */
 export function openWebhookSecret(input: {
   readonly sealed: SealedWebhookSecret;

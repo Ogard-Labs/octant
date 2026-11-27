@@ -2991,7 +2991,9 @@ person's work without any service Octant runs (maintainer decision,
   or wildcard address, is refused), at most eight. While any is listed the
   entrance listens only there, over TLS, and closes a connection from any
   other address before the handshake; the hub's address comes from
-  `tailscale status`, and the certificate is the one the person turned on
+  `tailscale status` (its IPv4 one when it has one, else its IPv6 one), a
+  list with no front of that address's family, which could reach nothing,
+  is refused (`no-front-in-address-family`), and the certificate is the one the person turned on
   for the private listener (`octant hub certificate`). The proxy is told the
   hub's tailnet name, which that certificate covers, so it can verify it
   without a hand-set server name,
@@ -3185,7 +3187,12 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   person adds the URL in Stripe and pastes the secret Stripe shows with
   `octant hub webhook secret <id>`, which reads it from standard input. Until
   then the spoke hands the hub nothing for it and it takes no delivery;
-  pasting again after rolling the secret in Stripe replaces it. The
+  pasting again after rolling the secret in Stripe replaces it, and, as
+  Stripe does, the replaced secret is still taken for a day
+  (`WEBHOOK_HOLD_MS`) after the paste: a delivery the hub or a standby holds
+  was already answered and Stripe will not send it again, so the spoke keeps
+  the old secret and hands each holder a second sealed copy, after the
+  current one, until then; afterwards both drop it. The
   `Stripe-Signature` header holds `t=<unix seconds>` and one or more
   `v1=<hex HMAC-SHA256 of "<t>.<raw body>">` keyed with the whole secret; a
   delivery passes if any `v1` matches, compared in constant time, and `v0`

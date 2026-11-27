@@ -4,12 +4,14 @@ import {
   type HubSealingKey,
   type WebhookDeliveryEnvelope,
   type WebhookEndpointId,
+  WEBHOOK_HOLD_MS,
 } from "@octant/contracts";
 import { hubSealingKeyPayload } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
-import { HubWebhookService } from "./hubWebhookService";
+import { HubWebhookService, type HubWebhookServiceOptions } from "./hubWebhookService";
+import type { PublicRequest } from "./publicEntrance";
 import { makeSealingKeyPair } from "./publicEntranceCrypto";
 import { SpokeWebhookService, type SpokeWebhookHubPort } from "./spokeWebhookService";
 
@@ -488,7 +490,10 @@ describe("copies on a standby", () => {
   const HUB = "11111111-1111-4111-8111-111111111111";
   const STANDBY = "22222222-2222-4222-8222-222222222222";
 
-  function holder(memberId: string) {
+  function holder(
+    memberId: string,
+    options: Partial<Pick<HubWebhookServiceOptions, "serving" | "send" | "now">> = {},
+  ) {
     const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
     const spki = publicKey.export({ format: "der", type: "spki" }).toString("base64url");
     const service = new HubWebhookService({
@@ -505,10 +510,10 @@ describe("copies on a standby", () => {
           },
         }) as never,
       hubMemberId: () => memberId,
-      serving: () => false,
-      send: async () => undefined,
+      serving: options.serving ?? (() => false),
+      send: options.send ?? (async () => undefined),
       record: () => undefined,
-      now: () => NOW,
+      now: options.now ?? (() => NOW),
     });
     return { memberId, service, fingerprint: publicKeyFingerprint(spki) };
   }
@@ -593,5 +598,145 @@ describe("copies on a standby", () => {
     // Taken under the roster it was sent under, the list now counts as published.
     await service.look();
     expect(sends).toBe(2);
+  });
+  describe("a Stripe secret rolled while deliveries wait", () => {
+    const OLD = "whsec_rolledAwaySecret0123456789";
+    const NEW = "whsec_pastedAfterRoll9876543210";
+
+    function signed(eventId: string, secret: string, atMs: number) {
+      const body = JSON.stringify({ id: eventId, type: "invoice.paid" });
+      const seconds = Math.floor(atMs / 1000);
+      const signature = createHmac("sha256", secret).update(`${seconds}.${body}`).digest("hex");
+      return { body, header: `t=${seconds},v1=${signature}` };
+    }
+
+    function request(endpointId: string, eventId: string, secret: string, atMs: number) {
+      const { body, header } = signed(eventId, secret, atMs);
+      return {
+        route: "webhook",
+        params: { id: endpointId },
+        method: "POST",
+        path: `/hooks/${endpointId}`,
+        headers: new Map([["stripe-signature", header]]),
+        principal: { kind: "webhook", endpointId },
+        readBody: async () => ({ status: "read", bytes: Buffer.from(body) }),
+        signal: new AbortController().signal,
+      } satisfies PublicRequest;
+    }
+
+    function envelope(endpointId: string, eventId: string, secret: string, atMs: number) {
+      const { body, header } = signed(eventId, secret, atMs);
+      return {
+        endpointId: endpointId as WebhookEndpointId,
+        deliveryId: eventId,
+        receivedAt: atMs,
+        headers: { "stripe-signature": header },
+        body: Buffer.from(body).toString("base64"),
+      } satisfies WebhookDeliveryEnvelope;
+    }
+
+    function wired() {
+      const clock = { now: NOW };
+      const reach = { spokeAway: true, standbyServing: false };
+      let spoke: SpokeWebhookService | undefined;
+      const hub = holder(HUB, {
+        serving: () => true,
+        send: async (_memberId, delivery) =>
+          reach.spokeAway ? undefined : spoke?.receive(delivery),
+        now: () => clock.now,
+      });
+      const standby = holder(STANDBY, {
+        serving: () => reach.standbyServing,
+        now: () => clock.now,
+      });
+      const state = memoryState();
+      state.save({ link: { selfMemberId: SPOKE } as never });
+      spoke = new SpokeWebhookService({
+        state,
+        publicGranted: () => true,
+        remoteAccessPaused: () => false,
+        hub: {
+          targets: () =>
+            [hub, standby].map(({ memberId, fingerprint }) => ({ memberId, fingerprint })),
+          named: () => [HUB, STANDBY],
+          sealingKey: async (memberId) => (memberId === HUB ? hub : standby).service.sealingKey(),
+          sendEndpoints: async (memberId, update) => {
+            (memberId === HUB ? hub : standby).service.receiveEndpoints(SPOKE, update);
+            return true;
+          },
+        },
+        record: () => undefined,
+        now: () => clock.now,
+      });
+      return { clock, reach, hub, standby, spoke };
+    }
+
+    it("a delivery held on the hub, and one a standby hands back, signed with the old secret each start their routine once", async () => {
+      const { clock, reach, hub, standby, spoke } = wired();
+      const created = await spoke.create({ scheme: "stripe", label: "Payments" });
+      if (created.status !== "awaiting-secret") throw new Error(created.status);
+      await spoke.setSecret(created.endpointId, OLD);
+
+      // Stripe is answered while the spoke is away, so it will not send these again.
+      expect(
+        (await hub.service.handle(request(created.endpointId, "evt_1", OLD, clock.now))).status,
+      ).toBe(202);
+      await hub.service.tick();
+      reach.standbyServing = true;
+      expect(
+        (await standby.service.handle(request(created.endpointId, "evt_2", OLD, clock.now))).status,
+      ).toBe(202);
+      reach.standbyServing = false;
+
+      clock.now += 60 * 60_000;
+      expect(await spoke.setSecret(created.endpointId, NEW)).toEqual({
+        status: "set",
+        published: true,
+      });
+      for (const queued of standby.service.handbackQueue()) {
+        expect(hub.service.takeHandback(STANDBY, queued)).toEqual({ status: "queued" });
+      }
+
+      reach.spokeAway = false;
+      await hub.service.tick();
+      expect(hub.service.status()).toMatchObject({ queued: 0, forwarded: 2, refused: 0 });
+      expect((await readEvents(spoke, created.endpointId)).events.map((event) => event.id)).toEqual(
+        [`${created.endpointId}:evt_1`, `${created.endpointId}:evt_2`],
+      );
+      // A delivery the new secret signs is taken as before, and a repeat is still a duplicate.
+      expect(spoke.receive(envelope(created.endpointId, "evt_3", NEW, clock.now))).toEqual({
+        status: "accepted",
+      });
+      expect(spoke.receive(envelope(created.endpointId, "evt_1", OLD, clock.now))).toEqual({
+        status: "duplicate",
+      });
+    });
+
+    it("stops taking the old secret a day after the new one was pasted", async () => {
+      const { clock, reach, hub, spoke } = wired();
+      reach.spokeAway = false;
+      const created = await spoke.create({ scheme: "stripe", label: "Payments" });
+      if (created.status !== "awaiting-secret") throw new Error(created.status);
+      await spoke.setSecret(created.endpointId, OLD);
+      await spoke.setSecret(created.endpointId, NEW);
+
+      clock.now += WEBHOOK_HOLD_MS - 60_000;
+      expect(spoke.receive(envelope(created.endpointId, "evt_1", OLD, clock.now))).toEqual({
+        status: "accepted",
+      });
+
+      clock.now += 2 * 60_000;
+      await spoke.look();
+      expect(spoke.receive(envelope(created.endpointId, "evt_2", OLD, clock.now))).toEqual({
+        status: "refused",
+        kind: "bad-signature",
+      });
+      expect(
+        (await hub.service.handle(request(created.endpointId, "evt_3", OLD, clock.now))).status,
+      ).toBe(401);
+      expect(
+        (await hub.service.handle(request(created.endpointId, "evt_4", NEW, clock.now))).status,
+      ).toBe(202);
+    });
   });
 });
