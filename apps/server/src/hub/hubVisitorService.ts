@@ -170,6 +170,14 @@ export class HubVisitorService {
         publicKeyFingerprint(signed.signerPublicKey) === listed,
     );
     const held = this.#load();
+    const before = held.grants.filter(
+      (signed) => String(signed.grant.spokeMemberId) === spokeMemberId,
+    );
+    // A spoke sends its list again whenever the roster moves, and one without
+    // Public sends an empty list each time; an unchanged list is not a change.
+    if (JSON.stringify(before) === JSON.stringify(own)) {
+      return { status: "recorded", count: own.length };
+    }
     this.#save({
       ...held,
       grants: [

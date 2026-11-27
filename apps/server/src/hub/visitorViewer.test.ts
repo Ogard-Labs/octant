@@ -56,11 +56,26 @@ function openViewer(
     addEventListener: () => undefined,
     querySelector: () => ({ textContent: "", value: "" }),
   });
+  const note = { textContent: "" };
+  const field = { value: "" };
+  const submits: Array<(event: { preventDefault: () => void }) => Promise<void>> = [];
+  const comment = {
+    ...element(),
+    addEventListener: (type: string, listener: (typeof submits)[number]) => {
+      if (type === "submit") submits.push(listener);
+    },
+    querySelector: (selector: string) => (selector === "textarea" ? field : note),
+  };
   const elements: Record<string, unknown> = {
     status,
     thread: element(),
     title: element(),
-    comment: element(),
+    comment,
+  };
+  /** Types `text` into the comment box and sends it, as the visitor would. */
+  const send = async (text: string) => {
+    field.value = text;
+    for (const submit of submits) await submit({ preventDefault: () => undefined });
   };
   const calls: Array<string> = [];
   const replaceState = vi.fn();
@@ -85,7 +100,7 @@ function openViewer(
     // The viewer's waits run a thousand times faster here.
     (resume: () => void, ms: number) => setTimeout(resume, ms / 1000),
   );
-  return { status, calls, replaceState };
+  return { status, calls, replaceState, send, note };
 }
 
 const OPEN = `/v/${LINK_ID}/open`;
@@ -165,4 +180,25 @@ describe("the visitor viewer's first open", () => {
       expect(viewer.calls.filter((path) => path === OPEN)).toHaveLength(2);
     },
   );
+});
+
+describe("the visitor viewer's comments", () => {
+  const COMMENTS = `/v/${LINK_ID}/comments`;
+
+  it.each([
+    [
+      "comments-full",
+      "The owner has not read your earlier comments yet. Send this once they have.",
+    ],
+    ["rate-limited", "Too many comments at once. Wait a minute, then send it again."],
+  ])("tells a visitor whose comment was refused with %s why", async (error, message) => {
+    const viewer = openViewer((path) => {
+      if (path === OPEN) return Response.json({ scope: "comment" });
+      if (path === COMMENTS) return Response.json({ error }, { status: 429 });
+      return ended();
+    });
+    await vi.waitFor(() => expect(viewer.status.textContent).toBe("This link has ended."));
+    await viewer.send("Looks good");
+    expect(viewer.note.textContent).toBe(message);
+  });
 });

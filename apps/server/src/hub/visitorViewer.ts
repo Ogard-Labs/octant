@@ -214,11 +214,18 @@ const SCRIPT = String.raw`
       body: JSON.stringify({ text }),
     });
     const note = form.querySelector(".note");
+    // A 429 is either the hub's rate limit or a full inbox the owner has not
+    // read yet; only the first goes away by waiting a minute.
+    const refusal = response.ok
+      ? undefined
+      : await response.json().then((body) => body && body.error, () => undefined);
     note.textContent = response.ok
       ? "Sent to the owner. It reaches the thread only if they choose to send it."
-      : response.status === 429
-        ? "Too many comments at once. Wait a minute, then send it again."
-        : "The owner is not taking comments right now.";
+      : refusal === "comments-full"
+        ? "The owner has not read your earlier comments yet. Send this once they have."
+        : response.status === 429
+          ? "Too many comments at once. Wait a minute, then send it again."
+          : "The owner is not taking comments right now.";
     if (response.ok) field.value = "";
   });
 

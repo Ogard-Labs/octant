@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import {
   HUB_AUTO_APPLY_KINDS,
   HUB_GRANT_ITEMS,
+  PUBLIC_FUNNEL_PORTS,
   type AppReleaseRing,
   type HubAutoApplyKind,
   type HubGrantItem,
@@ -660,11 +661,15 @@ async function runPublic(
   if (command.mode === "off") {
     const funnel = await post(input, "/api/desktop/hub/public/funnel", { enabled: false });
     if (!isOk(funnel, "changed")) {
-      return refusal(input, funnel, "Octant could not turn Funnel off.");
+      return await funnelOffRefusal(input, funnel, "Octant could not turn Funnel off.");
     }
     const entrance = await post(input, "/api/desktop/hub/public", { enabled: false });
     if (!isOk(entrance, "changed")) {
-      return refusal(input, entrance, "Octant refused to close the public entrance.");
+      return await funnelOffRefusal(
+        input,
+        entrance,
+        "Octant refused to close the public entrance.",
+      );
     }
     input.stdout.write("The public entrance is closed, and Funnel is off.\n");
     return 0;
@@ -1597,7 +1602,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
   "funnel-not-allowed":
     "Tailscale refused Funnel. Turn on HTTPS and MagicDNS, and add the funnel node attribute in your tailnet policy.",
   "funnel-off-failed":
-    "Tailscale did not turn Funnel off. Run `tailscale funnel --https=443 off` yourself.",
+    "Tailscale did not turn Funnel off. Run `tailscale funnel --https=<port> off` yourself, with the port `octant hub public status` shows.",
   "listener-failed": "The public entrance could not open a port on this computer.",
   "public-not-granted":
     "This computer's hub grant does not tick Public. Tick it with `octant hub grant --items` first.",
@@ -1627,6 +1632,29 @@ const TERMINAL_CONTROLS =
 function terminalSafe(text: string, shape: "one-line" | "lines"): string {
   const shown = text.replace(TERMINAL_CONTROLS, "\ufffd");
   return shape === "one-line" ? shown.replace(/[\n\t]+/g, " ") : shown;
+}
+
+/**
+ * A refusal that may be Tailscale keeping Funnel on. Funnel can be on 443 or
+ * 10000, so the command to turn it off by hand names the port status shows.
+ */
+async function funnelOffRefusal(
+  input: Input,
+  response: LocalControlResponse,
+  fallback: string,
+): Promise<number> {
+  if (field(response.body, "kind") !== "funnel-off-failed") {
+    return refusal(input, response, fallback);
+  }
+  const status = await input.session.send({ path: "/api/desktop/hub/status", method: "GET" });
+  const port = field(field(field(status.body, "publicEntrance"), "funnel"), "port");
+  if (status.status !== 200 || !PUBLIC_FUNNEL_PORTS.some((known) => known === port)) {
+    return refusal(input, response, fallback);
+  }
+  input.stderr.write(
+    `Tailscale did not turn Funnel off. Run \`tailscale funnel --https=${port} off\` yourself. (funnel-off-failed)\n`,
+  );
+  return 1;
 }
 
 function refusal(input: Input, response: LocalControlResponse, fallback: string): number {

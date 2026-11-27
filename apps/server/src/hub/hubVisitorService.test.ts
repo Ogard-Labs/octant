@@ -259,6 +259,24 @@ describe("visitor links on the hub", () => {
     expect((await call(context.standby, "visitor-stream", link.linkId, visitor)).status).toBe(410);
   });
 
+  it("keeps and journals nothing for a grant list that matches the one it holds", async () => {
+    const context = world();
+    await shareComment(context);
+    const received = () =>
+      context.records.filter((entry) => entry.change === "visitor-grants-received").length;
+    const before = received();
+    const held = context.hub.heldGrants();
+    context.hub.receiveGrants(SPOKE, { grants: held });
+    expect(received()).toBe(before);
+    expect(context.hub.heldGrants()).toEqual(held);
+
+    // A spoke without Public sends an empty list whenever the roster moves.
+    context.hub.receiveGrants(SPOKE, { grants: [] });
+    expect(received()).toBe(before + 1);
+    context.hub.receiveGrants(SPOKE, { grants: [] });
+    expect(received()).toBe(before + 1);
+  });
+
   it("a comment-only visitor cannot answer an approval", async () => {
     const context = world();
     const link = await shareComment(context);

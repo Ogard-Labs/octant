@@ -381,6 +381,32 @@ describe("visitor comments", () => {
     expect(answer.projection?.messages.at(-1)?.text.startsWith("199 ")).toBe(true);
   });
 
+  it("counts the whole projection, its state and message list included, against the byte budget", async () => {
+    const full = "x".repeat(32_000);
+    const envelope = (text: string) => Buffer.byteLength(JSON.stringify({ role: "agent", text }));
+    // Twelve full messages plus an oldest one sized to fill the budget exactly
+    // when only the title and the messages are counted.
+    const counted = Buffer.byteLength(JSON.stringify({ title: "T" })) + 12 * (envelope(full) + 1);
+    const oldest = "y".repeat(VISITOR_PROJECTION_MAX_BYTES - counted - 1 - envelope(""));
+    const messages = [oldest, ...Array.from({ length: 12 }, () => full)].map((text) => ({
+      role: "agent" as const,
+      text,
+    }));
+    const context = setup({
+      thread: () => ({ status: "found", title: "T", archived: false, state: "idle", messages }),
+    });
+    const link = await shared(context);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    if (answer.status !== "ok") throw new Error(answer.kind);
+    expect(answer.projection?.messages).toHaveLength(12);
+    expect(Buffer.byteLength(JSON.stringify(answer.projection))).toBeLessThanOrEqual(
+      VISITOR_PROJECTION_MAX_BYTES,
+    );
+  });
+
   it("an older grant list never reaches the hub after a newer one", async () => {
     const sent: number[] = [];
     let releaseFirst: (() => void) | undefined;

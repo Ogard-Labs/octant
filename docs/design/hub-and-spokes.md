@@ -3075,9 +3075,13 @@ card are not built yet. A standing-in standby serves them too (slice 26).
   messages and the titles and states of steps, live. Never tool inputs or
   outputs, diffs, files, attachments, Canvases, paths, or approval contents;
   an approval shows only that the owner is deciding. Any absolute path, a
-  network share, and a `file:` URL in a message read `[path]`. The newest
-  messages that fit in 384 KiB are shown, so the answer crosses the private
-  link whole. The page is a small
+  network share, and a `file:` URL in a message read `[path]`; a path inside
+  a web address, such as a login link's `?next=/docs/start`, stays. A web
+  address ends at a bracket, comma or semicolon, so a path written right
+  after one, as in a Markdown link, still reads `[path]`; a path inside an
+  address after such a character is redacted too, which errs toward hiding.
+  The newest messages that fit in 384 KiB, counting the whole projection, are
+  shown, so the answer crosses the private link whole. The page is a small
   viewer the hub serves, separate from the web app, that runs no script from
   the thread: it writes every message as text. Built: the thread's title,
   its state (working, idle, or the owner deciding), and its messages (Code's

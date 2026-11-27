@@ -13,6 +13,9 @@ import { classifyRemoteListenerAddress } from "@octant/domain";
 import { digestFromListenerPin } from "./hubCrypto";
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+// A host that drops packets silently never answers the dial; without its own
+// limit the dial outlives the request's deadline.
+const DIAL_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 256 * 1_024;
 
 export type HubFetchInit = {
@@ -33,8 +36,12 @@ export type HubTransport = (target: { readonly origin: string; readonly pin: str
 export interface HubNetwork {
   /** Every address the name resolves to. */
   readonly resolve: (hostname: string) => Promise<ReadonlyArray<string>>;
-  /** Opens TCP to an address that was judged private. */
-  readonly dial: (address: string, port: number) => Promise<Socket>;
+  /**
+   * Opens TCP to an address that was judged private. When `signal` aborts
+   * while the connection is still being made, the attempt is closed at once,
+   * so a host that never answers does not keep sockets open across retries.
+   */
+  readonly dial: (address: string, port: number, signal: AbortSignal) => Promise<Socket>;
 }
 
 export type HubTransportRefusal = "not-private" | "pin-mismatch" | "wrong-origin" | "invalid-pin";
@@ -49,21 +56,65 @@ export class HubTransportRefused extends Error {
   }
 }
 
-const SYSTEM_NETWORK: HubNetwork = {
+export const SYSTEM_NETWORK: HubNetwork = {
   resolve: async (hostname) => {
     if (isIP(hostname) !== 0) return [hostname];
     return (await lookup(hostname, { all: true })).map((entry) => entry.address);
   },
-  dial: (address, port) =>
+  dial: (address, port, signal) =>
     new Promise<Socket>((resolve, reject) => {
       const socket = connectTcp({ host: address, port });
-      socket.once("error", reject);
+      const onAbort = () => {
+        socket.destroy();
+        reject(signal.reason);
+      };
+      const onError = (error: Error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      socket.once("error", onError);
       socket.once("connect", () => {
-        socket.off("error", reject);
+        signal.removeEventListener("abort", onAbort);
+        socket.off("error", onError);
         resolve(socket);
       });
     }),
 };
+
+/**
+ * Dials within the timeout and the caller's signal. Giving up aborts the
+ * attempt itself, and a connection that still arrives afterwards is closed, so
+ * nothing holds it open.
+ */
+async function dialWithin(
+  network: HubNetwork,
+  address: string,
+  port: number,
+  signal: AbortSignal | undefined,
+): Promise<Socket> {
+  signal?.throwIfAborted();
+  const giveUp = new AbortController();
+  const timer = setTimeout(() => giveUp.abort(new Error("dial timed out")), DIAL_TIMEOUT_MS);
+  const onAbort = () => giveUp.abort(signal?.reason);
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const dialled = network.dial(address, port, giveUp.signal);
+  const gaveUp = new Promise<never>((_resolve, reject) => {
+    giveUp.signal.addEventListener("abort", () => reject(giveUp.signal.reason), { once: true });
+  });
+  try {
+    return await Promise.race([dialled, gaveUp]);
+  } catch (error) {
+    dialled.then(
+      (socket) => socket.destroy(),
+      () => undefined,
+    );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
 
 const isPrivateAddress = (address: string): boolean => {
   const sourceClass = classifyRemoteListenerAddress(address.replace(/^::ffff:/, ""));
@@ -91,7 +142,7 @@ export async function openPinnedSocket(
   if (first === undefined || !addresses.every(isPrivateAddress)) {
     throw new HubTransportRefused("not-private");
   }
-  const tcp = await network.dial(first, Number(url.port || 443));
+  const tcp = await dialWithin(network, first, Number(url.port || 443), signal);
   if (tcp.remoteAddress !== undefined && !isPrivateAddress(tcp.remoteAddress)) {
     tcp.destroy();
     throw new HubTransportRefused("not-private");

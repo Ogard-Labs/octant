@@ -3,9 +3,18 @@
 // and Chat's messages and replies from its thread view. Tool calls, diffs,
 // files, attachments and approvals never enter these reads; an approval shows
 // only as the thread's state. A Work thread has no such read yet.
+//
+// The state follows the run, not the messages: a reply that is still streaming
+// is working, and a turn stopped before it replied is idle.
 
-import { decodeChatThreadId, decodeCodeThreadId } from "@octant/contracts";
-import { activeChatTurns } from "@octant/domain";
+import {
+  decodeChatThreadId,
+  decodeCodeThreadId,
+  type ChatAttemptOutcome,
+  type CodeThread,
+  type CodeThreadId,
+} from "@octant/contracts";
+import { activeChatTurns, parkedStopReleased } from "@octant/domain";
 import { readChatThreadView } from "../persistence/chatProjection";
 import { readCodeThread } from "../persistence/codeProjection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
@@ -15,8 +24,60 @@ const MAX_MESSAGES = 200;
 const MISSING = { status: "missing" } as const;
 
 type Message = { readonly role: "person" | "agent"; readonly text: string };
+type VisitorThreadState = Extract<VisitorThreadRead, { status: "found" }>["state"];
 
-function readCode(connection: SqliteConnection, threadId: string): VisitorThreadRead {
+/**
+ * Whether a Code thread's turn runs or waits on the person, as its sidebar row
+ * says. The projection this source reads does not hold it; the Code service does.
+ */
+export type CodeTurnActivity = (threadId: CodeThreadId) => {
+  readonly executing?: boolean;
+  readonly awaitingInput?: boolean;
+};
+
+/** A Code thread's state as a visitor reads it, from its lifecycle and its turn's activity. */
+export function codeVisitorState(
+  lifecycle: CodeThread["lifecycle"],
+  activity: ReturnType<CodeTurnActivity>,
+): VisitorThreadState {
+  if (lifecycle === "waiting" || activity.awaitingInput === true) return "owner-deciding";
+  return activity.executing === true ? "working" : "idle";
+}
+
+/** A Chat turn's latest attempt, as the visitor's state reads it. */
+export type ChatLatestAttempt = {
+  readonly outcome: ChatAttemptOutcome;
+  /** The attempt is parked on its account's usage limit, not on a question. */
+  readonly usageLimitStop: boolean;
+};
+
+/**
+ * A Chat thread's state as a visitor reads it, from each turn's latest attempt
+ * in order. Regenerating an older reply adds its attempt to that older turn, so
+ * a run or a question on any turn counts, not only on the last. A usage-limit
+ * stop is different: it waits on the owner only while it is the last turn's
+ * and no move to another account released it; an older one is history.
+ */
+export function chatVisitorState(
+  latest: ReadonlyArray<ChatLatestAttempt | undefined>,
+  lastStopReleased: boolean,
+): VisitorThreadState {
+  if (latest.some((attempt) => attempt?.outcome === "queued" || attempt?.outcome === "streaming")) {
+    return "working";
+  }
+  const deciding = latest.some((attempt, index) => {
+    if (attempt?.outcome !== "waiting") return false;
+    if (!attempt.usageLimitStop) return true;
+    return index === latest.length - 1 && !lastStopReleased;
+  });
+  return deciding ? "owner-deciding" : "idle";
+}
+
+function readCode(
+  connection: SqliteConnection,
+  activity: CodeTurnActivity,
+  threadId: string,
+): VisitorThreadRead {
   let id;
   try {
     id = decodeCodeThreadId(threadId);
@@ -48,17 +109,11 @@ function readCode(connection: SqliteConnection, threadId: string): VisitorThread
       }),
     )
     .reverse();
-  const last = messages.at(-1);
   return {
     status: "found",
     title: thread.title,
     archived: thread.lifecycle === "archived",
-    state:
-      thread.lifecycle === "waiting"
-        ? "owner-deciding"
-        : last?.role === "person"
-          ? "working"
-          : "idle",
+    state: codeVisitorState(thread.lifecycle, activity(id)),
     messages,
   };
 }
@@ -84,7 +139,8 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
     return content?.role === role ? content.body : undefined;
   };
   const messages: Message[] = [];
-  for (const turn of activeChatTurns(view.turns)) {
+  const turns = activeChatTurns(view.turns);
+  for (const turn of turns) {
     const asked = textOf(String(turn.userMessageRef.contentId), "user");
     if (asked !== undefined) messages.push({ role: "person", text: asked });
     const latest = turn.attempts.at(-1);
@@ -94,20 +150,34 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
       .join("");
     if (reply !== "") messages.push({ role: "agent", text: reply });
   }
-  const last = messages.at(-1);
+  const lastAttempt = turns.at(-1)?.attempts.at(-1);
+  const lastAttemptId = lastAttempt === undefined ? undefined : String(lastAttempt.id);
   return {
     status: "found",
     title: view.thread.title,
     archived: view.thread.lifecycle === "archived",
-    state: last?.role === "person" ? "working" : "idle",
+    state: chatVisitorState(
+      turns.map((turn) => {
+        const attempt = turn.attempts.at(-1);
+        return attempt === undefined
+          ? undefined
+          : { outcome: attempt.outcome, usageLimitStop: attempt.usageLimit !== undefined };
+      }),
+      parkedStopReleased(view.thread, lastAttemptId),
+    ),
     messages: messages.slice(-MAX_MESSAGES),
   };
 }
 
-/** Reads Code and Chat threads from this host's projections. */
-export function visitorThreadSource(connection: () => SqliteConnection): VisitorThreadSource {
+/** Reads Code and Chat threads from this host's projections, and Code's turn activity from its service. */
+export function visitorThreadSource(
+  connection: () => SqliteConnection,
+  codeActivity: CodeTurnActivity,
+): VisitorThreadSource {
   return {
     read: (mode, threadId) =>
-      mode === "code" ? readCode(connection(), threadId) : readChat(connection(), threadId),
+      mode === "code"
+        ? readCode(connection(), codeActivity, threadId)
+        : readChat(connection(), threadId),
   };
 }

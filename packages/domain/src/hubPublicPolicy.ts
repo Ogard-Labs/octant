@@ -190,8 +190,13 @@ export function decideVisitorLink(input: {
 // A path names the person's folders and account; a visitor reads none of them.
 // Any absolute path of two or more parts is one, whatever its first folder,
 // since a fixed list of roots let `/workspace/...` and `/data/...` through.
-// Web addresses are left alone: the `//` after a scheme starts no path, but a
-// `file:` URL is a path and goes.
+// Web addresses are left alone, including any path inside one: a login link's
+// `?next=/docs/start` names a page on that site, not a folder on the person's
+// computer. A `file:` URL is a path and goes. The address ends at a bracket,
+// comma or semicolon, so a path right after it, as in a Markdown link
+// `[https://example.com](/home/...)`, is still redacted; a web address that
+// really holds one of those loses only its tail to the path check.
+const WEB_URL = /(?<![\w.+-])(?!file:)[a-z][a-z0-9+.-]*:\/\/[^\s"'`<>()[\],;]*/gi;
 const FILE_URL = /(^|[\s("'`=:,;])file:\/\/[^\s"'`)<>,;]*/gi;
 const UNIX_PATH = /(^|[\s("'`=:,;])(?:~|\/[\w.@+-]+)\/[^\s"'`)<>,;]*/g;
 const WINDOWS_PATH = /(^|[\s("'`=:,;])[A-Za-z]:[\\/][^\s"'`)<>,;]*/g;
@@ -199,7 +204,18 @@ const NETWORK_SHARE = /(^|[\s("'`=:,;])\\\\[^\s\\"'`)<>,;]+\\[^\s"'`)<>,;]*/g;
 
 /** Message text as a visitor may read it: no secret-shaped value and no file-system path. */
 export function redactForVisitor(text: string): string {
-  return redactSecretsAndPrivateKeys(text)
+  const redacted = redactSecretsAndPrivateKeys(text);
+  let out = "";
+  let last = 0;
+  for (const match of redacted.matchAll(WEB_URL)) {
+    out += redactPaths(redacted.slice(last, match.index)) + match[0];
+    last = match.index + match[0].length;
+  }
+  return out + redactPaths(redacted.slice(last));
+}
+
+function redactPaths(text: string): string {
+  return text
     .replace(FILE_URL, "$1[path]")
     .replace(UNIX_PATH, "$1[path]")
     .replace(WINDOWS_PATH, "$1[path]")

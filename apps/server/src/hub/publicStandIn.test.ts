@@ -1,6 +1,7 @@
 import type { HubMembershipChangedPayload } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import type { HubLinkState, HubState, HubStatePort } from "./hubStateStore";
+import { Schema } from "effect";
+import { HubLinkState, type HubSideState, type HubState, type HubStatePort } from "./hubStateStore";
 import {
   handBackPublicQueue,
   holdsPublicCopies,
@@ -13,28 +14,54 @@ import {
 
 const WINDOW = { kind: "local-window" } as const;
 
-/** Only the fields the rule reads; the rest of a link does not matter to it. */
+const HUB = "11111111-1111-4111-8111-111111111111";
+
+/** A complete link, decoded like a stored one, from this standby to its hub. */
+function linkOf(fields: Record<string, unknown> = {}): HubLinkState {
+  return Schema.decodeUnknownSync(HubLinkState)({
+    selfMemberId: "22222222-2222-4222-8222-222222222222",
+    hubMemberId: HUB,
+    hubName: "Hub",
+    hubOrigin: "https://100.101.102.103:8443",
+    hubListenerPin: "a".repeat(64),
+    hubIdentityPublicKey: "hub-key",
+    rosterSigningPublicKey: "roster-key",
+    grant: { items: [], actProjects: [] },
+    roster: {
+      roster: { sequence: 1, members: [], standbyOrder: [], failoverAfterSeconds: 60 },
+      signedBy: { kind: "hub", memberId: HUB },
+      signature: "signature",
+    },
+    peerGrants: [],
+    ...fields,
+  });
+}
+
+/** This host's own hub role, switched on with no members yet. */
+const OWN_HUB: HubSideState = { enabled: true, members: [], joinTickets: [] };
+const PUBLIC_GRANT = { grant: { items: ["public"], actProjects: [] } };
+
 function standby(
-  standIn: { readonly handingBack?: boolean } | undefined,
+  standIn: { readonly handingBack?: true } | undefined,
   serve: boolean,
+  fields: Record<string, unknown> = {},
 ): HubState {
-  const link = {
-    removed: false,
-    ...(standIn === undefined
-      ? {}
-      : {
-          standIn: {
-            startedAt: 1,
-            baseSequence: 1,
-            added: [],
-            removed: [],
-            joinTickets: [],
-            ...standIn,
-          },
-        }),
-  } as unknown;
   return {
-    link: link as HubLinkState,
+    link: linkOf({
+      ...(standIn === undefined
+        ? {}
+        : {
+            standIn: {
+              startedAt: 1,
+              baseSequence: 1,
+              added: [],
+              removed: [],
+              joinTickets: [],
+              ...standIn,
+            },
+          }),
+      ...fields,
+    }),
     publicEntrance: { enabled: true, ...(serve ? { serveWhileStandingIn: true } : {}) },
   };
 }
@@ -59,25 +86,16 @@ describe("who serves the public entrance", () => {
   });
 
   it("a standby that turned its own hub role on still takes deliveries for its own endpoints while its Public grant stands", () => {
-    const state = standby({}, true);
-    const link = { ...state.link, grant: { items: ["public"], actProjects: [] } } as HubLinkState;
-    expect(servesOwnPublicEndpoints({ ...state, hub: { enabled: true } as HubState["hub"] })).toBe(
-      false,
+    expect(servesOwnPublicEndpoints({ ...standby({}, true), hub: OWN_HUB })).toBe(false);
+    expect(servesOwnPublicEndpoints({ ...standby({}, true, PUBLIC_GRANT), hub: OWN_HUB })).toBe(
+      true,
     );
-    expect(
-      servesOwnPublicEndpoints({ ...state, link, hub: { enabled: true } as HubState["hub"] }),
-    ).toBe(true);
   });
 
   it("a host promoted to hub, which no longer has a hub of its own, refuses deliveries for the endpoints it owned as a spoke", () => {
-    expect(servesOwnPublicEndpoints({ hub: { enabled: true } as HubState["hub"] })).toBe(false);
-    const state = standby({}, true);
-    const removed = {
-      ...state.link,
-      removed: true,
-      grant: { items: ["public"], actProjects: [] },
-    } as HubLinkState;
-    expect(servesOwnPublicEndpoints({ ...state, link: removed })).toBe(false);
+    expect(servesOwnPublicEndpoints({ hub: OWN_HUB })).toBe(false);
+    const removed = standby({}, true, { ...PUBLIC_GRANT, removed: true });
+    expect(servesOwnPublicEndpoints(removed)).toBe(false);
   });
 
   it("refuses the choice on a host the hub has not named a standby, and journals a change", () => {

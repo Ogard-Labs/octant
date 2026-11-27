@@ -189,10 +189,10 @@ export class HubTestNetwork {
   networkFor(from: string): HubNetwork {
     return {
       resolve: this.network.resolve,
-      dial: (address, port) =>
+      dial: (address, port, signal) =>
         this.#split.has(`${from}|${address}`)
           ? Promise.reject(new Error(`${address} is split from ${from}.`))
-          : this.network.dial(address, port),
+          : this.network.dial(address, port, signal),
     };
   }
 
