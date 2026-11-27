@@ -50,6 +50,14 @@ describe("a credential written after a scheme word", () => {
     }
   });
 
+  it("replaces a bearer token whole even when its characters read like a label", () => {
+    // Shorter than a bearer token before `token=`, so a later pass cannot
+    // catch the prefix the assignment left behind.
+    const tricky = "q8Zr2mVn6Tk_token=Wc3Bf7Xa5Ge0Ld4Hs9";
+    const redacted = redactSecretShaped(`send Bearer ${tricky} here`);
+    expect(redacted).toBe("send [redacted] here");
+  });
+
   it("replaces a value that itself reads like a credential label", () => {
     expect(redactSecretShaped(`token=mytoken:${token}`)).toBe("[redacted]");
   });

@@ -19,11 +19,13 @@ const BEFORE_LATER_LABEL = String.raw`(?![^\S\r\n]*[\r\n]\s*${CREDENTIAL_LABEL})
  * left the credential after it in the text. A value is never another
  * credential's label, on a later line or after a scheme word: a token line
  * ending in `Bearer` took the next line's `Authorization:` as its value and
- * left that header's credential unmatched.
+ * left that header's credential unmatched. A bare bearer token is matched
+ * whole even when its characters spell something like `token=`; only a label
+ * on a later line stops it.
  */
 export const SECRET_SHAPED = new RegExp(
   [
-    `bearer${BEFORE_ANOTHER_LABEL}\\s+[A-Za-z0-9._~+/=-]{20,}`,
+    `bearer${BEFORE_LATER_LABEL}\\s+[A-Za-z0-9._~+/=-]{20,}`,
     `(?:refresh_token|access_token|api[_-]?key|token)\\s*[=:]${BEFORE_LATER_LABEL}\\s*(?:(?:bearer|basic)${BEFORE_ANOTHER_LABEL}\\s+)?\\S+`,
     `authorization\\s*:${BEFORE_LATER_LABEL}\\s*(?:(?:bearer|basic)${BEFORE_ANOTHER_LABEL}\\s+)?[^\\r\\n]+`,
     String.raw`\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b`,

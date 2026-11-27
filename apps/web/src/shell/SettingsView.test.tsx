@@ -748,7 +748,9 @@ describe("SettingsView", () => {
       expect(section.querySelector(`[data-setting-id="${id}"]`)).not.toBeNull();
     }
     expect(within(section).queryByRole("button")).toBeNull();
-    for (const toggle of within(section).queryAllByRole("switch")) {
+    const toggles = within(section).getAllByRole("switch");
+    expect(toggles.length).toBeGreaterThan(0);
+    for (const toggle of toggles) {
       expect(toggle).toHaveAttribute("aria-disabled", "true");
     }
   });
