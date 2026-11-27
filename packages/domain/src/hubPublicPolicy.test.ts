@@ -265,4 +265,13 @@ describe("what a visitor reads", () => {
       "The build passed; see https://example.com/a/b for notes.",
     );
   });
+
+  it("keeps a path inside a web address, such as a login link's next page", () => {
+    expect(redactForVisitor("Sign in at https://example.com/login?next=/docs/start first.")).toBe(
+      "Sign in at https://example.com/login?next=/docs/start first.",
+    );
+    expect(redactForVisitor("See https://example.com/a?next=/docs then /srv/app/env too")).toBe(
+      "See https://example.com/a?next=/docs then [path] too",
+    );
+  });
 });
