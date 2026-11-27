@@ -9,13 +9,28 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { OctantImportConflict, OctantImportCounts } from "@octant/contracts";
+import {
+  OCTANT_IMPORT_AGGREGATE_TYPE,
+  OCTANT_IMPORT_RECORDED,
+  type OctantImportConflict,
+  type OctantImportOutcomeCounts,
+} from "@octant/contracts";
 import { classifySqliteFailure } from "./journalErrors";
 import { Journal } from "./journal";
 import { DatabaseVersionTooNew } from "./migrationErrors";
 import { migrateStoreWithBackup } from "./migrationBackup";
 import { applyMigrations, MIGRATIONS } from "./migrations";
-import { mergeOctantSnapshot, type OctantImportKept } from "./octantImportMerge";
+import {
+  copyOctantSideFiles,
+  discardCopyReceipt,
+  removeCopiedFiles,
+  settleInterruptedCopies,
+} from "./octantImportFiles";
+import {
+  mergeOctantSnapshot,
+  type OctantImportKept,
+  type OctantImportMergeResult,
+} from "./octantImportMerge";
 import { settleOctantInFlightWork } from "./octantImportSettle";
 import { isExcludedOctantEvent } from "./octantImportTables";
 import { rebuildAll, verifyDatabase } from "./recovery";
@@ -40,12 +55,13 @@ export type OctantImportStage =
   | "merge"
   | "rebuild"
   | "verify"
+  | "files"
   | "swap";
 
 export type OctantImportOutcome =
   | {
       readonly kind: "imported";
-      readonly counts: OctantImportCounts;
+      readonly counts: OctantImportOutcomeCounts;
       /** Threads both apps changed since the last import; Nightly's stayed as they were. */
       readonly conflicts: ReadonlyArray<OctantImportConflict>;
       /** Settings, Projects and other records both changed; Nightly's value stayed. */
@@ -55,6 +71,9 @@ export type OctantImportOutcome =
   | { readonly kind: "failed"; readonly stage: OctantImportStage };
 
 const STORE_FILE = "octant.sqlite3";
+const RECORDED_IMPORT_SQL = `SELECT 1 FROM event_journal
+  WHERE aggregate_type = ? AND event_name = ? AND json_extract(payload_json, '$.importId') = ?
+  LIMIT 1`;
 const BACKUP_LABEL = "before-octant-import";
 const SNAPSHOT_ATTEMPTS = 3;
 
@@ -116,6 +135,19 @@ export function importFromOctant(input: {
       throw fail("open-nightly");
     }
     try {
+      // Files an earlier import copied and never committed are taken back
+      // first; they would otherwise look like Nightly's own.
+      try {
+        const recorded = nightly.prepare(RECORDED_IMPORT_SQL);
+        settleInterruptedCopies({
+          dataDirectory: input.nightlyDataDirectory,
+          isCommitted: (earlier) =>
+            recorded.get(OCTANT_IMPORT_AGGREGATE_TYPE, OCTANT_IMPORT_RECORDED, earlier) !==
+            undefined,
+        });
+      } catch {
+        // The leftovers stay for the next import; this one need not fail for them.
+      }
       createStoreBackup({
         connection: nightly,
         dataDirectory: input.nightlyDataDirectory,
@@ -145,6 +177,23 @@ export function importFromOctant(input: {
       uuid,
     });
 
+    // The files go before the swap so a failure at any step can take them
+    // back; the store is the only thing that makes the import count.
+    let files: number;
+    try {
+      files = copyOctantSideFiles({
+        octantDirectory: input.octantDataDirectory,
+        nightlyDirectory: input.nightlyDataDirectory,
+        importId,
+        threads: result.threads,
+        aggregates: result.aggregates,
+        imageArtifacts: result.imageArtifacts,
+      });
+    } catch {
+      removeCopiedFiles(input.nightlyDataDirectory, importId);
+      throw fail("files");
+    }
+
     try {
       // Nightly's sidecars go before the rename, not after: once the merged
       // store is in place, a failure to remove them must not report the
@@ -160,9 +209,16 @@ export function importFromOctant(input: {
         backupPath: finalPath,
       });
     } catch {
+      removeCopiedFiles(input.nightlyDataDirectory, importId);
       throw fail("swap");
     }
-    return { kind: "imported", ...result };
+    discardCopyReceipt(input.nightlyDataDirectory, importId);
+    return {
+      kind: "imported",
+      counts: { ...result.counts, files },
+      conflicts: result.conflicts,
+      kept: result.kept,
+    };
   } catch (error) {
     if (error instanceof ImportStopped) return error.outcome;
     throw error;
@@ -356,7 +412,7 @@ function buildMergedStore(input: {
   readonly importId: string;
   readonly clock: () => string;
   readonly uuid: () => string;
-}): Omit<Extract<OctantImportOutcome, { readonly kind: "imported" }>, "kind"> {
+}): OctantImportMergeResult {
   const merged = openSqlite(input.mergePath);
   try {
     const runtime = createPhase1RuntimeRegistries();

@@ -1,7 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import {
   decodeChatThread,
   decodeEventActor,
@@ -866,5 +877,347 @@ describe("importing Octant's data into Nightly", () => {
     ]);
     expect([...named].filter((table) => rebuilt.has(table))).toEqual([]);
     expect(tables.filter((table) => !rebuilt.has(table) && !named.has(table))).toEqual([]);
+  });
+});
+
+function put(folder: string, path: string, content: string, mode = 0o600): void {
+  const target = join(folder, path);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content, { mode });
+}
+
+/** Every regular file below a folder, by relative path, with its content. */
+function tree(folder: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  const walk = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && entry.name !== "octant.sqlite3-shm") {
+        files[relative(folder, path)] = readFileSync(path, "utf8");
+      }
+    }
+  };
+  walk(folder);
+  return files;
+}
+
+/** The files beside the store, which is all an import copies. */
+function sideFiles(folder: string): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(tree(folder)).filter(
+      ([path]) => path.includes("/") && !path.startsWith("import/"),
+    ),
+  );
+}
+
+const receipt = (threadId: string) => ({
+  version: 1,
+  receiptId: "0c7a0000-0000-4000-8000-0000000004a1",
+  threadId,
+  state: "ready",
+});
+
+describe("importing the files that belong to Octant's data", () => {
+  it("brings the files of the threads that came over and leaves a held-back thread's behind", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    createThread(octant, ids.shared, "Octant's copy");
+    octant.close();
+    const nightly = openStore(paths.nightly);
+    createThread(nightly, ids.shared, "Nightly's copy");
+    nightly.close();
+    for (const folder of [
+      "chat/threads",
+      "work-threads",
+      "code-threads",
+      "generated-images",
+      "generated-video",
+      "browser-captures",
+    ]) {
+      put(paths.octant, `${folder}/${ids.octantOnly}/a1/finalized.bin`, folder);
+      put(paths.octant, `${folder}/${ids.shared}/a1/finalized.bin`, "held back");
+    }
+    put(paths.octant, `work-threads/${ids.octantOnly}/a1/staged.bin.tmp`, "half written");
+    put(paths.octant, `project-icons/${ids.project}.png`, "icon");
+    put(paths.octant, "backgrounds/b1.png", "background");
+    put(paths.octant, "extensions/user-added-servers.json", "{}");
+    put(paths.octant, "extensions/versions/e/p/1/content/run.js", "code", 0o700);
+    put(paths.octant, "extensions/metadata/t.json", "{}", 0o400);
+    const store = openStore(paths.octant);
+    append(store, "project", ids.project, "project.created@1", { project: project("Notes") });
+    store.close();
+
+    const outcome = imported(runImport(paths));
+
+    expect(outcome.conflicts).toEqual([{ mode: "chat", octantThreadId: ids.shared }]);
+    const arrived = tree(paths.nightly);
+    expect(arrived[`chat/threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("chat/threads");
+    expect(arrived[`work-threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("work-threads");
+    expect(arrived[`code-threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("code-threads");
+    expect(arrived[`generated-images/${ids.octantOnly}/a1/finalized.bin`]).toBe("generated-images");
+    expect(arrived[`generated-video/${ids.octantOnly}/a1/finalized.bin`]).toBe("generated-video");
+    expect(arrived[`browser-captures/${ids.octantOnly}/a1/finalized.bin`]).toBe("browser-captures");
+    expect(arrived[`project-icons/${ids.project}.png`]).toBe("icon");
+    expect(arrived["backgrounds/b1.png"]).toBe("background");
+    expect(arrived["extensions/user-added-servers.json"]).toBe("{}");
+    expect(arrived["extensions/versions/e/p/1/content/run.js"]).toBe("code");
+    expect(Object.keys(arrived).filter((path) => path.includes(ids.shared))).toEqual([]);
+    expect(Object.keys(arrived).filter((path) => path.endsWith(".tmp"))).toEqual([]);
+    expect(outcome.counts.files).toBe(11);
+    const mode = (path: string) => statSync(join(paths.nightly, path)).mode & 0o777;
+    expect(mode(`work-threads/${ids.octantOnly}/a1/finalized.bin`)).toBe(0o600);
+    expect(mode("extensions/versions/e/p/1/content/run.js")).toBe(0o700);
+    expect(mode("extensions/metadata/t.json")).toBe(0o400);
+    expect(readdirSync(join(paths.nightly, "import"))).toEqual([]);
+  });
+
+  it("never overwrites a file Nightly already holds and adds only the ones it lacks", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    put(paths.octant, `work-threads/${ids.octantOnly}/a1/finalized.bin`, "octant's");
+    put(paths.octant, `work-threads/${ids.octantOnly}/a2/finalized.bin`, "octant's other");
+    put(paths.octant, "backgrounds/b1.png", "octant's background");
+    put(paths.nightly, `work-threads/${ids.octantOnly}/a1/finalized.bin`, "nightly's");
+    put(paths.nightly, "backgrounds/b1.png", "nightly's background");
+    put(paths.nightly, "backgrounds/own.png", "nightly's own");
+
+    imported(runImport(paths));
+
+    const arrived = tree(paths.nightly);
+    expect(arrived[`work-threads/${ids.octantOnly}/a1/finalized.bin`]).toBe("nightly's");
+    expect(arrived[`work-threads/${ids.octantOnly}/a2/finalized.bin`]).toBe("octant's other");
+    expect(arrived["backgrounds/b1.png"]).toBe("nightly's background");
+    expect(arrived["backgrounds/own.png"]).toBe("nightly's own");
+  });
+
+  it("leaves everything that belongs to Octant's host behind", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    const behind = [
+      "remote/private-listener-host-key.pem",
+      "hub/membership.json",
+      "run/host.sock",
+      "config/settings.json",
+      "state/window.json",
+      "octant-host.json",
+      "octant-bridge-secret",
+      "agent-messages/am-1.txt",
+      "chat/scratch/s.txt",
+      "chat/side-chat/sidecars.json",
+      "canvas-share-images/i.png",
+      "icon-sets/icon-set-1/x.png",
+      "integrations/linear-connection.json",
+      "agent-run-scratch/r/x",
+      "providers/plan-usage.json",
+      "extensions/runtime-receipts/r.json",
+      "extensions/mcp-server-sign-ins.json",
+      "extensions/staging/t/receipt.json",
+      "computer-use/driver",
+      "browser-extensions/e",
+      "compile-cache/c.bin",
+    ];
+    for (const path of behind) put(paths.octant, path, "octant's");
+
+    const outcome = imported(runImport(paths));
+
+    expect(outcome.counts.files).toBe(0);
+    expect(Object.keys(tree(paths.nightly)).filter((path) => behind.includes(path))).toEqual([]);
+  });
+
+  it("brings a worktree receipt of an imported thread marked as Octant's and keeps one Nightly already has", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    createThread(octant, ids.octantLater, "Octant later");
+    octant.close();
+    const claim = `.claim-${"a".repeat(64)}.json`;
+    const own = "0c7a0000-0000-4000-8000-0000000004a1";
+    const other = "0c7a0000-0000-4000-8000-0000000004a2";
+    const unrelated = "0c7a0000-0000-4000-8000-0000000004a3";
+    put(
+      paths.octant,
+      `managed-worktree-receipts/${own}.json`,
+      JSON.stringify(receipt(ids.octantOnly)),
+    );
+    put(
+      paths.octant,
+      `managed-worktree-receipts/${claim}`,
+      JSON.stringify(receipt(ids.octantOnly)),
+    );
+    put(
+      paths.octant,
+      `managed-worktree-receipts/${other}.json`,
+      JSON.stringify(receipt(ids.octantLater)),
+    );
+    put(
+      paths.octant,
+      `managed-worktree-receipts/${unrelated}.json`,
+      JSON.stringify(receipt(ids.nightlyOwn)),
+    );
+    put(paths.nightly, `managed-worktree-receipts/${other}.json`, "nightly's receipt");
+
+    imported(runImport(paths));
+
+    const read = (name: string) =>
+      JSON.parse(readFileSync(join(paths.nightly, "managed-worktree-receipts", name), "utf8"));
+    expect(read(`${own}.json`)).toEqual({ ...receipt(ids.octantOnly), importedFrom: "octant" });
+    expect(read(claim)).toEqual({ ...receipt(ids.octantOnly), importedFrom: "octant" });
+    expect(
+      readFileSync(join(paths.nightly, "managed-worktree-receipts", `${other}.json`), "utf8"),
+    ).toBe("nightly's receipt");
+    expect(existsSync(join(paths.nightly, "managed-worktree-receipts", `${unrelated}.json`))).toBe(
+      false,
+    );
+  });
+
+  it("does not follow a link in Octant's folder", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    const outside = join(dirname(paths.octant), "outside");
+    put(outside, "secret.txt", "outside");
+    put(outside, "b/background.png", "outside");
+    put(paths.octant, `work-threads/${ids.octantOnly}/a1/finalized.bin`, "inside");
+    symlinkSync(
+      join(outside, "secret.txt"),
+      join(paths.octant, `work-threads/${ids.octantOnly}/leak.txt`),
+    );
+    symlinkSync(join(outside, "b"), join(paths.octant, "backgrounds"));
+    symlinkSync(outside, join(paths.octant, `code-threads`));
+
+    imported(runImport(paths));
+
+    expect(sideFiles(paths.nightly)).toEqual({
+      [`work-threads/${ids.octantOnly}/a1/finalized.bin`]: "inside",
+    });
+    expect(lstatSync(join(paths.octant, "backgrounds")).isSymbolicLink()).toBe(true);
+  });
+
+  it("takes back every copied file when the import fails before the store is swapped", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    put(paths.octant, `work-threads/${ids.octantOnly}/a1/finalized.bin`, "octant's");
+    put(paths.octant, "backgrounds/b1.png", "octant's background");
+    // A file where Octant's folder needs a folder stops the copy halfway.
+    put(paths.nightly, "backgrounds", "not a folder");
+    openStore(paths.nightly).close();
+    const before = storeHash(paths.nightly);
+
+    expect(runImport(paths)).toEqual({ kind: "failed", stage: "files" });
+
+    expect(storeHash(paths.nightly)).toBe(before);
+    expect(tree(paths.nightly)["backgrounds"]).toBe("not a folder");
+    expect(
+      Object.keys(tree(paths.nightly)).filter((path) => path.startsWith("work-threads")),
+    ).toEqual([]);
+    expect(existsSync(join(paths.nightly, "work-threads"))).toBe(false);
+    expect(readdirSync(join(paths.nightly, "import"))).toEqual([]);
+  });
+
+  it("removes exactly what an earlier import that never committed copied", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    const interrupted = "0c7a0000-0000-4000-8000-0000000004b1";
+    put(paths.nightly, "generated-images/t/a/finalized.bin", "left by the interrupted import");
+    put(paths.nightly, "generated-images/t/own/finalized.bin", "nightly's own");
+    put(
+      paths.nightly,
+      `import/${interrupted}.json`,
+      JSON.stringify({
+        importId: interrupted,
+        files: ["generated-images/t/a/finalized.bin", "../outside.txt"],
+        directories: ["generated-images/t/a", "generated-images/t", "generated-images"],
+      }),
+    );
+
+    imported(runImport(paths));
+
+    const left = tree(paths.nightly);
+    expect(left["generated-images/t/a/finalized.bin"]).toBeUndefined();
+    expect(left["generated-images/t/own/finalized.bin"]).toBe("nightly's own");
+    expect(existsSync(join(paths.nightly, "import", `${interrupted}.json`))).toBe(false);
+  });
+
+  it("brings the library images of the image jobs that came over", () => {
+    const paths = folders();
+    const library = "00000000-0000-4000-8000-00000000f1e1";
+    const jobId = "0c7a0000-0000-4000-8000-000000000501";
+    const image = "0c7a0000-0000-4000-8000-000000000502";
+    const unrelated = "0c7a0000-0000-4000-8000-000000000503";
+    const digest = "a".repeat(64);
+    const artifact = {
+      attachmentId: image,
+      hash: digest,
+      size: 4,
+      mime: "image/png",
+      evidence: {
+        profileInstanceId: provider,
+        modelId: "model-a",
+        promptHash: digest,
+        jobId,
+      },
+    };
+    const octant = openStore(paths.octant);
+    rawEvent(octant, "image-job", jobId, 1, "image.job-queued@1", {
+      job: {
+        id: jobId,
+        status: "queued",
+        threadKind: "image-library",
+        scopeId: library,
+        profileInstanceId: provider,
+        modelId: "model-a",
+        promptHash: digest,
+        artifacts: [],
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    rawEvent(octant, "image-job", jobId, 2, "image.job-status-changed@1", {
+      jobId,
+      fromStatus: "queued",
+      toStatus: "completed",
+      version: 2,
+      updatedAt: now,
+      artifacts: [artifact],
+    });
+    octant.close();
+    put(paths.octant, `generated-images/${library}/${image}/finalized.bin`, "library image");
+    put(paths.octant, `generated-images/${library}/${unrelated}/finalized.bin`, "no job came over");
+
+    imported(runImport(paths));
+
+    expect(sideFiles(paths.nightly)).toEqual({
+      [`generated-images/${library}/${image}/finalized.bin`]: "library image",
+    });
+  });
+
+  it("leaves Octant's folder exactly as it was", () => {
+    const paths = folders();
+    const octant = openStore(paths.octant);
+    createThread(octant, ids.octantOnly, "Octant only");
+    octant.close();
+    put(paths.octant, `work-threads/${ids.octantOnly}/a1/finalized.bin`, "octant's");
+    put(
+      paths.octant,
+      `managed-worktree-receipts/0c7a0000-0000-4000-8000-0000000004a1.json`,
+      JSON.stringify(receipt(ids.octantOnly)),
+    );
+    const before = tree(paths.octant);
+
+    imported(runImport(paths));
+
+    expect(tree(paths.octant)).toEqual(before);
   });
 });

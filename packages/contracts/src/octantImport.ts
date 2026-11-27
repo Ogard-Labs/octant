@@ -47,6 +47,18 @@ export const OctantImportCounts = Schema.Struct({
 export type OctantImportCounts = typeof OctantImportCounts.Type;
 
 /**
+ * What an import reports to the person: the recorded counts plus the files in
+ * the data folder that came with them. The files are copied after the record
+ * is written, so the record itself does not carry that count.
+ */
+export const OctantImportOutcomeCounts = Schema.Struct({
+  ...OctantImportCounts.fields,
+  /** Side files copied into Nightly's folder: attachments, images, icons, receipts. */
+  files: NonNegativeInt,
+}).annotations(strict);
+export type OctantImportOutcomeCounts = typeof OctantImportOutcomeCounts.Type;
+
+/**
  * `octantMark` is the newest journal position of Octant's this import read;
  * where Nightly's journal stood is the record's own journal position. Both
  * are global sequences, never aggregate versions, because compaction

@@ -32,6 +32,12 @@ export interface OctantImportMergeResult {
   readonly counts: OctantImportCounts;
   readonly conflicts: ReadonlyArray<OctantImportConflict>;
   readonly kept: ReadonlyArray<OctantImportKept>;
+  /** Octant threads that came over: the only ones whose files may follow. */
+  readonly threads: ReadonlySet<string>;
+  /** Every aggregate id that came over, for content keyed by a Project or other record. */
+  readonly aggregates: ReadonlySet<string>;
+  /** Ids of the images the image jobs that came over name, for the library's files. */
+  readonly imageArtifacts: ReadonlySet<string>;
 }
 
 interface CandidateRow {
@@ -278,6 +284,10 @@ export function mergeOctantSnapshot(input: {
     if (thread !== undefined) importedThreads.add(thread);
   }
 
+  const imageArtifacts = new Set<string>();
+  for (const { row } of accepted) {
+    if (row.aggregate_type === "image-job") collectAttachmentIds(connection, row, imageArtifacts);
+  }
   const contentRows = copyContent(connection, importedThreads, importedIds);
   const conflictList: ReadonlyArray<OctantImportConflict> = [...conflicts]
     .sort()
@@ -306,7 +316,35 @@ export function mergeOctantSnapshot(input: {
   const kept = [...held.values()].filter(
     (entry) => !SELF_OBSERVED_AGGREGATE_TYPES.has(entry.aggregateType),
   );
-  return { counts, conflicts: conflictList, kept };
+  return {
+    counts,
+    conflicts: conflictList,
+    kept,
+    threads: importedThreads,
+    aggregates: importedIds,
+    imageArtifacts,
+  };
+}
+
+/** The `attachmentId` of every image an imported job event names, however deep. */
+function collectAttachmentIds(
+  connection: SqliteConnection,
+  row: CandidateRow,
+  into: Set<string>,
+): void {
+  const event = connection
+    .prepare("SELECT payload_json FROM octant.event_journal WHERE global_sequence = ?")
+    .get(row.global_sequence) as { readonly payload_json: string };
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === "object" && value !== null) {
+      for (const [key, item] of Object.entries(value)) {
+        if (key === "attachmentId" && typeof item === "string") into.add(item);
+        else walk(item);
+      }
+    }
+  };
+  walk(JSON.parse(event.payload_json));
 }
 
 function aggregateKey(
