@@ -3175,8 +3175,9 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   deliveries for the hold without waking it. The hub drops the endpoints and
   queue of a spoke its roster no longer lists.
 - **GitHub deliveries carry no signed timestamp.** GitHub signs only the body,
-  and its delivery id is not covered by the signature, so the timestamp window
-  applies to Standard Webhooks alone. A GitHub delivery is claimed under both
+  and its delivery id is not covered by the signature. The five-minute
+  timestamp window applies to Standard Webhooks and Stripe, which sign a
+  timestamp; GitHub has none. A GitHub delivery is claimed under both
   its delivery id and the SHA-256 of its body, and the spoke keeps those
   claims for seven days, so a captured body replayed under a fresh id inside
   that time starts nothing. A replay of a captured body after seven days is
