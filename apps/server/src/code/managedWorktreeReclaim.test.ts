@@ -315,6 +315,21 @@ async function world(
   };
 }
 
+describe("a worktree Nightly's own host made before its folder was its own", () => {
+  it("is still reclaimed from the folder and under the checkout id its receipt records", async () => {
+    // Made under Octant's folder name and checkout label, which Nightly's own
+    // host used until it had names of its own.
+    const w = await world();
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      expect(w.state.disk.has(target)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe("a worktree that came from Octant", () => {
   it("keeps its folder through the inactivity sweep, an archive cleanup and a confirmed removal", async () => {
     const w = await world({ imported: true });

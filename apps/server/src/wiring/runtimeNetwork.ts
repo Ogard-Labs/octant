@@ -97,8 +97,10 @@ export function resolveRuntimeProject(
   } catch {
     // A folder that does not resolve is compared as written.
   }
-  // Managed worktrees sit in this host's folder beside the repository they come from.
-  if (basename(dirname(dirname(folder))) === managedWorktreeHostScope().folderName) {
+  // Managed worktrees sit in this host's folder beside the repository they
+  // come from, or in the one Nightly's own host used before it had its own.
+  const container = basename(dirname(dirname(folder)));
+  if (managedWorktreeHostScope().recognized.some((names) => names.folderName === container)) {
     try {
       const thread = persistence.readCodeThread(decodeCodeThreadId(basename(folder)));
       if (thread !== undefined) return String(thread.projectId);

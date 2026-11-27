@@ -59,6 +59,7 @@ import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPor
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { CodeService, CodeServiceError } from "../code/codeService";
+import { managedWorktreeHostScope } from "../code/managedWorktreeHostScope";
 import {
   beginUnconfirmedStepSettlement,
   type CodeOperationRuntime,
@@ -1234,13 +1235,18 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
           ),
         moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
-        // The service exists only after this runtime does, so it is read lazily.
-        continueImportedThread: async (windowId, threadId) => {
-          const service = builtCodeService;
-          return service instanceof CodeService
-            ? service.continueImportedThread(windowId, threadId)
-            : { status: "own" };
-        },
+        // Only Nightly's own host imports from Octant. The service exists only
+        // after this runtime does, so it is read lazily.
+        ...(managedWorktreeHostScope().continuesImportedThreads
+          ? {
+              continueImportedThread: async (windowId: WindowId, threadId: CodeThreadId) => {
+                const service = builtCodeService;
+                return service instanceof CodeService
+                  ? service.continueImportedThread(windowId, threadId)
+                  : { status: "own" as const };
+              },
+            }
+          : {}),
         // A branch switch moves the checkout's journaled head; the service
         // exists only after this runtime does, so the callback reads it lazily.
         checkoutObserved: async (checkoutId, head) => {

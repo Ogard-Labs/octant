@@ -26,7 +26,7 @@ import {
   type ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
 import { forReceipt } from "./boundedGit";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { recognizedManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
@@ -867,11 +867,10 @@ export class ManagedWorktreeService {
     if (
       discard !== undefined &&
       (receipt.branchIntent !== discard ||
-        receipt.checkoutId !==
-          deriveManagedWorktreeCheckoutId({
-            repositoryId: receipt.repositoryId,
-            threadId: receipt.threadId,
-          }))
+        !recognizedManagedWorktreeCheckoutId(
+          { repositoryId: receipt.repositoryId, threadId: receipt.threadId },
+          receipt.checkoutId,
+        ))
     ) {
       return { status: "refused", reason: "mismatched" };
     }
@@ -917,12 +916,14 @@ export class ManagedWorktreeService {
       return { status: "refused", reason: "inventory-ambiguous" };
     }
 
-    const expectedTarget = managedTargetPath(
-      observation.repositoryRoot,
-      receipt.repositoryId,
-      receipt.threadId,
-    );
-    if (expectedTarget !== receipt.canonicalWorktreePath) {
+    if (
+      !recognizedManagedTargetPath(
+        observation.repositoryRoot,
+        receipt.repositoryId,
+        receipt.threadId,
+        receipt.canonicalWorktreePath,
+      )
+    ) {
       return { status: "refused", reason: "mismatched" };
     }
 
@@ -1353,6 +1354,32 @@ export function managedTargetPath(
  */
 export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string): string {
   return join(dirname(repositoryRoot), managedWorktreeHostScope().folderName, repositoryId);
+}
+
+/**
+ * Every directory one repository's managed worktrees of this host may sit
+ * under: its own folder, and on Nightly's own host the folder it used before
+ * it had one (see `managedWorktreeHostScope`).
+ */
+export function recognizedManagedWorktreeRoots(
+  repositoryRoot: string,
+  repositoryId: string,
+): ReadonlyArray<string> {
+  return managedWorktreeHostScope().recognized.map((names) =>
+    join(dirname(repositoryRoot), names.folderName, repositoryId),
+  );
+}
+
+/** Whether a receipt's folder is one this host derives, or derived, for the thread. */
+export function recognizedManagedTargetPath(
+  repositoryRoot: string,
+  repositoryId: string,
+  threadId: string,
+  path: string,
+): boolean {
+  return recognizedManagedWorktreeRoots(repositoryRoot, repositoryId).some(
+    (root) => join(root, threadId) === path,
+  );
 }
 
 export function branchRef(branchIntent: string): string {

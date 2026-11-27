@@ -259,6 +259,7 @@ import { directoryInResolvedRoot, pathInResolvedRoot } from "./codeProjectFolder
 import type { FileIdentity } from "./fileOperationPort";
 import {} from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 import {
   continuationBranchName,
   type ImportedCodeWorktreePort,
@@ -5883,8 +5884,17 @@ export class CodeService {
     threadId: CodeThreadId,
   ): Promise<ImportedThreadContinuation> {
     const current = this.#persistence.readCodeThread(threadId);
-    if (this.#importedWorktrees === undefined || current === undefined) return { status: "own" };
-    if (this.#persistence.readCodeCheckout(current.checkoutId)?.kind !== "managed-worktree") {
+    if (
+      this.#importedWorktrees === undefined ||
+      current === undefined ||
+      !managedWorktreeHostScope().continuesImportedThreads
+    ) {
+      return { status: "own" };
+    }
+    const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
+    // Decided before the guard below, so a thread of this host's own is never
+    // answered with the refusal an imported thread's move gives.
+    if (checkout === undefined || !(await this.#importedWorktrees.isImported(checkout))) {
       return { status: "own" };
     }
     const key = String(current.id);
@@ -5924,30 +5934,50 @@ export class CodeService {
       boardRuntimeActivityFromWorks(this.#persistence.readCodeRuntimeWorks(current.id)).executing;
     if (executing()) return refused("turn-running");
     const creation = this.#managedThreadCreation;
-    const branch = continuationBranchName(reading.sourceBranch, reading.takenBranchNames);
-    if (creation === undefined || branch === undefined) return refused("unavailable");
-    const input: ManagedCodeThreadCreationInput = {
-      authenticatedWindowId: windowId,
-      projectId: current.projectId,
-      bindingRevisionId: current.bindingRevisionId,
-      threadId: current.id,
-      branchIntent: branch,
-      sourceBranch: reading.sourceBranch,
-      startFromOrigin: false,
-      sourceRevision: head,
-      executionPolicy: current.executionPolicy,
-    };
-    const prepared = await creation.prepare(input, signal);
-    if (prepared.status !== "prepared") return refused("unavailable");
-    const preparation = prepared.preparation;
-    // The new checkout's id derives under this host's own label, so it is
-    // never the imported one: checkpoint refs are kept per checkout id in the
-    // repository both apps share.
-    if (String(preparation.checkoutId) === String(current.checkoutId)) {
-      return refused("unavailable");
+    if (creation === undefined) return refused("unavailable");
+    // A branch list that failed or was cut short names nothing, so a name it
+    // missed is found taken only when the worktree is made: the next is tried.
+    const taken = [...reading.takenBranchNames];
+    let made:
+      | Readonly<{
+          branch: string;
+          preparation: ManagedCodeThreadPreparation;
+          committed: Extract<ManagedCodeThreadCommitOutcome, { status: "created" }>;
+        }>
+      | undefined;
+    for (let attempt = 0; attempt < 5 && made === undefined; attempt += 1) {
+      const branch = continuationBranchName(reading.sourceBranch, taken);
+      if (branch === undefined) return refused("unavailable");
+      const input: ManagedCodeThreadCreationInput = {
+        authenticatedWindowId: windowId,
+        projectId: current.projectId,
+        bindingRevisionId: current.bindingRevisionId,
+        threadId: current.id,
+        branchIntent: branch,
+        sourceBranch: reading.sourceBranch,
+        startFromOrigin: false,
+        sourceRevision: head,
+        executionPolicy: current.executionPolicy,
+      };
+      const prepared = await creation.prepare(input, signal);
+      if (prepared.status !== "prepared") return refused("unavailable");
+      // The new checkout's id derives under this host's own label, so it is
+      // never the imported one: checkpoint refs are kept per checkout id in
+      // the repository both apps share.
+      if (String(prepared.preparation.checkoutId) === String(current.checkoutId)) {
+        return refused("unavailable");
+      }
+      const committed = await creation.commit(input, prepared.preparation, signal);
+      if (committed.status === "created") {
+        made = { branch, preparation: prepared.preparation, committed };
+      } else if (committed.status === "refused" && committed.reason === "branch-collision") {
+        taken.push(branch);
+      } else {
+        return refused("unavailable");
+      }
     }
-    const committed = await creation.commit(input, preparation, signal);
-    if (committed.status !== "created") return refused("unavailable");
+    if (made === undefined) return refused("unavailable");
+    const { branch, preparation, committed } = made;
     if (committed.expectedHead !== head) {
       await creation.cleanup({ receiptId: committed.receiptId }, signal).catch(() => undefined);
       return refused("unavailable");

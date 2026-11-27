@@ -1,5 +1,5 @@
 import { forReceipt, waitForSurvivingGit } from "./boundedGit";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { recognizedManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
 import {
   isImportedReceipt,
   type ManagedWorktreeReceipt,
@@ -7,7 +7,7 @@ import {
 } from "./managedWorktreeReceiptStore";
 import {
   branchRef,
-  managedTargetPath,
+  recognizedManagedTargetPath,
   type ManagedWorktreeAuthorityPort,
   type ManagedWorktreeFileSystemPort,
   type ManagedWorktreeGitPort,
@@ -782,11 +782,10 @@ export class ManagedWorktreeReclaimService {
     if (
       authority.repositoryId !== receipt.repositoryId ||
       authority.checkoutId !== receipt.checkoutId ||
-      receipt.checkoutId !==
-        deriveManagedWorktreeCheckoutId({
-          repositoryId: receipt.repositoryId,
-          threadId: receipt.threadId,
-        })
+      !recognizedManagedWorktreeCheckoutId(
+        { repositoryId: receipt.repositoryId, threadId: receipt.threadId },
+        receipt.checkoutId,
+      )
     ) {
       return { status: "refused", reason: "mismatched" };
     }
@@ -829,8 +828,12 @@ export class ManagedWorktreeReclaimService {
     }
     // The folder is only ever the one the service derives for this thread.
     if (
-      managedTargetPath(observation.repositoryRoot, receipt.repositoryId, receipt.threadId) !==
-      receipt.canonicalWorktreePath
+      !recognizedManagedTargetPath(
+        observation.repositoryRoot,
+        receipt.repositoryId,
+        receipt.threadId,
+        receipt.canonicalWorktreePath,
+      )
     ) {
       return { status: "stopped", result: { status: "refused", reason: "mismatched" } };
     }

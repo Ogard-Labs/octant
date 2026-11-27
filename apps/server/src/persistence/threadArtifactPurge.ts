@@ -17,11 +17,15 @@ export interface ThreadArtifactPurgeInput {
   readonly mode: OctantMode;
   readonly threadId: string;
   /**
-   * The directory the managed-worktree service keeps one repository's
-   * managed worktrees under. A receipt that names a path outside it is not
-   * a worktree this sweep may delete.
+   * The directories the managed-worktree service keeps one repository's
+   * managed worktrees under (on Nightly's own host, also the one it used
+   * before it had its own). A receipt that names a path outside them is not a
+   * worktree this sweep may delete.
    */
-  readonly managedWorktreeRootPath: (repositoryRoot: string, repositoryId: string) => string;
+  readonly managedWorktreeRootPaths: (
+    repositoryRoot: string,
+    repositoryId: string,
+  ) => ReadonlyArray<string>;
   /**
    * Runs the purge while it holds each of the thread's worktree receipts, with
    * no cleanup or restore of one in flight, so a restore cannot recreate a
@@ -276,15 +280,12 @@ function worktreeReceiptEvidence(
   ) {
     return { ...(threadId === undefined ? {} : { threadId }), deletable: false };
   }
-  const root = resolve(input.managedWorktreeRootPath(repositoryRoot, repositoryId));
   const target = resolve(path);
-  const within = relative(root, target);
-  if (
-    within.length === 0 ||
-    within.startsWith("..") ||
-    isAbsolute(within) ||
-    target === resolve(input.dataDirectory)
-  ) {
+  const inside = input.managedWorktreeRootPaths(repositoryRoot, repositoryId).some((root) => {
+    const within = relative(resolve(root), target);
+    return within.length > 0 && !within.startsWith("..") && !isAbsolute(within);
+  });
+  if (!inside || target === resolve(input.dataDirectory)) {
     return { threadId, deletable: false };
   }
   return { threadId, path, deletable: true };

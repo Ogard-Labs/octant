@@ -19,7 +19,29 @@ import {
 export interface ManagedWorktreeHostScope {
   readonly folderName: string;
   readonly checkoutLabel: string;
+  /**
+   * Every name pair this host's own worktrees may carry, its current one
+   * first. Nightly's own host made worktrees under Octant's names until it had
+   * its own, so a receipt it wrote then keeps resolving, cleaning up and
+   * reclaiming by the folder and checkout id it records; new ones take the
+   * current names. A receipt imported from Octant carries those same names,
+   * so every removal path refuses an imported receipt before it asks this.
+   */
+  /**
+   * Whether this host continues Code threads imported from Octant on
+   * worktrees of its own: only Nightly's own host imports from Octant.
+   */
+  readonly continuesImportedThreads: boolean;
+  readonly recognized: ReadonlyArray<{
+    readonly folderName: string;
+    readonly checkoutLabel: string;
+  }>;
 }
+
+const OCTANT_NAMES = {
+  folderName: managedWorktreesFolderName("octant"),
+  checkoutLabel: "octant.managed-worktree-checkout.v1",
+} as const;
 
 export function managedWorktreeHostScope(
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -28,11 +50,12 @@ export function managedWorktreeHostScope(
   // Host startup refuses an unknown family, so one here is a broken invariant;
   // guessing Octant's names would put this host's worktrees in Octant's folder.
   if (family === undefined) throw new Error("The host's Keychain family is not recognized.");
-  return {
+  if (family === "octant") {
+    return { ...OCTANT_NAMES, continuesImportedThreads: false, recognized: [OCTANT_NAMES] };
+  }
+  const own = {
     folderName: managedWorktreesFolderName(family),
-    checkoutLabel:
-      family === "octant"
-        ? "octant.managed-worktree-checkout.v1"
-        : "octant-nightly.managed-worktree-checkout.v1",
+    checkoutLabel: "octant-nightly.managed-worktree-checkout.v1",
   };
+  return { ...own, continuesImportedThreads: true, recognized: [own, OCTANT_NAMES] };
 }

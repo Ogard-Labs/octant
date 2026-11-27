@@ -13,7 +13,10 @@ import {
   type ChildWorktreeSnapshotData,
   type ChildWorktreeSnapshot,
 } from "@octant/contracts";
-import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
+import {
+  deriveManagedWorktreeCheckoutId,
+  recognizedManagedWorktreeCheckoutId,
+} from "../code/managedCodeThreadCreation";
 import {
   readyWorktreePath,
   type ManagedWorktreeReceipt,
@@ -21,6 +24,7 @@ import {
 } from "../code/managedWorktreeReceiptStore";
 import {
   managedTargetPath,
+  recognizedManagedTargetPath,
   type ManagedWorktreeRepositoryPort,
   type ManagedWorktreeService,
 } from "../code/managedWorktreeService";
@@ -104,8 +108,12 @@ export function resolveAgentRunChildWorktreeThreadId(input: {
   for (const requestId of [input.requestId, undefined]) {
     const childThreadId = deriveAgentRunChildWorktreeThreadId(input.parentThreadId, requestId);
     if (
-      workspace.worktreeRoot ===
-      managedTargetPath(workspace.checkoutRoot, input.repositoryId, childThreadId)
+      recognizedManagedTargetPath(
+        workspace.checkoutRoot,
+        input.repositoryId,
+        childThreadId,
+        workspace.worktreeRoot,
+      )
     ) {
       return decodeCodeThreadId(childThreadId);
     }
@@ -520,17 +528,18 @@ export function createAgentRunChildWorktreePort(input: {
         receipt.repositoryId !== request.repositoryId ||
         receipt.canonicalRepositoryPath !== request.repositoryRoot ||
         receipt.expectedHead !== request.startingRevision ||
-        receipt.checkoutId !==
-          String(
-            deriveManagedWorktreeCheckoutId({
-              repositoryId: request.repositoryId,
-              threadId: childThreadId,
-            }),
-          ) ||
+        !recognizedManagedWorktreeCheckoutId(
+          { repositoryId: request.repositoryId, threadId: childThreadId },
+          receipt.checkoutId,
+        ) ||
         receipt.branchIntent !== childBranchIntent(childThreadId) ||
         receipt.refIntent !== `refs/heads/${childBranchIntent(childThreadId)}` ||
-        receipt.canonicalWorktreePath !==
-          managedTargetPath(request.repositoryRoot, request.repositoryId, childThreadId)
+        !recognizedManagedTargetPath(
+          request.repositoryRoot,
+          request.repositoryId,
+          childThreadId,
+          receipt.canonicalWorktreePath,
+        )
       )
         return { status: "refused", reason: "stale" };
       if (

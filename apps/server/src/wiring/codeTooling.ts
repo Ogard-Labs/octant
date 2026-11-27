@@ -73,7 +73,7 @@ import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { createLanguageServerEgress } from "../code/languageServerEgress";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
-import { managedTargetPath } from "../code/managedWorktreeService";
+import { managedThreadFolder } from "../code/managedCodeThreadCreation";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
 import { projectTypeScriptServerBinary } from "../code/projectTypeScriptToolchain";
 import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
@@ -811,7 +811,12 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
           if (project?.type !== "code" || checkout === undefined) return undefined;
           const root = project.binding.canonicalRoot;
           return checkout.kind === "managed-worktree"
-            ? managedTargetPath(root, String(thread.repositoryId), String(thread.id))
+            ? managedThreadFolder(
+                root,
+                String(thread.repositoryId),
+                String(thread.id),
+                String(checkout.id),
+              )
             : root;
         },
         canAccessProject: canAccessCodeProject,

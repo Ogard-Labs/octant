@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { deriveManagedWorktreeCheckoutId, managedThreadFolder } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
 import type {
   CreateManagedWorktreeReceiptInput,
@@ -328,6 +328,57 @@ describe("which host's folder a managed worktree sits in", () => {
         "a0365414-78fb-4ddb-8178-bb9f240d048f",
       );
       expect(String(nightlyCheckout)).not.toBe("a0365414-78fb-4ddb-8178-bb9f240d048f");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("a worktree Nightly's own host made in the folder it used before", () => {
+  it("is still cleaned up from the folder its receipt records", async () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      const { service, receipts, git } = harness({
+        observations: [repositoryObservation({ target: "ready" })],
+      });
+      const receipt = await receipts.create({
+        repositoryId,
+        threadId,
+        checkoutId,
+        canonicalRepositoryPath: repositoryRoot,
+        canonicalWorktreePath: targetPath,
+        branchIntent,
+        refIntent: branchRef,
+        expectedHead: head,
+      });
+      await receipts.transition(receipt.receiptId, "ready");
+      await expect(
+        service.cleanup(
+          { receiptId: receipt.receiptId, confirmedByLocalUser: true },
+          new AbortController().signal,
+        ),
+      ).resolves.toMatchObject({ status: "removed" });
+      expect(git.removeWorktree).toHaveBeenCalledWith(
+        { repositoryRoot, targetPath },
+        expect.any(AbortSignal),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("names the folder a thread's checkout id says it was made in", () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", undefined);
+    const legacyCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      const ownCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+      expect(managedThreadFolder(repositoryRoot, repositoryId, threadId, legacyCheckout)).toBe(
+        targetPath,
+      );
+      expect(managedThreadFolder(repositoryRoot, repositoryId, threadId, ownCheckout)).toBe(
+        `/workspace/.octant-nightly-worktrees/${repositoryId}/${threadId}`,
+      );
     } finally {
       vi.unstubAllEnvs();
     }

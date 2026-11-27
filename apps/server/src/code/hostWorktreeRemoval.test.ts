@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { removeHostWorktree } from "./hostWorktreeRemoval";
+import { scanHostWorktrees } from "./hostWorktreeDiscovery";
+import { octantOwnedWorktreePaths, removeHostWorktree } from "./hostWorktreeRemoval";
+import { ManagedWorktreeReceiptStore } from "./managedWorktreeReceiptStore";
 
 const execFileAsync = promisify(execFile);
 const signal = new AbortController().signal;
@@ -45,6 +47,63 @@ const later = () => Date.now() + 60 * 60 * 1000;
 const deps = (owned: ReadonlyArray<string> = [], now = later) => ({
   ownedWorktreePaths: async () => new Set(owned),
   now,
+});
+
+describe("a worktree imported from Octant that no thread points at any more", () => {
+  it("is listed as Octant's own and refused by Disk cleanup", async () => {
+    const { root, repo, add } = await fixture();
+    const octantFolder = await add("octant", "-b", "octant/imported");
+    const head = (await git("-C", octantFolder, "rev-parse", "HEAD")).stdout.trim();
+    const dataDirectory = join(root, "data");
+    const receipts = new ManagedWorktreeReceiptStore({ dataDirectory });
+    const created = await receipts.create({
+      repositoryId: `repo_${"a".repeat(64)}`,
+      threadId: "60000000-0000-4000-8000-000000000001",
+      checkoutId: "60000000-0000-4000-8000-000000000002",
+      canonicalRepositoryPath: repo,
+      canonicalWorktreePath: octantFolder,
+      branchIntent: "octant/imported",
+      refIntent: "refs/heads/octant/imported",
+      expectedHead: head,
+    });
+    // As the import writes it; the thread has since moved to a worktree of its own.
+    const file = join(dataDirectory, "managed-worktree-receipts", `${created.receiptId}.json`);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      file,
+      `${JSON.stringify({ ...stored, state: "ready", importedFrom: "octant" })}\n`,
+    );
+    const ownedWorktreePaths = () =>
+      octantOwnedWorktreePaths({
+        readCodeThreads: () => [],
+        readCodeCheckout: () => undefined,
+        receipts,
+      });
+
+    const scan = await scanHostWorktrees(
+      {
+        homeDirectory: root,
+        platform: process.platform,
+        projectFolders: () => [repo],
+        ownedWorktreePaths,
+        now: Date.now,
+      },
+      signal,
+    );
+    // Listed as Octant's own, which Disk cleanup offers no removal for.
+    const listed = scan.repositories
+      .flatMap((repository) => repository.worktrees)
+      .find((worktree) => worktree.path === octantFolder);
+    expect(listed?.ownedByOctant).toBe(true);
+    await expect(
+      removeHostWorktree(
+        { repositoryPath: repo, worktreePath: octantFolder },
+        { ownedWorktreePaths, now: later },
+        signal,
+      ),
+    ).resolves.toMatchObject({ reason: "owned-by-octant" });
+    expect(existsSync(octantFolder)).toBe(true);
+  });
 });
 
 describe("removing a worktree Octant did not make", () => {

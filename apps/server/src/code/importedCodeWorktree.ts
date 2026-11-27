@@ -29,6 +29,12 @@ export type ImportedCodeWorktreeReading =
   | Readonly<{ status: "unavailable" }>;
 
 export interface ImportedCodeWorktreePort {
+  /**
+   * Whether the checkout is a worktree imported from Octant, from its receipt
+   * alone. A receipt that cannot be read is not taken as imported: the turn's
+   * own checks then decide, as for any thread of this host.
+   */
+  isImported(checkout: CodeCheckoutIdentity): Promise<boolean>;
   read(
     checkout: CodeCheckoutIdentity,
     repositoryRoot: string,
@@ -42,6 +48,15 @@ export function createImportedCodeWorktreePort(deps: {
   readonly git: Pick<ManagedWorktreeGitPort, "isDirty" | "resolveBranchHead" | "listBranchNames">;
 }): ImportedCodeWorktreePort {
   return {
+    isImported: async (checkout) => {
+      if (checkout.kind !== "managed-worktree") return false;
+      try {
+        const receipt = await deps.loadReceipt(String(checkout.ownershipReceiptId));
+        return receipt !== undefined && isImportedReceipt(receipt);
+      } catch {
+        return false;
+      }
+    },
     read: async (checkout, repositoryRoot, signal) => {
       if (checkout.kind !== "managed-worktree") return { status: "own" };
       let receipt: ManagedWorktreeReceipt | undefined;

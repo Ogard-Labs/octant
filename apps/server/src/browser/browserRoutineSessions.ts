@@ -12,7 +12,7 @@ import {
   type ToolHostId,
 } from "@octant/contracts";
 import type { AppToolThreadLevel } from "@octant/domain";
-import { deriveManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
+import { recognizedManagedWorktreeCheckoutId } from "../code/managedCodeThreadCreation";
 import type { CurrentBrowserSessionTarget } from "./browserSessionGrants";
 import { withToolFamilyHelp, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
@@ -262,13 +262,10 @@ function codeExecutionMatches(
         String(checkout.id) === String(binding.checkoutId) &&
         ["existing-worktree", "managed-worktree", "plain-folder"].includes(checkout.kind)
       : checkout.kind === "managed-worktree" &&
-        String(checkout.id) ===
-          String(
-            deriveManagedWorktreeCheckoutId({
-              repositoryId: binding.repositoryId,
-              threadId: thread.id,
-            }),
-          )) &&
+        recognizedManagedWorktreeCheckoutId(
+          { repositoryId: binding.repositoryId, threadId: thread.id },
+          String(checkout.id),
+        )) &&
     checkout.availability === "available" &&
     String(checkout.repositoryId) === String(binding.repositoryId) &&
     String(checkout.id) === String(thread.checkoutId) &&

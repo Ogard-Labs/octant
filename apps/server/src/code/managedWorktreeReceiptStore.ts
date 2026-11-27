@@ -373,6 +373,31 @@ export class ManagedWorktreeReceiptStore {
     return claimed;
   }
 
+  /**
+   * The folder of every receipt that came with data imported from Octant,
+   * whatever its state and whether or not a thread still points at it: each
+   * names Octant's checkout, which this host never removes. A receipt that
+   * cannot be read is skipped here; it names no folder this host may act on.
+   */
+  async importedWorktreePaths(): Promise<ReadonlySet<string>> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.#root);
+    } catch (error) {
+      if (hasErrorCode(error, "ENOENT")) return new Set();
+      throw error;
+    }
+    const paths = new Set<string>();
+    for (const entry of entries) {
+      if (!/^[0-9a-f-]{36}\.json$/i.test(entry)) continue;
+      const receipt = await this.#readReceipt(join(this.#root, entry)).catch(() => undefined);
+      if (receipt !== undefined && isImportedReceipt(receipt)) {
+        paths.add(receipt.canonicalWorktreePath);
+      }
+    }
+    return paths;
+  }
+
   async findActive(
     input: ManagedWorktreeReceiptLookup,
   ): Promise<ManagedWorktreeReceipt | undefined> {

@@ -1684,6 +1684,7 @@ describe("continuing a Code thread imported from Octant", () => {
       /** The branch's commit once Octant's folder is gone; absent, the branch is gone too. */
       readonly branchHead?: string;
       readonly importedFrom?: "octant" | undefined;
+      readonly receiptUnreadable?: true;
     } = {},
   ) {
     const octantFolder = options.octantFolder ?? "clean";
@@ -1721,10 +1722,13 @@ describe("continuing a Code thread imported from Octant", () => {
       checkouts: [importedCheckout],
       applySourceFiles,
       importedWorktrees: createImportedCodeWorktreePort({
-        loadReceipt: async (receiptId) =>
-          receiptId === importedReceiptId
+        loadReceipt: async (receiptId) => {
+          if (options.receiptUnreadable === true)
+            throw new Error("invalid managed worktree receipt");
+          return receiptId === importedReceiptId
             ? importedReceipt("importedFrom" in options ? options.importedFrom : "octant")
-            : undefined,
+            : undefined;
+        },
         repository: { observe },
         git: { isDirty, resolveBranchHead },
       }),
@@ -1838,6 +1842,52 @@ describe("continuing a Code thread imported from Octant", () => {
     });
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();
     expect(fixture.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("takes the next name when the branch it would make exists though the branch list could not be read", async () => {
+    const fixture = continuing();
+    (fixture.git.branchExists as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_root: string, branch: string) => branch === "feature/source-nightly",
+    );
+    expect(
+      await fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+    ).toMatchObject({ status: "continued" });
+    expect(fixture.git.addWorktree).toHaveBeenCalledTimes(1);
+    expect(fixture.git.addWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branchIntent: "feature/source-nightly-2",
+        targetPath: nightlyPath,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("never answers overlapping turn starts on Octant's own host with the import refusal", async () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", undefined);
+    const fixture = continuing({ importedFrom: undefined });
+    const [first, second] = await Promise.all([
+      fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+      fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+    ]);
+    expect(first).toEqual({ status: "own" });
+    expect(second).toEqual({ status: "own" });
+  });
+
+  it("answers overlapping turn starts on a thread of Nightly's own as its own, not with the import refusal", async () => {
+    const fixture = continuing({ importedFrom: undefined });
+    const [first, second] = await Promise.all([
+      fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+      fixture.codeService.continueImportedThread(windowId, sourceThreadId),
+    ]);
+    expect(first).toEqual({ status: "own" });
+    expect(second).toEqual({ status: "own" });
+  });
+
+  it("takes a thread whose receipt cannot be read as its own", async () => {
+    const fixture = continuing({ receiptUnreadable: true });
+    expect(await fixture.codeService.continueImportedThread(windowId, sourceThreadId)).toEqual({
+      status: "own",
+    });
   });
 
   it("leaves a thread on a worktree of this host's own as it is", async () => {
