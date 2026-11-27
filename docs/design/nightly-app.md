@@ -242,7 +242,11 @@ Nightly runs a host of its own on data that is never Octant's:
 ## Importing from Octant
 
 Nightly can bring Octant's work into its own data, and bring it again later
-(maintainer decisions, 2026-11-27). Status: designed, not built.
+(maintainer decisions, 2026-11-27). Status: partly built. The import, the
+merge, the file copy, Chat and Work copies, the Settings row and the window
+preference copy are built; the Keychain copy and Nightly's own worktree for a
+continued Code thread are in progress, and a packaged run has not been
+exercised.
 
 - **What comes over.** Threads in every mode with their content and files,
   Projects, instructions, settings and the window preferences on a fixed
@@ -276,7 +280,11 @@ Nightly can bring Octant's work into its own data, and bring it again later
   Octant added since: new threads and turns, and changes to settings and
   Projects Nightly left alone. Work done only in Nightly stays. A thread both
   apps changed since the last import arrives as a second copy beside
-  Nightly's, and a later import continues that copy. A setting or Project both
+  Nightly's, built from Octant's own journal with every frame and titled
+  "(from Octant)", and a later import continues that copy. A Code thread both
+  apps changed is held back instead and listed in the summary, because its
+  file and checkout ids derive from its thread id (maintainer decision,
+  2026-11-27); Octant's version stays in Octant. A setting or Project both
   changed keeps Nightly's value, and the summary lists it. Deleting something
   in either app never deletes it in the other. Comparisons use journal
   positions and event ids. Octant's new events for a stream are appended only
@@ -292,15 +300,27 @@ Nightly can bring Octant's work into its own data, and bring it again later
   the host already writes for that state, so nothing imported runs until the
   person starts it. Restart continuations stay behind.
 - **Code checkouts stay Octant's.** Nightly never removes a worktree folder
-  that came from Octant: reclaim, archive cleanup and purge refuse it.
-  Continuing an imported Code thread in Nightly first gives it its own branch
-  and worktree, made from the thread's current branch, so the two apps never
-  run turns in one checkout. Uncommitted changes in Octant's folder do not come
-  over, and the thread says so.
+  that came from Octant: reclaim, archive cleanup and purge refuse it, and a
+  purge deletes only the receipt. Nightly's own host keeps its managed
+  worktrees under `.octant-nightly-worktrees` beside the repository, where
+  Octant keeps `.octant-worktrees`, because a worktree's folder is fixed by its
+  thread id and the two apps would otherwise share a path (maintainer
+  decision, 2026-11-27). Continuing an imported Code thread in Nightly first
+  gives it its own branch and worktree there, made from the thread's current
+  branch, and starts a fresh provider session with a text handoff, since
+  Octant's session is tied to Octant's checkout. Uncommitted changes in
+  Octant's folder do not come over, and the thread says so. With Octant's
+  folder gone, the branch is used; with the branch gone too, the turn refuses
+  and says why.
 - **Where it starts.** Settings › Updates › Data offers "Import from Octant"
   while Nightly runs on its own data and Octant's data folder exists, with the
-  time of the last import. The renderer only asks; Nightly's main process
-  resolves both fixed folders, and no request names a path.
+  time of the last import. The renderer sends only whether to copy keys;
+  Nightly's main process resolves both fixed folders, stops its own host, runs
+  the import as a maintenance step, copies preferences and keys, starts the
+  host again and shows what came over, what was held back and why an import
+  refused. A first import replaces the allowlisted window preferences; later
+  imports only add ones Nightly lacks. The keys to copy are the ones Octant's
+  data names, listed by the host without their values.
 
 ## Starting a closed Stable host
 
