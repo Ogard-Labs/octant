@@ -4174,7 +4174,7 @@ function issueLinkRefusalMessage(reason: CodeThreadIssueLinkRefusal): string {
 }
 
 /** Why the host did not move a thread into its own worktree, in the person's words. */
-function worktreeMoveRefusalMessage(
+export function worktreeMoveRefusalMessage(
   reason: CodeThreadWorktreeMoveRefusal,
   paths: ReadonlyArray<string> | undefined,
   submodulePaths?: ReadonlyArray<string>,
