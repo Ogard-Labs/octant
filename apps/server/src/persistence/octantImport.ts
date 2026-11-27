@@ -83,14 +83,15 @@ const RECORDED_IMPORT_SQL = `SELECT 1 FROM event_journal
 const BACKUP_LABEL = "before-octant-import";
 const SNAPSHOT_ATTEMPTS = 3;
 
-class ImportStopped extends Error {
+export class ImportStopped extends Error {
   constructor(readonly outcome: Exclude<OctantImportOutcome, { readonly kind: "imported" }>) {
     super("The import from Octant stopped.");
   }
 }
 
-const refuse = (reason: OctantImportRefusal) => new ImportStopped({ kind: "refused", reason });
-const fail = (stage: OctantImportStage) => new ImportStopped({ kind: "failed", stage });
+export const refuse = (reason: OctantImportRefusal) =>
+  new ImportStopped({ kind: "refused", reason });
+export const fail = (stage: OctantImportStage) => new ImportStopped({ kind: "failed", stage });
 
 /**
  * Imports Octant's data into Nightly's own store, or merges what changed in
@@ -258,7 +259,7 @@ export function importFromOctant(input: {
  * may be, contain, or lie inside the other, and neither it nor its store may
  * be a link, so the copy reads exactly the store Octant's host writes.
  */
-function admittedOctantStore(octantDirectory: string, nightlyDirectory: string): string {
+export function admittedOctantStore(octantDirectory: string, nightlyDirectory: string): string {
   let folder;
   try {
     folder = lstatSync(octantDirectory);
@@ -300,7 +301,7 @@ function admittedOctantStore(octantDirectory: string, nightlyDirectory: string):
  * file, complete on its own, is copied instead, and copied again through a
  * read-only connection if a writer started meanwhile.
  */
-function snapshotOctantStore(source: string, target: string): void {
+export function snapshotOctantStore(source: string, target: string): void {
   const log = `${source}-wal`;
   for (let attempt = 0; attempt < SNAPSHOT_ATTEMPTS; attempt += 1) {
     removeStore(target);
