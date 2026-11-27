@@ -54,7 +54,7 @@ choice is stored, and Octant's data through Octant's host is the opt-in. A
 Nightly set to Octant's data whose Octant is missing or too old offers to
 switch to its own data from its startup window.
 [Importing from Octant](#importing-from-octant) and merging on a later import
-are designed, not built.
+are built and not yet exercised in a packaged app.
 
 Every desktop channel now has a class in Nightly's client mode, and Octant-only
 administration is absent from a Nightly client window
@@ -242,11 +242,13 @@ Nightly runs a host of its own on data that is never Octant's:
 ## Importing from Octant
 
 Nightly can bring Octant's work into its own data, and bring it again later
-(maintainer decisions, 2026-11-27). Status: partly built. The import, the
-merge, the file copy, Chat and Work copies, the Settings row and the window
-preference copy are built; the Keychain copy and Nightly's own worktree for a
-continued Code thread are in progress, and a packaged run has not been
-exercised.
+(maintainer decisions, 2026-11-27). Status: built, not yet exercised in a
+packaged app; the window preference copy runs only there. Not built yet: the
+thread view does not show that uncommitted changes stayed in Octant's folder
+(the move records it), and before an imported Code thread's first turn in
+Nightly, its files, terminal and Git actions still act in Octant's folder;
+only a turn moves it. Side Chat notes do not come over, and a held-back
+extension install leaves its package files in Nightly.
 
 - **What comes over.** Threads in every mode with their content and files,
   Projects, instructions, settings and the window preferences on a fixed
