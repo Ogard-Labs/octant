@@ -33,6 +33,7 @@ import {
   type WebSocketMessage,
 } from "../webSocketRelay";
 import { publicKeyFingerprint, verifySignature } from "./hubCrypto";
+import { hubPublicOrigin } from "./hubPublicOrigin";
 import type { HubRelayHubState, HubState, HubStatePort } from "./hubStateStore";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
@@ -90,35 +91,16 @@ function refuseUpgrade(socket: Duplex, status: string): void {
 
 /**
  * The relay address this host hands its spokes while it serves as the hub:
- * the public address the person typed for their own front, or else its
- * Funnel front on its own tailnet name, as the local Tailscale daemon reports
- * it (`funnelName`). The roster's private names stand in until that is read; a
- * listener bound to an IP address has none. Undefined while the relay switch
- * or the entrance is off, or the address is not known.
+ * `/relay/v1` behind its public origin. Undefined while the relay switch is
+ * off or that origin is not known.
  */
 export function hubRelayAddress(
   state: HubState,
   hubMemberId: string,
   funnelName?: string,
 ): RelayAddress | undefined {
-  const entrance = state.publicEntrance;
-  if (state.hub?.enabled !== true || state.relayHub?.enabled !== true) return undefined;
-  if (entrance?.enabled !== true) return undefined;
-  let origin = entrance.ownFrontOrigin;
-  if (origin === undefined && entrance.funnel !== undefined) {
-    const self = state.hub.roster?.roster.members.find(
-      (member) => String(member.memberId) === hubMemberId,
-    );
-    const name = [funnelName, ...(self?.privateNames ?? [])].find((candidate) =>
-      candidate?.endsWith(".ts.net"),
-    );
-    if (name !== undefined) {
-      origin =
-        entrance.funnel.port === 443
-          ? `https://${name}`
-          : `https://${name}:${entrance.funnel.port}`;
-    }
-  }
+  if (state.relayHub?.enabled !== true) return undefined;
+  const origin = hubPublicOrigin(state, hubMemberId, funnelName);
   if (origin === undefined) return undefined;
   return { hubMemberId: decodeMemberId(hubMemberId), relayUrl: relayUrlForPublicOrigin(origin) };
 }

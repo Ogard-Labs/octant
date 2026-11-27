@@ -45,6 +45,7 @@ export const PUBLIC_ENTRANCE_REFUSALS: Readonly<Record<string, string>> = {
   "daemon-not-reachable": "Octant could not reach Tailscale on this computer.",
   "funnel-off-failed": "Tailscale did not turn Funnel off. Funnel is still on.",
   "listener-failed": "The public entrance could not open a port on this computer.",
+  "not-a-named-standby": "The hub has not named this computer a standby.",
 };
 
 export function HubPublicEntranceSection(props: {
@@ -55,13 +56,17 @@ export function HubPublicEntranceSection(props: {
   /** This computer is a standby the hub named; only then can it choose to serve. */
   readonly namedStandby: boolean;
   readonly onStandbyServe: (on: boolean) => void;
+  readonly focusedSetting?: string | undefined;
 }) {
   const { view } = props;
+  const funnelClosed = !view.enabled && !view.funnel.enabled;
+  const mayServe = props.namedStandby || view.serveWhileStandingIn;
   return (
     <SettingsSection title="Public entrance">
       <div className="setgroup">
         <SettingRow
           description="Open one narrow door to the internet for visitor links, webhooks, and your own devices away from home."
+          focused={props.focusedSetting === "hub-public-entrance"}
           label="Public entrance"
           more="It answers only those routes, never pairing, administration, or anything between your computers. Visitor links, webhooks, and the device relay each stay off until you turn them on. Pausing remote access closes it. Off by default."
           scope="host"
@@ -74,42 +79,43 @@ export function HubPublicEntranceSection(props: {
             onCheckedChange={props.onEntrance}
           />
         </SettingRow>
-        {!view.enabled && !view.funnel.enabled ? null : (
-          <SettingRow
-            description="Let Tailscale carry the entrance on port 443 of this computer's tailnet name."
+        <SettingRow
+          description={
+            funnelClosed
+              ? "Turn the public entrance on first. Tailscale can then carry it."
+              : "Let Tailscale carry the entrance on port 443 of this computer's tailnet name."
+          }
+          focused={props.focusedSetting === "hub-public-funnel"}
+          label="Tailscale Funnel"
+          more="TLS ends on this computer, so Tailscale's relays cannot read the traffic. Needs HTTPS, MagicDNS, and the funnel node attribute in your tailnet policy. Or point your own tunnel or proxy at the address below instead."
+          scope="host"
+          settingId="hub-public-funnel"
+        >
+          <OctantSwitch
+            checked={view.funnel.enabled}
+            disabled={props.busy || view.paused || funnelClosed}
             label="Tailscale Funnel"
-            more="TLS ends on this computer, so Tailscale's relays cannot read the traffic. Needs HTTPS, MagicDNS, and the funnel node attribute in your tailnet policy. Or point your own tunnel or proxy at the address below instead."
-            scope="host"
-            settingId="hub-public-funnel"
-          >
-            <OctantSwitch
-              checked={view.funnel.enabled}
-              disabled={props.busy || view.paused}
-              label="Tailscale Funnel"
-              onCheckedChange={props.onFunnel}
-            />
-          </SettingRow>
-        )}
-        {!props.namedStandby && !view.serveWhileStandingIn ? null : (
-          // A plain row, not an indexed SettingRow: Remote access holds as
-          // many indexed settings as a page may, and search finds this one
-          // through the Public entrance row above it.
-          <div className="setrow">
-            <span className="setrow-label">Serve the public entrance</span>
-            <p className="setrow-hint">
-              While this computer stands in for the hub, answer visitor links and webhooks here. Off
-              by default.
-            </p>
-            <div className="setrow-control">
-              <OctantSwitch
-                checked={view.serveWhileStandingIn}
-                disabled={props.busy}
-                label="Serve the public entrance"
-                onCheckedChange={props.onStandbyServe}
-              />
-            </div>
-          </div>
-        )}
+            onCheckedChange={props.onFunnel}
+          />
+        </SettingRow>
+        <SettingRow
+          description={
+            mayServe
+              ? "While this computer stands in for the hub, answer visitor links and webhooks here. Off by default."
+              : "Only a computer the hub named a standby can answer visitor links and webhooks while it stands in."
+          }
+          focused={props.focusedSetting === "hub-public-standby"}
+          label="Serve the public entrance"
+          scope="host"
+          settingId="hub-public-standby"
+        >
+          <OctantSwitch
+            checked={view.serveWhileStandingIn}
+            disabled={props.busy || !mayServe}
+            label="Serve the public entrance"
+            onCheckedChange={props.onStandbyServe}
+          />
+        </SettingRow>
         {!view.enabled || view.address === undefined ? null : (
           <div className="setrow">
             <p className="setrow-hint">

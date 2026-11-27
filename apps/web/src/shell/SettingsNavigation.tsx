@@ -7,6 +7,7 @@ import {
   Database,
   FolderSync,
   Gauge,
+  Globe,
   Hexagon,
   Image,
   Keyboard,
@@ -91,6 +92,7 @@ const SETTINGS_PAGE_PLACES = {
   data: { group: "Data & devices", icon: Database },
   sync: { group: "Data & devices", icon: FolderSync },
   "remote-access": { group: "Data & devices", icon: Radio },
+  "public-entrance": { group: "Data & devices", icon: Globe },
   host: { group: "Data & devices", icon: Server },
   usage: { group: "Data & devices", icon: ChartNoAxesColumnIncreasing },
 } satisfies Record<keyof typeof octantSettingsNavigation, SettingsPagePlace>;

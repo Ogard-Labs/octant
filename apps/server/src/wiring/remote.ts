@@ -234,6 +234,7 @@ import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { sendWebhookDelivery, spokeWebhookHubPort } from "../hub/webhookLinks";
 import { HubVisitorService } from "../hub/hubVisitorService";
 import { SpokeVisitorService } from "../hub/spokeVisitorService";
+import { hubPublicOrigin } from "../hub/hubPublicOrigin";
 import { HubRelayService, hubRelayAddress } from "../hub/hubRelayService";
 import { SpokeRelayService } from "../hub/spokeRelayService";
 import { openRelayTunnel, spokeRelayHubPort } from "../hub/relayLinks";
@@ -1502,6 +1503,7 @@ export function wireRemote(deps: RemoteDependencies) {
     state: hubStateStore,
     serving: servesPublicNow,
     standingIn: () => !hubService.status().enabled && servesPublicNow(),
+    remoteAccessPaused: () => readRemoteAccessPaused(persistence.connection),
     hubMemberId: () => hubService.hubMemberId(),
     rosterFingerprintFor: (memberId) =>
       servingRosterMembers(hubStateStore.load()).find(
@@ -1521,6 +1523,14 @@ export function wireRemote(deps: RemoteDependencies) {
         request,
       ),
     viewer: visitorViewer(),
+    publicOrigin: () =>
+      hubService.status().enabled
+        ? hubPublicOrigin(
+            hubStateStore.load(),
+            hubService.hubMemberId(),
+            publicEntrance.funnelName(),
+          )
+        : undefined,
     record: recordHubMembership,
     now: Date.now,
   });

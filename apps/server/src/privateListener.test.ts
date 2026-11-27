@@ -21,7 +21,7 @@ const validConfig = (overrides: Partial<PrivateListenerConfig> = {}): PrivateLis
 describe("private listener lifecycle", () => {
   it.each([
     ["wrong host", "192.168.1.21", new Date("2026-08-01T00:00:00Z")],
-    ["expired", "192.168.1.20", new Date("2028-01-01T00:00:00Z")],
+    ["expired", "192.168.1.20", new Date("2200-01-01T00:00:00Z")],
     ["not yet valid", "192.168.1.20", new Date("2026-01-01T00:00:00Z")],
   ] as const)("rejects a configured certificate that is %s", (_case, hostname, now) => {
     expect(() =>

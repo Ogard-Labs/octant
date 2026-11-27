@@ -4,7 +4,7 @@ import { useHubEntranceAction, type HubRequest } from "./hubEntranceAction";
 import { readVisitors, VisitorLinkList, type VisitorLink } from "./VisitorLinks";
 
 /**
- * Settings › Remote access › Visitor links: on the hub, the switch that lets
+ * Settings › Public entrance › Visitor links: on the hub, the switch that lets
  * its public entrance serve visitor links; on a member, every link this
  * computer shares and the visitor requests waiting on them. A thread is
  * shared from Share with visitor on its Environment's Computer card. Loaded

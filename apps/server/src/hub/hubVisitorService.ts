@@ -8,6 +8,7 @@
 
 import {
   HubMemberId,
+  HubPublicOrigin,
   PUBLIC_ENTRANCE_MAX_VISITOR_STREAMS,
   VISITOR_KEY_HEADER,
   VISITOR_LINK_COMMENTS_PER_MINUTE,
@@ -16,6 +17,7 @@ import {
   VISITOR_PROOF_SKEW_MS,
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
+  type HubVisitorGrantsReceipt,
   type HubVisitorGrantsUpdate,
   type SignedVisitorLinkGrant,
   type VisitorFetchAnswer,
@@ -29,6 +31,7 @@ import type { PublicAnswer, PublicEntranceHandlers, PublicRequest } from "./publ
 import { checkVisitorLinkGrant } from "./publicEntranceCrypto";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
+const isPublicOrigin = Schema.is(HubPublicOrigin);
 const MINUTE_MS = 60_000;
 const DEFAULT_POLL_MS = 2_000;
 // A comment is up to 4,000 characters, which as UTF-8 inside JSON may take
@@ -55,6 +58,8 @@ export interface HubVisitorServiceOptions {
    * the entrance; that choice covers visitor links, whatever its own switch says.
    */
   readonly standingIn?: () => boolean;
+  /** Whether this host's person paused remote access; a paused hub names no public origin. */
+  readonly remoteAccessPaused: () => boolean;
   readonly hubMemberId: () => string;
   /** The identity-key fingerprint the signed roster lists for a member. */
   readonly rosterFingerprintFor: (memberId: string) => string | undefined;
@@ -64,6 +69,8 @@ export interface HubVisitorServiceOptions {
     request: VisitorFetchRequest,
   ) => Promise<VisitorFetchAnswer | undefined>;
   readonly viewer?: HubVisitorViewer;
+  /** This hub's public origin while it knows it; named to each spoke in the answer to its grants. */
+  readonly publicOrigin?: () => string | undefined;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
   /** How often an open stream asks the spoke again. */
@@ -158,10 +165,7 @@ export class HubVisitorService {
    * Replaces what this hub holds for one spoke. A grant for another spoke, or
    * one signed by a key the roster does not list for this spoke, is dropped.
    */
-  receiveGrants(
-    spokeMemberId: string,
-    update: HubVisitorGrantsUpdate,
-  ): { readonly status: "recorded"; readonly count: number } {
+  receiveGrants(spokeMemberId: string, update: HubVisitorGrantsUpdate): HubVisitorGrantsReceipt {
     const listed = this.#options.rosterFingerprintFor(spokeMemberId);
     const own = update.grants.filter(
       (signed) =>
@@ -176,7 +180,7 @@ export class HubVisitorService {
     // A spoke sends its list again whenever the roster moves, and one without
     // Public sends an empty list each time; an unchanged list is not a change.
     if (JSON.stringify(before) === JSON.stringify(own)) {
-      return { status: "recorded", count: own.length };
+      return this.#receipt(own.length);
     }
     this.#save({
       ...held,
@@ -190,7 +194,23 @@ export class HubVisitorService {
       actingPrincipal: { kind: "peer", memberId: decodeMemberId(spokeMemberId) },
       memberId: decodeMemberId(spokeMemberId),
     });
-    return { status: "recorded", count: own.length };
+    return this.#receipt(own.length);
+  }
+
+  /**
+   * Names the public origin only while a link behind it would open: the visitor
+   * switch on and remote access not paused. `publicOrigin` names none while the
+   * hub role or the entrance is off.
+   */
+  #receipt(count: number): HubVisitorGrantsReceipt {
+    const open = this.#load().enabled && !this.#options.remoteAccessPaused();
+    const named = open ? this.#options.publicOrigin?.() : undefined;
+    // An address a spoke would refuse to read is left out, not sent.
+    return {
+      status: "recorded",
+      count,
+      ...(named !== undefined && isPublicOrigin(named) ? { publicOrigin: named } : {}),
+    };
   }
 
   /** The entrance's visitor routes; none while the switch is off. */

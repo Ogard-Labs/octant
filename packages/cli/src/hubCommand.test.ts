@@ -1736,7 +1736,30 @@ describe("octant hub visitor", () => {
       path: "/api/desktop/hub/visitors/share",
       body: { mode: "code", threadId: "thread-1", scope: "read" },
     });
-    expect(shared.out.join("")).toContain("/v/AAAAAAAAAAAAAAAAAAAAAA#k=secret");
+    expect(shared.out.join("")).toContain("Path  /v/AAAAAAAAAAAAAAAAAAAAAA#k=secret");
+    expect(shared.out.join("")).toContain("put it in front of the path");
+  });
+
+  it("prints a whole link when the host knows the hub's public address", async () => {
+    const url = "https://octant.example.com/v/AAAAAAAAAAAAAAAAAAAAAA#k=secret";
+    const shared = await fixture(() =>
+      ok({
+        status: "shared",
+        linkId: "AAAAAAAAAAAAAAAAAAAAAA",
+        url,
+        expiresAt: 1_800_000_000_000,
+        published: true,
+      }),
+    );
+    await shared.run({
+      action: "visitor",
+      mode: "share",
+      threadMode: "code",
+      threadId: "thread-1",
+      scope: "read",
+    });
+    expect(shared.out.join("")).toContain(`Link  ${url}`);
+    expect(shared.out.join("")).not.toContain("put it in front");
   });
 
   it("prints a visitor's comment without the escape sequences it carries", async () => {

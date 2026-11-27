@@ -765,18 +765,24 @@ describe("RemoteShellView", () => {
         "true",
       ),
     );
-    // A workspace mounted afresh reads its mode's threads again.
-    const bootstraps = () =>
-      seen.filter((request) => request.path === "/api/work/threads/bootstrap").length;
-    const before = bootstraps();
+    // A workspace mounted afresh draws new elements, so the same ones still
+    // in the page show it was kept. Counting its requests instead raced the
+    // first open's own late reads under load.
+    const workspace = await screen.findByRole(
+      "region",
+      { name: "Task workspace" },
+      { timeout: 10_000 },
+    );
     await openFromActiveWork();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(bootstraps()).toBe(before);
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Active work" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("region", { name: "Task workspace" })).toBe(workspace);
     expect(screen.getByRole("button", { name: "Remote Work" })).toHaveAttribute(
       "aria-current",
       "true",
     );
-  });
+  }, 30_000);
 
   it("lets a read-only browser watch Chat without offering sends, approval, or thread creation", async () => {
     const user = userEvent.setup();

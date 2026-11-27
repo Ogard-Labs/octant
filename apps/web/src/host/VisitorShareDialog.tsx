@@ -148,6 +148,9 @@ export default function VisitorShareDialog(props: {
     await refresh();
   };
 
+  // The host answers a whole link when it knows the hub's public address.
+  const whole = shared?.url.startsWith("https://") === true;
+
   return (
     <OctantDialog
       className="project-dialog hub-entrance-dialog"
@@ -214,9 +217,9 @@ export default function VisitorShareDialog(props: {
           tabIndex={-1}
         >
           <p className="setrow-hint">
-            This is the link's path, not a whole link. Put your hub's public address in front of it
-            and send the whole link now. The part after # is its secret; Octant does not show it
-            again.
+            {whole
+              ? "Send this link to your visitor now. The part after # is its secret; Octant does not show it again."
+              : "This is the link's path, not a whole link. Put your hub's public address in front of it and send the whole link now. The part after # is its secret; Octant does not show it again."}
           </p>
           <code className="hub-entrance__secret">{shared.url}</code>
           <div className="host-settings__controls">
@@ -225,14 +228,17 @@ export default function VisitorShareDialog(props: {
                 void copyToClipboard(shared.url).then((copied) =>
                   action.say(
                     copied
-                      ? { kind: "success", text: "Path copied." }
-                      : { kind: "error", text: "The path could not be copied. Select it instead." },
+                      ? { kind: "success", text: whole ? "Link copied." : "Path copied." }
+                      : {
+                          kind: "error",
+                          text: `The ${whole ? "link" : "path"} could not be copied. Select it instead.`,
+                        },
                   ),
                 )
               }
               size="sm"
             >
-              Copy path
+              {whole ? "Copy link" : "Copy path"}
             </OctantButton>
             <OctantButton
               onClick={() => {

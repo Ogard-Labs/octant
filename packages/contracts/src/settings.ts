@@ -46,6 +46,7 @@ export const SETTINGS_SECTION_IDS = [
   "todos",
   "sync",
   "remote-access",
+  "public-entrance",
   "host",
   "usage",
 ] as const;

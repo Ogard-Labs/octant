@@ -259,6 +259,12 @@ export function createHeadlessBuilds(options: {
     running.current = { ...running.current, state: "verifying" };
     // A name `find` never matches, so a build is never used before it is checked.
     const staged = join(options.folder, `.download-${uuid()}`);
+    // The refusal says nothing was kept, so the staged file goes before the
+    // sheet can read it.
+    const discard = async (message: string) => {
+      await rm(staged, { force: true });
+      finish("build-unverified", message);
+    };
     try {
       await mkdir(options.folder, { recursive: true, mode: 0o700 });
       const file = await open(staged, "wx", 0o600);
@@ -270,14 +276,10 @@ export function createHeadlessBuilds(options: {
       const checked = await builds.check(staged, target);
       if (signal.aborted) return;
       if (checked.status === "refused") {
-        return finish(
-          "build-unverified",
-          `${downloadedRefusal(checked.reason)} Octant kept nothing. ${place}`,
-        );
+        return await discard(`${downloadedRefusal(checked.reason)} Octant kept nothing. ${place}`);
       }
       if (checked.version !== version || checked.ring !== offer.release.ring) {
-        return finish(
-          "build-unverified",
+        return await discard(
           `The downloaded build is not the ${version} the ${ring} release lists, so Octant kept nothing. ${place}`,
         );
       }

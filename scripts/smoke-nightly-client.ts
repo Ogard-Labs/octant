@@ -340,6 +340,7 @@ async function startStable(input: {
   track(child.pid, `${input.name} synthetic Stable (Electron)`);
   const events = new EventLog();
   logs.push({ name: input.name, log: events });
+  child.once("exit", (code, signal) => events.note({ event: "exited", code, signal }));
   if (child.stdout !== null) events.attach(child.stdout, input.name);
   if (child.stderr !== null) events.attach(child.stderr, input.name);
   const harness: StableHarness = {
@@ -353,10 +354,15 @@ async function startStable(input: {
   stables.push(harness);
   cleanups.push(() => stopStable(harness));
   const ready = await events.next(
-    (event) => event.event === "ready" || event.event === "command-failed",
+    (event) =>
+      event.event === "ready" || event.event === "command-failed" || event.event === "exited",
     0,
     90_000,
   );
+  if (ready.event === "exited")
+    throw new Error(
+      `${input.name} did not start: it exited with code ${String(ready.code)}, signal ${String(ready.signal)}.`,
+    );
   if (ready.event !== "ready")
     throw new Error(
       `${input.name} did not start${typeof ready.message === "string" ? `: ${ready.message}` : "."}`,

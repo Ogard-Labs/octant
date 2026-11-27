@@ -43,7 +43,7 @@ person brings to Settings, and a group lists its pages in this order:
 | AI             | Providers & Models, Octant Harness, Voice & images, Chat & Work, Code | Which provider or model answers each job, and how each mode starts          |
 | Tools          | Skills & Extensions, Computer use, Integrations                       | What a running agent may reach                                              |
 | Safety         | Permissions, Limits, Secret stores, Memory                            | What an agent may touch, reach and remember, and how far it runs unattended |
-| Data & devices | Data & storage, Sync, Remote access, Host, Usage                      | What this computer stores and the other machines it talks to                |
+| Data & devices | Data & storage, Sync, Remote access, Public entrance, Host, Usage     | What this computer stores and the other machines it talks to                |
 
 A page holds the settings of one question. No page holds more than thirty
 settings, and a page of one to three is folded into the page that asks the
@@ -175,6 +175,17 @@ this computer's Projects by name, the same checklist a member's Act item
 shows, with **Save the Projects**; it is the hub's own Act list, read at each
 request, and none ticked leaves a member's window nothing to start here
 ([Hub and spokes: the hub coordinates](hub-and-spokes.md#the-hub-coordinates-each-member-runs-its-own-work)).
+
+**Public entrance** has its own page, Settings › Public entrance, split from
+Remote access when that page was full, so search finds each control by its
+name (maintainer decision, 2026-11-27). It holds the **Public entrance**
+switch, **Tailscale Funnel** and **Serve the public entrance** in one section,
+then **Visitor links**, **Webhook endpoints** and **Device relay**
+([Hub and spokes: public entrance](hub-and-spokes.md#public-entrance)). A
+control this computer cannot use keeps its row and says why: it is in no hub,
+the entrance is off, the hub did not name it a standby, or the window is a
+paired browser. Links to the entrance or Funnel on Remote access open this
+page. The page loads as its own chunk.
 
 **Access activity** sits on Settings › Remote access above Paired devices
 (maintainer decision, 2026-11-22). Its rows are page rows, newest first: a

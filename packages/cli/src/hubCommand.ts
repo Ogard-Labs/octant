@@ -915,9 +915,13 @@ async function runVisitor(
       if (!isOk(response, "shared")) {
         return refusal(input, response, "Octant refused to share that thread.");
       }
+      // A whole link when this computer knows the hub's public address, else the path alone.
+      const url = String(field(response.body, "url"));
       input.stdout.write(
         [
-          `Link on your hub's public address  ${String(field(response.body, "url"))}`,
+          url.startsWith("https://")
+            ? `Link  ${url}`
+            : `Path  ${url}\nThis computer does not know your hub's public address; put it in front of the path.`,
           "The part after # is the link's secret. Octant does not show it again; send the whole link to your visitor now.",
           ...(field(response.body, "published") === true
             ? []

@@ -3,7 +3,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { field, list, useHubEntranceAction, type HubRequest } from "./hubEntranceAction";
 
 /**
- * Settings › Remote access › Device relay: on the hub, the switch that lets
+ * Settings › Public entrance › Device relay: on the hub, the switch that lets
  * paired devices reach their hosts through the public entrance; on a member,
  * which of its own paired devices it lists for that. The hub carries only
  * ciphertext and learns only a listed key's fingerprint. Loaded as its own

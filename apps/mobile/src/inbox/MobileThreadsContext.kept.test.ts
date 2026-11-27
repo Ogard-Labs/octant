@@ -20,6 +20,8 @@ const phone = vi.hoisted(() => {
       offline: [] as ReadonlyArray<string>,
     },
     projects: [{ projectId: "travel", name: "Travel" }] as ReadonlyArray<unknown>,
+    /** Times a launch has applied what it read of the kept list. */
+    restores: 0,
     // The shared packages are the same through a restart, and slow to load again.
     runtime: undefined as typeof import("@octant/client-runtime") | undefined,
     contracts: undefined as typeof import("@octant/contracts") | undefined,
@@ -47,6 +49,18 @@ vi.mock("../outbox/sealedFile", () => ({
     remove: () => void phone.files.delete(name),
   }),
 }));
+// The app applies the kept list in the same step as it reads it, so a count
+// here says a launch is past restoring, whatever it restored.
+vi.mock("./keptThreads", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./keptThreads")>();
+  return {
+    ...actual,
+    restoreKeptThreads: (...args: Parameters<typeof actual.restoreKeptThreads>) => {
+      phone.restores += 1;
+      return actual.restoreKeptThreads(...args);
+    },
+  };
+});
 vi.mock("./readCursorFile", () => ({
   loadReadCursors: () => null,
   keepReadCursors: () => undefined,
@@ -153,6 +167,44 @@ async function launch() {
   };
 }
 
+/** Waits until the running app has kept the row and its Project's name. */
+async function listKept() {
+  const { sealedThreads } = await import("./MobileThreadsContext");
+  await settled(async () => {
+    const text = await sealedThreads().load();
+    expect(text).toContain("Plan the trip");
+    expect(text).toContain("Travel");
+  });
+}
+
+/** One whole run that reads the computer and keeps its list. */
+async function runOnce() {
+  const app = await launch();
+  await listKept();
+  app.quit();
+}
+
+/**
+ * Starts the app afresh and waits until it has restored the kept list. A check
+ * that a row is absent means nothing before then.
+ */
+async function launchRestored() {
+  phone.restores = 0;
+  const app = await launch();
+  await settled(() => expect(phone.restores).toBeGreaterThan(0));
+  return app;
+}
+
+/** Waits for the app's own reads and writes, which a launch does not await. */
+const settled = (check: () => void | Promise<void>) =>
+  vi.waitFor(
+    async () => {
+      await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+      await check();
+    },
+    { timeout: 15_000 },
+  );
+
 // The first load reads the shared packages, which is slow on a busy machine;
 // every launch after it reloads the app's own modules alone.
 beforeAll(async () => {
@@ -165,19 +217,25 @@ afterEach(() => {
   phone.projects = [{ projectId: "travel", name: "Travel" }];
 });
 
-describe("the thread list after a restart", () => {
+// Each run waits for the app's own writes and reads, which are slow on a busy machine.
+describe("the thread list after a restart", { timeout: 60_000 }, () => {
   it("is there while the computer cannot be reached, with its Project, and nothing readable on disk", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const first = await launch();
-    expect(first.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]);
+    await vi.waitFor(() =>
+      expect(first.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]),
+    );
+    // The app writes the list after it shows it, so quitting waits for both
+    // the row and its Project's name to be kept.
+    await listKept();
     first.quit();
     expect([...phone.files.values()].join("")).not.toContain("Plan the trip");
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
+    await settled(() => expect(later.threads().rows[0]?.title).toBe("Plan the trip"));
     const [kept] = later.threads().rows;
-    expect(kept?.title).toBe("Plan the trip");
     expect(kept?.live).toBeUndefined();
     expect(kept === undefined ? undefined : later.threads().projectName(kept)).toBe("Travel");
     later.quit();
@@ -204,11 +262,13 @@ describe("the thread list after a restart", () => {
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
-    expect(later.threads().lastStanding(studio)).toEqual({ actsAsHostPerson: true });
+    await settled(() =>
+      expect(later.threads().lastStanding(studio)).toEqual({ actsAsHostPerson: true }),
+    );
     later.quit();
 
     pairedWith("key-2");
-    const repaired = await launch();
+    const repaired = await launchRestored();
     expect(repaired.threads().lastStanding(studio)).toBeUndefined();
     repaired.quit();
   });
@@ -216,7 +276,7 @@ describe("the thread list after a restart", () => {
   it("is kept, not written over, through a run that could not read it", async () => {
     pairedWith("key-1", true);
     phone.inbox = { rows: [row], reachable: true, offline: [] };
-    (await launch()).quit();
+    await runOnce();
 
     // Its first read fails, the key store answers again, and the laptop answers
     // while the studio is out of reach.
@@ -230,14 +290,16 @@ describe("the thread list after a restart", () => {
     }
     phone.inbox = { rows: [], reachable: false, offline: [] };
     const later = await launch();
-    expect(later.threads().rows.map((entry) => entry.threadId)).toContain("plan-the-trip");
+    await settled(() =>
+      expect(later.threads().rows.map((entry) => entry.threadId)).toContain("plan-the-trip"),
+    );
     later.quit();
   });
 
   it("comes back in the same run once a failed read is read again", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
-    (await launch()).quit();
+    await runOnce();
 
     phone.inbox = { rows: [], reachable: false, offline: [] };
     phone.secureFailures = 1;
@@ -249,7 +311,9 @@ describe("the thread list after a restart", () => {
         await vi.advanceTimersByTimeAsync(5_000);
       });
       await later.again();
-      expect(later.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]);
+      await settled(() =>
+        expect(later.threads().rows.map((entry) => entry.threadId)).toEqual(["plan-the-trip"]),
+      );
       later.quit();
     } finally {
       vi.useRealTimers();
@@ -260,10 +324,10 @@ describe("the thread list after a restart", () => {
   it("gives way to what the computer says once it answers", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
-    (await launch()).quit();
+    await runOnce();
 
     phone.inbox = { rows: [], reachable: true, offline: [] };
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -271,11 +335,11 @@ describe("the thread list after a restart", () => {
   it("is not shown for a computer paired again under another key", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
-    (await launch()).quit();
+    await runOnce();
 
     pairedWith("key-2");
     phone.inbox = { rows: [], reachable: false, offline: [] };
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -284,13 +348,14 @@ describe("the thread list after a restart", () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
     const running = await launch();
+    await vi.waitFor(() => expect(running.threads().rows).toHaveLength(1));
     phone.inbox = { rows: [], reachable: false, offline: [] };
     pairedWith("key-2");
     await running.again();
     expect(running.threads().rows).toEqual([]);
     running.quit();
 
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().rows).toEqual([]);
     later.quit();
   });
@@ -298,11 +363,11 @@ describe("the thread list after a restart", () => {
   it("does not bring back Project names a computer no longer has", async () => {
     pairedWith("key-1");
     phone.inbox = { rows: [row], reachable: true, offline: [] };
-    (await launch()).quit();
+    await runOnce();
 
     phone.inbox = { rows: [], reachable: true, offline: [] };
     phone.projects = [];
-    const later = await launch();
+    const later = await launchRestored();
     expect(later.threads().projects).toEqual([]);
     later.quit();
   });

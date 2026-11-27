@@ -50,6 +50,23 @@ describe("octantSettingsRegistry", () => {
     );
   });
 
+  it.each([
+    ["Public entrance", "hub-public-entrance"],
+    ["Tailscale Funnel", "hub-public-funnel"],
+    ["Serve the public entrance", "hub-public-standby"],
+    ["Visitor links", "hub-visitor-links"],
+    ["Webhook endpoints", "hub-webhook-endpoints"],
+    ["Device relay", "hub-device-relay"],
+  ])("finds the public entrance control %s by its name, first", (query, setting) => {
+    expect(
+      searchSettings(
+        listAvailableSections(octantSettingsRegistry, capabilities),
+        capabilities,
+        query,
+      )[0],
+    ).toMatchObject({ kind: "setting", sectionId: "public-entrance", settingId: setting });
+  });
+
   it.each(["transcribe", "transcription"])("finds the Transcribe with menu by %s", (query) => {
     expect(
       searchSettings(
@@ -154,6 +171,7 @@ describe("octantSettingsRegistry", () => {
       "data",
       "sync",
       "remote-access",
+      "public-entrance",
       "host",
       "usage",
     ]);

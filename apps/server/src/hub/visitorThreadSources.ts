@@ -13,6 +13,7 @@ import {
   decodeCodeThreadId,
   decodeWorkThreadId,
   type ChatAttemptOutcome,
+  type CodeRuntimeWorkState,
   type CodeThread,
   type CodeThreadId,
   type WorkThread,
@@ -127,13 +128,18 @@ export interface WorkVisitorThreads {
   readonly activity: (threadId: WorkThreadId) => WorkTurnActivity;
 }
 
+/** A scheme word whose value is the part still being written. */
+const TRAILING_SCHEME = /\b(?:bearer|basic)\s+$/i;
+
 /**
  * A streaming reply up to its last whitespace. The visitor read redacts by a
  * secret's shape, which the first characters of one still being written do not
- * have yet, so a word is shown only once the reply has moved past it.
+ * have yet, so a word is shown only once the reply has moved past it. A
+ * `Bearer` or `Basic` just before that word is held back with it, so the
+ * redactor never reads the scheme as the whole of a credential.
  */
 function finishedWords(live: string): string {
-  return /^[\s\S]*\s/.exec(live)?.[0] ?? "";
+  return (/^[\s\S]*\s/.exec(live)?.[0] ?? "").replace(TRAILING_SCHEME, "");
 }
 
 function readWork(work: WorkVisitorThreads | undefined, threadId: string): VisitorThreadRead {
@@ -198,32 +204,44 @@ function readCode(
   }
   const thread = readCodeThread(connection, id);
   if (thread === undefined) return MISSING;
+  // Each row carries its turn's work state: the turn runs under the operation
+  // whose id names that record.
   const rows = connection
     .prepare(`
-      SELECT content_role, body_text
-      FROM code_transcript_search_projection
-      WHERE thread_id = ? AND rewound = 0
-      ORDER BY start_sequence DESC, content_role ASC
+      SELECT search.content_role, search.body_text, work.state AS turn_state
+      FROM code_transcript_search_projection AS search
+      LEFT JOIN code_runtime_projection AS work
+        ON work.runtime_work_id = search.operation_id
+        AND work.thread_id = search.thread_id
+        AND work.work_kind = 'provider-turn'
+      WHERE search.thread_id = ? AND search.rewound = 0
+      ORDER BY search.start_sequence DESC, search.content_role ASC
       LIMIT ?
     `)
     .all(threadId, MAX_MESSAGES) as ReadonlyArray<{
     readonly content_role: "user" | "assistant";
     readonly body_text: string;
+    readonly turn_state: CodeRuntimeWorkState | null;
   }>;
   const turnActivity = activity(id);
-  // A turn parked on a question or an approval has not finished its reply
-  // either. Only the newest turn can be live, and its reply row comes first.
-  const live =
-    turnActivity.executing === true || turnActivity.awaitingInput === true
-      ? rows.find((row) => row.content_role === "assistant")
-      : undefined;
+  const running = turnActivity.executing === true || turnActivity.awaitingInput === true;
+  // Newest first, so the newest turn's reply row comes first.
+  const newest = rows.find((row) => row.content_role === "assistant");
+  // Only a reply whose turn completed is shown whole. The newest one must say
+  // so: a turn parked or waiting reports neither executing nor a question. An
+  // older one without a record has nothing left to write it.
+  const unfinished = (row: (typeof rows)[number]) =>
+    row.content_role === "assistant" &&
+    (row === newest
+      ? running || row.turn_state !== "completed"
+      : row.turn_state !== null && row.turn_state !== "completed");
   // A completed turn's prompt and reply share a sequence. Newest first, the
   // reply comes before its prompt here, so the reversal below puts the prompt first.
   const messages: Message[] = rows
     .map(
       (row): Message => ({
         role: row.content_role === "user" ? "person" : "agent",
-        text: row === live ? finishedWords(row.body_text) : row.body_text,
+        text: unfinished(row) ? finishedWords(row.body_text) : row.body_text,
       }),
     )
     .filter((message) => message.text.trim() !== "")

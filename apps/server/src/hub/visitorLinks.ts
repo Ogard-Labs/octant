@@ -5,6 +5,7 @@
 
 import {
   VISITOR_FETCH_ANSWER_MAX_BYTES,
+  decodeHubVisitorGrantsReceipt,
   decodeVisitorFetchAnswer,
   type HubVisitorGrantsUpdate,
   type VisitorFetchAnswer,
@@ -25,7 +26,7 @@ import {
 } from "./publicStandIn";
 import type { HubTransport } from "./pinnedHubTransport";
 import { grantConfirmTimeoutMs } from "./pushService";
-import type { SpokeVisitorHubPort } from "./spokeVisitorService";
+import type { SpokeVisitorHubPort, SpokeVisitorSendOutcome } from "./spokeVisitorService";
 
 interface LinkDependencies {
   readonly state: HubStatePort;
@@ -60,9 +61,10 @@ export function spokeVisitorHubPort(
     sendGrants: async (update: HubVisitorGrantsUpdate) => {
       const link = deps.state.load().link;
       const targets = publicCopyTargets(link, deps.standbyGranted());
-      if (link === undefined || targets.length === 0) return false;
+      if (link === undefined || targets.length === 0) return { sent: false };
       const identity = deps.identity();
       let complete = true;
+      let hub: SpokeVisitorSendOutcome["hub"];
       // A standby that no longer takes copies (Standby unticked, or out of the
       // order) gets an empty list, so it holds nothing the person withdrew.
       const current = new Set(targets.map((target) => target.memberId));
@@ -91,9 +93,25 @@ export function spokeVisitorHubPort(
           headers: { [HUB_PEER_KEY_HEADER]: identity.signing.hostPublicKey },
           now: deps.now(),
         });
-        if (answer.status !== "answered" || !answer.response.ok) complete = false;
+        if (answer.status !== "answered" || !answer.response.ok) {
+          complete = false;
+          continue;
+        }
+        // Only the hub this host follows names a public origin, and only over
+        // the connection held to its pin.
+        if (target.memberId !== String(link.hubMemberId)) continue;
+        try {
+          const receipt = decodeHubVisitorGrantsReceipt(await answer.response.json());
+          hub = {
+            memberId: target.memberId,
+            ...(receipt.publicOrigin === undefined ? {} : { publicOrigin: receipt.publicOrigin }),
+          };
+        } catch {
+          // An answer that does not read took the list and names no origin.
+          hub = { memberId: target.memberId };
+        }
       }
-      return complete;
+      return { sent: complete, ...(hub === undefined ? {} : { hub }) };
     },
   };
 }

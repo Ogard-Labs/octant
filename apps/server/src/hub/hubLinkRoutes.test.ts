@@ -689,6 +689,30 @@ async function standbyFamily() {
   return { network, hub, standby, spoke, sendAs };
 }
 
+describe("a visitor link shared on a spoke", () => {
+  it("is a whole link once the hub it joined serves visitor links on a known address", async () => {
+    const { hub, spoke } = await standbyFamily();
+    const share = async () => {
+      const shared = await spoke.spokeVisitors.share({
+        mode: "code",
+        threadId: "t-1",
+        scope: "read",
+      });
+      if (shared.status !== "shared") throw new Error(JSON.stringify(shared));
+      return shared;
+    };
+    expect((await share()).url.startsWith("/v/")).toBe(true);
+    hub.state.save({
+      ...hub.state.load(),
+      publicEntrance: { enabled: true, ownFrontOrigin: "https://octant.example.com" },
+    });
+    await hub.visitors.setEnabled(true, window);
+    const whole = await share();
+    expect(whole.published).toBe(true);
+    expect(whole.url.startsWith(`https://octant.example.com/v/${whole.linkId}#k=`)).toBe(true);
+  });
+});
+
 describe("a visitor fetch from a named standby", () => {
   async function family() {
     const { sendAs, ...hosts } = await standbyFamily();

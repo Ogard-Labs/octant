@@ -3019,7 +3019,7 @@ person's work without any service Octant runs (maintainer decision,
   ids, spoke-signed grants, sealed secrets, the delivery queue, and counts.
 - **Outside content.** Visitor text and webhook payloads taint the thread
   they reach and are never instructions or grants.
-- **The front.** Settings › Remote access › Hub and `octant hub public`
+- **The front.** Settings › Public entrance and `octant hub public`
   turn the Funnel switch on, which runs
   `tailscale funnel --bg --https=443 http://127.0.0.1:<port>` through the
   local Tailscale daemon, and off, which runs
@@ -3065,11 +3065,22 @@ visitor sits on the Computer card of the thread's Environment tool, shown
 only for a thread on this computer in a local desktop window and only for a
 kind of thread the visitor-link contract names; it opens a dialog, loaded as
 its own chunk, with the thread's links and the Requests waiting on them.
-The dialog shows a new link as its path, labels it one, offers Copy path, and
-asks the person to put the hub's public address in front of it, as the command
-line does. Sharing publishes the link to the hub this computer joined, and the
-window does not know that hub's public address. A whole link built from this
-computer's own Funnel address would name a host that never receives it.
+Sharing publishes the link to the hub this computer joined. In its answer to a
+spoke's grant list, over the pinned, signed hub link, the acting hub names its
+public origin while its visitor switch and entrance are on, remote access is
+not paused there, and it knows the address (the one typed with `octant hub
+public address`, or Funnel's tailnet name and port), as it names its relay
+address. The spoke keeps it only from the hub it follows, never from a
+standby, and only while Public is ticked. Knowing it, the dialog and the
+command line give the whole `https://<hub address>/v/<id>#k=<secret>` link,
+and the dialog offers Copy link. Without it they show the path, label it one,
+ask the person to put the hub's public address in front of it, and the dialog
+offers Copy path. While the hub cannot be reached, the spoke uses the origin
+that hub last named. The spoke holds that origin in memory only, so after a
+restart it shows the path until the hub answers again; saving it would make an
+older build, which reads the hub state strictly, drop all of it on rollback. A
+whole link is never built from this computer's own Funnel address, which would
+name a host that never receives it.
 A sent request's framed comment stays in the
 dialog even when the links cannot be read again.
 While it is open and the window is shown, the dialog reads the links and
@@ -3081,7 +3092,7 @@ until a read succeeds. A new link, and a sent request's comment, are
 shown once: until the person presses its Done, the window offers no Make link
 or Send that would put another in its place. Stopping the shown link clears
 it.
-Settings › Remote access › Visitor links lists every link and holds the
+Settings › Public entrance › Visitor links lists every link and holds the
 hub's switch. The thread list's menu has no Share item: the main chunk has
 no room for one (`scripts/initial-renderer-budget.json`). A Request card
 inside the transcript itself is not built yet.
@@ -3133,8 +3144,11 @@ inside the transcript itself is not built yet.
   progress means a Chat reply that did not complete (still being written,
   waiting, or stopped for good, since a stopped reply can also end inside a
   secret, so a visitor may miss its last word), a Code
-  thread's newest reply while its turn runs or waits on the person, and a Work
-  reply still held live. The stream asks the spoke again every two seconds and
+  reply whose turn has not completed (the newest one unless its turn's record
+  says completed, and while it runs or waits on the person), and a Work
+  reply still held live. A `Bearer` or `Basic` just before the held word is
+  held back with it, and a credential written after one is replaced with the
+  word, so no part of its value shows. The stream asks the spoke again every two seconds and
   ends when the spoke refuses. Not built yet: step titles and states.
 - **Comments.** On a comment-only link, a visitor's message lands on the
   spoke as a **Request** in the thread with **Send** and **Dismiss**. Only
@@ -3176,7 +3190,7 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   re-arm; a rotate refused for want of Public leaves the old pair working.
   An endpoint id never begins with `-`, so the CLI never reads one as a flag.
   `octant hub webhook create|list|rotate|remove|secret`, the loopback
-  administration routes, and Settings › Remote access › Webhook endpoints
+  administration routes, and Settings › Public entrance › Webhook endpoints
   (with the recent delivery log) do this. While the window shows a new
   secret and the person has not pressed Done, it offers no new endpoint, no
   Stripe secret form, and no rotation of another endpoint, any of which would
@@ -3231,7 +3245,7 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   secret once it has the URL, so a Stripe endpoint starts without one: the
   person adds the URL in Stripe and pastes the secret Stripe shows with
   `octant hub webhook secret <id>`, which reads it from standard input, or in
-  Settings › Remote access › Webhook endpoints, which shows the URL, marks the
+  Settings › Public entrance › Webhook endpoints, which shows the URL, marks the
   endpoint as waiting for its secret, and takes the secret in a masked field
   it empties on send and never shows back. Until
   then the spoke hands the hub nothing for it and it takes no delivery;
@@ -3383,7 +3397,7 @@ between hosts on loopback; what is not built is listed below.
   answers them 501); a relay through a forwarding member or a standing-in
   standby (only the acting hub admits relays, and a forwarding member answers
   the relay route 404). The switch and each host's device list are in
-  Settings › Remote access › Device relay as well as the CLI.
+  Settings › Public entrance › Device relay as well as the CLI.
 - **Phone push is separate.** The relay carries a device's own connection,
   not notifications. The store build of the phone app still gets push through
   the minimal Octant push gateway

@@ -84,6 +84,14 @@ let instanceId: string | undefined;
 const bridgeSecret = randomBytes(32).toString("base64url");
 let stopping: Promise<void> | undefined;
 
+// Electron answers an uncaught exception in a main process with a modal error
+// box, which stops this process's event loop: it then answers no window
+// request and prints nothing. Say what was thrown and exit instead.
+process.on("uncaughtException", (error) => {
+  emit("uncaught-exception", { message: String(error), stack: error.stack?.slice(0, 1_200) });
+  void app.exit(4);
+});
+
 // Electron holds `ready` until a top-level await in an ESM main settles, so
 // the harness starts from a function rather than awaiting at the top level.
 async function main(): Promise<void> {
@@ -217,6 +225,9 @@ async function main(): Promise<void> {
         return;
       }
       if (typeof message.id !== "number") return;
+      // Told apart from a reply: a failed run shows whether a request never
+      // arrived here or arrived and was never answered.
+      emit("native-request", { id: message.id, operation: message.operation });
       const requestId = nextRequest++;
       pending.set(requestId, { socket, id: message.id });
       listener?.({
@@ -314,6 +325,9 @@ async function main(): Promise<void> {
   lifetimeTimer.unref();
   process.once("SIGTERM", () => void shutdown(0));
   process.once("SIGINT", () => void shutdown(0));
+
+  // A gap in these says this process's event loop stopped.
+  setInterval(() => emit("alive"), 5_000).unref();
 
   const commands = createInterface({ input: process.stdin });
   commands.on("close", () => void shutdown(0));

@@ -368,6 +368,30 @@ export type HubVisitorGrantsUpdate = typeof HubVisitorGrantsUpdate.Type;
 export const decodeHubVisitorGrantsUpdate = Schema.decodeUnknownSync(HubVisitorGrantsUpdate);
 
 /**
+ * The hub's own public address as an `https` origin: no path, credentials or
+ * query. A spoke puts a visitor link's path behind it.
+ */
+export const HubPublicOrigin = Schema.String.pipe(
+  Schema.maxLength(300),
+  Schema.pattern(/^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/),
+);
+export type HubPublicOrigin = typeof HubPublicOrigin.Type;
+
+/**
+ * The hub's answer to a spoke's grant list. The acting hub names its public
+ * origin while visitor links and its entrance are on and it knows that
+ * address, so it reaches each spoke over the pinned, signed hub link and never
+ * through the public entrance.
+ */
+export const HubVisitorGrantsReceipt = Schema.Struct({
+  status: Schema.Literal("recorded"),
+  count: Schema.Int.pipe(Schema.nonNegative()),
+  publicOrigin: Schema.optional(HubPublicOrigin),
+});
+export type HubVisitorGrantsReceipt = typeof HubVisitorGrantsReceipt.Type;
+export const decodeHubVisitorGrantsReceipt = Schema.decodeUnknownSync(HubVisitorGrantsReceipt);
+
+/**
  * What a visitor sees of a thread: its title, whether the owner is deciding
  * something, and the messages. Never a tool's input or output, a diff, a file,
  * an attachment, a path, or what an approval asks.

@@ -12,6 +12,7 @@ import type { HubState, HubStatePort } from "./hubStateStore";
 import { publicKeyFingerprint } from "./hubCrypto";
 import {
   SpokeVisitorService,
+  type SpokeVisitorSendOutcome,
   type VisitorThreadRead,
   type VisitorThreadSource,
 } from "./spokeVisitorService";
@@ -70,9 +71,10 @@ function setup(
     thread?: () => VisitorThreadRead;
     granted?: () => boolean;
     paused?: () => boolean;
-    sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<boolean>;
+    sendGrants?: (update: HubVisitorGrantsUpdate) => Promise<SpokeVisitorSendOutcome>;
     hubMemberId?: () => string;
     source?: VisitorThreadSource;
+    state?: HubStatePort;
   } = {},
 ) {
   let now = 1_800_000_000_000;
@@ -81,7 +83,7 @@ function setup(
   const sent: unknown[] = [];
   const key = signer();
   const service = new SpokeVisitorService({
-    state: memoryState(),
+    state: options.state ?? memoryState(),
     publicGranted: options.granted ?? (() => true),
     remoteAccessPaused: options.paused ?? (() => false),
     hub: {
@@ -90,7 +92,7 @@ function setup(
         options.sendGrants ??
         (async (update) => {
           sent.push(update);
-          return true;
+          return { sent: true };
         }),
     },
     signing: () => key,
@@ -198,6 +200,28 @@ describe("a webhook signing secret in a shared Work thread", () => {
   });
 });
 
+describe("a token line followed by an authorization line", () => {
+  it("shows a visitor neither value", async () => {
+    const value = "q8Zr2mVn6TkYp1Ld4Hs9Wc3Bf7Xa5Ge0";
+    const context = setup({
+      thread: () => ({
+        status: "found",
+        title: "Check",
+        archived: false,
+        state: "idle",
+        messages: [{ role: "agent", text: `access_token: Bearer\nAuthorization: ${value}` }],
+      }),
+    });
+    const link = await shared(context);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer.status).toBe("ok");
+    expect(JSON.stringify(answer)).not.toContain(value);
+  });
+});
+
 describe("a secret a Work reply is still writing", () => {
   it("shows a visitor none of it, and redacts it whole once the turn settles", async () => {
     const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
@@ -264,6 +288,53 @@ describe("sharing a thread with a visitor", () => {
     );
     expect(JSON.stringify(update)).not.toContain("thread-1");
     expect(JSON.stringify(update)).not.toContain(link.url.split("#k=")[1]);
+  });
+
+  const FRONT = "https://octant.example.com";
+
+  it("gives a whole link behind the public origin the hub names, else the path alone", async () => {
+    let named: string | undefined;
+    const context = setup({
+      sendGrants: async () => ({
+        sent: true,
+        hub: { memberId: HUB, ...(named === undefined ? {} : { publicOrigin: named }) },
+      }),
+    });
+    const path = await shared(context);
+    expect(path.url.startsWith(`/v/${path.linkId}#k=`)).toBe(true);
+    named = FRONT;
+    const whole = await shared(context);
+    expect(whole.url.startsWith(`${FRONT}/v/${whole.linkId}#k=`)).toBe(true);
+    // The hub naming none again, as with its visitor links turned off, drops it.
+    named = undefined;
+    expect((await shared(context)).url.startsWith("/v/")).toBe(true);
+  });
+
+  it("keeps the followed hub's origin while it cannot be reached, and never another hub's", async () => {
+    let followed = HUB;
+    let reachable = true;
+    const context = setup({
+      hubMemberId: () => followed,
+      sendGrants: async () =>
+        reachable ? { sent: true, hub: { memberId: HUB, publicOrigin: FRONT } } : { sent: false },
+    });
+    await shared(context);
+    reachable = false;
+    expect((await shared(context)).url.startsWith(`${FRONT}/v/`)).toBe(true);
+    followed = "33333333-3333-4333-8333-333333333333";
+    expect((await shared(context)).url.startsWith("/v/")).toBe(true);
+  });
+
+  it("keeps the hub's origin out of the saved state, which an older build reads strictly", async () => {
+    const state = memoryState();
+    const context = setup({
+      state,
+      sendGrants: async () => ({ sent: true, hub: { memberId: HUB, publicOrigin: FRONT } }),
+    });
+    expect((await shared(context)).url.startsWith(`${FRONT}/v/`)).toBe(true);
+    // A rolled-back build refuses the whole hub state over one unknown field.
+    expect(JSON.stringify(state.load())).not.toContain(FRONT);
+    expect(Object.keys(state.load().visitors ?? {}).sort()).toEqual(["comments", "links"]);
   });
 
   it("refuses to share while the Public item is unticked", async () => {
@@ -591,7 +662,7 @@ describe("visitor comments", () => {
         calls += 1;
         if (calls === 1) await new Promise<void>((resolve) => (releaseFirst = resolve));
         sent.push(update.grants.length);
-        return true;
+        return { sent: true };
       },
     });
     const first = context.service.share({ mode: "code", threadId: "thread-1", scope: "read" });
@@ -739,14 +810,15 @@ describe("a secret a Chat or Code reply is still writing", () => {
     "shows a visitor none of it while a Code turn is live (%o), and redacts it whole once settled",
     async (running) => {
       let activity = running;
+      let turnState = "running";
       let reply = partial;
       // Newest first, as the read orders them; an earlier settled reply follows.
       const connection = {
         prepare: () => ({
           all: () => [
-            { content_role: "assistant", body_text: reply },
+            { content_role: "assistant", body_text: reply, turn_state: turnState },
             { content_role: "user", body_text: "Show it" },
-            { content_role: "assistant", body_text: "Ready." },
+            { content_role: "assistant", body_text: "Ready.", turn_state: "completed" },
           ],
         }),
       };
@@ -767,6 +839,7 @@ describe("a secret a Chat or Code reply is still writing", () => {
       });
       expect(JSON.stringify(live)).not.toContain("whsec_");
       activity = { executing: false, awaitingInput: false };
+      turnState = "completed";
       reply = `The secret is ${secret}`;
       expect(context.service.fetch(request, HUB)).toMatchObject({
         projection: {
@@ -775,4 +848,111 @@ describe("a secret a Chat or Code reply is still writing", () => {
       });
     },
   );
+});
+
+describe("a Code reply whose turn has not completed", () => {
+  const partial = "The secret is whsec_5WbX1k";
+
+  const read = async (rows: ReadonlyArray<Record<string, unknown>>) => {
+    projections.code = { title: "Check", lifecycle: "active" };
+    const context = setup({
+      source: visitorThreadSource(
+        () => ({ prepare: () => ({ all: () => rows }) }) as never,
+        // Neither executing nor asking, as a turn whose work reads waiting.
+        () => ({ executing: false, awaitingInput: false }),
+      ),
+    });
+    const link = await context.service.share({
+      mode: "code",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    return JSON.stringify(answer);
+  };
+
+  it.each(["running", "waiting", "ambiguous", "interrupted", "failed", null])(
+    "holds back the newest reply's last unfinished word (%s)",
+    async (state) => {
+      const answer = await read([
+        { content_role: "assistant", body_text: partial, turn_state: state },
+        { content_role: "user", body_text: "Show it", turn_state: state },
+      ]);
+      expect(answer).toContain("The secret is ");
+      expect(answer).not.toContain("whsec_");
+    },
+  );
+
+  it("holds it back in an older reply whose turn stopped, and shows a completed one whole", async () => {
+    const answer = await read([
+      { content_role: "assistant", body_text: "All done.", turn_state: "completed" },
+      { content_role: "assistant", body_text: partial, turn_state: "interrupted" },
+      { content_role: "assistant", body_text: "Earlier words.", turn_state: null },
+    ]);
+    expect(answer).toContain("All done.");
+    expect(answer).toContain("Earlier words.");
+    expect(answer).not.toContain("whsec_");
+  });
+});
+
+describe("a header or scheme keyword in a reply still being written", () => {
+  const token = "q8Zr2mVn6TkYp1Ld4Hs9Wc3Bf7Xa5Ge0";
+
+  const shown = async (live: string) => {
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: "Check", lifecycle: "active" }),
+          turns: () => [
+            {
+              requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+              turnId: "turn-1",
+              status: "running",
+              transcript: [],
+            },
+          ],
+          liveReplyText: () => live,
+          activity: () => ({ executing: true, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    return JSON.stringify(answer);
+  };
+
+  it.each([
+    "Send Authorization: Bearer ",
+    "Send authorization:\nBearer\n",
+    "Send access_token: Bearer ",
+    "Send token = Basic ",
+    "Send Bearer ",
+    "Send Basic ",
+  ])("shows no part of the token after %j, however far it has streamed", async (lead) => {
+    for (const length of [1, 12, 19, 20, token.length]) {
+      for (const tail of ["", " then"]) {
+        // Once the word is finished only a credential's shape hides it: a
+        // bare `Basic` value or a short word after a bare scheme has none.
+        if (tail !== "" && (length < 20 || lead === "Send Basic ")) continue;
+        const answer = await shown(`${lead}${token.slice(0, length)}${tail}`);
+        expect(answer).not.toContain(token.slice(0, Math.min(length, 6)));
+      }
+    }
+  });
 });
