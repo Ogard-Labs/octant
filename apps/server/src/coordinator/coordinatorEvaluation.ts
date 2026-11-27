@@ -117,23 +117,32 @@ export function score(
 }
 
 function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boolean {
-  const recap = answer.toLowerCase();
-  const mentions: Array<{ title: string; at: number; end: number }> = [];
+  const workers: Array<{ title: string; reference: string }> = [];
   for (const { title, startedReference } of starts) {
-    if (!title?.trim() || startedReference === undefined) return false;
-    const at = recap.indexOf(startedReference);
-    if (at < 0) return false;
-    mentions.push({ title: title.toLowerCase(), at, end: at + startedReference.length });
+    if (!title?.trim() || !startedReference) return false;
+    workers.push({ title: title.toLowerCase(), reference: startedReference });
   }
-  mentions.sort((left, right) => left.at - right.at);
-  // Each reference belongs with its own title, whether the recap puts the
-  // label first (including Markdown links) or begins each entry with the reference.
-  return (
-    mentions.every((entry, i) =>
-      recap.slice(mentions[i - 1]?.end ?? 0, entry.at).includes(entry.title),
-    ) ||
-    mentions.every((entry, i) => recap.slice(entry.end, mentions[i + 1]?.at).includes(entry.title))
-  );
+
+  const paired = new Set<string>();
+  // A recap can repeat references in its introduction. Match within each
+  // line so titles cannot cross list entries, and keep inline lists working.
+  for (const line of answer.toLowerCase().split("\n")) {
+    const mentions = workers
+      .flatMap(({ title, reference }) => {
+        const at = line.indexOf(reference);
+        return at < 0 ? [] : [{ title, reference, at, end: at + reference.length }];
+      })
+      .sort((left, right) => left.at - right.at);
+    if (
+      mentions.every((entry, i) =>
+        line.slice(mentions[i - 1]?.end ?? 0, entry.at).includes(entry.title),
+      ) ||
+      mentions.every((entry, i) => line.slice(entry.end, mentions[i + 1]?.at).includes(entry.title))
+    ) {
+      for (const { reference } of mentions) paired.add(reference);
+    }
+  }
+  return workers.every(({ reference }) => paired.has(reference));
 }
 
 export type Sample =
