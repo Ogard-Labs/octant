@@ -65,8 +65,10 @@ it("requires the Project conversation to name and link each confirmed worker", (
         actions,
         [
           "- **CSV parser**",
+          "  Feeds the changelog generator.",
           "  Reference: parser@project",
           "- **Changelog**",
+          "  Documents the CSV parser change.",
           "  Reference: changelog@project",
         ].join("\n"),
       ),
@@ -110,8 +112,10 @@ it("requires the Project conversation to name and link each confirmed worker", (
       actions,
       [
         "- **CSV parser**",
+        "  Feeds the changelog generator.",
         "  Reference: changelog@project",
         "- **Changelog**",
+        "  Documents the CSV parser change.",
         "  Reference: parser@project",
       ].join("\n"),
     ),

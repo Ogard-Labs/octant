@@ -136,18 +136,20 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     if (!line.trim()) continue;
     const previous = entries.at(-1);
     const startsItem = /^\s*(?:[-+*]|\d+[.)]|#{1,6})\s/.test(line);
-    const continuesItem = /^[ \t]+\S|^(?:worker|reference)\s*:/.test(line);
-    if (
-      previous &&
-      !startsItem &&
-      continuesItem &&
-      !(hasReference(previous) && hasReference(line)) &&
-      !(hasTitle(previous) && hasTitle(line))
-    ) {
-      entries[entries.length - 1] = `${previous} ${line.trimStart()}`;
-    } else {
-      entries.push(line);
+    const labeled = /^\s*(?:worker|reference)\s*:/.test(line);
+    if (previous && !startsItem && (labeled || /^[ \t]/.test(line))) {
+      const previousHasReference = hasReference(previous);
+      const lineHasReference = hasReference(line);
+      const previousHasTitle = hasTitle(previous);
+      // Descriptions can name dependencies. Keep the heading as the worker
+      // name while waiting for the reference belonging to this item.
+      if (previousHasTitle && !previousHasReference && !lineHasReference && !labeled) continue;
+      if (!(previousHasReference && lineHasReference) && !(previousHasTitle && hasTitle(line))) {
+        entries[entries.length - 1] = `${previous} ${line.trimStart()}`;
+        continue;
+      }
     }
+    entries.push(line);
   }
 
   const paired = new Set<string>();
