@@ -8,7 +8,8 @@ export function shouldSuppressAutoUnlockAfterPrompt(promptInFlight: boolean): bo
   return promptInFlight;
 }
 
-export type UnlockAppState = "active" | "background" | "inactive" | "unknown" | "extension" | null;
+/** React Native types its state as a plain string; null means it is not known. */
+export type UnlockAppState = string | null;
 
 export function shouldPreserveVaultForAppState(input: {
   readonly nextState: UnlockAppState;

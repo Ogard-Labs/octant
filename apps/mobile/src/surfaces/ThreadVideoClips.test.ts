@@ -6,13 +6,15 @@ import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../design-system/theme";
 import { ThreadVideoClips } from "./ThreadVideoClips";
 
-const { cache, remove, pickDirectory, copy, mobile, native } = vi.hoisted(() => ({
+const { cache, remove, pickDirectory, copy, mobile, native, opened } = vi.hoisted(() => ({
   cache: vi.fn(),
   remove: vi.fn(),
   pickDirectory: vi.fn(),
   copy: vi.fn(),
   mobile: { platform: "android" },
   native: { pick: vi.fn(), copy: vi.fn(), discard: vi.fn() },
+  // The players the screen set up, after its own setup ran on each.
+  opened: [] as Array<{ status: string; audioMixingMode?: string }>,
 }));
 vi.mock("expo-file-system", () => ({ Directory: { pickDirectoryAsync: pickDirectory } }));
 vi.mock("./videoClipCache", () => ({ cacheVideoClip: cache }));
@@ -30,7 +32,12 @@ vi.mock("expo", () => ({
   requireOptionalNativeModule: () => native,
 }));
 vi.mock("expo-video", () => ({
-  useVideoPlayer: () => ({ status: "readyToPlay" }),
+  useVideoPlayer: (_source: string, setup?: (player: { audioMixingMode?: string }) => void) => {
+    const player: { status: string; audioMixingMode?: string } = { status: "readyToPlay" };
+    setup?.(player);
+    opened.push(player);
+    return player;
+  },
   VideoView: () => createElement("div", { "data-testid": "video-playing" }),
 }));
 vi.mock("../../design-system", async () => ({
@@ -115,6 +122,8 @@ async function verifySave(platform: string) {
     await act(async () => node.querySelector<HTMLElement>('[aria-label="Open video"]')?.click());
     const player = playing();
     expect(player).not.toBeNull();
+    // On iOS a clip takes over from other apps' audio, as it did before SDK 58.
+    expect(opened.at(-1)?.audioMixingMode).toBe(platform === "ios" ? "doNotMix" : undefined);
     const save = () => node.querySelector<HTMLElement>('[aria-label="Save video"]');
     await act(async () => save()?.click());
     expect(pick).toHaveBeenCalledOnce();

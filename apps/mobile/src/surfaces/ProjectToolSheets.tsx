@@ -4,6 +4,7 @@ import {
   Image,
   Pressable,
   ScrollView,
+  type ScrollViewInstance,
   StyleSheet,
   Text,
   TextInput,
@@ -70,7 +71,7 @@ export function ProjectTerminalSheet(props: ProjectTerminalSheetProps) {
   const [output, setOutput] = useState("");
   const [line, setLine] = useState("");
   const [note, setNote] = useState<string>();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // Which open of the sheet a start belongs to: a shell that finishes starting
   // after the sheet closed is stopped, not adopted.
   const generation = useRef(0);
