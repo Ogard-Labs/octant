@@ -35,3 +35,21 @@ export function queuedMessageRows(
     };
   });
 }
+
+/**
+ * Exposes queue mutation callbacks only when the phone may change this thread
+ * right now; a read-only pairing, offline demo, or stale host omits them so
+ * the queue renders read-only.
+ */
+export function threadQueueActions<T>(
+  input: {
+    readonly offlineDemo: boolean;
+    readonly composerEditable: boolean;
+    readonly allowProductMutations: boolean;
+  },
+  callbacks: T,
+): T | undefined {
+  return !input.offlineDemo && input.composerEditable && input.allowProductMutations
+    ? callbacks
+    : undefined;
+}

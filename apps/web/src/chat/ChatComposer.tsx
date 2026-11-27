@@ -141,7 +141,9 @@ export interface ChatComposerProps {
    * Takes a chosen, dropped or pasted file and reports whether Chat accepted
    * it or refused it with a reason.
    */
-  readonly onFileSelected: (file: File) => void | Promise<ChatFileSelectionResult>;
+  readonly onFileSelected: (
+    file: File,
+  ) => ChatFileSelectionResult | Promise<ChatFileSelectionResult>;
   readonly onModelChange: (modelId: string) => void;
   readonly onProviderChange: (providerId: string) => void;
   readonly onResearchEnabledChange: (enabled: boolean) => void;
@@ -651,7 +653,9 @@ export function ChatComposer(props: ChatComposerProps) {
               const answer = props.onFileSelected(file);
               return answer instanceof Promise
                 ? answer.then((result) => (result.status === "refused" ? result.reason : undefined))
-                : undefined;
+                : answer.status === "refused"
+                  ? answer.reason
+                  : undefined;
             }
       }
       inlineChips={mention.inlineChips}

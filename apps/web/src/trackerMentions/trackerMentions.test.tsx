@@ -74,7 +74,7 @@ function Composer(props: {
         setDraft(next);
         props.onDraft(next);
       }}
-      onFileSelected={vi.fn()}
+      onFileSelected={vi.fn(() => ({ status: "accepted" as const }))}
       onModelChange={vi.fn()}
       onProviderChange={vi.fn()}
       onResearchEnabledChange={vi.fn()}

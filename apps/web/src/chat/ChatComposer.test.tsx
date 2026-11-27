@@ -34,7 +34,7 @@ function renderComposer(
       value: "model-a",
     },
     onDraftChange: vi.fn(),
-    onFileSelected: vi.fn(),
+    onFileSelected: vi.fn(() => ({ status: "accepted" as const })),
     onModelChange: vi.fn(),
     onProviderChange: vi.fn(),
     onResearchEnabledChange: vi.fn(),
@@ -120,7 +120,7 @@ describe("ChatComposer", () => {
         isSending: false,
         model: { options: [{ id: "model-a", label: "Model A" }], value: "model-a" },
         onDraftChange,
-        onFileSelected: vi.fn(),
+        onFileSelected: vi.fn(() => ({ status: "accepted" as const })),
         onModelChange: vi.fn(),
         onProviderChange: vi.fn(),
         onResearchEnabledChange: vi.fn(),
@@ -345,7 +345,7 @@ describe("ChatComposer", () => {
 
   it("passes only the chosen File to the attachment callback and explains unsupported attachments", async () => {
     const user = userEvent.setup();
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     renderComposer({
       attachment: { kind: "unavailable", reason: "The selected model cannot accept attachments." },
       onFileSelected,
@@ -377,7 +377,7 @@ describe("ChatComposer", () => {
 
   it("forwards the selected File without reading or exposing a file path", async () => {
     const user = userEvent.setup();
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     renderComposer({ onFileSelected });
 
     const file = new File(["image"], "diagram.png", { type: "image/png" });
@@ -698,7 +698,7 @@ function SlashHarness(props: {
         {...(props.onCaretIndexChange === undefined
           ? {}
           : { onCaretIndexChange: props.onCaretIndexChange })}
-        onFileSelected={vi.fn()}
+        onFileSelected={vi.fn(() => ({ status: "accepted" as const }))}
         onModelChange={vi.fn()}
         onProviderChange={vi.fn()}
         onResearchEnabledChange={vi.fn()}

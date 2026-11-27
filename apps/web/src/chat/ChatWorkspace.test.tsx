@@ -2904,7 +2904,18 @@ describe("ChatWorkspace", () => {
   });
 
   it("fills the prompt with a pointer line after a whole-prompt large paste uploads in Chat", async () => {
-    const upload = vi.fn<ChatController["upload"]>(controllerFixture().upload);
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
+    );
     function Harness() {
       const [draft, setDraft] = useState("");
       return (
