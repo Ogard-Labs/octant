@@ -1,11 +1,13 @@
 /**
  * Text shaped like a credential: a bearer header, a key or token assignment,
- * or a provider's own key prefix. It is replaced before provider-composed text
+ * a provider's own key prefix, or a webhook signing secret (Stripe's and
+ * Standard Webhooks' `whsec_`, and the latter's private `whsk_`), whose
+ * base64 may end in `=`. It is replaced before provider-composed text
  * crosses into anything Octant shows, keeps, or sends on, as the
  * provider-neutral floor under each runtime's own redaction.
  */
 export const SECRET_SHAPED =
-  /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
+  /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b|\bwh(?:sec|sk)_[A-Za-z0-9+/=_-]{16,})/gi;
 
 /** A private key's armoured block, closed or running to the end of the text. */
 const PRIVATE_KEY_BLOCK =

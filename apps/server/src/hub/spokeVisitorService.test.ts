@@ -136,6 +136,54 @@ const fetchOf = (
   ...extra,
 });
 
+describe("a webhook signing secret in a shared Work thread", () => {
+  it("reaches a visitor redacted", async () => {
+    const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";
+    const context = setup({
+      source: visitorThreadSource(
+        () => {
+          throw new Error("A Work read uses no database.");
+        },
+        () => ({}),
+        {
+          thread: () => ({ title: `Check ${secret}`, lifecycle: "active" }),
+          turns: () => [
+            {
+              turnId: "turn-1",
+              status: "completed",
+              transcript: [
+                { role: "user", text: `Verify events with ${secret}` },
+                { role: "assistant", text: `I will use ${secret}.` },
+              ],
+            },
+          ],
+          activity: () => ({ executing: false, awaitingInput: false }),
+        },
+      ),
+    });
+    const link = await context.service.share({
+      mode: "work",
+      threadId: "11111111-1111-4111-8111-111111111111",
+      scope: "read",
+    });
+    if (link.status !== "shared") throw new Error(link.kind);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer).toMatchObject({
+      status: "ok",
+      projection: {
+        title: "Check [redacted]",
+        messages: [
+          { role: "person", text: "Verify events with [redacted]" },
+          { role: "agent", text: "I will use [redacted]." },
+        ],
+      },
+    });
+  });
+});
+
 describe("sharing a thread with a visitor", () => {
   it("signs the grant with this host's key and hands the hub only the grant", async () => {
     const context = setup();
