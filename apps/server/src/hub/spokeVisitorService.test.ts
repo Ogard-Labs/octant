@@ -692,6 +692,61 @@ describe("a secret a Chat or Code reply is still writing", () => {
     },
   );
 
+  it("shows a Chat reply whole once its usage-limit stop is superseded or released", async () => {
+    const turn = (id: string, outcome: string, reply: string, usageLimit: boolean) => ({
+      id,
+      userMessageRef: { contentId: `${id}-asked` },
+      attempts: [
+        {
+          id: `${id}-attempt`,
+          outcome,
+          ...(usageLimit ? { usageLimit: { resetsAt: 0 } } : {}),
+          responseRefs: [{ contentId: `${id}-reply` }],
+        },
+      ],
+    });
+    const chat = (
+      thread: Record<string, unknown>,
+      turns: ReadonlyArray<ReturnType<typeof turn>>,
+    ) => ({
+      thread: { title: "Check", lifecycle: "active", ...thread },
+      contents: turns.flatMap((entry, index) => [
+        { contentId: `${entry.id}-asked`, role: "user", body: "Go on" },
+        {
+          contentId: `${entry.id}-reply`,
+          role: "assistant",
+          body: index === 0 ? "The failing check is lint" : "Fixed",
+        },
+      ]),
+      turns,
+    });
+    const context = setup({
+      source: visitorThreadSource(
+        () => ({}) as never,
+        () => ({}),
+      ),
+    });
+    const request = await opened(context, "chat");
+
+    projections.chat = chat({}, [
+      turn("turn-1", "waiting", "", true),
+      turn("turn-2", "completed", "", false),
+    ]);
+    expect(JSON.stringify(context.service.fetch(request, HUB))).toContain(
+      "The failing check is lint",
+    );
+
+    projections.chat = chat({ releasedStopId: "turn-1-attempt" }, [
+      turn("turn-1", "waiting", "", true),
+    ]);
+    expect(JSON.stringify(context.service.fetch(request, HUB))).toContain(
+      "The failing check is lint",
+    );
+
+    projections.chat = chat({}, [turn("turn-1", "waiting", "", true)]);
+    expect(JSON.stringify(context.service.fetch(request, HUB))).not.toContain("lint");
+  });
+
   it.each([
     { executing: true, awaitingInput: false },
     { executing: false, awaitingInput: true },

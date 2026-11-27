@@ -259,7 +259,10 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
   };
   const messages: Message[] = [];
   const turns = activeChatTurns(view.turns);
-  for (const turn of turns) {
+  const lastAttempt = turns.at(-1)?.attempts.at(-1);
+  const lastAttemptId = lastAttempt === undefined ? undefined : String(lastAttempt.id);
+  const lastStopReleased = parkedStopReleased(view.thread, lastAttemptId);
+  for (const [index, turn] of turns.entries()) {
     const asked = textOf(String(turn.userMessageRef.contentId), "user");
     if (asked !== undefined) messages.push({ role: "person", text: asked });
     const latest = turn.attempts.at(-1);
@@ -267,16 +270,17 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
       .map((ref) => textOf(String(ref.contentId), "assistant"))
       .filter((text): text is string => text !== undefined)
       .join("");
-    // A waiting attempt can resume and go on writing the same reply.
+    // A waiting attempt can resume and go on writing the same reply, except a
+    // usage-limit stop that a newer turn superseded or an account move
+    // released: that one never writes again, so its reply is shown whole.
     const unfinished =
       latest?.outcome === "queued" ||
       latest?.outcome === "streaming" ||
-      latest?.outcome === "waiting";
+      (latest?.outcome === "waiting" &&
+        (latest.usageLimit === undefined || (index === turns.length - 1 && !lastStopReleased)));
     const shown = unfinished ? finishedWords(reply) : reply;
     if (shown.trim() !== "") messages.push({ role: "agent", text: shown });
   }
-  const lastAttempt = turns.at(-1)?.attempts.at(-1);
-  const lastAttemptId = lastAttempt === undefined ? undefined : String(lastAttempt.id);
   return {
     status: "found",
     title: view.thread.title,
@@ -288,7 +292,7 @@ function readChat(connection: SqliteConnection, threadId: string): VisitorThread
           ? undefined
           : { outcome: attempt.outcome, usageLimitStop: attempt.usageLimit !== undefined };
       }),
-      parkedStopReleased(view.thread, lastAttemptId),
+      lastStopReleased,
     ),
     messages: messages.slice(-MAX_MESSAGES),
   };
