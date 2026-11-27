@@ -1297,22 +1297,13 @@ export class GitMutationPort {
     );
     if (listed.exitCode !== 0) return undefined;
     const tracked = await this.#run(
-      ["-C", checkoutRoot, "ls-files", "-s", "-z"],
+      ["-C", checkoutRoot, "ls-files", "-z"],
       signal,
       undefined,
       executionPolicy,
     );
     if (tracked.exitCode !== 0) return undefined;
-    const indexed = new Set<string>();
-    const gitlinks = new Set<string>();
-    for (const record of splitNulPaths(tracked.stdout)) {
-      const tab = record.indexOf("\t");
-      const space = record.indexOf(" ");
-      if (tab === -1 || space === -1) return undefined;
-      const entryPath = record.slice(tab + 1);
-      indexed.add(entryPath);
-      if (record.slice(0, space) === "160000") gitlinks.add(entryPath);
-    }
+    const indexed = new Set(splitNulPaths(tracked.stdout));
     // A path the checkout still tracks cannot be the case at issue: Git does not
     // ignore tracked paths, and a restore writing over one is exactly what the
     // undo point covers. Only a path that has left the index can be ignored now,
@@ -1323,7 +1314,32 @@ export class GitMutationPort {
       // A path strictly below a submodule gitlink (mode 160000) is not
       // captured by the superproject's `git add -A` undo point; refuse
       // fail-closed so local edits inside the submodule are never overwritten.
-      if (hasGitlinkAncestor(path, gitlinks)) return undefined;
+      // Check modes only for ancestors that already appear as index entries so
+      // `ls-files -z` stays path-only and bounded on large repositories.
+      const matchedAncestors = indexedAncestors(path, indexed);
+      if (matchedAncestors.length > 0) {
+        const ancestorModes = await this.#run(
+          [
+            "-C",
+            checkoutRoot,
+            "--literal-pathspecs",
+            "ls-files",
+            "-s",
+            "-z",
+            "--",
+            ...matchedAncestors,
+          ],
+          signal,
+          undefined,
+          executionPolicy,
+        );
+        if (ancestorModes.exitCode !== 0) return undefined;
+        for (const record of splitNulPaths(ancestorModes.stdout)) {
+          const space = record.indexOf(" ");
+          if (space === -1) return undefined;
+          if (record.slice(0, space) === "160000") return undefined;
+        }
+      }
       let isDirectory = false;
       try {
         isDirectory = (await lstat(join(checkoutRoot, path))).isDirectory();
@@ -1916,12 +1932,13 @@ function asPlainPath(path: string): string {
   return path.startsWith(":") ? `./${path}` : path;
 }
 
-function hasGitlinkAncestor(path: string, gitlinks: ReadonlySet<string>): boolean {
-  if (gitlinks.size === 0) return false;
+function indexedAncestors(path: string, indexed: ReadonlySet<string>): ReadonlyArray<string> {
+  const matched: string[] = [];
   let slash = path.indexOf("/");
   while (slash !== -1) {
-    if (gitlinks.has(path.slice(0, slash))) return true;
+    const prefix = path.slice(0, slash);
+    if (indexed.has(prefix)) matched.push(prefix);
     slash = path.indexOf("/", slash + 1);
   }
-  return false;
+  return matched;
 }
