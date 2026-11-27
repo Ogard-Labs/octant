@@ -313,6 +313,33 @@ describe("what the person did not ask for", () => {
     }
   });
 
+  it("turns an owed Funnel off once when the same resume also finds its port taken", async () => {
+    let failOff = false;
+    let now = 1_000_000;
+    const { service, calls, pause } = setup({ failFunnelOff: () => failOff, now: () => now });
+    await service.setEnabled(true, WINDOW);
+    await service.setFunnel({ enabled: true }, WINDOW);
+    const saved = service.status().port;
+    failOff = true;
+    await pause(true);
+    expect(service.status().funnel).toEqual({ enabled: true, port: 443 });
+    const squatter = createServer((_request, response) => response.end("someone else"));
+    await new Promise<void>((resolve) => squatter.listen(saved, "127.0.0.1", () => resolve()));
+    try {
+      failOff = false;
+      calls.length = 0;
+      now += 60_000;
+      await pause(false);
+      expect(calls.filter((args) => args.at(-1) === "off")).toEqual([
+        ["funnel", "--https=443", "off"],
+      ]);
+      expect(service.status()).toMatchObject({ listening: true, funnel: { enabled: false } });
+      expect(service.status().port).not.toBe(saved);
+    } finally {
+      await new Promise<void>((resolve) => squatter.close(() => resolve()));
+    }
+  });
+
   it("stays closed once the host stops, whatever a later look finds", async () => {
     const { service } = setup();
     await service.setEnabled(true, WINDOW);
