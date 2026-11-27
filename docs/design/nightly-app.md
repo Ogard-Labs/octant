@@ -52,9 +52,9 @@ Since 2026-11-27 Nightly works on its own data by default on macOS and Linux
 ([Nightly's own data](#nightlys-own-data)): it runs that host whenever no Data
 choice is stored, and Octant's data through Octant's host is the opt-in. A
 Nightly set to Octant's data whose Octant is missing or too old offers to
-switch to its own data from its startup window. Importing Octant's history,
-settings and keys into Nightly's own data, and merging Octant's newer work on
-a later import, are designed, not built.
+switch to its own data from its startup window.
+[Importing from Octant](#importing-from-octant) and merging on a later import
+are designed, not built.
 
 Every desktop channel now has a class in Nightly's client mode, and Octant-only
 administration is absent from a Nightly client window
@@ -238,6 +238,58 @@ Nightly runs a host of its own on data that is never Octant's:
   legacy re-scoping can never claim one for Nightly's own data.
 - Removal moves only the fixed folder to the Trash, refuses while Nightly's
   own host runs, and refuses a linked folder.
+
+## Importing from Octant
+
+Nightly can bring Octant's work into its own data, and bring it again later
+(maintainer decisions, 2026-11-27). Status: designed, not built.
+
+- **What comes over.** Threads in every mode with their content and files,
+  Projects, instructions, settings and the window preferences on a fixed
+  allowlist (keybindings, model favorites and recent choices, editor and
+  layout choices). Keys and other saved secrets come over only when the person
+  ticks "Copy keys" in the confirmation; macOS may then ask once per item, and
+  each is saved under Nightly's own Keychain names without replacing one
+  Nightly already has. Public share-link secrets never come over, so the two
+  hosts never both control one public link.
+- **What stays behind.** Everything that belongs to Octant's host: its
+  identity, private listener and certificates, paired devices and push
+  registrations, hub membership, artifact sync membership, service and owner
+  records, logs, caches and health samples.
+- **Octant's data is only read.** Nightly opens Octant's store read-only and
+  writes a self-contained copy (`VACUUM INTO`) into its own folder, which is
+  safe while Octant runs. SQLite's own shared-memory file `octant.sqlite3-shm`
+  is the only file in Octant's folder this may touch. A store that a newer
+  host migrated than Nightly's refuses as "Octant is newer than this Nightly".
+- **Nightly's host is stopped while it imports.** The import runs as a
+  maintenance step under Nightly's owner lock, builds the merged store in a
+  copy, rebuilds and verifies every projection, and only then swaps it in. A
+  failure at any step leaves Nightly's data as it was; a backup of Nightly's
+  store is taken first.
+- **Later imports merge.** Each import records how far it read Octant's
+  journal and where Nightly's journal stood. A later import brings over what
+  Octant added since: new threads and turns, and changes to settings and
+  Projects Nightly left alone. Work done only in Nightly stays. A thread both
+  apps changed since the last import arrives as a second copy beside
+  Nightly's, and a later import continues that copy. A setting or Project both
+  changed keeps Nightly's value, and the summary lists it. Deleting something
+  in either app never deletes it in the other. Comparisons use journal
+  positions and event ids, never aggregate versions, because compaction
+  renumbers versions.
+- **Work in flight arrives settled.** Queued messages, pending approvals,
+  restart continuations and coordinator wakes arrive settled as interrupted;
+  wake-ups arrive missed, and automations and goal loops arrive paused, so
+  nothing imported runs until the person starts it.
+- **Code checkouts stay Octant's.** Nightly never removes a worktree folder
+  that came from Octant: reclaim, archive cleanup and purge refuse it.
+  Continuing an imported Code thread in Nightly first gives it its own branch
+  and worktree, made from the thread's current branch, so the two apps never
+  run turns in one checkout. Uncommitted changes in Octant's folder do not come
+  over, and the thread says so.
+- **Where it starts.** Settings › Updates › Data offers "Import from Octant"
+  while Nightly runs on its own data and Octant's data folder exists, with the
+  time of the last import. The renderer only asks; Nightly's main process
+  resolves both fixed folders, and no request names a path.
 
 ## Starting a closed Stable host
 
