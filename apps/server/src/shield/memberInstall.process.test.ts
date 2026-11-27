@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   readlinkSync,
   rmSync,
   writeFileSync,
@@ -68,7 +69,9 @@ afterEach(() => {
 });
 
 function scratchDirectory(): string {
-  const scratch = mkdtempSync(join(tmpdir(), "octant-member-install-"));
+  // Resolved, since macOS reaches its temporary folder through a link and the
+  // server reports and confirms the resolved data folder.
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "octant-member-install-")));
   scratches.push(scratch);
   return scratch;
 }
