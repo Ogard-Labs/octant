@@ -458,6 +458,7 @@ export default function HubWebhooksSection(props: {
               </div>
               <form
                 className="settings-panel__stack"
+                noValidate
                 onSubmit={(event) => {
                   event.preventDefault();
                   void saveSecret();
