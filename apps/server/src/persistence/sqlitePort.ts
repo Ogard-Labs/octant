@@ -28,6 +28,8 @@ export interface SqliteConnection {
  */
 export interface ReadOnlySqliteConnection {
   all(sql: string): ReadonlyArray<unknown>;
+  /** Runs a statement that returns no rows, such as `VACUUM INTO` a new file. */
+  exec(sql: string): void;
   close(): void;
 }
 

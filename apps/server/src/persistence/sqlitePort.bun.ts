@@ -66,6 +66,7 @@ export function openBunSqliteReadOnly(path: string): ReadOnlySqliteConnection {
   const database = new Database(path, { readonly: true });
   return {
     all: (sql) => database.query(sql).all(),
+    exec: (sql) => database.exec(sql),
     close: () => database.close(true),
   };
 }

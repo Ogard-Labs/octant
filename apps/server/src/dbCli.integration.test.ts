@@ -61,6 +61,55 @@ describe("database CLI runtime composition", () => {
     }
   });
 
+  it("refuses an import from Octant while Nightly's host owns its store", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-db-cli-import-busy-"));
+    directories.push(directory);
+    const octant = mkdtempSync(join(tmpdir(), "octant-db-cli-import-source-"));
+    directories.push(octant);
+    const paths = resolveHostRuntimePaths({
+      env: { OCTANT_DATA_DIR: directory },
+      platform: process.platform === "win32" ? "linux" : process.platform,
+      home: directory,
+      temporaryDirectory: realpathSync(tmpdir()),
+      uid: process.getuid?.() ?? 1000,
+    });
+    await prepareHostRuntimePaths(paths);
+    const owner = await acquireHostRuntimeOwner({
+      paths,
+      hostId: deriveHostRuntimeHostId(paths.dataDirectory),
+      instanceId: "55555555-5555-4555-8555-555555555555",
+      serverVersion: "0.0.0-test",
+      wireVersion: "1",
+      serviceMode: "foreground",
+      processStart: "test-owner",
+    });
+    if (owner.kind !== "owner") throw new Error("expected test owner");
+    try {
+      const result = await runCliAsync(directory, "import-octant", "--from", octant);
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toEqual({ kind: "refused", reason: "busy" });
+      expect(existsSync(join(directory, "octant.sqlite3"))).toBe(false);
+    } finally {
+      await owner.release();
+    }
+  });
+
+  it("imports Octant's store into the selected data folder from the maintenance entry", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-db-cli-import-"));
+    directories.push(directory);
+    const octant = mkdtempSync(join(tmpdir(), "octant-db-cli-import-source-"));
+    directories.push(octant);
+    const source = openSqlite(join(octant, "octant.sqlite3"));
+    applyMigrations(source, MIGRATIONS, () => now);
+    source.close();
+
+    const result = runCli(directory, "import-octant", "--from", octant);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ kind: "imported", conflicts: [] });
+    expect(existsSync(join(directory, "octant.sqlite3"))).toBe(true);
+  });
+
   it("routes online backup through a live owner and refuses online restore", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-db-cli-online-"));
     directories.push(directory);
