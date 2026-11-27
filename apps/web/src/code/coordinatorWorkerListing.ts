@@ -36,16 +36,22 @@ export function workerListingFor(
 /**
  * The Code rows the sidebar lists. With Show workers off for a worker's
  * Project, the worker is left out of the list, under its coordinator and among
- * the other threads alike, and its coordinator row carries how many of the
- * hidden workers are working and how many need the person, so the row's counts
- * still cover every request (docs/design/workspace.md#coordinators). A worker
+ * the other threads alike. A coordinator row carries its hidden worker
+ * counts, or the Project row carries them for a bound conversation. A worker
  * whose coordinator is not listed stays an ordinary row. Needs you, Inbox and
  * search read the full list, never this one.
  */
 export function sidebarThreadsWithWorkers(
   threads: ReadonlyArray<ChatThreadNavigationItem>,
   settings: Parameters<typeof workerListingFor>[0],
-): ReadonlyArray<ChatThreadNavigationItem> {
+  projectConversationIds: ReadonlyArray<string> = [],
+): {
+  readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+  readonly hiddenProjectWorkers: ReadonlyMap<
+    string,
+    NonNullable<ChatThreadNavigationItem["hiddenWorkers"]>
+  >;
+} {
   // Only a coordinator the Project tree lists can hold its workers: a put-away
   // coordinator sits on the Put away shelf, and its unfinished workers stay
   // ordinary Project rows, as the workspace specification keeps them.
@@ -54,7 +60,10 @@ export function sidebarThreadsWithWorkers(
       .filter((thread) => thread.coordinator === true && thread.shelf !== "completed")
       .map((thread) => thread.threadId),
   );
-  if (coordinatorIds.size === 0) return threads;
+  const conversations = new Set(projectConversationIds);
+  for (const id of conversations) coordinatorIds.add(id);
+  const hiddenProjectWorkers = new Map<string, { working: number; attention: number }>();
+  if (coordinatorIds.size === 0) return { threads, hiddenProjectWorkers };
   const hidden = new Map<string, { working: number; attention: number }>();
   const listed: ChatThreadNavigationItem[] = [];
   for (const thread of threads) {
@@ -68,15 +77,24 @@ export function sidebarThreadsWithWorkers(
       listed.push(thread);
       continue;
     }
-    const counts = hidden.get(coordinatorId) ?? { working: 0, attention: 0 };
+    const projectConversation = conversations.has(coordinatorId);
+    const countsOwner = projectConversation ? thread.projectId : coordinatorId;
+    const countsByOwner = projectConversation ? hiddenProjectWorkers : hidden;
+    if (countsOwner === undefined) continue;
+    const counts = countsByOwner.get(countsOwner) ?? { working: 0, attention: 0 };
     const facts = threadRowStatusInput(thread);
     if (facts.working) counts.working += 1;
     if (facts.attention) counts.attention += 1;
-    hidden.set(coordinatorId, counts);
+    countsByOwner.set(countsOwner, counts);
   }
-  if (hidden.size === 0) return threads;
-  return listed.map((thread) => {
-    const counts = hidden.get(thread.threadId);
-    return counts === undefined ? thread : { ...thread, hiddenWorkers: counts };
-  });
+  return {
+    threads:
+      listed.length === threads.length
+        ? threads
+        : listed.map((thread) => {
+            const counts = hidden.get(thread.threadId);
+            return counts === undefined ? thread : { ...thread, hiddenWorkers: counts };
+          }),
+    hiddenProjectWorkers,
+  };
 }

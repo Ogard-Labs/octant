@@ -750,6 +750,28 @@ describe("the agent message delivery service", () => {
     },
   );
 
+  it("delivers a Project revision to its own worker and refuses another coordinator's worker", async () => {
+    const { service, endpoints } = fixture();
+    const code = { mode: "code" as const, projectId: PROJECT_A, terminal: false };
+    endpoints.set(String(senderThreadId), { ...code, projectConversation: true });
+    endpoints.set(String(recipientThreadId), {
+      ...code,
+      coordinatorThreadId: String(senderThreadId),
+    });
+    endpoints.set(String(otherProjectThreadId), { ...code, coordinatorThreadId: randomUUID() });
+    const send = (threadId: typeof recipientThreadId) =>
+      service.send({
+        senderThreadId,
+        recipients: [{ threadId }],
+        body: "Include Windows in the retry fix.",
+      });
+    expect(await send(otherProjectThreadId)).toMatchObject([
+      { status: "refused", reason: "unauthorized" },
+    ]);
+    expect(await send(recipientThreadId)).toMatchObject([{ status: "sent" }]);
+    expect(await service.carryIntoTurn(String(recipientThreadId))).toHaveLength(1);
+  });
+
   it("delivers between two Work threads of one Project, marks the recipient, and takes its receipt", async () => {
     const { service, endpoints, ingested } = fixture();
     const work = { mode: "work" as const, projectId: PROJECT_A, terminal: false };

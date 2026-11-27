@@ -1203,6 +1203,7 @@ Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architectu
 
 A person may make a Code thread a coordinator: a long-lived thread that starts worker threads, talks to them, and brings their requests to the person (maintainer request, 2026-11-10).
 
+- Each active Code Project has one host-bound conversation for assignments and evidence-linked worker reports. The report shows a bounded newest page, offers earlier pages, and preserves the opened page depth when worker results are rewound. The sidebar Project row carries status counts for its hidden conversation workers. A completed worker turn uses its finished receipt when available. Named coordinators retain their own workers and stop independently. The Project shortcut opens Conversation, and ordinary navigation remembers the person’s last choice (maintainer decision, 2026-11-26).
 - Only a person makes or stops a coordinator, at a local window or a person-paired device, within Settings › Limits (maintainer decision, 2026-11-12).
 - Outside Strict a coordinator's own actions follow its thread's level; under Strict they keep Plan's gate (maintainer decision, 2026-11-25). It is never Done.
 - `start` is offered only to a current coordinator outside Plan; workers are never coordinators. Starting may be set to Propose for approval by a person.
@@ -2992,7 +2993,7 @@ A thread can be settled (completed) or snoozed; both are overlays, not lifecycle
 - Nothing else settles a thread, nothing settles a coordinator or a thread with a decision left for the person, and the host never marks a thread Done.
 - A host sweep archives only settled threads, after a configurable delay.
 - A thread waiting on the person cannot be snoozed; a snooze wakes early when the agent needs the person (maintainer decision, 2026-11-25).
-- The palette's settle and snooze commands add no authority (maintainer request, 2026-11-25). A deferred pending question never changes the thread, draft, answer or execution authority.
+- The palette's settle and snooze commands add no authority (maintainer request, 2026-11-25). An open worker keeps its thread commands when its sidebar row is hidden. A deferred pending question never changes the thread, draft, answer or execution authority.
 - Dragging a row onto or out of Pinned, Settled or Snoozed runs the row menu's own command, so the host decides; Snoozed is never a drop target (maintainer decision, 2026-11-26).
 - Every sidebar state change the host accepts offers Undo for a moment, sent as a new person command, never a rewrite; Archive has none (maintainer decision, 2026-11-26).
 - Files dropped on a thread row open the thread and go to its composer's own attach path (maintainer decision, 2026-11-26).

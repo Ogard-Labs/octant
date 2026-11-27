@@ -1,4 +1,8 @@
 import {
+  rememberedProjectDestination,
+  type CodeProjectDestination,
+} from "./projects/codeProjectDestination";
+import {
   noteTypedComposerText,
   threadDraftScope,
   typedSendClaim,
@@ -111,7 +115,7 @@ import { DockModuleBoundary } from "./shell/DockModuleBoundary";
 import { couldNotLoad, LazyPartBoundary, WindowNoticeContext } from "./shell/windowNotice";
 import type { ShellActions, ThreadMoveRequest } from "./app/shellActions";
 import { SidebarContainer } from "./app/SidebarContainer";
-import { threadRestRowActions, type ThreadRestRow } from "./app/threadRestRowActions";
+import { threadRestRowActions } from "./app/threadRestRowActions";
 import { TerminalShellContext, type TerminalShellFacts } from "./shell/terminalSlot";
 import { ThreadPaneContainer } from "./app/ThreadPaneContainer";
 import { useStableActions } from "./app/useStableActions";
@@ -431,12 +435,9 @@ import { useTodoListHost } from "./todos/useTodoListHost";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { TodoListHostSettingsContext } from "./todos/todoListHostSettingsContext";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
-import { ProjectActionButtons } from "./projects/ProjectActionButtons";
+import type { ProjectActionButtonsProps } from "./projects/ProjectActionButtons";
 import { coordinatorDoneWhenEqual } from "@octant/domain";
-import {
-  ProjectActionRunDialog,
-  type ProjectActionTarget,
-} from "./projects/ProjectActionRunDialog";
+import type { ProjectActionTarget } from "./projects/ProjectActionRunDialog";
 import { ProjectIconPrefetch, ProjectIconProvider } from "./projects/ProjectIcon";
 import {
   type ProjectThreadsAccess,
@@ -533,6 +534,7 @@ import {
   RemotePairingView,
   RemoteTodoDraft,
 } from "./shell/deferredSurfaces";
+import { providerGroupsForProject } from "./projects/ProjectProviderPolicySection";
 import { firstSelectableProviderSelection } from "./providers/firstSelectableProviderSelection";
 import {
   isAuthorizedCanvasDocument,
@@ -733,6 +735,25 @@ const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
+const LazyProjectActionButtons = lazy(() =>
+  import("./projects/ProjectActionButtons").then(({ ProjectActionButtons }) => ({
+    default: ProjectActionButtons,
+  })),
+);
+function ProjectActionButtons(props: ProjectActionButtonsProps) {
+  if (props.actions.length === 0) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyProjectActionButtons {...props} />
+    </Suspense>
+  );
+}
+
+const ProjectActionRunDialog = lazy(() =>
+  import("./projects/ProjectActionRunDialog").then(({ ProjectActionRunDialog }) => ({
+    default: ProjectActionRunDialog,
+  })),
+);
 const PrepareToShutDownHost = lazy(() =>
   import("./environment/threadMove/PrepareToShutDownHost").then((module) => ({
     default: module.PrepareToShutDownHost,
@@ -1252,6 +1273,8 @@ function LaunchedShell(
    * window is not yet allowed to have, which is the refusal this whole path
    * exists to remove.
    */
+  const projectOpenRequest = useRef(0);
+  const failedProjectAutoOpens = useRef(new Set<ProjectId>());
   const draftProjectBinding = useRef<Promise<void> | undefined>(undefined);
   const [draftProjectSelection, setDraftProjectSelection] = useState<
     Partial<Readonly<Record<OctantMode, ProjectId>>>
@@ -2903,6 +2926,10 @@ function LaunchedShell(
     changeRevision: machineChanges.codeNavigation,
     readCursorStore: codeReadCursorStore,
   });
+  const listedCodeThreads = useMemo(
+    () => codeController.navigation.filter((thread) => thread.projectConversation !== true),
+    [codeController.navigation],
+  );
   const restartNoticeThreads = useMemo(
     () => [
       ...codeController.navigation.map((thread) => ({
@@ -3388,7 +3415,7 @@ function LaunchedShell(
       todoThreadStates(todoThisHostId, [
         { mode: "chat", rows: chatController.navigation },
         { mode: "work", rows: workNavigation.navigation },
-        { mode: "code", rows: codeController.navigation },
+        { mode: "code", rows: listedCodeThreads },
         ...remoteTodoData.threadRows.flatMap((host) => [
           { hostId: host.hostId, mode: "chat" as const, rows: host.chat },
           { hostId: host.hostId, mode: "work" as const, rows: host.work },
@@ -3399,7 +3426,7 @@ function LaunchedShell(
       todoThisHostId,
       chatController.navigation,
       workNavigation.navigation,
-      codeController.navigation,
+      listedCodeThreads,
       remoteTodoData.threadRows,
     ],
   );
@@ -5821,7 +5848,7 @@ function LaunchedShell(
     };
     const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
       codeController.status === "ready"
-        ? codeController.navigation.map((thread) => ({
+        ? listedCodeThreads.map((thread) => ({
             threadId: String(thread.threadId),
             title: thread.title,
             projectId: String(thread.projectId),
@@ -5883,9 +5910,10 @@ function LaunchedShell(
     // Workers the person has not asked to see in the sidebar stay out of the
     // list but still count on their coordinator's row. Everything else that
     // reads Code threads (Needs you, search, the Agents dock) keeps the full list.
-    const codeSidebarThreads = sidebarThreadsWithWorkers(
+    const { threads: codeSidebarThreads, hiddenProjectWorkers } = sidebarThreadsWithWorkers(
       codeProjectThreads,
       codeController.bootstrap?.settings,
+      codeController.bootstrap?.projectConversationIds,
     );
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
@@ -5964,8 +5992,14 @@ function LaunchedShell(
       }
     }
     return {
+      unreadCodeProjects: new Set(
+        codeController.navigation
+          .filter((t) => t.projectConversation === true && (t.unread || t.unreadProjectReports))
+          .map((t) => String(t.projectId)),
+      ),
       codeProjectThreads,
       codeSidebarThreads,
+      hiddenProjectWorkers,
       liveThreadTitles,
       markedChatNavigation,
       markedThreadGroups,
@@ -5979,8 +6013,10 @@ function LaunchedShell(
     activeMode,
     chatController.navigation,
     codeController.bootstrap?.settings,
+    codeController.bootstrap?.projectConversationIds,
     codeController.navigation,
     codeController.status,
+    listedCodeThreads,
     codeProviderRequestsByThreadId,
     snoozeClockNow,
     providerController.instances,
@@ -6339,6 +6375,7 @@ function LaunchedShell(
       openChatThread: controller.openChatThread,
       openCodeSurface: controller.openCodeSurface,
       openCodeThread: controller.openCodeThread,
+      openCodeWorkerBeside: controller.openCodeWorkerBeside,
       openCreatedFollowUp,
       openCrossContextInNewWindow: controller.openCrossContextInNewWindow,
       openDockTab,
@@ -7175,10 +7212,10 @@ function LaunchedShell(
       };
     }
   }
-  function threadRestRow(mode: OctantMode, threadId: string): ThreadRestRow | undefined {
+  function threadRestRow(mode: OctantMode, threadId: string): ChatThreadNavigationItem | undefined {
     const rows =
       mode === "code"
-        ? navigationModel.codeSidebarThreads
+        ? navigationModel.codeProjectThreads
         : mode === "work"
           ? navigationModel.workProjectThreads
           : chatController.status === "ready"
@@ -7398,10 +7435,46 @@ function LaunchedShell(
     },
   });
 
-  async function openSelectedProject(project: ProjectSummary) {
+  async function openSelectedProject(
+    project: ProjectSummary,
+    destination?: CodeProjectDestination,
+  ) {
     closeThreadSearch();
     closeWorkspaceReaders();
-    await controller.openProject(project.id, project.type, project.name);
+    const request = ++projectOpenRequest.current;
+    const conversation =
+      project.type === "code" &&
+      project.lifecycle === "active" &&
+      (destination ?? rememberedProjectDestination(project.id)) === "conversation" &&
+      (destination !== undefined || !failedProjectAutoOpens.current.has(project.id));
+    const needsProjectSurface =
+      !conversation || activeMode !== "code" || activeProjectId !== project.id;
+    if (needsProjectSurface) await controller.openProject(project.id, project.type, project.name);
+    if (!conversation || projectOpenRequest.current !== request) return;
+    const groups = providerGroupsForProject(project, codeProviderGroups);
+    const model =
+      resolveDraftProviderSelection(groups, codeDraftPreferredSelection) ??
+      firstSelectableProviderSelection(groups);
+    const opened = await codeController.execute({
+      kind: "open-code-project-conversation",
+      projectId: project.id,
+      ...(model === undefined
+        ? {}
+        : { model: { providerInstanceId: model.providerInstanceId, modelId: model.modelId } }),
+    });
+    if (projectOpenRequest.current !== request) return;
+    if (opened?.kind !== "project-conversation-opened") {
+      failedProjectAutoOpens.current.add(project.id);
+      if (!needsProjectSurface)
+        await controller.openProject(project.id, project.type, project.name);
+      setThreadExportNotice(
+        codeController.lastExecuteError.current?.message ??
+          "The Project conversation could not be opened.",
+      );
+      return;
+    }
+    failedProjectAutoOpens.current.delete(project.id);
+    await controller.openCodeThread(opened.thread.id, project.name, undefined, project.id);
   }
 
   function openProjects() {
@@ -9181,21 +9254,12 @@ function LaunchedShell(
         ? undefined
         : { id: serverActionsProject.projectId, name: serverActionsProject.name }
       : { id: actionsProject.id, name: actionsProject.name };
-  // The palette acts on the thread in front through that thread's own sidebar
-  // row: the same state decides what is offered, and the same actions run. A
-  // window with no row for it (still loading, or the thread lives elsewhere)
-  // offers nothing.
+  // A worker opened from its Project keeps its commands when Show workers hides its sidebar row.
+  // Read the same thread state that the command will use for Undo.
   const frontThreadRow =
     replyDetailThread === undefined
       ? undefined
-      : (replyDetailThread.mode === "code"
-          ? navigationModel.codeSidebarThreads
-          : replyDetailThread.mode === "work"
-            ? navigationModel.workProjectThreads
-            : chatController.status === "ready"
-              ? navigationModel.markedChatNavigation
-              : []
-        ).find((row) => row.threadId === replyDetailThread.threadId);
+      : threadRestRow(replyDetailThread.mode, replyDetailThread.threadId);
   terminalShell.current = {
     layout: controller.presentedLayout,
     narrow: isNarrow,
@@ -10201,15 +10265,15 @@ function LaunchedShell(
             // stays mounted and reachable wherever the asking surface is —
             // including when the sidebar that used to host it is hidden.
             <MoveThreadToProjectDialog
-              {...(moveRequest.busy === true ||
-              (moveRequest.mode === "code" &&
-                navigationModel.codeSidebarThreads.some(
-                  (thread) =>
-                    String(thread.threadId) === moveRequest.threadId &&
-                    (thread.activity === "working" || thread.activity === "attention"),
-                ))
-                ? { busy: true }
-                : {})}
+              busy={
+                moveRequest.busy === true ||
+                (moveRequest.mode === "code" &&
+                  codeController.navigation.some(
+                    (thread) =>
+                      String(thread.threadId) === moveRequest.threadId &&
+                      (thread.executing === true || thread.awaitingInput === true),
+                  ))
+              }
               currentProjectId={moveRequest.projectId}
               mode={moveRequest.mode}
               onClose={() => setMoveRequest(undefined)}
@@ -10479,39 +10543,43 @@ function LaunchedShell(
                                 />
                               ) : null}
                               {projectActionRun === undefined ? null : (
-                                <ProjectActionRunDialog
-                                  key={JSON.stringify(projectActionRun.target)}
-                                  client={projectTerminalClient}
-                                  target={projectActionRun.target}
-                                  storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                                  open={projectActionRun.open}
-                                  onClose={() =>
-                                    setProjectActionRun((current) =>
-                                      current === undefined
-                                        ? undefined
-                                        : { ...current, open: false },
+                                <Suspense
+                                  fallback={<SurfaceLoading label="Opening Project action" />}
+                                >
+                                  <ProjectActionRunDialog
+                                    key={JSON.stringify(projectActionRun.target)}
+                                    client={projectTerminalClient}
+                                    target={projectActionRun.target}
+                                    storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                                    open={projectActionRun.open}
+                                    onClose={() =>
+                                      setProjectActionRun((current) =>
+                                        current === undefined
+                                          ? undefined
+                                          : { ...current, open: false },
+                                      )
+                                    }
+                                    {...(zen.enabled &&
+                                    !serverCodeProjects.workProjects.some(
+                                      (project) =>
+                                        project.projectId === projectActionRun.target.projectId,
                                     )
-                                  }
-                                  {...(zen.enabled &&
-                                  !serverCodeProjects.workProjects.some(
-                                    (project) =>
-                                      project.projectId === projectActionRun.target.projectId,
-                                  )
-                                    ? {
-                                        onOpenTerminal: (
-                                          terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                        ) => {
-                                          void (async () => {
-                                            if (!zen.active) await zen.enterZen();
-                                            await zen.pinProjectTerminal({
-                                              projectId: projectActionRun.target.projectId,
-                                              terminalId,
-                                            });
-                                          })();
-                                        },
-                                      }
-                                    : {})}
-                                />
+                                      ? {
+                                          onOpenTerminal: (
+                                            terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                          ) => {
+                                            void (async () => {
+                                              if (!zen.active) await zen.enterZen();
+                                              await zen.pinProjectTerminal({
+                                                projectId: projectActionRun.target.projectId,
+                                                terminalId,
+                                              });
+                                            })();
+                                          },
+                                        }
+                                      : {})}
+                                  />
+                                </Suspense>
                               )}
                             </OctantDialogPresence>
 

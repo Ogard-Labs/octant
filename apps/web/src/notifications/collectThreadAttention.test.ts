@@ -253,7 +253,27 @@ describe("collecting thread attention", () => {
         chatThreads: [],
         workThreads: [],
         codeThreads: [
-          { ...base, threadId: "code-done" as CodeThreadId, title: "Finished", unread: true },
+          {
+            ...base,
+            threadId: "code-done" as CodeThreadId,
+            title: "Finished",
+            unread: true,
+            coordinatorThreadId: "project-chat" as CodeThreadId,
+          },
+          {
+            ...base,
+            threadId: "project-chat" as CodeThreadId,
+            title: "Project",
+            unreadProjectReports: true,
+            projectConversation: true,
+          },
+          {
+            ...base,
+            threadId: "project-inline" as CodeThreadId,
+            title: "Project with a direct reply",
+            projectConversation: true,
+            unread: true,
+          },
           {
             ...base,
             threadId: "code-running" as CodeThreadId,
@@ -275,6 +295,13 @@ describe("collecting thread attention", () => {
         threadId: "code-done",
         reason: "turn-finished",
         title: "Finished",
+        source: "code",
+        projectId: "project-1",
+      },
+      {
+        threadId: "project-inline",
+        title: "Project with a direct reply",
+        reason: "turn-finished",
         source: "code",
         projectId: "project-1",
       },

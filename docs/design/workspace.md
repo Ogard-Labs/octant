@@ -217,17 +217,20 @@ choices under the row menu's own words and conditions: **Pin** or **Unpin**
 closed, and **Wake** on a snoozed thread or else one **Snooze · <time>**
 command for each wake time the row menu offers, since the palette has no
 submenu. They run the row menu's own actions, so a refusal reads where the
-row's does, and a wake time is worked out when its command runs. A draft, a
-page or Settings covering the workspace, and a thread this window has no row
-for leave no thread in front, so none are listed. **Mark done** stays on the
-row menu. In the Activity feed the
+row's does, and a wake time is worked out when its command runs. An open
+worker keeps these commands when **Show workers** hides its sidebar row.
+The window must have loaded the thread's navigation data to offer its
+commands. The Project conversation keeps its own Project controls. A draft,
+a page or Settings covering the workspace leaves no thread in front.
+**Mark done** stays on the row menu. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
 
-Projects opens its searchable directory in the main workspace. Selecting a Project
-replaces that directory with the Project overview; Projects in primary navigation
-returns to the directory. Neither view adds a second sidebar. Other destinations
+Projects opens its searchable directory in the main workspace. Chat and Work Projects open their overview. Active Code Projects open
+**Conversation** on the first visit. Selecting **Overview** or **Conversation**
+remembers that choice for this Project. Projects in primary navigation returns
+to the directory. Neither view adds a second sidebar. Other destinations
 replace the directory while preserving the underlying Project selection.
 
 **Pinning Projects to the rail.** A Project can be pinned to the icon rail from
@@ -237,7 +240,8 @@ keyboard). A pinned Project is a tile under the destinations, after the rail's
 divider, in the order it was pinned, in the rail beside the sidebar and in the
 collapsed rail; it shows the Project's icon or its initial, is named in the
 label beside the rail, and is current while that Project is the open one.
-Opening it is the same action as opening the Project in the sidebar. In the
+A pinned Code Project always opens its conversation and preserves the remembered
+view. Unpinning preserves the conversation and its history. In the
 collapsed rail the pinned Projects lead and the automatic list fills what is
 left of six Project tiles without repeating a pinned one; the rail draws no more
 than six pinned tiles, so a long list of pins never pushes Settings or the usage
@@ -461,6 +465,24 @@ thread listing reports no failure, and a status is never inferred from silence.
 A due follow-up is a reminder, not a waiting thread, and is left out. The
 Status arrangement's **Needs you** and **Ready for review** headings are the
 list-side counterpart, so no second priority group is added to the Projects tree.
+
+### Project conversations
+
+The Project header names the Code Project and offers Conversation and Overview.
+The conversation stays outside thread lists, status buckets, and the Board.
+It shows worker activity, pending decisions and reports linked to their workers.
+Project-wide listings name each worker’s coordinator. Opening a worker lets the
+person inspect and steer it. **Open beside** focuses a visible worker or opens a
+second pane, preserving the Project draft. A narrow window opens the worker in
+place and offers a return to the Project conversation. Read state and pending
+decisions are independent. **Load earlier reports** adds the next older page.
+With Show workers off for the sidebar, working and needs-you counts for the
+Project conversation's hidden workers appear on the Project row even when its
+thread list is closed. The Status row setting controls those marks.
+If a default open fails, ordinary opens show Overview for the rest of the window
+session. Conversation and the pinned shortcut retry, and a successful retry
+restores ordinary opens. [Coordinator threads](coordinator-threads.md) owns
+identity, worker dispatch and reporting.
 
 ### Coordinators
 
@@ -4042,9 +4064,10 @@ Environment read and the thread's binding both show the branch the checkout
 actually holds; a managed worktree is never re-observed through its
 Project's root.
 
-**Moving a busy thread.** The Move to Project dialog on a thread whose turn is
-still running offers two choices once a destination is picked: Move after this
-turn, the default, and Stop and move now. The first queues an intent scoped to
+**Moving a busy thread.** The Move to Project dialog offers turn timing while
+a Code turn is executing or waiting for the person's input. An idle thread
+with an open follow-up offers an immediate move. The two timing choices are
+**Move after this turn**, the default, and **Stop and move now**. The first queues an intent scoped to
 that thread and that turn — the dialog stays open with the queue visible;
 Cancel move, Escape, the backdrop and every other way the dialog goes away
 drop that one queued request and resolve it, never leaving a promise open or

@@ -115,6 +115,8 @@ export interface ThreadPaneContainerProps {
     | "openCreatedFollowUp"
     | "openCrossContextInNewWindow"
     | "openDraftThread"
+    | "openCodeWorkerBeside"
+    | "openSelectedProject"
     | "openDraftInProject"
     | "requestMoveToProject"
     | "openInbox"
@@ -520,9 +522,31 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
       row.coordinatorThreadId === undefined
         ? undefined
         : rows.find((thread) => thread.threadId === row.coordinatorThreadId);
+    const project = allProjects.find((item) => String(item.id) === row.projectId);
+    if (
+      row.coordinatorThreadId !== undefined &&
+      project !== undefined &&
+      codeController.bootstrap?.projectConversationIds?.some(
+        (id) => String(id) === row.coordinatorThreadId,
+      )
+    ) {
+      return (
+        <WorkerOfStrip
+          backLabel="Back to Project"
+          coordinatorTitle={project.name}
+          onBack={() => void actions.openSelectedProject(project, "conversation")}
+        />
+      );
+    }
     if (coordinator === undefined) return undefined;
     return (
       <WorkerOfStrip
+        {...(project !== undefined &&
+        codeController.navigation.some(
+          (thread) => thread.projectId === project.id && thread.projectConversation === true,
+        )
+          ? { onOpenProject: () => void actions.openSelectedProject(project, "conversation") }
+          : {})}
         coordinatorTitle={coordinator.title}
         onBack={() =>
           void openCodeThread(
@@ -706,6 +730,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                       draftProjectBinding.current = binding;
                       void binding.catch(() => undefined);
                     }}
+                    onOpenCodeWorkerBeside={actions.openCodeWorkerBeside}
+                    onOpenProjectDestination={actions.openSelectedProject}
                     onNewThreadInProject={(projectId, options) =>
                       void openDraftInProject(projectId, options)
                     }

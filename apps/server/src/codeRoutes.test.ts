@@ -501,6 +501,8 @@ describe("Code routes", () => {
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
     const commands = [
+      { kind: "open-code-project-conversation", projectId },
+      { kind: "read-code-project-report-page", projectId },
       { kind: "set-code-thread-coordinator", threadId, expectedVersion: 1, coordinator: true },
       {
         kind: "set-code-thread-coordinator",
@@ -543,7 +545,16 @@ describe("Code routes", () => {
       for (const restricted of [undefined, "hub-roster"] as const) {
         const refused = await route(from(command, restricted));
         expect(refused?.status).toBe(403);
-        expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+        const action =
+          command.kind === "open-code-project-conversation"
+            ? "open the Project conversation"
+            : command.kind === "read-code-project-report-page"
+              ? "read Project reports"
+              : "set coordinators and wake switches";
+        expect(await refused?.json()).toMatchObject({
+          category: "unauthorized",
+          message: expect.stringContaining(action),
+        });
       }
     }
     expect(execute).not.toHaveBeenCalled();

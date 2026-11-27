@@ -2,6 +2,7 @@ import {
   decodeBindingRevisionId,
   decodeWorkThread,
   decodeCodeThreadId,
+  decodeCodeThreadFollowUpView,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceReference,
   decodeCodePlannerView,
@@ -83,6 +84,7 @@ import {
   openSidebarProject,
   otherProjectId,
   projectBootstrap,
+  projectConversationCodes,
   projectId,
   projectWindowCapability,
   projects,
@@ -5656,6 +5658,140 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Right sidebar" })).toBeNull();
   });
 
+  it("opens the pinned conversation by keyboard and keeps the ordinary Project's Overview choice", async () => {
+    const user = userEvent.setup();
+    const codeApi = await projectConversationCodes();
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (!observed || !first) throw new Error("Expected a ready Code model");
+    const allowed = {
+      ...providerModel({
+        id: "project-model",
+        displayName: "Project model",
+        toolCalling: "supported",
+        evidence: "supported",
+      }),
+      dataTags: ["zdr" as const],
+    };
+    const restricted = projectBootstrap();
+    const projectApi = projects({
+      ...restricted,
+      active: restricted.active.map((project) => ({
+        ...project,
+        providerPolicy: { mode: "eu-zdr" as const, providerInstanceIds: [] },
+      })),
+    });
+    const shell = codeShellBootstrap();
+    const key = `octant.code.project-destination.${projectId}`;
+    localStorage.removeItem(key);
+    try {
+      render(
+        <App
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          codeClient={codeApi}
+          projectClient={projectApi}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client({
+            ...shell,
+            settings: {
+              ...shell.settings,
+              sidebarCollapsedPresentation: "always",
+              sidebarPinnedProjects: [projectId],
+            },
+          })}
+          providerClient={{
+            ...providerApi,
+            bootstrap: async () => ({
+              ...catalog,
+              observedStates: [{ ...observed, models: [first, allowed] }],
+            }),
+          }}
+        />,
+      );
+      const rail = await screen.findByRole("navigation", { name: "Destinations" });
+      const pin = await within(rail).findByRole("button", { name: "Octant, unread" });
+      pin.focus();
+      await user.keyboard("{Enter}");
+      await waitFor(() =>
+        expect(codeApi.execute).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: "open-code-project-conversation",
+            model: { providerInstanceId: observed.instanceId, modelId: allowed.id },
+          }),
+        ),
+      );
+      const views = await screen.findByRole("navigation", { name: "Project views" });
+      await waitFor(() =>
+        expect(within(views).getByRole("button", { name: "Conversation" })).toHaveAttribute(
+          "aria-current",
+          "page",
+        ),
+      );
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      await waitFor(() => expect(pin).toHaveAccessibleName("Octant"));
+      expect(screen.getByText(/Needs you \(1\)/)).toBeVisible();
+      await user.click(within(views).getByRole("button", { name: "Overview" }));
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      await user.click(pin);
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      expect(localStorage.getItem(key)).toBe("overview");
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
+  it("recovers from an unavailable default Project conversation only when explicitly retried", async () => {
+    const user = userEvent.setup();
+    const codeApi = await projectConversationCodes();
+    let available = false;
+    const openConversation = vi.fn();
+    const execute: CodeClient["execute"] = async (command, signal) => {
+      if (command.kind === "open-code-project-conversation") {
+        openConversation();
+        if (!available) throw new Error("Project checkout is unavailable.");
+      }
+      return codeApi.execute(command, signal);
+    };
+    const key = `octant.code.project-destination.${projectId}`;
+    localStorage.removeItem(key);
+    try {
+      render(
+        <App
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          codeClient={{ ...codeApi, execute }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client()}
+        />,
+      );
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      await waitFor(() => expect(openConversation).toHaveBeenCalledOnce());
+      await openSidebarProject(user, "Octant");
+      expect(await screen.findByDisplayValue("Octant")).toBeVisible();
+      expect(openConversation).toHaveBeenCalledOnce();
+      available = true;
+      const views = screen.getByRole("navigation", { name: "Project views" });
+      await user.click(within(views).getByRole("button", { name: "Conversation" }));
+      expect(
+        await screen.findByText("Retry coverage now includes interrupted downloads."),
+      ).toBeVisible();
+      expect(openConversation).toHaveBeenCalledTimes(2);
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("does not disclose a thread environment for a Project overview", async () => {
     const user = userEvent.setup();
     render(
@@ -5715,48 +5851,106 @@ describe("App", () => {
     );
   });
 
-  it("opens the shared Move to Project dialog from the Environment's Project row with the sidebar hidden", async () => {
-    const user = userEvent.setup();
-    const base = projectBootstrap();
-    const second = {
-      ...base.active[0]!,
-      id: otherProjectId,
-      name: "Octant mirror",
-    };
-    const projectApi = projects({
-      ...base,
-      active: [base.active[0]!, second],
-      availability: base.availability.map((entry) => ({
-        ...entry,
-        status: "available" as const,
-      })),
-    });
-    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
-    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+  it.each([
+    { turn: "idle", awaitingInput: false },
+    { turn: "waiting for input", awaitingInput: true },
+  ])(
+    "shows the right move choices for a hidden worker whose turn is $turn",
+    async ({ awaitingInput }) => {
+      const user = userEvent.setup();
+      const base = projectBootstrap();
+      const second = {
+        ...base.active[0]!,
+        id: otherProjectId,
+        name: "Octant mirror",
+      };
+      const projectApi = projects({
+        ...base,
+        active: [base.active[0]!, second],
+        availability: base.availability.map((entry) => ({
+          ...entry,
+          status: "available" as const,
+        })),
+      });
+      vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+      vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
 
-    render(
-      <App
-        codeClient={codes()}
-        isNarrow={false}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projectApi}
-        projectWindowCapability={projectWindowCapability}
-        shellClient={client(codeShellBootstrap())}
-      />,
-    );
+      const worker = await projectConversationCodes();
+      const runtime = [
+        {
+          threadId: codeThreadId,
+          executing: false,
+          ...(awaitingInput
+            ? { awaitingInput: true as const, awaitingKind: "user-input" as const }
+            : {}),
+        },
+      ];
+      const codeApi: CodeClient = {
+        ...worker,
+        bootstrap: async () => ({
+          ...(await worker.bootstrap()),
+          runtime,
+        }),
+        navigation: async () => ({
+          ...(await worker.navigation()),
+          runtime,
+        }),
+        readFollowUp: async (threadId) =>
+          threadId === codeThreadId
+            ? decodeCodeThreadFollowUpView({
+                threadId,
+                followUpVersion: 1,
+                followUp: {
+                  threadId,
+                  state: "open",
+                  origin: "manual",
+                  reason: "Review the retry fix",
+                  triggerSequence: 1,
+                  acknowledgedThroughSequence: 0,
+                  createdAt: "2026-11-26T12:00:00.000Z",
+                },
+              })
+            : worker.readFollowUp(threadId),
+      };
+      render(
+        <App
+          providerClient={providersWithToolModel()}
+          codeClient={codeApi}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projectApi}
+          projectWindowCapability={projectWindowCapability}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
 
-    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    await showRightUtilityDock(user);
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await openQuickDockTool(user, dock, "Environment");
-    await within(dock).findByRole("region", { name: "Environment details" });
-    // The dialog used to live inside the sidebar's own tree, so hiding the
-    // sidebar took the move choice with it.
-    await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
-    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
-    await user.click(within(dock).getByRole("button", { name: /Octant/ }));
-    expect(await screen.findByRole("dialog", { name: "Move to Project" })).toBeVisible();
-  });
+      await openSidebarProject(user, "Octant");
+      const report = await screen.findByRole("region", { name: "Project report" });
+      await user.click(
+        within(report).getByRole("button", { name: "Open Fix updater retries beside the Project" }),
+      );
+      const pane = await screen.findByRole("region", {
+        name: "Workspace pane: Fix updater retries",
+      });
+      await user.click(within(pane).getByRole("textbox", { name: "Follow-up message" }));
+      await showRightUtilityDock(user);
+      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+      await openQuickDockTool(user, dock, "Environment");
+      await within(dock).findByRole("region", { name: "Environment details" });
+      // The dialog used to live inside the sidebar's own tree, so hiding the
+      // sidebar took the move choice with it.
+      await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
+      expect(
+        screen.queryByRole("complementary", { name: "Octant sidebar" }),
+      ).not.toBeInTheDocument();
+      await user.click(within(dock).getByRole("button", { name: /Octant/ }));
+      const dialog = await screen.findByRole("dialog", { name: "Move to Project" });
+      expect(dialog).toBeVisible();
+      const stop = within(dialog).queryByRole("radio", { name: "Stop and move now" });
+      if (awaitingInput) expect(stop).toBeVisible();
+      else expect(stop).not.toBeInTheDocument();
+    },
+  );
 
   it("stops the exact operation a thread slot is running when Move to Project picks Stop and move now", async () => {
     const user = userEvent.setup();
@@ -6607,7 +6801,7 @@ describe("App", () => {
     // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
-    const search = screen.getByRole("combobox", { name: "Search threads" });
+    const search = await screen.findByRole("combobox", { name: "Search threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
     expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();

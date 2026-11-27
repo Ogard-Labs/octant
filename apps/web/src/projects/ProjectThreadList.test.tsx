@@ -2259,7 +2259,7 @@ describe("coordinators in a Project's thread list", () => {
 
   it("does not list a hidden worker because it is open", () => {
     sessionStorage.clear();
-    const listed = sidebarThreadsWithWorkers([coordinator, working], undefined);
+    const { threads: listed } = sidebarThreadsWithWorkers([coordinator, working], undefined);
     render(
       <ProjectThreadList
         activeThreadId="worker-working"

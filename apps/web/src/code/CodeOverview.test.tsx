@@ -1125,6 +1125,7 @@ function controller(): CodeController {
     lastStartRefusal: { current: undefined },
     markFollowUp: vi.fn(async () => true),
     markThreadRead: vi.fn(),
+    markProjectReportsRead: vi.fn(),
     refreshConversation: vi.fn(() => true),
     earlierConversation: undefined,
     loadEarlierConversation: vi.fn(),

@@ -1,3 +1,4 @@
+import { projectReportsReader } from "../code/projectReports";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createXcodeDerivedData } from "../apple/xcodeDerivedData";
 import { scanHostWorktrees } from "../code/hostWorktreeDiscovery";
@@ -1053,6 +1054,7 @@ export function wireCode(deps: CodeDependencies) {
       const codeService =
         options.codeService ??
         new CodeService({
+          ...projectReportsReader(persistence.connection),
           coordinatorsPerProject: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings())
               .coordinatorsPerProject,

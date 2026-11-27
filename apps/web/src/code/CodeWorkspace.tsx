@@ -219,6 +219,7 @@ export interface CodeWorkspaceProps {
   /** A coordinator thread's proposed workers, shown above its composer. */
   readonly coordinatorProposals?: ReactNode;
   /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
+  readonly projectReport?: ReactNode;
   readonly coordinatorWorkerAsks?: ReactNode;
   /** A coordinator thread's workers, as cards in its transcript. */
   readonly coordinatorWorkers?: CoordinatorWorkersSource;
@@ -330,6 +331,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.coordinatorProposals === undefined
           ? {}
           : { coordinatorProposals: props.coordinatorProposals })}
+        {...(props.projectReport === undefined ? {} : { projectReport: props.projectReport })}
         {...(props.coordinatorWorkerAsks === undefined
           ? {}
           : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}

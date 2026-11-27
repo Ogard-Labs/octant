@@ -71,6 +71,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: CodeWorkspaceProps["onCanvasReferencesObserved"];
   readonly onNewThreadInProject?: CodeWorkspaceProps["onNewThreadInProject"];
+  readonly projectReport?: CodeWorkspaceProps["projectReport"];
   readonly coordinatorProposals?: CodeWorkspaceProps["coordinatorProposals"];
   readonly coordinatorWorkerAsks?: CodeWorkspaceProps["coordinatorWorkerAsks"];
   readonly coordinatorWorkers?: CodeWorkspaceProps["coordinatorWorkers"];
@@ -206,6 +207,7 @@ export default function CodeWorkspaceTab(props: {
             ? {}
             : { automationClient: props.automationClient })}
           {...(approvals === undefined ? {} : { approvals })}
+          {...(props.projectReport === undefined ? {} : { projectReport: props.projectReport })}
           {...(props.coordinatorProposals === undefined
             ? {}
             : { coordinatorProposals: props.coordinatorProposals })}

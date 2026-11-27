@@ -1,3 +1,4 @@
+import { projectConversationId } from "../code/projectConversationBinding";
 import { eligibleTerminalSessionFolders } from "../terminalSessions/terminalSessionScopes";
 import { MovedThreadHistory } from "../hub/movedThreadHistory";
 import { randomUUID } from "node:crypto";
@@ -323,10 +324,20 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       }
       const code = persistence.readCodeThread(threadId as never);
       if (code !== undefined) {
+        const projectConversation =
+          code.coordinator === true &&
+          projectConversationId(persistence.journal, code.projectId) === code.id;
         return {
           mode: "code",
           projectId: String(code.projectId),
-          terminal: code.lifecycle !== "active",
+          ...(projectConversation ? { projectConversation: true } : {}),
+          ...(code.coordinatorThreadId === undefined
+            ? {}
+            : { coordinatorThreadId: code.coordinatorThreadId }),
+          terminal:
+            code.lifecycle !== "active" ||
+            (projectConversation &&
+              persistence.readProject(code.projectId)?.lifecycle !== "active"),
         };
       }
       const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);

@@ -37,7 +37,7 @@ const ids = (rows: ReadonlyArray<ChatThreadNavigationItem>) => rows.map((row) =>
 
 describe("where a coordinator's workers are listed", () => {
   it("lists no worker in the sidebar by default, and the coordinator row still counts every request", () => {
-    const listed = sidebarThreadsWithWorkers(threads, undefined);
+    const { threads: listed } = sidebarThreadsWithWorkers(threads, undefined);
     expect(ids(listed)).toEqual(["t", "coordinator", "w3"]);
     expect(listed.find((row) => row.threadId === "coordinator")?.hiddenWorkers).toEqual({
       working: 1,
@@ -45,14 +45,31 @@ describe("where a coordinator's workers are listed", () => {
     });
   });
 
+  it("uses Show workers for a Project conversation while leaving a former coordinator’s workers visible", () => {
+    const rows = [ordinary, working, orphan];
+    const hidden = sidebarThreadsWithWorkers(rows, undefined, [coordinator.threadId]);
+    expect(ids(hidden.threads)).toEqual(["t", "w3"]);
+    expect(hidden.hiddenProjectWorkers.get(PROJECT)).toEqual({ working: 1, attention: 0 });
+    const shown = sidebarThreadsWithWorkers(
+      rows,
+      { coordinatorWorkerListing: { sidebar: true, board: false } },
+      [coordinator.threadId],
+    );
+    expect(ids(shown.threads)).toEqual(ids(rows));
+    expect(shown.hiddenProjectWorkers.size).toBe(0);
+  });
+
   it("keeps a put-away coordinator's workers as ordinary Project rows", () => {
     const putAway: ChatThreadNavigationItem = { ...coordinator, shelf: "completed" };
-    const rows = sidebarThreadsWithWorkers([ordinary, putAway, working, asking], undefined);
+    const { threads: rows } = sidebarThreadsWithWorkers(
+      [ordinary, putAway, working, asking],
+      undefined,
+    );
     expect(ids(rows)).toEqual(["t", coordinator.threadId, working.threadId, asking.threadId]);
   });
 
   it("lists workers, with no hidden counts, when Settings shows them in the sidebar", () => {
-    const listed = sidebarThreadsWithWorkers(threads, {
+    const { threads: listed } = sidebarThreadsWithWorkers(threads, {
       coordinatorWorkerListing: { sidebar: true, board: false },
     });
     expect(ids(listed)).toEqual(ids(threads));
@@ -60,13 +77,13 @@ describe("where a coordinator's workers are listed", () => {
   });
 
   it("lets a Project's own choice win over Settings, in either direction", () => {
-    const hiddenHere = sidebarThreadsWithWorkers(threads, {
+    const { threads: hiddenHere } = sidebarThreadsWithWorkers(threads, {
       coordinatorWorkerListing: { sidebar: true, board: true },
       coordinatorWorkerListingByProject: { [PROJECT]: { sidebar: false, board: true } } as never,
     });
     expect(ids(hiddenHere)).toEqual(["t", "coordinator", "w3"]);
 
-    const shownHere = sidebarThreadsWithWorkers(threads, {
+    const { threads: shownHere } = sidebarThreadsWithWorkers(threads, {
       coordinatorWorkerListingByProject: { [PROJECT]: { sidebar: true, board: false } } as never,
     });
     expect(ids(shownHere)).toEqual(ids(threads));

@@ -117,7 +117,7 @@ interface Harness {
   clock: number;
 }
 
-function harness(): Harness {
+function harness(projectConversation = false): Harness {
   const storePath = countStoreFile();
   const threads = new Map<string, CodeThread>([
     [COORDINATOR, codeThread(COORDINATOR, { coordinator: true, messageWake: true })],
@@ -146,6 +146,7 @@ function harness(): Harness {
     readProject: () => ({ type: "code", lifecycle: "active" }) as unknown as Project,
     readSettings: () => self.settings,
     isDesignatedPlanner: (id) => planners.has(id),
+    isProjectConversation: () => projectConversation,
     isMarked: (id) => marked.has(id),
     isStrict: (id) => !outsideStrict.has(id),
     threadState: (id) => states.get(id) ?? "idle",
@@ -298,6 +299,65 @@ describe("starting workers", () => {
     });
     expect(creation?.context).toEqual({ coordinatorThreadId: COORDINATOR });
     expect(h.hostTurns).toEqual([{ threadId: NEW_WORKER, prompt: "Find and fix it." }]);
+  });
+
+  it("starts a Project worker at its recorded detached commit even after the checkout moves", async () => {
+    const h = harness(true);
+    const oid = "a".repeat(40);
+    const coordinator = codeThread(COORDINATOR, { coordinator: true });
+    h.threads.set(COORDINATOR, {
+      ...coordinator,
+      deliveryTarget: {
+        ...coordinator.deliveryTarget,
+        branchIntent: "HEAD",
+        proposedBaseBranch: oid,
+      },
+    });
+    await h.service.start(startCall({}));
+    expect(h.executed.map(({ command }) => command)).toContainEqual(
+      expect.objectContaining({
+        kind: "create-managed-code-thread",
+        sourceRevision: oid,
+        startFromOrigin: false,
+      }),
+    );
+  });
+
+  it("links distinct assignments to distinct workers and reuses the first after restart", async () => {
+    const h = harness();
+    const retries = {
+      ...startCall({ title: "Fix updater retries" }),
+      assignmentId: "50000000-0000-4000-8000-000000000081",
+    };
+    const notes = {
+      ...startCall({ title: "Draft release notes" }),
+      assignmentId: "50000000-0000-4000-8000-000000000082",
+    };
+    const [first, repeat, second] = await Promise.all([
+      h.service.start(retries),
+      h.service.start(retries),
+      h.service.start(notes),
+    ]);
+    expect(first.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(repeat.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(second.result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(notes.assignmentId),
+    });
+    expect((await h.restart().start(retries)).result).toMatchObject({
+      status: "started",
+      reference: expect.stringContaining(retries.assignmentId),
+    });
+    expect(h.hostTurns.map((turn) => turn.threadId)).toEqual([
+      retries.assignmentId,
+      notes.assignmentId,
+    ]);
   });
 
   it("starts a marked coordinator's worker marked and at the coordinator's Full access outside Strict", async () => {

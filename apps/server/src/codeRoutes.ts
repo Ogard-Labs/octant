@@ -989,7 +989,9 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           if (
             command !== undefined &&
             (callerAuthority !== "local-window" || agentGrantSession) &&
-            (command.kind === "set-code-thread-coordinator" ||
+            (command.kind === "read-code-project-report-page" ||
+              command.kind === "open-code-project-conversation" ||
+              command.kind === "set-code-thread-coordinator" ||
               command.kind === "set-code-thread-coordinator-bounds" ||
               command.kind === "set-code-thread-coordinator-done-when" ||
               command.kind === "set-code-thread-message-wake" ||
@@ -1001,11 +1003,16 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                   command.coordinatorWorkerListingByProject !== undefined ||
                   command.coordinatorOpenWorkerLimit !== undefined)))
           ) {
+            const action =
+              command.kind === "open-code-project-conversation"
+                ? "open the Project conversation"
+                : command.kind === "read-code-project-report-page"
+                  ? "read Project reports"
+                  : "set coordinators and wake switches";
             return failureResponse(
               {
                 category: "unauthorized",
-                message:
-                  "Only you, from a window or a device you paired, can set coordinators and wake switches.",
+                message: `Only you, from a window or a device you paired, can ${action}.`,
               },
               403,
               origin,

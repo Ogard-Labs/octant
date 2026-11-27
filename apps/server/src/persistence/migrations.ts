@@ -2955,6 +2955,16 @@ CREATE INDEX validation_evidence_authority_idx
           AND event_name = 'native-harness-transcript-compacted@1';
     `,
   },
+  {
+    version: 115,
+    name: "index_code_project_report_receipts",
+    sql: `CREATE INDEX event_journal_code_project_report_receipt ON event_journal (
+      json_extract(payload_json, '$.projectId'), aggregate_id,
+      json_extract(payload_json, '$.turnId'), global_sequence
+    ) WHERE aggregate_type = 'thread-finished-receipt'
+      AND event_name = 'thread.finished-receipt-recorded@1'
+      AND json_extract(payload_json, '$.mode') = 'code';`,
+  },
 ];
 
 interface AppliedMigrationRow {

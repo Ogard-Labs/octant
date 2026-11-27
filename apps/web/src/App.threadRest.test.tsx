@@ -10,10 +10,14 @@ import {
   chats,
   client,
   codeShellBootstrap,
+  codeThreadId,
   codes,
+  openSidebarProject,
+  projectConversationCodes,
   projectWindowCapability,
   projects,
   providers,
+  providersWithToolModel,
   windowId,
 } from "./App.test-fixtures";
 
@@ -27,7 +31,7 @@ import {
  * a suite of its own is what keeps both sets honest.
  */
 describe("thread rest from the sidebar", () => {
-  function shell(codeClient: CodeClient) {
+  function shell(codeClient: CodeClient, providerClient = providers()) {
     return (
       <App
         chatClient={chats()}
@@ -35,7 +39,7 @@ describe("thread rest from the sidebar", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projects()}
         projectWindowCapability={projectWindowCapability}
-        providerClient={providers()}
+        providerClient={providerClient}
         shellClient={client(codeShellBootstrap())}
       />
     );
@@ -109,6 +113,36 @@ describe("thread rest from the sidebar", () => {
       ),
     );
     expect(await screen.findByText("This thread is waiting on you.")).toBeVisible();
+  });
+
+  it("offers commands for the open Project worker when its sidebar row is hidden", async () => {
+    const codeApi = await projectConversationCodes();
+    const user = userEvent.setup();
+    render(shell(codeApi, providersWithToolModel()));
+
+    const sidebar = await screen.findByRole("navigation", { name: "Projects" });
+    expect(
+      within(sidebar).queryByRole("button", { name: /Fix updater retries/ }),
+    ).not.toBeInTheDocument();
+    await openSidebarProject(user, "Octant");
+    const report = await screen.findByRole("region", { name: "Project report" });
+    await user.click(
+      within(report).getByRole("button", { name: "Open Fix updater retries beside the Project" }),
+    );
+    const worker = await screen.findByRole("region", {
+      name: "Workspace pane: Fix updater retries",
+    });
+    await user.click(within(worker).getByRole("textbox", { name: "Follow-up message" }));
+    await user.keyboard("{Control>}k{/Control}");
+    const pin = await screen.findByRole("option", { name: /^Pin.*Fix updater retries/ });
+    expect(screen.getByRole("option", { name: /^Settle.*Fix updater retries/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /^Snooze · In 1 hour/ })).toBeVisible();
+    await user.click(pin);
+    await waitFor(() =>
+      expect(codeApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "pin-code-thread", threadId: codeThreadId, pinned: true }),
+      ),
+    );
   });
 
   it("offers no thread commands while a new thread is being drafted", async () => {

@@ -59,6 +59,8 @@ const MAX_RECIPIENTS_PER_SEND = 4;
  * devices, child runs, and unknown ids are not addressable.
  */
 export interface AgentMessageEndpointFacts {
+  readonly projectConversation?: true;
+  readonly coordinatorThreadId?: string;
   readonly mode: OctantMode;
   /** The Project the thread belongs to, when it has one. */
   readonly projectId: string | undefined;
@@ -159,11 +161,19 @@ export interface AgentMessageServiceOptions {
  * unreachable in the same words as one of another Project, whatever Project
  * its record names.
  */
-function crossesModes(
+function outsideMessageScope(
+  senderId: string,
   sender: AgentMessageEndpointFacts | undefined,
   recipient: AgentMessageEndpointFacts | undefined,
 ): boolean {
-  return sender !== undefined && recipient !== undefined && sender.mode !== recipient.mode;
+  return (
+    sender !== undefined &&
+    recipient !== undefined &&
+    (sender.mode !== recipient.mode ||
+      (sender.projectConversation === true &&
+        recipient.coordinatorThreadId !== undefined &&
+        recipient.coordinatorThreadId !== senderId))
+  );
 }
 
 export class AgentMessageDeliveryRefused extends Error {
@@ -589,7 +599,7 @@ export class AgentMessageService {
     | undefined {
     const recipientEndpoint = this.#resolveEndpoint(String(recipientThreadId));
     const senderEndpoint = this.#resolveEndpoint(String(request.senderThreadId));
-    if (crossesModes(senderEndpoint, recipientEndpoint)) {
+    if (outsideMessageScope(String(request.senderThreadId), senderEndpoint, recipientEndpoint)) {
       return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
     }
     const decision = decideAgentMessageDelivery({
@@ -634,7 +644,7 @@ export class AgentMessageService {
       return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
     }
     const senderEndpoint = this.#resolveEndpoint(String(record.senderThreadId));
-    if (crossesModes(senderEndpoint, recipientEndpoint)) {
+    if (outsideMessageScope(String(record.senderThreadId), senderEndpoint, recipientEndpoint)) {
       return { status: "refused", reason: "unauthorized", message: AGENT_MESSAGE_UNREACHABLE };
     }
     const decision = decideAgentMessageDeliveryAtRecheck({
