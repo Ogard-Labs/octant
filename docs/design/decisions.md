@@ -2989,7 +2989,7 @@ A thread can be settled (completed) or snoozed; both are overlays, not lifecycle
 - Nothing else settles a thread, nothing settles a coordinator or a thread with a decision left for the person, and the host never marks a thread Done.
 - A host sweep archives only settled threads, after a configurable delay.
 - A thread waiting on the person cannot be snoozed; a snooze wakes early when the agent needs the person (maintainer decision, 2026-11-25).
-- The palette's settle and snooze commands add no authority (maintainer request, 2026-11-25). A deferred pending question never changes the thread, draft, answer or execution authority.
+- The palette's settle and snooze commands add no authority (maintainer request, 2026-11-25). An open worker keeps its thread commands when its sidebar row is hidden. A deferred pending question never changes the thread, draft, answer or execution authority.
 - Dragging a row onto or out of Pinned, Settled or Snoozed runs the row menu's own command, so the host decides; Snoozed is never a drop target (maintainer decision, 2026-11-26).
 - Every sidebar state change the host accepts offers Undo for a moment, sent as a new person command, never a rewrite; Archive has none (maintainer decision, 2026-11-26).
 - Files dropped on a thread row open the thread and go to its composer's own attach path (maintainer decision, 2026-11-26).

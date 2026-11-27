@@ -217,10 +217,12 @@ choices under the row menu's own words and conditions: **Pin** or **Unpin**
 closed, and **Wake** on a snoozed thread or else one **Snooze · <time>**
 command for each wake time the row menu offers, since the palette has no
 submenu. They run the row menu's own actions, so a refusal reads where the
-row's does, and a wake time is worked out when its command runs. A draft, a
-page or Settings covering the workspace, and a thread this window has no row
-for leave no thread in front, so none are listed. **Mark done** stays on the
-row menu. In the Activity feed the
+row's does, and a wake time is worked out when its command runs. An open
+worker keeps these commands when **Show workers** hides its sidebar row.
+The window must have loaded the thread's navigation data to offer its
+commands. The Project conversation keeps its own Project controls. A draft,
+a page or Settings covering the workspace leaves no thread in front.
+**Mark done** stays on the row menu. In the Activity feed the
 newest group is open, so a feed whose only group is Earlier is never a blank
 column. Group headings in the sidebar are 12px in the meta ink with a 14px
 chevron and the count as a right-aligned number.
@@ -4056,9 +4058,10 @@ Environment read and the thread's binding both show the branch the checkout
 actually holds; a managed worktree is never re-observed through its
 Project's root.
 
-**Moving a busy thread.** The Move to Project dialog on a thread whose turn is
-still running offers two choices once a destination is picked: Move after this
-turn, the default, and Stop and move now. The first queues an intent scoped to
+**Moving a busy thread.** The Move to Project dialog offers turn timing while
+a Code turn is executing or waiting for the person's input. An idle thread
+with an open follow-up offers an immediate move. The two timing choices are
+**Move after this turn**, the default, and **Stop and move now**. The first queues an intent scoped to
 that thread and that turn — the dialog stays open with the queue visible;
 Cancel move, Escape, the backdrop and every other way the dialog goes away
 drop that one queued request and resolve it, never leaving a promise open or

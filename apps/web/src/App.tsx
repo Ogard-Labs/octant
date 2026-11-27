@@ -10260,15 +10260,15 @@ function LaunchedShell(
             // stays mounted and reachable wherever the asking surface is —
             // including when the sidebar that used to host it is hidden.
             <MoveThreadToProjectDialog
-              {...(moveRequest.busy === true ||
-              (moveRequest.mode === "code" &&
-                navigationModel.codeProjectThreads.some(
-                  (thread) =>
-                    String(thread.threadId) === moveRequest.threadId &&
-                    (thread.activity === "working" || thread.activity === "attention"),
-                ))
-                ? { busy: true }
-                : {})}
+              busy={
+                moveRequest.busy === true ||
+                (moveRequest.mode === "code" &&
+                  codeController.navigation.some(
+                    (thread) =>
+                      String(thread.threadId) === moveRequest.threadId &&
+                      (thread.executing === true || thread.awaitingInput === true),
+                  ))
+              }
               currentProjectId={moveRequest.projectId}
               mode={moveRequest.mode}
               onClose={() => setMoveRequest(undefined)}
