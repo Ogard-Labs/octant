@@ -190,6 +190,8 @@ interface StoredWorktreeReceipt {
   readonly path?: string;
   /** A receipt the sweep cannot trust to name a managed worktree blocks it. */
   readonly deletable: boolean;
+  /** The folder is Octant's checkout, imported with Octant's data: never removed here. */
+  readonly importedFromOctant: boolean;
 }
 
 async function readWorktreeReceipts(
@@ -205,6 +207,7 @@ async function readWorktreeReceipts(
       file,
       receiptId: name.slice(0, -".json".length),
       ...worktreeReceiptEvidence(parsed, input),
+      importedFromOctant: parsed?.importedFrom === "octant",
     });
   }
   return receipts;
@@ -223,7 +226,12 @@ async function removeOwnedWorktrees(
   for (const receipt of receipts) {
     if (receipt.threadId !== input.threadId || !receipt.deletable) continue;
     await rm(receipt.file, { force: true });
-    if (!blocked && receipt.path !== undefined && !kept.has(receipt.path)) {
+    if (
+      !blocked &&
+      !receipt.importedFromOctant &&
+      receipt.path !== undefined &&
+      !kept.has(receipt.path)
+    ) {
       await removeDirectory(receipt.path, input.dataDirectory);
     }
   }

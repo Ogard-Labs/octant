@@ -1255,6 +1255,37 @@ describe("thread purge sweep", () => {
     ).toBe(true);
   });
 
+  it("deletes an imported worktree's receipt with its thread but leaves Octant's checkout folder in place", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+    const receipt = join(
+      harness.directory,
+      "managed-worktree-receipts",
+      `${uuidFor("code", "worktree")}.json`,
+    );
+    writeFileSync(
+      receipt,
+      JSON.stringify({ ...JSON.parse(readFileSync(receipt, "utf8")), importedFrom: "octant" }),
+    );
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+
+    expect(existsSync(receipt)).toBe(false);
+    expect(existsSync(worktreeLayout(harness.directory).worktreeFor(thread.id))).toBe(true);
+  });
+
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
     const harness = openHarness();
     seedControlThread(harness);
