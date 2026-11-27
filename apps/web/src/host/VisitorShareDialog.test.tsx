@@ -120,20 +120,11 @@ describe("VisitorShareDialog", () => {
   it("shows a new link as a path to put the hub's public address in front of, and copies the path", async () => {
     const user = userEvent.setup();
     renderDialog({
-      // A hub with its own Funnel on is no exception: the link goes to the hub it joined.
+      // Sharing goes through the hub this computer joined, whose public
+      // address the window does not know, so the link is always a path.
       "visitor-list": {
         status: 200,
-        body: {
-          spoke: { membership: "none" },
-          hub: {
-            enabled: true,
-            roster: {
-              roster: { members: [{ role: "hub", privateNames: ["studio.tail1234.ts.net"] }] },
-            },
-          },
-          publicEntrance: { enabled: true, funnel: { enabled: true, port: 443 } },
-          visitors: { spoke: { links: [], comments: [], published: true } },
-        },
+        body: { visitors: { spoke: { links: [], comments: [], published: true } } },
       },
       "visitor-share": madeLink,
     });
