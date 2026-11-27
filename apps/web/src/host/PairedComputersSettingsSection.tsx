@@ -163,10 +163,12 @@ export function PairedComputersSettingsSection({
     return host.state === "ready" ? "Connected" : "Not connected right now";
   };
 
-  // Said only once the person turned the choice on, so the row stays quiet otherwise.
+  // The row says what its switch does in either position, as the hub's own
+  // device list does; an app that cannot relay shows no switch and says nothing.
   const relayNote = (computer: PairedComputer): string => {
+    if (bridge.setPairedComputerRelay === undefined) return "";
     const relay = computer.relayThroughHub;
-    if (relay?.enabled !== true) return "";
+    if (relay?.enabled !== true) return " · Away: private network only.";
     return relay.addressKnown
       ? " · Away, Octant reaches it through its hub."
       : " · It hasn't told Octant where its hub is yet. Connect once at home.";

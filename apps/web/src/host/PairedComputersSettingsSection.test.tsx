@@ -360,6 +360,7 @@ describe("forgetting a paired computer", () => {
       name: "Reach Studio Mac through the hub when away",
     });
     expect(choice.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText(/Away: private network only/)).toBeTruthy();
     await userEvent.click(choice);
     expect(setPairedComputerRelay).toHaveBeenCalledWith(studio.origin, true);
     expect(await screen.findByText(/Away, Octant reaches it through its hub/)).toBeTruthy();
