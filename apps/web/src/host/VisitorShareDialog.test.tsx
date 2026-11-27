@@ -22,6 +22,38 @@ function statusWith(spoke: Record<string, unknown>) {
   };
 }
 
+function hubStatus(options: {
+  readonly enabled: boolean;
+  readonly port?: number;
+  readonly hub?: boolean;
+  readonly paused?: boolean;
+  readonly names?: ReadonlyArray<string>;
+}) {
+  const isHub = options.hub !== false;
+  return {
+    status: 200,
+    body: {
+      hub: {
+        enabled: isHub,
+        roster: {
+          roster: {
+            members: [
+              { role: "spoke", privateNames: ["laptop.tail1234.ts.net"] },
+              { role: "hub", privateNames: options.names ?? ["studio.tail1234.ts.net"] },
+            ],
+          },
+        },
+      },
+      publicEntrance: {
+        enabled: true,
+        paused: options.paused === true,
+        funnel: options.enabled ? { enabled: true, port: options.port ?? 443 } : { enabled: false },
+      },
+      visitors: { spoke: { links: [], comments: [], published: true } },
+    },
+  };
+}
+
 const shared = {
   links: [
     {
@@ -102,6 +134,88 @@ describe("VisitorShareDialog", () => {
       operation: "visitor-share",
       body: { mode: "code", threadId: "thread-1", scope: "comment", lifetimeMs: 3_600_000 },
     });
+  });
+
+  const madeLink = {
+    status: 200,
+    body: {
+      status: "shared",
+      linkId: LINK,
+      url: `/v/${LINK}#k=secret-part`,
+      expiresAt: NOW + 3_600_000,
+      published: true,
+    },
+  };
+
+  it.each([
+    { port: 443, origin: "https://studio.tail1234.ts.net" },
+    { port: 8443, origin: "https://studio.tail1234.ts.net:8443" },
+  ])(
+    "shows and copies the whole link on a hub whose Funnel carries port $port",
+    async ({ port, origin }) => {
+      const user = userEvent.setup();
+      renderDialog({
+        status: hubStatus({ enabled: true, port }),
+        "visitor-share": madeLink,
+      });
+      await screen.findByText("Nothing is shared with a visitor.");
+      await user.click(screen.getByRole("button", { name: "Make link" }));
+      const link = await screen.findByRole("group", { name: "New visitor link" });
+      const whole = `${origin}/v/${LINK}#k=secret-part`;
+      expect(within(link).getByText(whole)).toBeInTheDocument();
+      await user.click(within(link).getByRole("button", { name: "Copy link" }));
+      expect(await navigator.clipboard.readText()).toBe(whole);
+    },
+  );
+
+  it.each([
+    { where: "a computer that is not the hub", status: hubStatus({ enabled: true, hub: false }) },
+    { where: "a hub without Funnel", status: hubStatus({ enabled: false }) },
+    { where: "a paused hub", status: hubStatus({ enabled: true, paused: true }) },
+    { where: "a hub with no tailnet name", status: hubStatus({ enabled: true, names: [] }) },
+  ])(
+    "calls the link a path, to go after the hub's public address, on $where",
+    async ({ status }) => {
+      const user = userEvent.setup();
+      renderDialog({ status, "visitor-share": madeLink });
+      await screen.findByText("Nothing is shared with a visitor.");
+      await user.click(screen.getByRole("button", { name: "Make link" }));
+      const link = await screen.findByRole("group", { name: "New visitor link" });
+      expect(
+        within(link).getByText(/Put your hub's public address in front of it/),
+      ).toBeInTheDocument();
+      expect(within(link).queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
+      await user.click(within(link).getByRole("button", { name: "Copy path" }));
+      expect(await navigator.clipboard.readText()).toBe(`/v/${LINK}#k=secret-part`);
+    },
+  );
+
+  it("keeps a sent request's comment copyable when the links cannot be read again", async () => {
+    const user = userEvent.setup();
+    let reads = 0;
+    renderDialog({
+      status: () => {
+        reads += 1;
+        return reads === 1 ? statusWith(shared) : { status: 503, body: {} };
+      },
+      "visitor-comment": {
+        status: 200,
+        body: {
+          status: "sent",
+          mode: "code",
+          threadId: "thread-1",
+          text: "A visitor wrote: hello",
+        },
+      },
+    });
+    const requests = await screen.findByRole("list", { name: "Visitor requests" });
+    await user.click(within(requests).getByRole("button", { name: /^Send the visitor's request/ }));
+    expect(
+      await screen.findByText(/This computer is not set up for visitor links/),
+    ).toBeInTheDocument();
+    const toSend = screen.getByRole("group", { name: "Comment to send" });
+    await user.click(within(toSend).getByRole("button", { name: "Copy comment" }));
+    expect(await navigator.clipboard.readText()).toBe("A visitor wrote: hello");
   });
 
   it("lists only this thread's links and requests, and stops sharing one", async () => {

@@ -5,7 +5,13 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { copyToClipboard, field, useHubEntranceAction, type HubRequest } from "./hubEntranceAction";
+import {
+  copyToClipboard,
+  field,
+  list,
+  useHubEntranceAction,
+  type HubRequest,
+} from "./hubEntranceAction";
 import { readVisitors, VISITOR_REFUSALS, VisitorLinkList, type VisitorsView } from "./VisitorLinks";
 
 /**
@@ -27,10 +33,46 @@ const EXPIRY_CHOICES: ReadonlyArray<{
   { id: "week", label: "7 days", ms: VISITOR_LINK_MAX_LIFETIME_MS },
 ];
 
-type Loaded =
-  | { readonly kind: "loading" }
-  | { readonly kind: "error"; readonly message: string }
-  | { readonly kind: "ready"; readonly view: VisitorsView };
+/**
+ * The last good read stays beside a later failure: the list holds a sent
+ * request's framed comment, which the host cannot hand out again.
+ */
+interface Loaded {
+  readonly view?: VisitorsView;
+  /** Where visitors reach this computer, when it is the hub and its Funnel says so. */
+  readonly origin?: string | undefined;
+  readonly error?: string | undefined;
+}
+
+/**
+ * The hub's own public address from its status: Funnel serves the hub's
+ * tailnet name, which the signed roster carries. Every other computer, and a
+ * hub behind the person's own front, has no address a visitor could use here.
+ */
+function funnelOrigin(status: unknown): string | undefined {
+  const hub = field(status, "hub");
+  const entrance = field(status, "publicEntrance");
+  const funnel = field(entrance, "funnel");
+  const port = field(funnel, "port");
+  if (
+    field(hub, "enabled") !== true ||
+    field(entrance, "enabled") !== true ||
+    field(entrance, "paused") === true ||
+    field(funnel, "enabled") !== true ||
+    typeof port !== "number"
+  ) {
+    return undefined;
+  }
+  const self = list(field(field(field(hub, "roster"), "roster"), "members")).find(
+    (member) => field(member, "role") === "hub",
+  );
+  const name = list(field(self, "privateNames")).find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" && candidate.endsWith(".ts.net"),
+  );
+  if (name === undefined) return undefined;
+  return port === 443 ? `https://${name}` : `https://${name}:${port}`;
+}
 
 export default function VisitorShareDialog(props: {
   readonly request: HubRequest;
@@ -41,7 +83,7 @@ export default function VisitorShareDialog(props: {
   readonly now?: () => number;
 }) {
   const action = useHubEntranceAction(props.request);
-  const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
+  const [loaded, setLoaded] = useState<Loaded>({});
   const [scope, setScope] = useState<"read" | "comment">("read");
   const [expiry, setExpiry] = useState("day");
   const [shared, setShared] = useState<{
@@ -60,34 +102,23 @@ export default function VisitorShareDialog(props: {
   const { request, mode, threadId } = props;
 
   const refresh = useCallback(async () => {
+    const failed = (error: string) => setLoaded((previous) => ({ ...previous, error }));
     try {
       const reply = await request("status");
       const view = reply.status === 200 ? readVisitors(field(reply.body, "visitors")) : undefined;
-      setLoaded(
-        view === undefined
-          ? {
-              kind: "error",
-              message:
-                "This computer is not set up for visitor links. Join a hub and tick Public first.",
-            }
-          : {
-              kind: "ready",
-              // Only this thread's links, and only the requests waiting on them.
-              view: (() => {
-                const links = view.links.filter(
-                  (link) => link.mode === mode && link.threadId === threadId,
-                );
-                const ids = new Set(links.map((link) => link.linkId));
-                return {
-                  ...view,
-                  links,
-                  comments: view.comments.filter((comment) => ids.has(comment.linkId)),
-                };
-              })(),
-            },
-      );
+      if (view === undefined) {
+        failed("This computer is not set up for visitor links. Join a hub and tick Public first.");
+        return;
+      }
+      // Only this thread's links, and only the requests waiting on them.
+      const links = view.links.filter((link) => link.mode === mode && link.threadId === threadId);
+      const ids = new Set(links.map((link) => link.linkId));
+      setLoaded({
+        view: { ...view, links, comments: view.comments.filter((c) => ids.has(c.linkId)) },
+        origin: funnelOrigin(reply.body),
+      });
     } catch {
-      setLoaded({ kind: "error", message: "Octant could not read this computer's visitor links." });
+      failed("Octant could not read this computer's visitor links.");
     }
   }, [request, mode, threadId]);
 
@@ -117,6 +148,15 @@ export default function VisitorShareDialog(props: {
     }
     await refresh();
   };
+
+  // What the person copies: the whole link where the address is known, else
+  // the path the host answered, named as one.
+  const address =
+    shared === undefined
+      ? undefined
+      : loaded.origin === undefined
+        ? { text: shared.url, noun: "path" }
+        : { text: `${loaded.origin}${shared.url}`, noun: "link" };
 
   return (
     <OctantDialog
@@ -161,14 +201,14 @@ export default function VisitorShareDialog(props: {
           Close
         </OctantButton>
         <OctantButton
-          disabled={action.busy || loaded.kind !== "ready"}
+          disabled={action.busy || loaded.view === undefined || loaded.error !== undefined}
           onClick={() => void share()}
           type="button"
         >
           Make link
         </OctantButton>
       </div>
-      {shared === undefined ? null : (
+      {shared === undefined || address === undefined ? null : (
         <div
           aria-label="New visitor link"
           className="settings-panel__stack"
@@ -177,24 +217,31 @@ export default function VisitorShareDialog(props: {
           tabIndex={-1}
         >
           <p className="setrow-hint">
-            Link on your hub's public address. The part after # is its secret; Octant does not show
-            it again, so send the whole link now.
+            {address.noun === "link"
+              ? "Link on your hub's public address. The part after # is its secret; Octant does not show it again, so send the whole link now."
+              : "This is the link's path, not a whole link. Put your hub's public address in front of it and send the whole link now. The part after # is its secret; Octant does not show it again."}
           </p>
-          <code className="hub-entrance__secret">{shared.url}</code>
+          <code className="hub-entrance__secret">{address.text}</code>
           <div className="host-settings__controls">
             <OctantButton
               onClick={() =>
-                void copyToClipboard(shared.url).then((copied) =>
+                void copyToClipboard(address.text).then((copied) =>
                   action.say(
                     copied
-                      ? { kind: "success", text: "Link copied." }
-                      : { kind: "error", text: "The link could not be copied. Select it instead." },
+                      ? {
+                          kind: "success",
+                          text: address.noun === "link" ? "Link copied." : "Path copied.",
+                        }
+                      : {
+                          kind: "error",
+                          text: `The ${address.noun} could not be copied. Select it instead.`,
+                        },
                   ),
                 )
               }
               size="sm"
             >
-              Copy link
+              {`Copy ${address.noun}`}
             </OctantButton>
           </div>
           {shared.published ? null : (
@@ -207,11 +254,13 @@ export default function VisitorShareDialog(props: {
       {action.notice === undefined ? null : (
         <SettingsState kind={action.notice.kind}>{action.notice.text}</SettingsState>
       )}
-      {loaded.kind === "loading" ? (
+      {loaded.view === undefined && loaded.error === undefined ? (
         <SettingsState kind="loading">Reading this thread's links…</SettingsState>
-      ) : loaded.kind === "error" ? (
-        <SettingsState kind="error">{loaded.message}</SettingsState>
-      ) : (
+      ) : null}
+      {loaded.error === undefined ? null : (
+        <SettingsState kind="error">{loaded.error}</SettingsState>
+      )}
+      {loaded.view === undefined ? null : (
         <VisitorLinkList
           action={action}
           now={(props.now ?? Date.now)()}

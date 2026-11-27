@@ -3065,6 +3065,12 @@ visitor sits on the Computer card of the thread's Environment tool, shown
 only for a thread on this computer in a local desktop window and only for a
 kind of thread the visitor-link contract names; it opens a dialog, loaded as
 its own chunk, with the thread's links and the Requests waiting on them.
+The dialog shows and copies a whole link only where the window already
+knows the address: on the acting hub with Funnel on, from the hub's tailnet
+name in its signed roster and the Funnel port. Elsewhere it shows the path,
+names it as one, and asks the person to put the hub's public address in
+front of it, as the command line does. A sent request's framed comment stays
+in the dialog even when the links cannot be read again.
 Settings › Remote access › Visitor links lists every link and holds the
 hub's switch. The thread list's menu has no Share item: the main chunk has
 no room for one (`scripts/initial-renderer-budget.json`). A Request card
