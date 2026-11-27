@@ -31,9 +31,17 @@ import {
   decodeHubSignInDecisionRequest,
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
+  decodeHubPublicStandbyServeRequest,
+  decodeHubVisitorCommentRequest,
+  decodeHubVisitorLinkRequest,
+  decodeHubVisitorShareRequest,
+  decodeHubVisitorSwitchRequest,
   decodeHubWebhookCreateRequest,
   decodeHubWebhookEndpointRequest,
+  decodeHubWebhookSecretRequest,
   decodeHubPushSwitchRequest,
+  decodeHubRelayDeviceRequest,
+  decodeHubRelaySwitchRequest,
   decodeHubStandbyOrderRequest,
   decodeHubWakeHardwareAddressRequest,
   decodeHubWakeSwitchRequest,
@@ -224,11 +232,23 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/public/funnel",
     decodeBody: decodeHubPublicFunnelRequest,
   },
+  // A named standby's own choice to serve the entrance while it stands in for the hub.
+  "public-standby": {
+    method: "POST",
+    path: "/api/desktop/hub/public/standby",
+    decodeBody: decodeHubPublicStandbyServeRequest,
+  },
   // This spoke's webhook endpoints; a new secret is shown once.
   "webhook-create": {
     method: "POST",
     path: "/api/desktop/hub/webhooks/create",
     decodeBody: decodeHubWebhookCreateRequest,
+  },
+  // The secret Stripe minted for one of this spoke's Stripe endpoints, pasted in.
+  "webhook-secret": {
+    method: "POST",
+    path: "/api/desktop/hub/webhooks/secret",
+    decodeBody: decodeHubWebhookSecretRequest,
   },
   "webhook-rotate": {
     method: "POST",
@@ -239,6 +259,39 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/webhooks/remove",
     decodeBody: decodeHubWebhookEndpointRequest,
+  },
+  // The hub's visitor-link switch, and this spoke's links and the comments waiting on them.
+  "visitor-list": { method: "GET", path: "/api/desktop/hub/visitors" },
+  visitors: {
+    method: "POST",
+    path: "/api/desktop/hub/visitors",
+    decodeBody: decodeHubVisitorSwitchRequest,
+  },
+  "visitor-share": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/share",
+    decodeBody: decodeHubVisitorShareRequest,
+  },
+  "visitor-stop": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/stop",
+    decodeBody: decodeHubVisitorLinkRequest,
+  },
+  "visitor-comment": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/comment",
+    decodeBody: decodeHubVisitorCommentRequest,
+  },
+  // The hub's device relay switch, and which of this host's paired devices may come through it.
+  relay: {
+    method: "POST",
+    path: "/api/desktop/hub/relay",
+    decodeBody: decodeHubRelaySwitchRequest,
+  },
+  "relay-device": {
+    method: "POST",
+    path: "/api/desktop/hub/relay/devices",
+    decodeBody: decodeHubRelayDeviceRequest,
   },
   "direct-push": {
     method: "POST",

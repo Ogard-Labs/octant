@@ -1,0 +1,16 @@
+/*
+ * The public entrance's window screens: a secret, path or link shown once,
+ * and a visitor's comment. Each wraps anywhere and keeps its own line
+ * breaks, so a long one never widens the page or the dialog.
+ */
+.hub-entrance__secret {
+  font-family: var(--oct-font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
+.hub-entrance__comment {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}

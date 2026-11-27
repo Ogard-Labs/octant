@@ -30,6 +30,10 @@ async function setup(
   listenerStatus?: Parameters<typeof startHubTestHost>[0]["listenerStatus"],
   network = new HubTestNetwork(),
   delegationAccepting?: { read: () => boolean; set: (accepting: boolean) => void },
+  visitorServices: Pick<
+    Parameters<typeof createHubAdministrationRouteHandler>[0],
+    "visitors" | "spokeVisitors"
+  > = {},
 ) {
   const host = await startHubTestHost({
     name: "Mac mini",
@@ -46,6 +50,7 @@ async function setup(
     hub: host.hub,
     spoke: host.spoke,
     ...(delegationAccepting === undefined ? {} : { delegationAccepting }),
+    ...visitorServices,
     pairedMergeUnlock: host.pairedMergeUnlock,
     ownerApprovalAnswerUnlock: host.ownerApprovalAnswerUnlock,
     failover: host.failover,
@@ -146,6 +151,40 @@ describe("hub administration over the loopback channel", () => {
     );
     expect(unsigned?.status).not.toBe(200);
     expect(accepting).toBe(false);
+  });
+
+  it("answers a window the visitor view alone, without reading direct sending's credentials", async () => {
+    const view = { links: [], comments: [], published: true };
+    const counts = { enabled: false, grants: 0, streams: 0 };
+    const { host, handle } = await setup(undefined, new HubTestNetwork(), undefined, {
+      visitors: { status: () => counts, setEnabled: vi.fn() },
+      spokeVisitors: { view: () => view, share: vi.fn(), stop: vi.fn(), decideComment: vi.fn() },
+    });
+    const credentials = vi.spyOn(host.directPush, "status");
+    const read = (headers: Record<string, string> = {}) =>
+      handle(
+        new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.visitorSwitch}`, {
+          headers: {
+            "x-octant-desktop-secret": secret,
+            "x-octant-window-capability": capability,
+            ...headers,
+          },
+        }),
+      );
+
+    const answered = await read();
+    expect(answered?.status).toBe(200);
+    expect(answered?.headers.get("cache-control")).toBe("no-store");
+    expect(await answered?.json()).toEqual({ visitors: { hub: counts, spoke: view } });
+    for (const headers of [
+      { "x-octant-window-capability": "B".repeat(43) },
+      { "x-octant-window-capability": "" },
+      { "x-octant-desktop-secret": "wrong" },
+      { origin: "http://127.0.0.1" },
+    ]) {
+      expect((await read(headers))?.status).toBe(401);
+    }
+    expect(credentials).not.toHaveBeenCalled();
   });
 
   it("turns the Tailscale certificate on only for a window that sends the acknowledgement", async () => {

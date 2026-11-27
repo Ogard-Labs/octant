@@ -202,6 +202,121 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("sends the device relay switch and one device's choice only with their decoded bodies", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+
+    await sendHubAdministrationOperation(controls, "relay", { enabled: true });
+    await sendHubAdministrationOperation(controls, "relay-device", {
+      deviceId: "device-1",
+      allowed: false,
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/relay",
+      "http://127.0.0.1:4317/api/desktop/hub/relay/devices",
+    ]);
+
+    for (const [operation, body] of [
+      ["relay", { enabled: true, devices: [] }],
+      ["relay-device", { deviceId: "", allowed: true }],
+      ["relay-device", { deviceId: "device-1" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
+  it("sends a standby's choice to serve the public entrance only with its decoded body", async () => {
+    const { calls, runtime: controls } = runtime(() =>
+      Response.json({ status: "changed", enabled: true }),
+    );
+    await sendHubAdministrationOperation(controls, "public-standby", { enabled: true });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/public/standby",
+    ]);
+    expect(
+      await sendHubAdministrationOperation(controls, "public-standby", { enabled: "on" }),
+    ).toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("forwards a pasted Stripe secret only with a body that names one endpoint and the secret", async () => {
+    const { calls, runtime: controls } = runtime(() =>
+      Response.json({ status: "set", published: true }),
+    );
+    const endpointId = "A".repeat(22);
+    await sendHubAdministrationOperation(controls, "webhook-secret", {
+      endpointId,
+      secret: "whsec_pasted-from-stripe",
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/webhooks/secret",
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      endpointId,
+      secret: "whsec_pasted-from-stripe",
+    });
+    for (const body of [
+      { endpointId: "../admin", secret: "whsec_x" },
+      { endpointId, secret: "whsec_x", scheme: "github" },
+      { endpointId, secret: "x".repeat(257) },
+    ]) {
+      expect(await sendHubAdministrationOperation(controls, "webhook-secret", body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(1);
+  });
+
+  it("shares, stops and answers visitor links only with bodies that name one thread, link or comment", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+    const linkId = "A".repeat(22);
+    await sendHubAdministrationOperation(controls, "visitors", { enabled: true });
+    await sendHubAdministrationOperation(controls, "visitor-share", {
+      mode: "code",
+      threadId: "thread-1",
+      scope: "comment",
+      lifetimeMs: 3_600_000,
+    });
+    await sendHubAdministrationOperation(controls, "visitor-stop", { linkId });
+    await sendHubAdministrationOperation(controls, "visitor-comment", {
+      commentId: linkId,
+      action: "send",
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/visitors",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/share",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/stop",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/comment",
+    ]);
+
+    for (const [operation, body] of [
+      ["visitor-share", { mode: "code", threadId: "thread-1", scope: "write" }],
+      ["visitor-share", { mode: "code", threadId: "thread-1", scope: "read", lifetimeMs: 1 }],
+      ["visitor-stop", { linkId: "../admin" }],
+      ["visitor-comment", { commentId: linkId, action: "approve" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(4);
+  });
+
+  it("reads this host's visitor links alone with a bodiless GET", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({}));
+    await sendHubAdministrationOperation(controls, "visitor-list", undefined);
+    expect(calls.map((call) => [call.init?.method, call.url])).toEqual([
+      ["GET", "http://127.0.0.1:4317/api/desktop/hub/visitors"],
+    ]);
+    expect(calls[0]?.init?.body).toBeUndefined();
+    expect(
+      await sendHubAdministrationOperation(controls, "visitor-list", { enabled: true }),
+    ).toMatchObject({ status: 400 });
+    expect(calls).toHaveLength(1);
+  });
+
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

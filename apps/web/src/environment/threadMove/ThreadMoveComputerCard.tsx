@@ -11,11 +11,17 @@ import {
   type ThreadMoveThreadStatus,
   type ThreadMoveUnlockChallenge,
   type HandoverOutcome,
+  VisitorThreadMode,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
-import { ArrowRight, ChevronRight, Laptop, Server } from "../../ui/icons";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ArrowRight, ChevronRight, Globe, Laptop, Server } from "../../ui/icons";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  getInjectedHostBridge,
+  hubAdministrationOf,
+  type HubAdministrationBridge,
+} from "../../shell/hostBridge";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
@@ -53,7 +59,18 @@ export interface ThreadMoveComputerCardProps {
   readonly unlock?: Pick<DesktopOwnerUnlockPort, "ownerUnlockSign">;
   /** Opens Settings › Remote access › Hub, for a host that is in no hub. */
   readonly onOpenHubSettings?: () => void;
+  /**
+   * The loopback hub administration Share with visitor asks; by default the
+   * desktop's own. Read only beside `client`, which is present only for a
+   * thread on this computer in a local desktop window, so a visitor link is
+   * asked of the computer that owns the thread. Read here rather than passed
+   * down, so the main chunk carries none of it.
+   */
+  readonly hubRequest?: HubAdministrationBridge["hubAdministrationRequest"];
 }
+
+// Loaded only when a person opens it (hub-and-spokes.md, Visitor links).
+const VisitorShareDialog = lazy(() => import("../../host/VisitorShareDialog"));
 
 /** What a thread's Environment needs to show its Computer card, beyond the thread itself. */
 export type ThreadMoveEnvironment = Omit<ThreadMoveComputerCardProps, "thread" | "threadTitle">;
@@ -92,6 +109,9 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
   const [handoverOpen, setHandoverOpen] = useState(false);
   const canHandOver = props.thread.mode === "code";
   const [takeBackOffered, setTakeBackOffered] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const hubRequest =
+    props.hubRequest ?? hubAdministrationOf(getInjectedHostBridge())?.hubAdministrationRequest;
   const contentId = useId();
   const status = move.status;
   const live = useLiveAnnouncement(status);
@@ -179,8 +199,34 @@ function MovableComputerCard(props: ThreadMoveComputerCardProps & { client: Thre
               )}
             </div>
           ) : null}
+          {/* Only the kinds of thread the visitor-link contract names can be shared. */}
+          {hubRequest === undefined ||
+          !(VisitorThreadMode.literals as ReadonlyArray<string>).includes(
+            props.thread.mode,
+          ) ? null : (
+            <OctantButton
+              className="environment-move__row window-no-drag"
+              onClick={() => setSharing(true)}
+              type="button"
+              variant="bare"
+            >
+              <EnvironmentTile icon={Globe} />
+              <span className="environment-move__name">Share with visitor…</span>
+            </OctantButton>
+          )}
         </div>
       </EnvironmentCard>
+      {!sharing || hubRequest === undefined ? null : (
+        <Suspense fallback={null}>
+          <VisitorShareDialog
+            mode={props.thread.mode}
+            onClose={() => setSharing(false)}
+            request={hubRequest}
+            threadId={props.thread.threadId}
+            title={props.threadTitle}
+          />
+        </Suspense>
+      )}
       {status?.failure === undefined ? null : (
         <OctantAlert
           action={

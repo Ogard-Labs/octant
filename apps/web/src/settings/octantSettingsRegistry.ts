@@ -2167,7 +2167,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Public entrance",
           scope: "host",
           keywords:
-            "hub public entrance internet visitor links webhooks relay away from home off by default",
+            "hub public entrance internet visitor links share comment requests webhooks endpoint secret rotate delivery log device relay allow withdraw standby serve away from home off by default",
         },
         {
           id: settingId("hub-public-funnel"),
