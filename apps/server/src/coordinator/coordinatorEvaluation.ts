@@ -142,7 +142,7 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     if (!line) continue;
     const marker = /^(?:[-+*]|\d+[.)]|#{1,6})\s+/.exec(line);
     const content = line.slice(marker?.[0].length ?? 0);
-    const field = /^(worker|reference)\s*:\s*/.exec(content);
+    const field = /^(?:\*\*|__)?(worker|reference)(?:\*\*|__)?\s*:(?:\*\*|__)?\s*/.exec(content);
     const value = content.slice(field?.[0].length ?? 0);
     const lead = value.replace(/^[\s`*_[(<]+/, "");
     const refs = workers.filter(({ reference }) => value.includes(reference));
@@ -154,20 +154,25 @@ function recapNamesWorkers(starts: ReadonlyArray<Action>, answer: string): boole
     // entry even without a list marker or a Worker label.
     const standalone = lead.replace(/[\s`*_\])>:]+$/, "");
     const standaloneTitle = titles.find(({ title }) => standalone === title);
+    const standaloneRef = refs.find(({ reference }) => standalone === reference);
     const titleHeading = field || marker ? leadingTitle : standaloneTitle;
 
     if (pending && !marker) {
       // The identifier in a reference field belongs to the preceding title.
       // An aside in that field may name a different worker.
-      if (pending.part === "title" && leadingRef && field) {
-        finishItem(leadingRef.reference);
+      const fieldRef =
+        leadingRef ?? (field?.[1] === "reference" && refs.length === 1 ? refs[0] : undefined);
+      if (pending.part === "title" && field && fieldRef) {
+        finishItem(fieldRef.reference);
         continue;
       }
-      if (pending.part === "reference" && titleHeading && refs.length === 0) {
-        finishItem(titleHeading.title);
+      const fieldTitle =
+        titleHeading ?? (field?.[1] === "worker" && titles.length === 1 ? titles[0] : undefined);
+      if (pending.part === "reference" && fieldTitle && refs.length === 0) {
+        finishItem(fieldTitle.title);
         continue;
       }
-      if (!field && !standaloneTitle) {
+      if (!field && !standaloneTitle && !(pending.part === "reference" && standaloneRef)) {
         if (pending.part === "title" && leadingRef) {
           const suffix = lead.slice(leadingRef.reference.length).replace(/^[`*_\])>\s]+/, "");
           if (!suffix || suffix.startsWith("(")) referenceLines.add(leadingRef.reference);

@@ -62,6 +62,10 @@ it("requires the Project conversation to name and link each confirmed worker", (
     const parserRef = swapped ? "changelog@project" : "parser@project";
     const changelogRef = swapped ? "parser@project" : "changelog@project";
     for (const recap of [
+      `${parserRef}\nCSV parser fixes things.\n${changelogRef}\nChangelog release notes follow.`,
+      `**Worker:** CSV parser\nReference: see ${parserRef}\n__Worker__: Changelog\n**Reference:** see ${changelogRef}`,
+      `CSV parser and Changelog have both started:\nI assigned CSV parser to ${parserRef}.\nI assigned Changelog to ${changelogRef}.`,
+      `- ${parserRef}\nCSV parser output feeds this.\nWorker: CSV parser\n- ${changelogRef}\nChangelog work depends on this.\nWorker: Changelog`,
       `- **CSV parser**\n  Changelog work depends on this.\n  Reference: ${parserRef}\n- **Changelog**\n  CSV parser output feeds it.\n  Reference: ${changelogRef}`,
       `- **CSV parser**\n  changelog@project needs this.\n  Reference: ${parserRef}\n- **Changelog**\n  parser@project depends on it.\n  Reference: ${changelogRef}`,
       `I started the CSV parser and a documentation worker.\n  **Changelog**\n  Reference: ${changelogRef}\n  **CSV parser**\n  Reference: ${parserRef}`,
