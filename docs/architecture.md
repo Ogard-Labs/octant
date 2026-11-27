@@ -4812,7 +4812,11 @@ CI or reviewers should be woken, not left polling; maintainer request,
   thread's own watch and the Auto-fix or babysitting it repairs, to a window or
   the host person's own paired device that may open the thread. It reads local
   state only: no forge call, and unlike a pull request's own view it vouches
-  for nothing. A settled or archived thread lists nothing, though its watch
+  for nothing. A wait reads paused while no window vouches for it, while
+  GitHub access is revoked (read from local state, so it shows before the next
+  pass), or after a pass could not read or wake it, until a pass can again;
+  the last two name their reason, and the vouch is kept so the wait resumes by
+  itself. A settled or archived thread lists nothing, though its watch
   may not have read it as gone yet. `POST /api/code-thread-waits/stop` stops one of them for the
   person (a routine's scope and a hub-introduced device are refused). It only
   takes reach away, so it asks the forge and the Project nothing: the thread

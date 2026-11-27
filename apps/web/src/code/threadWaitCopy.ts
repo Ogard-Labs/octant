@@ -28,16 +28,19 @@ const endTime = (iso: string) =>
     minute: "2-digit",
   });
 
+/** Why a paused wait reads nothing, or how the person resumes it. */
+function pausedBecause(wait: CodeThreadPullRequestWait): string {
+  if (wait.pausedBy === "github-disconnected") return "GitHub is disconnected";
+  // Babysitting finds a window again by itself, so there is nothing to open.
+  if (wait.pausedBy === "unreachable" || wait.kind === "babysit")
+    return "Octant can’t reach this pull request";
+  return "Open the pull request to resume";
+}
+
 /** The second line of a wait's entry: where it is, and what bounds or holds it. */
 export function waitDetail(wait: CodeThreadPullRequestWait): string {
   const parts = [waitRepository(wait)];
-  if (wait.paused) {
-    parts.push(
-      wait.kind === "babysit"
-        ? "Octant can’t reach this pull request"
-        : "Open the pull request to resume",
-    );
-  }
+  if (wait.paused) parts.push(pausedBecause(wait));
   if (wait.wakes !== undefined && wait.wakeLimit !== undefined) {
     parts.push(`${String(wait.wakes)} of ${String(wait.wakeLimit)} wakes used`);
   }

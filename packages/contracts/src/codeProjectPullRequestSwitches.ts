@@ -278,6 +278,11 @@ export const CodeThreadPullRequestWait = Schema.Struct({
   since: UtcTimestamp,
   /** On, but reading nothing until a window vouches for it or the host reconnects. */
   paused: Schema.Boolean,
+  /**
+   * What holds a paused wait besides a window not yet vouching for it: GitHub
+   * access is revoked, or the last pass could not read the pull request.
+   */
+  pausedBy: Schema.optional(Schema.Literal("github-disconnected", "unreachable")),
   /** Turns it has started, and the count that ends it. */
   wakes: Schema.optional(Schema.NonNegativeInt),
   wakeLimit: Schema.optional(

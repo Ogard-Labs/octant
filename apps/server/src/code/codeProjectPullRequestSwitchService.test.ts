@@ -23,6 +23,7 @@ import {
   type PullRequestSwitchForge,
   type PullRequestSwitchLimits,
 } from "./codeProjectPullRequestSwitchService";
+import { PullRequestLinkService, type PullRequestLinkOwner } from "./pullRequestLinkService";
 import type {
   GhAutoFixFailureDetail,
   GhPullRequestActivity,
@@ -93,6 +94,7 @@ function fixture(
     readonly limits?: () => PullRequestSwitchLimits;
     readonly localWindows?: () => ReadonlyArray<typeof windowId>;
     readonly threadPullRequests?: ReadonlyArray<typeof target>;
+    readonly pullRequestLinks?: (journal: Journal) => PullRequestLinkOwner;
   } = {},
 ) {
   let authority: "authorized" | "not-authorized" | "disconnected" = "authorized";
@@ -147,8 +149,10 @@ function fixture(
     readFollowUp: vi.fn<NonNullable<PullRequestAutoFixThreads["readFollowUp"]>>(),
     notifyPerson: vi.fn<PullRequestAutoFixThreads["notifyPerson"]>(async () => undefined),
   };
+  const pullRequestLinks = options.pullRequestLinks?.(journal);
   const create = () =>
     new CodeProjectPullRequestSwitchService({
+      ...(pullRequestLinks && { pullRequestLinks }),
       ...(options.limits && { limits: options.limits }),
       ...(options.localWindows ? { localWindows: options.localWindows } : {}),
       authority: {
@@ -159,6 +163,7 @@ function fixture(
               ? { status: "authorized", linkedThreadIds: options.linked ?? [String(threadId)] }
               : { status: authority }),
         linkedPullRequests: async () => options.threadPullRequests ?? [target],
+        connectionRevoked: () => authority === "disconnected",
       },
       forge,
       threads,
@@ -1333,6 +1338,68 @@ describe("a thread watching its own pull request", () => {
     f.setAuthority("disconnected");
     await f.service.tick(signal);
     expect(f.service.threadWaits(threadId)).toMatchObject([{ kind: "babysit", paused: true }]);
+  });
+
+  it("reads a watch and Auto-fix as paused from the moment GitHub is disconnected until it is back", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    await f.service.setAutoFix(windowId, { kind: "enable", target, threadId }, "user");
+
+    f.setAuthority("disconnected");
+    const disconnected = [
+      { kind: "watch", paused: true, pausedBy: "github-disconnected" },
+      { kind: "auto-fix", paused: true, pausedBy: "github-disconnected" },
+    ];
+    expect(f.service.threadWaits(threadId)).toMatchObject(disconnected);
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject(disconnected);
+
+    f.setAuthority("authorized");
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "watch", paused: false },
+      { kind: "auto-fix", paused: false },
+    ]);
+  });
+
+  it("reads a watch the last pass could not read as paused until a pass reads it again", async () => {
+    const f = fixture();
+    f.observe(activity());
+    await watching(f);
+    f.observe({ status: "unavailable" });
+    await f.service.tick(signal);
+    expect(f.service.threadWaits(threadId)).toMatchObject([
+      { kind: "watch", paused: true, pausedBy: "unreachable" },
+    ]);
+
+    f.observe(activity());
+    await f.service.tick(signal);
+    const [wait] = f.service.threadWaits(threadId);
+    expect(wait).toMatchObject({ kind: "watch", paused: false });
+    expect(wait).not.toHaveProperty("pausedBy");
+  });
+
+  it("looks up no pull-request link for a stopped switch when the sidebar reads who waits", async () => {
+    let resolved = 0;
+    const f = fixture({
+      pullRequestLinks: (journal) => {
+        const links = new PullRequestLinkService({ journal, uuid: randomUUID });
+        const resolveLink = links.resolveLink.bind(links);
+        vi.spyOn(links, "resolveLink").mockImplementation((input) => {
+          resolved += 1;
+          return resolveLink(input);
+        });
+        return links;
+      },
+    });
+    f.observe(activity());
+    await watching(f);
+    await f.service.unwatch({ threadId, providerInstanceId });
+    resolved = 0;
+
+    expect(f.service.threadsWaitingSince()).toEqual(new Map());
+    expect(resolved).toBe(0);
   });
 
   it("stops the thread's own watch for the person and journals who stopped it", async () => {

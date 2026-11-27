@@ -284,6 +284,7 @@ describe("RemoteRequestProofService", () => {
                 status: "authorized",
                 linkedThreadIds: [String(threadId)],
               }),
+              connectionRevoked: () => false,
               linkedPullRequests: async () => [target],
             },
             forge: {

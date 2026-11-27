@@ -6,6 +6,7 @@ import {
   decodeCodeThreadPullRequestWaits,
   type CodeThreadPullRequestWait,
 } from "@octant/contracts/code-project-pull-request-switches";
+import { CodeNavigationRevisionContext } from "../polling/ThreadActivityRevisions";
 import { ThreadBackgroundWork } from "./ThreadBackgroundWork";
 import type { CodeSessionClient } from "./codeSessionClient";
 import { createThreadWaitClient, type ThreadWaitClient } from "./threadWaitClient";
@@ -129,6 +130,49 @@ describe("a thread's background work", () => {
     await user.click(screen.getByRole("button", { name: "Show background work details" }));
     const dialog = await screen.findByRole("dialog", { name: "Background work" });
     expect(within(dialog).getByText(/Open the pull request to resume/)).toBeTruthy();
+  });
+
+  it("says in Details that a paused wait is held by the GitHub disconnect or an unreachable pull request", async () => {
+    const user = userEvent.setup();
+    const { pullRequests } = waiting([
+      wait({ paused: true, pausedBy: "github-disconnected" }),
+      wait({
+        kind: "auto-fix",
+        paused: true,
+        pausedBy: "unreachable",
+        target: { ...target, number: 373 },
+      }),
+    ]);
+    render(
+      <ThreadBackgroundWork threadId={threadId} client={undefined} pullRequests={pullRequests} />,
+    );
+    await screen.findByText("Paused on 2 pull requests");
+    await user.click(screen.getByRole("button", { name: "Show background work details" }));
+    const dialog = await screen.findByRole("dialog", { name: "Background work" });
+    expect(within(dialog).getByText(/GitHub is disconnected/)).toBeTruthy();
+    expect(within(dialog).getByText(/Octant can’t reach this pull request/)).toBeTruthy();
+    expect(within(dialog).queryByText(/Open the pull request to resume/)).toBeNull();
+  });
+
+  it("reads a Code thread's waits again as soon as the Code navigation notice arrives", async () => {
+    let waits: ReadonlyArray<CodeThreadPullRequestWait> = [];
+    const read = vi.fn(async () => waits);
+    const pullRequests = {
+      threadId,
+      client: { waits: read, stop: async () => true },
+      turnRunning: false,
+    };
+    const row = (revision: number) => (
+      <CodeNavigationRevisionContext.Provider value={revision}>
+        <ThreadBackgroundWork threadId={threadId} client={undefined} pullRequests={pullRequests} />
+      </CodeNavigationRevisionContext.Provider>
+    );
+    const view = render(row(0));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+
+    waits = [wait({ kind: "auto-fix" })];
+    view.rerender(row(1));
+    expect(await screen.findByText("Auto-fixing pull request #372")).toBeTruthy();
   });
 
   it("lists every task and pull request in Details with its state, and stops one by name", async () => {

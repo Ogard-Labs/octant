@@ -1334,35 +1334,36 @@ runs out of room (each entry's full text on hover), and **Details** and
   pull request #372"). With no live task the state reads **Waiting** (or
   **Waiting on N pull requests**), or **Paused** when every one of them is on
   but reading nothing. With both, it counts each ("Running 2 tasks, waiting on
-  1 pull request"). Merge when ready
-  belongs to the pull request, so it never shows here.
+  1 pull request"). Merge when ready belongs to the pull request, so it never
+  shows here.
 
 With nothing running or waiting, while a turn holds the thread (the turn shows
-its own work), and on a settled or archived thread, the row takes no space. **Stop** is in the row only when
-it means one thing: every live task, which end together with their session, or
+its own work), and on a settled or archived thread, the row takes no space.
+**Stop** is in the row only when it means one thing: every live task, which end together with their session, or
 the one pull request. Otherwise each is stopped by name in Details.
 
 **Details** opens the **Background work** dialog, closed by its corner close
 button or Escape: every entry with its state and its Stop in aligned columns
 (one Stop for the live tasks). A pull request's second line names
 its repository, its wakes used of its limit and, for a watch, when it ends; a
-paused one says how it resumes ("Open the pull request to resume", or "Octant
-can’t reach this pull request"). When the last entry ends while the dialog is
-open it says so and stays until closed. Showing the row or the dialog vouches
+paused one says how it resumes ("Open the pull request to resume") or what
+holds it ("GitHub is disconnected", or "Octant can’t reach this pull
+request"). When the last entry ends while the dialog is open it says so and
+stays until closed. Showing the row or the dialog vouches
 for nothing: a watch a restart left quiet stays paused until a window shows the
 pull request.
 
 A failed stop shows a sentence under the row, or in the dialog while it is
-open. The row refreshes on the thread's follow-up notices and on a slow
-visible-page interval; one source failing keeps its last answer and never hides
+open. The row refreshes on the thread's follow-up notices, in Code also on the
+Code navigation notice the sidebar reloads on (a switch turned on from the pull
+request's own controls raises that one), and on a slow visible-page interval; one source failing keeps its last answer and never hides
 the other. A turn the runtime starts by itself on the idle thread opens with
 the host's line `The agent started this turn by itself after background work it
 was running reported.` in place of a person's message. The rules are in
 [Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns)
 and, for a watch, [Architecture: Modes, Watch](../architecture.md#modes-chat-work-and-code).
-The host
-answers the host person's own paired device too, but a paired browser and the
-phone do not draw the row yet.
+The host answers the host person's own paired device too, but a paired browser
+and the phone do not draw the row yet.
 
 ## Plan-mode asks
 

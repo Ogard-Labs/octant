@@ -121,6 +121,14 @@ const AUTO_FIX_SOURCE_LABEL = "pull-request-auto-fix";
 const WATCH_SOURCE_LABEL = "pull-request-watch";
 const DAY_MS = 86_400_000;
 
+const PAUSED_BY_DISCONNECT = { paused: true, pausedBy: "github-disconnected" } as const;
+const PAUSED_UNREACHABLE = { paused: true, pausedBy: "unreachable" } as const;
+
+/** Whether a thread can be waiting on this pull request at all. */
+function holdsThreadWait(fold: PullRequestSwitchFold): boolean {
+  return fold.watch.status === "on" || fold.autoFix.status === "on";
+}
+
 /** Auto-fix's and a watch's bounds as the person set them in Settings. */
 export interface PullRequestSwitchLimits {
   readonly watchWakes: number;
@@ -129,6 +137,11 @@ export interface PullRequestSwitchLimits {
 }
 
 export interface PullRequestSwitchAuthority {
+  /**
+   * Whether GitHub access is revoked on this host. Local state only, so a
+   * thread's waits can say they are held before a pass finds out.
+   */
+  connectionRevoked(): boolean;
   authorizePullRequest(
     windowId: WindowId,
     target: CodeProjectPullRequestSwitchTarget,
@@ -268,6 +281,11 @@ export class CodeProjectPullRequestSwitchService
    * can rediscover a current local window with the same Project and PR link.
    */
   readonly #vouchingWindows = new Map<string, WindowId>();
+  /**
+   * Vouched watches and Auto-fix the last pass could not poll or wake. Not
+   * journaled: the next pass reads it again.
+   */
+  readonly #unreachable = new Set<string>();
   readonly #babysitScopes = new Map<
     string,
     { windowId: WindowId; deviceCurrent?: () => boolean }
@@ -784,18 +802,27 @@ export class CodeProjectPullRequestSwitchService
    * watch a restart left quiet.
    */
   threadWaits(threadId: CodeThreadId): ReadonlyArray<CodeThreadPullRequestWait> {
-    this.#canonicalizeFolds();
+    this.#canonicalizeFolds(holdsThreadWait);
     const limits = this.#limits();
+    const revoked = this.#authority.connectionRevoked();
     const waits: CodeThreadPullRequestWait[] = [];
     for (const [key, fold] of this.#folds) {
       const { autoFix, watch } = fold;
       const vouched = this.#vouchingWindows.has(key);
+      // An unvouched wait says how to resume it, so a failed pass adds nothing.
+      const ordinary = revoked
+        ? PAUSED_BY_DISCONNECT
+        : !vouched
+          ? { paused: true }
+          : this.#unreachable.has(key)
+            ? PAUSED_UNREACHABLE
+            : { paused: false };
       if (watch.status === "on" && watch.threadId === String(threadId)) {
         waits.push({
           kind: "watch",
           target: fold.target,
           since: decodeUtcTimestamp(watch.enabledAt),
-          paused: !vouched,
+          ...ordinary,
           wakes: watch.wakes,
           wakeLimit: limits.watchWakes,
           endsAt: decodeUtcTimestamp(
@@ -810,7 +837,7 @@ export class CodeProjectPullRequestSwitchService
                 kind: "auto-fix",
                 target: fold.target,
                 since: decodeUtcTimestamp(autoFix.enabledAt),
-                paused: !vouched,
+                ...ordinary,
               }
             : {
                 kind: "babysit",
@@ -818,7 +845,11 @@ export class CodeProjectPullRequestSwitchService
                 since: decodeUtcTimestamp(autoFix.enabledAt),
                 // Babysitting finds a window again by itself; it waits only
                 // while a pass could not reach the pull request.
-                paused: this.#babysitProgress.get(key)?.status === "connection",
+                ...(revoked
+                  ? PAUSED_BY_DISCONNECT
+                  : this.#babysitProgress.get(key)?.status === "connection"
+                    ? PAUSED_UNREACHABLE
+                    : { paused: false }),
                 wakes: autoFix.feedbackWakes,
                 wakeLimit: limits.watchWakes,
               },
@@ -834,7 +865,7 @@ export class CodeProjectPullRequestSwitchService
    * the navigation read asks for all of them at once.
    */
   threadsWaitingSince(): ReadonlyMap<string, string> {
-    this.#canonicalizeFolds();
+    this.#canonicalizeFolds(holdsThreadWait);
     const earliest = new Map<string, string>();
     const note = (threadId: string, since: string) => {
       const held = earliest.get(threadId);
@@ -1223,6 +1254,11 @@ export class CodeProjectPullRequestSwitchService
         const priorStall = this.#stallCandidates.get(current.autoFix);
         this.#stallCandidates.delete(current.autoFix);
         const mayAct = await this.#threadSwitchesMayAct(current, resolved.key);
+        const heldQuiet =
+          this.#vouchingWindows.has(resolved.key) &&
+          ((current.autoFix.status === "on" && !current.autoFix.babysit && !mayAct.autoFix) ||
+            (current.watch.status === "on" && !mayAct.watch));
+        if (heldQuiet) this.#unreachable.add(resolved.key);
         if (current.autoFix.status === "on" && current.autoFix.babysit && !mayAct.autoFix)
           this.#babysitProgress.set(resolved.key, { status: "connection" });
         const failures = current.mergeWhenReady.status === "on" || mayAct.autoFix;
@@ -1243,8 +1279,10 @@ export class CodeProjectPullRequestSwitchService
             this.#fold(resolved.target).autoFix === current.autoFix
           )
             this.#babysitProgress.set(resolved.key, { status: "connection" });
+          this.#unreachable.add(resolved.key);
           continue;
         }
+        if (!heldQuiet) this.#unreachable.delete(resolved.key);
         if (
           expectedPullRequestNodeId !== undefined &&
           observation.pullRequestNodeId !== undefined &&
@@ -1817,10 +1855,14 @@ export class CodeProjectPullRequestSwitchService
     }
   }
 
-  #canonicalizeFolds(): void {
+  /**
+   * Moves folds onto their canonical link keys. Each lookup can scan the link
+   * and alias registries, so a frequent read names only the folds it reads.
+   */
+  #canonicalizeFolds(reads: (fold: PullRequestSwitchFold) => boolean = () => true): void {
     if (this.#pullRequestLinks === undefined) return;
     for (const fold of Array.from(this.#folds.values())) {
-      this.#resolveIdentity(fold.target);
+      if (reads(fold)) this.#resolveIdentity(fold.target);
     }
   }
 
@@ -2125,7 +2167,11 @@ export class CodeProjectPullRequestSwitchService
     change: CodeProjectPullRequestAutoFixRecorded["change"],
     actor: EventActor,
   ): void {
-    if (change.kind !== "woke") this.#babysitProgress.delete(this.#resolveIdentity(target).key);
+    if (change.kind !== "woke") {
+      const { key } = this.#resolveIdentity(target);
+      this.#babysitProgress.delete(key);
+      this.#unreachable.delete(key);
+    }
     const record = decodeCodeProjectPullRequestAutoFixRecorded({ target, threadId, change });
     const occurredAt = this.#append(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED, record, actor);
     this.#apply({ kind: "auto-fix", occurredAt, record });
@@ -2137,6 +2183,7 @@ export class CodeProjectPullRequestSwitchService
     change: CodeProjectPullRequestWatchRecorded["change"],
     actor: EventActor,
   ): void {
+    if (change.kind !== "woke") this.#unreachable.delete(this.#resolveIdentity(target).key);
     const record = decodeCodeProjectPullRequestWatchRecorded({ target, threadId, change });
     const occurredAt = this.#append(CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED, record, actor);
     this.#apply({ kind: "watch", occurredAt, record });

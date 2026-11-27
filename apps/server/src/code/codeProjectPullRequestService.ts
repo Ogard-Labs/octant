@@ -397,6 +397,11 @@ export class CodeProjectPullRequestService {
     if (restored !== undefined) this.#restoreSnapshot(restored);
   }
 
+  /** Whether GitHub access is revoked, from local state alone. */
+  connectionRevoked(): boolean {
+    return this.#githubRevoked;
+  }
+
   revokeGithub(): void {
     this.#githubRevoked = true;
     this.#revocationGeneration += 1;

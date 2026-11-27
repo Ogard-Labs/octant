@@ -4,6 +4,7 @@ import type { CodeThreadPullRequestWait } from "@octant/contracts/code-project-p
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
+  useCodeNavigationRevision,
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
@@ -85,11 +86,20 @@ export function ThreadBackgroundWork<Id extends string>(props: {
     },
     [client, threadId, waitClient, waitThreadId],
   );
-  const revision = useThreadActivityRevision("threadFollowUps");
+  const followUps = useThreadActivityRevision("threadFollowUps");
+  // A watch or Auto-fix turned on from the pull request's own controls raises
+  // only the Code navigation notice. Both counts only rise, so their sum moves
+  // whenever either does.
+  const navigationNotice = useCodeNavigationRevision();
+  const navigation = waitThreadId === undefined ? undefined : navigationNotice;
+  const revision =
+    followUps === undefined && navigation === undefined
+      ? undefined
+      : (followUps ?? 0) + (navigation ?? 0);
   useVisibleRefresh(
     refresh,
     revision,
-    revision === undefined ? 15_000 : THREAD_ACTIVITY_RECOVERY_MS,
+    followUps === undefined ? 15_000 : THREAD_ACTIVITY_RECOVERY_MS,
   );
 
   const stop = async (target: string, act: () => Promise<unknown>, failure: string) => {
