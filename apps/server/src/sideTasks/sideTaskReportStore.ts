@@ -158,7 +158,7 @@ export class SideTaskReportStore {
           !record.delivered.has(id) &&
           !record.refused.has(id)
         ) {
-          owed.push({ childThreadId, report });
+          owed.push({ childThreadId, report: withChildThread(report, childThreadId) });
         }
       }
     }
@@ -175,7 +175,7 @@ export class SideTaskReportStore {
       for (const report of record.reports) {
         const id = String(report.reportId);
         if (!record.delivered.has(id) && !record.refused.has(id)) {
-          owed.push({ childThreadId, report });
+          owed.push({ childThreadId, report: withChildThread(report, childThreadId) });
         }
       }
     }
@@ -331,4 +331,13 @@ export class SideTaskReportStore {
       }
     }
   }
+}
+
+/**
+ * A report journaled before reports carried their thread's id still came
+ * from the child it is filed under, so it is delivered with that id and its
+ * row opens the right thread.
+ */
+function withChildThread(report: SideTaskReportOwed, childThreadId: string): SideTaskReportOwed {
+  return report.childThreadId === undefined ? { ...report, childThreadId } : report;
 }

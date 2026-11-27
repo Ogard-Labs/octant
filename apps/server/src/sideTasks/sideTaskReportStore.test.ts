@@ -123,7 +123,7 @@ describe("SideTaskReportStore", () => {
     ).toEqual([child, sibling]);
   });
 
-  it("replays a report journaled before reports named their thread", () => {
+  it("delivers a report journaled before reports named their thread with the thread it is filed under", () => {
     const connection = openConnection();
     journalOn(connection).append({
       aggregate: {
@@ -156,7 +156,7 @@ describe("SideTaskReportStore", () => {
 
     const [entry] = storeOn(connection).undeliveredForParent(parent);
     expect(entry?.report.title).toBe("Fix stale install docs");
-    expect(entry?.report.childThreadId).toBeUndefined();
+    expect(entry?.report.childThreadId).toBe(child);
   });
 
   it("owes nothing while reporting is stopped, and owes again once resumed", () => {
