@@ -199,6 +199,28 @@ describe("a webhook signing secret in a shared Work thread", () => {
   });
 });
 
+describe("a token line followed by an authorization line", () => {
+  it("shows a visitor neither value", async () => {
+    const value = "q8Zr2mVn6TkYp1Ld4Hs9Wc3Bf7Xa5Ge0";
+    const context = setup({
+      thread: () => ({
+        status: "found",
+        title: "Check",
+        archived: false,
+        state: "idle",
+        messages: [{ role: "agent", text: `access_token: Bearer\nAuthorization: ${value}` }],
+      }),
+    });
+    const link = await shared(context);
+    const answer = context.service.fetch(
+      fetchOf(link.linkId, "open", BROWSER, { secret: secretOf(link) }),
+      HUB,
+    );
+    expect(answer.status).toBe("ok");
+    expect(JSON.stringify(answer)).not.toContain(value);
+  });
+});
+
 describe("a secret a Work reply is still writing", () => {
   it("shows a visitor none of it, and redacts it whole once the turn settles", async () => {
     const secret = "whsec_5WbX1kEMOo2N8gQk9Ff3LhZtA7cYdRsV";

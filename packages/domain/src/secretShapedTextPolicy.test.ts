@@ -36,6 +36,24 @@ describe("a credential written after a scheme word", () => {
     }
   });
 
+  it("never spends the next line's credential label as a value and leaves its secret", () => {
+    for (const lead of [
+      "access_token: Bearer\nAuthorization: ",
+      "token = Basic\r\nAuthorization: Basic ",
+      "api_key=bearer\n  Proxy-Authorization: ",
+      "token:\nAuthorization: ",
+      "Bearer\nx_refresh_token_for_the_agent=",
+      "Authorization: Bearer\ntoken: ",
+      "token = Bearer Authorization: ",
+    ]) {
+      expect(redactSecretShaped(`${lead}${token} then`)).not.toContain(token);
+    }
+  });
+
+  it("replaces a value that itself reads like a credential label", () => {
+    expect(redactSecretShaped(`token=mytoken:${token}`)).toBe("[redacted]");
+  });
+
   it("replaces a bearer token holding base64 characters whole", () => {
     expect(redactSecretShaped("send Bearer q8Zr2mVn+6TkY/p1Ld4Hs9Wc3Bf7Xa5Ge0== now")).toBe(
       "send [redacted] now",
