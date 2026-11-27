@@ -1,10 +1,11 @@
-import type {
-  MovedThreadReference,
-  ThreadMoveDestinations,
-  ThreadMovePhoneAskRequest,
-  ThreadMoveSizes,
-  ThreadMoveStartRequest,
-  ThreadMoveThreadStatus,
+import {
+  VisitorThreadMode,
+  type MovedThreadReference,
+  type ThreadMoveDestinations,
+  type ThreadMovePhoneAskRequest,
+  type ThreadMoveSizes,
+  type ThreadMoveStartRequest,
+  type ThreadMoveThreadStatus,
 } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -641,6 +642,49 @@ describe("the Computer card", () => {
     expect(screen.getAllByText("Mac mini")).toHaveLength(2);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+
+  it("opens Share with visitor for a thread on this computer, asking this computer's hub administration", async () => {
+    const user = userEvent.setup();
+    const hubRequest = vi.fn(async () => ({
+      status: 200,
+      body: { visitors: { spoke: { links: [], comments: [], published: true } } },
+    }));
+    render(
+      <ThreadMoveComputerCard
+        client={fakeClient({}).client}
+        hostName="This computer"
+        hubRequest={hubRequest}
+        isThisComputer
+        thread={THREAD}
+        threadTitle="Add dark mode"
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Share with visitor…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Share with visitor" });
+    expect(within(dialog).getByText(/a link to “Add dark mode”/)).toBeInTheDocument();
+    await waitFor(() => expect(hubRequest).toHaveBeenCalledWith("status"));
+  });
+
+  // Once the contract names every mode, there is no such thread left to try.
+  const unshareable = (["chat", "code", "work"] as const).find(
+    (mode) => !(VisitorThreadMode.literals as ReadonlyArray<string>).includes(mode),
+  );
+  it.runIf(unshareable !== undefined)(
+    "offers no Share with visitor for a kind of thread the visitor-link contract does not name",
+    () => {
+      render(
+        <ThreadMoveComputerCard
+          client={fakeClient({}).client}
+          hostName="This computer"
+          hubRequest={vi.fn()}
+          isThisComputer
+          thread={{ ...THREAD, mode: unshareable ?? "work" }}
+          threadTitle="Plan the launch"
+        />,
+      );
+      expect(screen.queryByRole("button", { name: "Share with visitor…" })).not.toBeInTheDocument();
+    },
+  );
 
   it("hands a Code thread that can't move over through its branch, and takes it back", async () => {
     const user = userEvent.setup();

@@ -46,6 +46,7 @@ import { PairingCodeQr } from "./PairingCodeQr";
 // no room left for them in the main one (hub-and-spokes.md, slice 25).
 const HubWebhooksSection = lazy(() => import("./HubWebhooksSection"));
 const HubDeviceRelaySection = lazy(() => import("./HubDeviceRelaySection"));
+const HubVisitorLinksSection = lazy(() => import("./HubVisitorLinksSection"));
 
 /**
  * The hub role and hub membership of this host. Every action goes through the
@@ -318,6 +319,7 @@ interface HubStatus {
   readonly entrance: {
     readonly webhooks: unknown;
     readonly relay: unknown;
+    readonly visitors: unknown;
   };
   /** Whether this computer takes work other members delegate; absent where delegation is not composed. */
   readonly delegationAccepting?: boolean;
@@ -1870,6 +1872,16 @@ export function HubSettingsSection({
           />
         )}
         {status === undefined || (!hubOn && status.link?.membership !== "member") ? null : (
+          <HubVisitorLinksSection
+            body={status.entrance.visitors}
+            hubOn={hubOn}
+            member={status.link?.membership === "member"}
+            now={clock}
+            onChanged={refresh}
+            request={request}
+          />
+        )}
+        {status === undefined || (!hubOn && status.link?.membership !== "member") ? null : (
           <HubDeviceRelaySection
             body={status.entrance.relay}
             deviceNames={deviceNames}
@@ -2671,7 +2683,11 @@ function readStatus(body: unknown): HubStatus | undefined {
   const pairedMergeUnlock = field(body, "pairedMergeUnlock") === true;
   const ownerApprovalAnswerUnlock = field(body, "ownerApprovalAnswerUnlock") === true;
   const delegationAccepting = field(field(body, "delegation"), "accepting");
-  const entrance = { webhooks: field(body, "webhooks"), relay: field(body, "relay") };
+  const entrance = {
+    webhooks: field(body, "webhooks"),
+    relay: field(body, "relay"),
+    visitors: field(body, "visitors"),
+  };
   if (
     (membership === "member" || membership === "removed") &&
     typeof hubName === "string" &&

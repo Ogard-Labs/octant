@@ -241,6 +241,41 @@ describe("hub administration controls", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("shares, stops and answers visitor links only with bodies that name one thread, link or comment", async () => {
+    const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
+    const linkId = "A".repeat(22);
+    await sendHubAdministrationOperation(controls, "visitors", { enabled: true });
+    await sendHubAdministrationOperation(controls, "visitor-share", {
+      mode: "code",
+      threadId: "thread-1",
+      scope: "comment",
+      lifetimeMs: 3_600_000,
+    });
+    await sendHubAdministrationOperation(controls, "visitor-stop", { linkId });
+    await sendHubAdministrationOperation(controls, "visitor-comment", {
+      commentId: linkId,
+      action: "send",
+    });
+    expect(calls.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:4317/api/desktop/hub/visitors",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/share",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/stop",
+      "http://127.0.0.1:4317/api/desktop/hub/visitors/comment",
+    ]);
+
+    for (const [operation, body] of [
+      ["visitor-share", { mode: "code", threadId: "thread-1", scope: "write" }],
+      ["visitor-share", { mode: "code", threadId: "thread-1", scope: "read", lifetimeMs: 1 }],
+      ["visitor-stop", { linkId: "../admin" }],
+      ["visitor-comment", { commentId: linkId, action: "approve" }],
+    ] as const) {
+      expect(await sendHubAdministrationOperation(controls, operation, body)).toMatchObject({
+        status: 400,
+      });
+    }
+    expect(calls).toHaveLength(4);
+  });
+
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 

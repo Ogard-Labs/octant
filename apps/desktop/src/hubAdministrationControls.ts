@@ -32,6 +32,10 @@ import {
   decodeHubPublicEntranceSwitchRequest,
   decodeHubPublicFunnelRequest,
   decodeHubPublicStandbyServeRequest,
+  decodeHubVisitorCommentRequest,
+  decodeHubVisitorLinkRequest,
+  decodeHubVisitorShareRequest,
+  decodeHubVisitorSwitchRequest,
   decodeHubWebhookCreateRequest,
   decodeHubWebhookEndpointRequest,
   decodeHubPushSwitchRequest,
@@ -248,6 +252,27 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/webhooks/remove",
     decodeBody: decodeHubWebhookEndpointRequest,
+  },
+  // The hub's visitor-link switch, and this spoke's links and the comments waiting on them.
+  visitors: {
+    method: "POST",
+    path: "/api/desktop/hub/visitors",
+    decodeBody: decodeHubVisitorSwitchRequest,
+  },
+  "visitor-share": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/share",
+    decodeBody: decodeHubVisitorShareRequest,
+  },
+  "visitor-stop": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/stop",
+    decodeBody: decodeHubVisitorLinkRequest,
+  },
+  "visitor-comment": {
+    method: "POST",
+    path: "/api/desktop/hub/visitors/comment",
+    decodeBody: decodeHubVisitorCommentRequest,
   },
   // The hub's device relay switch, and which of this host's paired devices may come through it.
   relay: {
