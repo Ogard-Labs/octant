@@ -122,10 +122,8 @@ describe("the stored hub state", () => {
     expect(loaded.hub?.provision?.offers[0]?.mirrorFeed?.release.product).toBe("octant");
   });
 
-  it("keeps a spoke's hub link and known grant items when a newer build saved an unknown grant item", () => {
+  it("keeps a spoke's hub link and known grant items on the file store when a newer build saved an unknown grant item", () => {
     const raw = spokeStateWithGrantItems(["roster", "future-capability", "status"]);
-
-    // File-backed store path
     const dataDirectory = mkdtempSync(join(tmpdir(), "octant-hub-state-"));
     directories.push(dataDirectory);
     const fileStore = createHubStateStore(dataDirectory);
@@ -146,8 +144,10 @@ describe("the stored hub state", () => {
       link?: { grant?: { items?: ReadonlyArray<string> } };
     };
     expect(persistedFile.link?.grant?.items).toEqual(["roster", "status"]);
+  });
 
-    // Native authority-state store path
+  it("keeps a spoke's hub link and known grant items on the native authority store when a newer build saved an unknown grant item", () => {
+    const raw = spokeStateWithGrantItems(["roster", "future-capability", "status"]);
     let savedBytes: Buffer | undefined = Buffer.from(JSON.stringify(raw), "utf8");
     const nativeStore = createHubStateStore("native-only", {
       dataDirectory: "native-only",
