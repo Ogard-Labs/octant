@@ -73,6 +73,24 @@ export function sentResultQuotes(threadId: string, id: string | undefined, text:
   return message?.text === text ? message.places : [];
 }
 
+/**
+ * The workspace owns quote positions. Its controller reports the accepted
+ * identity or that it restored the trimmed draft after a failed submission.
+ */
+export function observeResultQuoteSend(threadId: string, draft: string) {
+  const places = resultQuotePlaces(threadId, draft);
+  if (places.length === 0) return undefined;
+  return (messageId: string | null, submitted: string) => {
+    if (draft.trim() !== submitted) return;
+    if (messageId !== null) {
+      rememberSentResultQuotes(threadId, messageId, draft, places);
+      return;
+    }
+    const lead = draft.length - draft.trimStart().length;
+    rememberResultQuotePlaces(threadId, submitted, shiftResultQuotePlaces(places, -lead));
+  };
+}
+
 export function shiftResultQuotePlaces(places: ReadonlyArray<ResultQuotePlace>, offset: number) {
   return places.map((place) => ({
     ...place,

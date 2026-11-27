@@ -1,10 +1,3 @@
-import { threadDraftScope } from "@octant/client-runtime/typed-composer-text";
-import {
-  rememberResultQuotePlaces,
-  rememberSentResultQuotes,
-  resultQuotePlaces,
-  shiftResultQuotePlaces,
-} from "../composer/resultQuoteDraft";
 import type { ThreadUsageLimited } from "@octant/contracts";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
@@ -1551,6 +1544,7 @@ export function useChatController(options: ChatControllerOptions) {
         readonly draftRevision?: number;
         /** The person typed this message into the composer; a button's text is not. */
         readonly typedByPerson?: true;
+        readonly onQuoteSend?: (messageId: string | null, prompt: string) => void;
       } = { composerDraft: "consume" },
       sideChatReturns: ReadonlyArray<SideChatDraftReturnReference> = [],
       toolCatalogHandoff = false,
@@ -1586,13 +1580,9 @@ export function useChatController(options: ChatControllerOptions) {
         (sendOptions.draftRevision === undefined ||
           composerDraftRef.current.revisionFor(sendingThreadId) === sendOptions.draftRevision);
       const clearsBeforeSend = consumesDraft && sendOptions.composerDraft === "consume";
-      const previousDraft = consumesDraft
+      const previousDraft = clearsBeforeSend
         ? composerDraftRef.current.readFor(sendingThreadId)
         : undefined;
-      const quoteScope = threadDraftScope("chat", sendingThreadId);
-      const draftText = previousDraft?.text ?? "";
-      const resultQuotes =
-        draftText.trim() === prompt ? resultQuotePlaces(quoteScope, draftText) : [];
       if (clearsBeforeSend) composerDraftRef.current.clearFor(sendingThreadId);
       const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
       const result = await execute({
@@ -1620,12 +1610,7 @@ export function useChatController(options: ChatControllerOptions) {
         composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
       ) {
         if (clearsBeforeSend && result === undefined) {
-          const start = draftText.length - draftText.trimStart().length;
-          rememberResultQuotePlaces(
-            quoteScope,
-            prompt,
-            shiftResultQuotePlaces(resultQuotes, -start),
-          );
+          sendOptions.onQuoteSend?.(null, prompt);
           composerDraftRef.current.restoreFor(sendingThreadId, {
             ...previousDraft,
             text: prompt,
@@ -1637,12 +1622,7 @@ export function useChatController(options: ChatControllerOptions) {
         }
       }
       if (result?.kind === "turn-created") {
-        rememberSentResultQuotes(
-          quoteScope,
-          String(result.turn.submissionId ?? result.turn.id),
-          draftText,
-          resultQuotes,
-        );
+        sendOptions.onQuoteSend?.(String(result.turn.submissionId ?? result.turn.id), prompt);
       }
       if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
       return result !== undefined;

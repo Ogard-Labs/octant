@@ -1,4 +1,4 @@
-import { appendToResultQuoteDraft } from "../composer/resultQuoteDraft";
+import { appendToResultQuoteDraft, observeResultQuoteSend } from "../composer/resultQuoteDraft";
 import { threadDraftScope, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
 import "../styles/code-thread.css";
 import { settledThreadNotice } from "../composer/settledThreadNotice";
@@ -1535,6 +1535,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
     if (!canSend || queuePreparingRef.current) return;
     const retireStashRecovery = stashSubmission.current?.();
+    const onQuoteSend = observeResultQuoteSend(typedScope, draft);
     const draftRevision = props.controller.draftRevision ?? draftRevisionRef.current;
     const outgoing = draft.includes(LEGACY_RESULT_REFERENCE_MARK)
       ? await promptWithReadableResultSources(draft)
@@ -1620,6 +1621,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (reviewFindingReferences.length > 0) sendArguments[10] = reviewFindingReferences;
     if (toolCatalogHandoff) sendArguments[11] = true;
     if (continuation.policy === "text-only") sendArguments[12] = continuation.policy;
+    if (onQuoteSend !== undefined) sendArguments[14] = onQuoteSend;
     const sent = await props.controller.sendFollowUp(...sendArguments);
     if (sent) {
       retireStashRecovery?.();

@@ -1,5 +1,5 @@
 import { appendComposerQuote } from "../composer/composerQuote";
-import { sentResultQuotes } from "../composer/resultQuoteDraft";
+import { observeResultQuoteSend, sentResultQuotes } from "../composer/resultQuoteDraft";
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   decodeChatBootstrap,
@@ -1318,7 +1318,16 @@ describe("useChatController", () => {
     const { result } = renderHook(() => useChatController({ activeThreadId: threadId, client }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
     act(() => result.current.setPendingDraft(draft));
-    await act(async () => expect(await result.current.sendTurn(draft.trim())).toBe(true));
+    const onQuoteSend = observeResultQuoteSend(scope, draft);
+    if (onQuoteSend === undefined) throw new Error("The draft quote should have a send receipt.");
+    await act(async () =>
+      expect(
+        await result.current.sendTurn(draft.trim(), [], [], [], [], [], undefined, {
+          composerDraft: "consume",
+          onQuoteSend,
+        }),
+      ).toBe(true),
+    );
     expect(
       sentResultQuotes(scope, accepted, draft.trim()).map((place) => place.source.row),
     ).toEqual(["first-delivery"]);

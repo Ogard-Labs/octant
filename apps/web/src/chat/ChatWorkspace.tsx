@@ -1,5 +1,6 @@
 import {
   appendToResultQuoteDraft,
+  observeResultQuoteSend,
   rememberSentResultQuotes,
   resultQuotePlaces,
 } from "../composer/resultQuoteDraft";
@@ -1337,6 +1338,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       return false;
     }
     const sideChatReturns = props.controller.draftSideChatReturns ?? [];
+    const onQuoteSend = observeResultQuoteSend(typedScope, draft);
     const retireStashRecovery = stashSubmission.current?.();
     const sendingDraftRevision = props.controller.draftRevision;
     const extensionReceiptsForSend = pendingExtensionRef.current;
@@ -1400,7 +1402,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           sendingDraftRevision !== undefined ||
           continuation.policy === "text-only" ||
           retireStashRecovery !== undefined ||
-          typed.typedByPerson === true
+          typed.typedByPerson === true ||
+          onQuoteSend !== undefined
         )
           args[7] = {
             composerDraft: retireStashRecovery === undefined ? "consume" : "consume-on-acceptance",
@@ -1409,6 +1412,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               : {}),
             ...(sendingDraftRevision === undefined ? {} : { draftRevision: sendingDraftRevision }),
             ...typed,
+            ...(onQuoteSend === undefined ? {} : { onQuoteSend }),
           };
         if (sideChatReturns.length > 0) args[8] = sideChatReturns;
         if (toolCatalogHandoff) args[9] = true;
