@@ -1,3 +1,4 @@
+import { checkServerIdentity } from "node:tls";
 import { request as httpRequest } from "node:http";
 import { get as httpsGet } from "node:https";
 import { connect } from "node:net";
@@ -439,7 +440,16 @@ describe("a front on another machine", () => {
   const health = (port: number) =>
     new Promise<number | "refused">((resolve) => {
       const request = httpsGet(
-        { host: "127.0.0.1", port, path: "/healthz", rejectUnauthorized: false },
+        {
+          host: "127.0.0.1",
+          port,
+          path: "/healthz",
+          ca: PRIVATE_LISTENER_TEST_CERT,
+          // The chain is verified against the fixture; its certificate names
+          // the address it was issued for, so the identity is checked there.
+          checkServerIdentity: (_host, certificate) =>
+            checkServerIdentity("192.168.1.20", certificate),
+        },
         (response) => {
           response.resume();
           resolve(response.statusCode ?? 0);
