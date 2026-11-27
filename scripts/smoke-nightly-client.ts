@@ -354,10 +354,15 @@ async function startStable(input: {
   stables.push(harness);
   cleanups.push(() => stopStable(harness));
   const ready = await events.next(
-    (event) => event.event === "ready" || event.event === "command-failed",
+    (event) =>
+      event.event === "ready" || event.event === "command-failed" || event.event === "exited",
     0,
     90_000,
   );
+  if (ready.event === "exited")
+    throw new Error(
+      `${input.name} did not start: it exited with code ${String(ready.code)}, signal ${String(ready.signal)}.`,
+    );
   if (ready.event !== "ready")
     throw new Error(
       `${input.name} did not start${typeof ready.message === "string" ? `: ${ready.message}` : "."}`,
