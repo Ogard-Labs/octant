@@ -145,6 +145,23 @@ describe("keychainHelperSpec", () => {
 });
 
 describe("makeKeychainCredentialStore", () => {
+  it("reads another app's provider items without letting the helper re-scope or fall back, and refuses to write or delete them", async () => {
+    const stdin: string[] = [];
+    const execute: KeychainHelperExecutor = async (spec) => {
+      stdin.push(spec.stdin);
+      return { exitCode: 0, stdout: '{"version":1,"ok":true,"present":false}\n', stderr: "" };
+    };
+    const store = makeKeychainCredentialStore(helperPath, { execute, readOnly: true });
+    await store.has(providerInstanceId);
+    expect(JSON.parse(stdin[0] ?? "")).toMatchObject({ operation: "has", readOnly: true });
+    await expect(store.set(providerInstanceId, "x")).rejects.toMatchObject({ category: "invalid" });
+    await expect(store.delete(providerInstanceId)).rejects.toMatchObject({ category: "invalid" });
+    expect(stdin).toHaveLength(1);
+    const ordinary = makeKeychainCredentialStore(helperPath, { execute });
+    await ordinary.has(providerInstanceId);
+    expect(JSON.parse(stdin[1] ?? "")).not.toHaveProperty("readOnly");
+  });
+
   it("round-trips only typed protocol responses through a bounded executor", async () => {
     const execute = vi.fn<KeychainHelperExecutor>(async (_spec, limits) => {
       expect(limits).toEqual({ maxBytes: KEYCHAIN_HELPER_MAX_BYTES, timeoutMs: 2_000 });

@@ -48,8 +48,7 @@ export async function launchDesktopApplication(
             "Needs a newer Octant. The installed app does not support this Nightly connection or host-only launch.";
           break;
         case "not-installed":
-          message =
-            "Install Octant before opening Octant Nightly. Nightly uses Octant's host and never starts its own.";
+          message = "Octant Nightly is set to work on Octant's data, which needs Octant installed.";
           break;
         case "not-running":
           message =

@@ -14,6 +14,8 @@
 
 /** Navigating here is the Quit button; the window intercepts it and loads nothing. */
 export const STARTUP_FAILURE_QUIT_URL = "octant-startup-failure://quit";
+/** Navigating here is the failure's second way forward, shown before Quit. */
+export const STARTUP_FAILURE_ALTERNATIVE_URL = "octant-startup-failure://alternative";
 /** Navigating here is a notice's Close button; it closes that window only. */
 export const NOTICE_CLOSE_URL = "octant-startup-failure://close";
 
@@ -25,16 +27,22 @@ const escapeHtml = (text: string): string =>
     .replaceAll('"', "&quot;");
 
 /**
- * The page: a heading, the reason in its own scrolling block, and one button.
- * The window cannot be resized, so the reason is bounded: however long it is,
- * the heading and the button stay in view.
+ * The page: a heading, the reason in its own scrolling block, and its button,
+ * with an optional second way forward before it. The window cannot be
+ * resized, so the reason is bounded: however long it is, the heading and the
+ * buttons stay in view.
  */
 export function startupFailureDocument(input: {
   readonly title: string;
   readonly message: string;
   readonly action?: { readonly label: string; readonly url: string };
+  readonly alternative?: { readonly label: string; readonly url: string };
 }): string {
   const action = input.action ?? { label: "Quit", url: STARTUP_FAILURE_QUIT_URL };
+  const alternative =
+    input.alternative === undefined
+      ? ""
+      : `<a class="action" href="${input.alternative.url}">${escapeHtml(input.alternative.label)}</a>\n`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -48,13 +56,13 @@ export function startupFailureDocument(input: {
   .reason { margin: 0 0 12px; max-height: 120px; overflow-y: auto; white-space: pre-wrap;
     overflow-wrap: anywhere; user-select: text; }
   a.action { display: inline-block; padding: 5px 16px; border: 1px solid currentColor;
-    border-radius: 6px; color: inherit; text-decoration: none; }
+    border-radius: 6px; color: inherit; text-decoration: none; margin-right: 8px; }
 </style>
 </head>
 <body>
 <h1>${escapeHtml(input.title)}</h1>
 <div class="reason">${escapeHtml(input.message)}</div>
-<a class="action" href="${action.url}" autofocus>${escapeHtml(action.label)}</a>
+${alternative}<a class="action" href="${action.url}" autofocus>${escapeHtml(action.label)}</a>
 </body>
 </html>`;
 }
@@ -87,15 +95,23 @@ export async function showStartupFailureWindow(options: {
   readonly title: string;
   readonly message: string;
   readonly quit: () => void;
+  /** A second way forward beside Quit; it runs at most once. */
+  readonly alternative?: { readonly label: string; readonly run: () => void };
   /** Receives the window as soon as it exists, so a quit can remove it. */
   readonly onCreated?: (window: StartupFailureWindow) => void;
 }): Promise<void> {
   await options.ready();
   if (options.quitRequested()) return;
   const window = options.createWindow(options.title);
+  let alternativeTaken = false;
   window.onNavigate((url, preventDefault) => {
     preventDefault();
     if (url === STARTUP_FAILURE_QUIT_URL) options.quit();
+    if (url === STARTUP_FAILURE_ALTERNATIVE_URL && options.alternative !== undefined) {
+      if (alternativeTaken) return;
+      alternativeTaken = true;
+      options.alternative.run();
+    }
   });
   let closed = false;
   window.onClosed(() => {
@@ -105,7 +121,20 @@ export async function showStartupFailureWindow(options: {
   options.onCreated?.(window);
   try {
     await window.load(
-      documentUrl(startupFailureDocument({ title: options.title, message: options.message })),
+      documentUrl(
+        startupFailureDocument({
+          title: options.title,
+          message: options.message,
+          ...(options.alternative === undefined
+            ? {}
+            : {
+                alternative: {
+                  label: options.alternative.label,
+                  url: STARTUP_FAILURE_ALTERNATIVE_URL,
+                },
+              }),
+        }),
+      ),
     );
   } catch (error) {
     // A quit removes a window that is still loading, which rejects the load:

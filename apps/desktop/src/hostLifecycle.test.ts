@@ -448,4 +448,53 @@ describe("desktop host lifecycle", () => {
 
     expect(lifecycle.snapshot()).toMatchObject({ activityUnconfirmed: true });
   });
+
+  describe("holding starts for maintenance", () => {
+    it("proceeds when the host is already stopped, and refuses starts until released", async () => {
+      const start = vi.fn(async () => desktopHost);
+      const stop = vi.fn(async () => undefined);
+      const lifecycle = createHostLifecycleController({
+        attach: async () => undefined,
+        start,
+        stop,
+      });
+      const release = await lifecycle.holdStartsStopped();
+      expect(stop).not.toHaveBeenCalled();
+      await expect(lifecycle.ensureRunning()).resolves.toEqual({ status: "closing" });
+      await expect(lifecycle.restart()).resolves.toEqual({ status: "closing" });
+      expect(start).not.toHaveBeenCalled();
+      release();
+      await expect(lifecycle.ensureRunning()).resolves.toEqual({
+        status: "running",
+        host: desktopHost,
+      });
+      expect(start).toHaveBeenCalledOnce();
+    });
+
+    it("stops a running desktop-owned host and holds it stopped", async () => {
+      const stop = vi.fn(async () => undefined);
+      const lifecycle = createHostLifecycleController({
+        attach: async () => undefined,
+        start: async () => desktopHost,
+        stop,
+      });
+      await lifecycle.ensureRunning();
+      const release = await lifecycle.holdStartsStopped();
+      expect(stop).toHaveBeenCalledOnce();
+      expect(lifecycle.snapshot().state).toBe("stopped");
+      await expect(lifecycle.ensureRunning()).resolves.toEqual({ status: "closing" });
+      release();
+    });
+
+    it("does not hold starts when a separately managed host cannot be stopped", async () => {
+      const lifecycle = createHostLifecycleController({
+        attach: async () => managedHost,
+        start: async () => desktopHost,
+        stop: async () => undefined,
+      });
+      await lifecycle.ensureRunning();
+      await expect(lifecycle.holdStartsStopped()).rejects.toThrow();
+      await expect(lifecycle.ensureRunning()).resolves.toMatchObject({ status: "running" });
+    });
+  });
 });

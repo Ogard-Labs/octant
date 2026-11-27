@@ -49,6 +49,7 @@ export function openNodeSqliteReadOnly(path: string): ReadOnlySqliteConnection {
   const database = new Database(path, { readonly: true, fileMustExist: true });
   return {
     all: (sql) => database.prepare(sql).all(),
+    exec: (sql) => database.exec(sql),
     close: () => database.close(),
   };
 }

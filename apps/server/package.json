@@ -16,6 +16,8 @@
     "db:backup": "bun src/maintenanceCli.ts backup",
     "db:rebuild": "bun src/maintenanceCli.ts rebuild",
     "db:remove": "bun src/maintenanceCli.ts remove",
+    "db:import-octant": "bun src/maintenanceCli.ts import-octant",
+    "db:list-credential-references": "bun src/maintenanceCli.ts list-credential-references",
     "db:reset": "bun src/maintenanceCli.ts reset",
     "db:restore": "bun src/maintenanceCli.ts restore",
     "db:status": "bun src/maintenanceCli.ts status",

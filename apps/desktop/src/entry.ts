@@ -15,6 +15,7 @@ import {
   desktopIdentity,
   desktopIdentityForPackage,
   desktopWindowStorageDirectory,
+  nightlyOwnHostPlatform,
 } from "@octant/host-runtime/desktop-identity";
 import { enableCompileCacheBeneath } from "@octant/host-runtime/paths";
 import { createWindowsDesktopLauncher } from "@octant/host-runtime/windows-desktop-launcher";
@@ -35,7 +36,7 @@ import {
   resolveDesktopHostRuntimePaths,
   WINDOWS_HOST_OWNER_FILENAME,
 } from "./runtimePaths";
-import { resolveStartupHostRole } from "./nightlyTestData";
+import { resolveStartupHostRole, storeDesktopDataChoice } from "./nightlyTestData";
 import { createNightlyLaunchLinks } from "./nightlyLaunchLinks";
 
 // Install the process error net before role checks or runtime imports so any
@@ -164,7 +165,7 @@ async function launchDesktop(): Promise<void> {
     mkdirSync(storage, { recursive: true, mode: 0o700 });
     app.setPath("userData", storage);
     app.setPath("sessionData", storage);
-    // With separate test data Nightly owns a host of its own through the same
+    // On its own data Nightly owns a host of its own through the same
     // host-owning desktop Octant runs; it never reads Octant's status or host.
     const role = resolveStartupHostRole({
       identity,
@@ -174,7 +175,7 @@ async function launchDesktop(): Promise<void> {
       env: process.env,
     });
     if (role.kind === "test-host") {
-      // The test host's own main claims its links.
+      // Nightly's own host's main claims its links.
       launchLinks.stop();
       try {
         await import(new URL("./main.mjs", import.meta.url).href);
@@ -182,7 +183,7 @@ async function launchDesktop(): Promise<void> {
         throw new NightlyTestHostFailure(
           error instanceof Error && error.message.startsWith("Octant Nightly refused")
             ? error.message
-            : "Octant Nightly could not start the host for its test data.",
+            : "Octant Nightly could not start the host for its own data.",
         );
       }
       return;
@@ -254,10 +255,40 @@ async function launchDesktop(): Promise<void> {
   );
   if (outcome.kind === "client-bridge-required") {
     app.setName(identity.productName);
-    app.setPath("userData", desktopWindowStorageDirectory(identity, "", app.getPath("appData")));
+    const storage = desktopWindowStorageDirectory(identity, "", app.getPath("appData"));
+    app.setPath("userData", storage);
     writeDiagnostic(`${identity.productName}: ${outcome.message}`);
-    void showStartupFailureAndQuit({ title: identity.productName, message: outcome.message });
+    // A Nightly set to Octant's data can switch to its own data from here, so
+    // a missing or older Octant never leaves it with only Quit.
+    const ownData =
+      identity.testHost !== null && nightlyOwnHostPlatform(process.platform)
+        ? { label: "Use Nightly's own data", run: () => void relaunchOnOwnData(storage) }
+        : undefined;
+    void showStartupFailureAndQuit({
+      title: identity.productName,
+      message: outcome.message,
+      ...(ownData === undefined ? {} : { alternative: ownData }),
+    });
   }
+}
+
+/**
+ * Stores Nightly's own data as its choice and relaunches; a failed store only
+ * quits. A Quit that starts while the choice is being written wins: the app
+ * then leaves without coming back.
+ */
+async function relaunchOnOwnData(storage: string): Promise<void> {
+  let quitStarted = false;
+  app.once("before-quit", () => {
+    quitStarted = true;
+  });
+  try {
+    await storeDesktopDataChoice(storage, "test-data");
+    if (!quitStarted) app.relaunch();
+  } catch {
+    writeDiagnostic(`${identity.productName}: could not store the choice of its own data.`);
+  }
+  app.quit();
 }
 
 /** Octant's Linux window socket and launcher record, from Octant's own host paths. */

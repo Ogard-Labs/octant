@@ -2,6 +2,7 @@ import { readdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { OctantMode } from "@octant/contracts";
 import { createArtifactMirrorFilePort } from "../canvas/artifactMirrorFilePort";
+import { keepImportedWorktreeRecord } from "../code/importedWorktreeRecords";
 import type { SqliteConnection } from "./sqlitePort";
 import { listThreadFileAnchors } from "./threadPurge";
 
@@ -17,11 +18,15 @@ export interface ThreadArtifactPurgeInput {
   readonly mode: OctantMode;
   readonly threadId: string;
   /**
-   * The directory the managed-worktree service keeps one repository's
-   * managed worktrees under. A receipt that names a path outside it is not
-   * a worktree this sweep may delete.
+   * The directories the managed-worktree service keeps one repository's
+   * managed worktrees under (on Nightly's own host, also the one it used
+   * before it had its own). A receipt that names a path outside them is not a
+   * worktree this sweep may delete.
    */
-  readonly managedWorktreeRootPath: (repositoryRoot: string, repositoryId: string) => string;
+  readonly managedWorktreeRootPaths: (
+    repositoryRoot: string,
+    repositoryId: string,
+  ) => ReadonlyArray<string>;
   /**
    * Runs the purge while it holds each of the thread's worktree receipts, with
    * no cleanup or restore of one in flight, so a restore cannot recreate a
@@ -190,6 +195,8 @@ interface StoredWorktreeReceipt {
   readonly path?: string;
   /** A receipt the sweep cannot trust to name a managed worktree blocks it. */
   readonly deletable: boolean;
+  /** The folder is Octant's checkout, imported with Octant's data: never removed here. */
+  readonly importedFromOctant: boolean;
 }
 
 async function readWorktreeReceipts(
@@ -205,6 +212,7 @@ async function readWorktreeReceipts(
       file,
       receiptId: name.slice(0, -".json".length),
       ...worktreeReceiptEvidence(parsed, input),
+      importedFromOctant: parsed?.importedFrom === "octant",
     });
   }
   return receipts;
@@ -222,8 +230,17 @@ async function removeOwnedWorktrees(
   const blocked = receipts.some((receipt) => !receipt.deletable);
   for (const receipt of receipts) {
     if (receipt.threadId !== input.threadId || !receipt.deletable) continue;
+    // Octant's checkout outlives the receipt that named it here.
+    if (receipt.importedFromOctant && receipt.path !== undefined) {
+      await keepImportedWorktreeRecord(input.dataDirectory, receipt.path);
+    }
     await rm(receipt.file, { force: true });
-    if (!blocked && receipt.path !== undefined && !kept.has(receipt.path)) {
+    if (
+      !blocked &&
+      !receipt.importedFromOctant &&
+      receipt.path !== undefined &&
+      !kept.has(receipt.path)
+    ) {
       await removeDirectory(receipt.path, input.dataDirectory);
     }
   }
@@ -268,15 +285,12 @@ function worktreeReceiptEvidence(
   ) {
     return { ...(threadId === undefined ? {} : { threadId }), deletable: false };
   }
-  const root = resolve(input.managedWorktreeRootPath(repositoryRoot, repositoryId));
   const target = resolve(path);
-  const within = relative(root, target);
-  if (
-    within.length === 0 ||
-    within.startsWith("..") ||
-    isAbsolute(within) ||
-    target === resolve(input.dataDirectory)
-  ) {
+  const inside = input.managedWorktreeRootPaths(repositoryRoot, repositoryId).some((root) => {
+    const within = relative(resolve(root), target);
+    return within.length > 0 && !within.startsWith("..") && !isAbsolute(within);
+  });
+  if (!inside || target === resolve(input.dataDirectory)) {
     return { threadId, deletable: false };
   }
   return { threadId, path, deletable: true };

@@ -361,7 +361,7 @@ owned by [Background native ownership](design/browser-profiles.md#background-nat
 On macOS, both trusted desktop executables use sealed ASAR entries and fixed
 launch roles. Each app's separately identified, same-version bundled runtime runs
 its host, managed tools and executable extensions as Node (Stable's also runs its
-scoped terminal CLI; Nightly's host is only its test-data host). The worker runtime is
+scoped terminal CLI; Nightly's host is only its own-data host). The worker runtime is
 not a trusted desktop peer, and Node consumers keep physical server files and
 stdin supervision. The runtime has independent Framework/fuse bytes; no arbitrary
 script runs under the trusted desktop executable's identity. See the owning
@@ -24334,20 +24334,22 @@ Work and Code below Full access remain refused until their native confinement bo
   binary whose ring is the person's in-app channel choice (Stable or Preview);
   preview ships as a second app, Octant Nightly, with its own bundle id, link
   scheme, command-line name, and icon (maintainer decision, 2026-11-05). Nightly
-  shares Octant's data through Octant's running host and never runs a host on
-  that folder, so the journal keeps one writer and no nightly migrates data
-  Octant must still open. For development and testing it can instead run its
-  own host on separate test data. Its command-line tool, `octant-nightly`,
-  follows the same rule: it attaches to Octant's host (or, with test data,
-  Nightly's test host) and never starts or migrates one
-  ([the `octant-nightly` command](design/nightly-app.md#the-octant-nightly-command)). A person's first install is therefore Octant
-  ([Octant Nightly](design/nightly-app.md)). The channel split and the
+  never runs a host on Octant's folder, so that journal keeps one writer and no
+  nightly migrates data Octant must still open. On macOS and Linux it runs its
+  own host on its own data by default, so it needs no Octant installed; set to
+  Octant's data, it shares that data through Octant's running host
+  (maintainer decision, 2026-11-27). Its command-line tool, `octant-nightly`,
+  follows the same rule: it attaches to Nightly's own host or Octant's, and
+  never starts or migrates one
+  ([the `octant-nightly` command](design/nightly-app.md#the-octant-nightly-command);
+  [Octant Nightly](design/nightly-app.md)). The channel split and the
   Nightly-channel install row (packaged macOS Octant, person-started,
   feed signature, artifact hash and a Nightly-specific code requirement) are
   built; a signed install from a published Nightly build has not been
-  exercised. Nightly's own host on separate test data (macOS and Linux: its own
+  exercised. Nightly's own host on its own data (macOS and Linux: its own
   folder, port, logs and Keychain service names or Secret Service `service`
-  values, chosen in Settings and decided once at launch) is built; a signed Nightly running it has not been
+  values, the default with Octant's data the Settings opt-in, decided once at
+  launch) is built; a signed Nightly running it has not been
   exercised. Identity and packaging foundations
   now stamp separate app flavors and restrict each packaged updater to its
   identity's rings. A separate authenticated native window bootstrap can load

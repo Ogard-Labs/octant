@@ -55,6 +55,7 @@ export async function showStartupFailure(options: {
   readonly message: string;
   readonly quit: () => void;
   readonly quitRequested: () => boolean;
+  readonly alternative?: { readonly label: string; readonly run: () => void };
 }): Promise<void> {
   await showStartupFailureWindow({
     ready: () => app.whenReady(),
@@ -88,6 +89,8 @@ let nightlyFailureShown = false;
 export async function showStartupFailureAndQuit(options: {
   readonly title: string;
   readonly message: string;
+  /** A second way forward; `run` decides whether and how the app ends. */
+  readonly alternative?: { readonly label: string; readonly run: () => void };
 }): Promise<void> {
   if (nightlyFailureShown) return;
   nightlyFailureShown = true;

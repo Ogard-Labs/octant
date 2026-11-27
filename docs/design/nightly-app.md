@@ -20,9 +20,10 @@ surfaces, its pickers, file handoffs, provider keys and Code approvals through
 that admission, the embedded Browser (popups, fields, frames and
 accessibility), lifecycle and reconnect, the full `octant-nightly` command,
 roll-forward rollback, the app-named feed and Linux client trust are built.
-Development, ad-hoc and incompatible builds refuse. Nightly never imports the
-host-owning desktop module, initializes host credentials, owns Octant's host or
-migrates shared data. Canvas prototypes, Browser extensions, Computer Use,
+Development, ad-hoc and incompatible builds refuse. As a client of Octant's
+host, Nightly never imports the host-owning desktop module, initializes host
+credentials, owns Octant's host or migrates shared data; on its own data it
+runs that module for its own host and folder only. Canvas prototypes, Browser extensions, Computer Use,
 managed tools and a second Project window remain brokered and say they are not
 available in Nightly yet.
 
@@ -41,11 +42,19 @@ release workflow stamp the flavor from the ring, and only a Nightly run is held
 by the usable-client preflight. The Octant Nightly row in
 Octant's Settings › Updates is built for packaged macOS Octant, including its
 three checks; a signed install from a published Nightly build has not yet been
-exercised. Nightly's own host on separate test data is built for macOS: the
-Data choice in Settings › Updates with its relaunch offer and removal, the
-Test data label, startup on its own folder, port, logs and Keychain service
-names, and the host payload and worker runtime in packaged Nightly. A signed
-Nightly running its test host has not yet been exercised.
+exercised. Nightly's own host on its own data is built for macOS: the Data
+choice in Settings › Updates with its relaunch offer and removal, startup on
+its own folder, port, logs and Keychain service names, and the host payload
+and worker runtime in packaged Nightly. A signed Nightly running its own host
+has not yet been exercised.
+
+Since 2026-11-27 Nightly works on its own data by default on macOS and Linux
+([Nightly's own data](#nightlys-own-data)): it runs that host whenever no Data
+choice is stored, and Octant's data through Octant's host is the opt-in. A
+Nightly set to Octant's data whose Octant is missing or too old offers to
+switch to its own data from its startup window.
+[Importing from Octant](#importing-from-octant) and merging on a later import
+are built and not yet exercised in a packaged app.
 
 Every desktop channel now has a class in Nightly's client mode, and Octant-only
 administration is absent from a Nightly client window
@@ -101,14 +110,19 @@ time (maintainer decision, 2026-11-05):
 Ring ids stay as they are because feed paths and the version tags installed
 builds follow carry them; Settings shows the names Stable, Preview and Nightly.
 
-Both apps work on the same threads, Projects, settings, sign-ins, and history.
-A thread started in one is live in the other, as it is in two windows of one
-app. For development and testing, Nightly can instead run its own host on
-separate test data ([below](#nightlys-own-host-for-development-and-testing)).
+On macOS and Linux, Nightly works on its own data by default, with a host of
+its own ([below](#nightlys-own-data)), so it needs no Octant installed and
+never changes Octant's data (maintainer decision, 2026-11-27: no stable release
+existed, and the newest Octant candidate was weeks older than each Nightly).
+A person can instead set Nightly to Octant's data. Then both apps work on the
+same threads, Projects, settings, sign-ins, and history: a thread started in
+one is live in the other, as it is in two windows of one app. Windows Nightly
+has no host of its own and is always a client of Octant's host.
 
 ## One host serves both
 
-The data folder has one host, and it is Octant's.
+This section describes Nightly set to Octant's data. Octant's data folder has
+one host, and it is Octant's.
 
 - The journal has one writer, and its migrations are forward-only: a host
   refuses data that a newer host has migrated
@@ -117,8 +131,11 @@ The data folder has one host, and it is Octant's.
   data. So Octant Nightly never runs a host of its own on that folder.
 - Octant Nightly's windows connect to Octant's running host as a client, the
   way a second window does. When no host is running, Nightly starts Octant's
-  host without opening an Octant window. Nightly therefore needs Octant
-  installed; on its own it says so and offers the download.
+  host without opening an Octant window. Nightly on Octant's data therefore
+  needs a compatible Octant installed. Without one, its startup window says
+  why and offers "Use Nightly's own data", which stores that choice and
+  relaunches; Quit stays beside it. Windows, where Nightly has no host of its
+  own, offers only Quit.
 - What Nightly brings is its shell and screens: the renderer and the desktop
   process. New host behavior (agents, providers, tools, persistence) reaches a
   person when it ships in Octant. Nightly decodes host answers the forgiving
@@ -137,32 +154,36 @@ The data folder has one host, and it is Octant's.
   Preview host migrates the data, switching back to Stable offers nothing until
   a stable release at least as new exists, so an older host never opens it.
 
-## Nightly's own host for development and testing
+## Nightly's own data
 
-Nightly can run a host of its own, for development and testing, on data that is
-never Octant's:
+Nightly runs a host of its own on data that is never Octant's:
 
-- It is opt-in. Nightly's Settings offers **Data: Octant's data** (the default)
-  or **Separate test data**. The choice is stored in Nightly's window storage
-  and applies on the next launch; Nightly says so and offers to relaunch.
-- With separate test data, Nightly starts its own host on
+- It is the default on macOS and Linux (maintainer decision, 2026-11-27).
+  Nightly's Settings offers **Data: Nightly's own data** or **Octant's data**.
+  The choice is stored in Nightly's window storage and applies on the next
+  launch; Nightly says so and offers to relaunch.
+- On its own data, Nightly starts its own host on
   `~/Library/Application Support/Octant Nightly/Test Data` (or its platform
   equivalent) and its own loopback port, `13774`. It never reads, writes,
   locks or migrates Octant's data folder, never connects to Octant's host, and
   never asks Octant to start one. Octant and Nightly can both run, each with
   its own host.
-- Credentials Octant keeps in the Keychain stay apart: the test host's
+- Credentials Octant keeps in the Keychain stay apart: its own host's
   credential broker stores its items under Nightly's own Keychain service
-  names, so a key or secret saved for test data never replaces or reads one of
-  Octant's, and a person enters them again for test data. Provider command-line
+  names, so a key or secret saved for Nightly's own data never replaces or reads one of
+  Octant's, and a person enters them again for Nightly (or imports them, once that is
+  built). Provider command-line
   tools keep their own sign-ins in the home folder (`~/.claude`, `~/.codex` and
   the like), and those are shared with Octant.
 - New host behavior (agents, providers, tools, persistence) from `main` runs
-  here, which the client mode cannot test. The test data is disposable:
-  Nightly's Settings can remove it (moved to the Trash) when its host is
-  stopped.
-- The window shows a quiet "Test data" label beside the Nightly label, so a
-  person never mistakes it for their real work.
+  here, which the client mode cannot test. While Nightly runs on Octant's
+  data, its Settings can move its own data to the Trash.
+- The window shows only the Nightly label. Its "Test data" label went when this
+  data became the default, because it is now a person's real work.
+- The folder, the Keychain service names and the stored value
+  (`"test-data"`) keep the names they had when this was a test-only mode, so
+  data and Keychain items made then stay readable. Only the words a person
+  reads changed.
 - Packaged Nightly therefore carries the host payload and its worker runtime,
   as Octant does. The host role starts only from this stored choice; the
   [fixed entry](#fixed-packaged-entry) still refuses caller-selected roles,
@@ -171,26 +192,30 @@ never Octant's:
   a development build. Pointing Nightly's own host at Octant's folder that way
   is the developer's explicit choice and is not a supported configuration.
 - The choice is `data-choice.json` in Nightly's window storage. Only an exact
-  `{"data":"test-data"}` selects test data; a missing, oversized, linked or
-  malformed file means Octant's data. The main process reads it once at launch
-  and no renderer request changes the running role.
-- On Linux, Secret Service items carry no store scope, so the test host names
-  its own `service` values instead: `octant-nightly-test-data.<namespace>`
+  `{"data":"octant"}` selects Octant's data and an exact `{"data":"test-data"}`
+  Nightly's own; a missing, oversized, linked or malformed file is the
+  platform's default (Nightly's own data on macOS and Linux, Octant's on
+  Windows). Neither value ever starts a host on Octant's folder. The main
+  process reads it once at launch and no renderer request changes the running
+  role.
+- On Linux, Secret Service items carry no store scope, so Nightly's own host
+  names its own `service` values instead: `octant-nightly-test-data.<namespace>`
   (`provider`, `replica-device-key`, `ssh-key` and the rest) in place of
   Octant's. Every lookup, store and clear names `service`, so an item of one
-  family never matches the other's. The Linux test folder is
+  family never matches the other's. The Linux folder is
   `$XDG_DATA_HOME/octant-nightly/test-data` (by default
   `~/.local/share/octant-nightly/test-data`), its service log
   `$XDG_STATE_HOME/octant-nightly/logs/service.log`, and its port `13774`.
-  Remove test data also clears every test-data Secret Service item; when the
+  Moving Nightly's own data to the Trash also clears every one of its Secret
+  Service items; when the
   keyring refuses, the folder stays and Remove reports the failure, so it can
   be retried.
-- Nightly refuses to start its test host when its folder is, or lies inside,
+- Nightly refuses to start its own host when its folder is, or lies inside,
   Octant's data folder, or contains it, unless `OCTANT_DATA_DIR` set the folder
-  explicitly. A Nightly process that reaches the host-owning desktop without a
-  test-host role (its choice changed or became unreadable during launch)
+  explicitly. A Nightly process that reaches the host-owning desktop without an
+  own-host role (its choice changed or became unreadable during launch)
   refuses and quits; it never falls back to Octant's folder or port `13773`.
-- The test host's service log is `~/Library/Logs/Octant Nightly/service.log`
+- Its own host's service log is `~/Library/Logs/Octant Nightly/service.log`
   (on Linux, under `$XDG_STATE_HOME/octant-nightly/logs`), passed to its host
   as `OCTANT_LOGS_DIR`, so it never shares Octant's log.
 - Its default folder is `~/Octant Nightly` rather than `~/Octant`, passed as
@@ -201,18 +226,112 @@ never Octant's:
 - Still shared with Octant, as for any second host on the same account:
   provider command-line configuration and sign-ins in the home folder, and
   developer toolchains such as the Android SDK and Xcode.
-- A Nightly client and the test host take the same single-instance lock in
+- A Nightly client and Nightly's own host take the same single-instance lock in
   Nightly's window storage, so only one runs at a time and a second launch
-  focuses the first. Removal also refuses while the test folder's owner receipt
+  focuses the first. Removal also refuses while that folder's owner receipt
   names a live process, and when the folder's real path is not its fixed path.
 - A relaunch asked for from Settings arms only once its quit is accepted; a
   cancelled quit forgets it.
-- The test host's macOS Keychain services are named
+- Its own host's macOS Keychain services are named
   `app.octant.desktop.nightly.test-data.*` rather than `app.octant.*`. Because
   Octant's unscoped legacy items live only under Octant's names, the helper's
-  legacy re-scoping can never claim one for test data.
-- Removal moves only the fixed test folder to the Trash, refuses while the test
-  host runs, and refuses a linked folder.
+  legacy re-scoping can never claim one for Nightly's own data.
+- Removal moves only the fixed folder to the Trash, refuses while Nightly's
+  own host runs, and refuses a linked folder.
+
+## Importing from Octant
+
+Nightly can bring Octant's work into its own data, and bring it again later
+(maintainer decisions, 2026-11-27). Status: built, not yet exercised in a
+packaged app; the window preference copy runs only there. Not built yet: the
+thread view does not show that uncommitted changes stayed in Octant's folder
+(the move records it), and before an imported Code thread's first turn in
+Nightly, its files, terminal and Git actions still act in Octant's folder;
+only a turn moves it. Side Chat notes do not come over, and a held-back
+extension install leaves its package files in Nightly.
+
+- **What comes over.** Threads in every mode with their content and files,
+  Projects, instructions, settings and the window preferences on a fixed
+  allowlist (keybindings, model favorites and recent choices, editor and
+  layout choices). Keys and other saved secrets come over only when the person
+  ticks "Copy keys" in the confirmation; macOS may then ask once per item, and
+  each is saved under Nightly's own Keychain names without replacing one
+  Nightly already has. Public share links, their records as well as their
+  secrets, never come over, so the two hosts never both control one public
+  link.
+- **What stays behind.** Everything that belongs to Octant's host: its
+  identity, private listener and certificates, paired devices and push
+  registrations, hub membership, artifact sync membership, service and owner
+  records, logs, caches and health samples. Octant's Canvas mirror receipts stay too,
+  so a purge in Nightly never removes a file Octant mirrored, and a mirror
+  setting that writes to a folder outside the Project's repository is held
+  back and listed, so Nightly never writes into a folder Octant writes to; the
+  person chooses Nightly's own.
+- **Octant's data is only read.** While Octant runs, Nightly opens Octant's
+  store read-only and writes a self-contained copy (`VACUUM INTO`) into its
+  own folder; SQLite's own shared-memory file `octant.sqlite3-shm` is the only
+  file in Octant's folder this may touch. While Octant is closed there is no
+  `octant.sqlite3-wal`, and a read-only open would create one, so Nightly
+  copies the store file instead, checks that it did not change during the
+  copy, and makes its self-contained copy from that; after three changed
+  copies it says Octant is busy. A store that a newer
+  host migrated than Nightly's refuses as "Octant is newer than this Nightly".
+- **Nightly's host is stopped while it imports.** The import runs as a
+  maintenance step under Nightly's owner lock, builds the merged store in a
+  copy, rebuilds and verifies every projection, and only then swaps it in. A
+  failure at any step leaves Nightly's data as it was; a backup of Nightly's
+  store is taken first.
+- **Later imports merge.** Each import records how far it read Octant's
+  journal and where Nightly's journal stood. A later import brings over what
+  Octant added since: new threads and turns, and changes to settings and
+  Projects Nightly left alone. Work done only in Nightly stays. A thread both
+  apps changed since the last import arrives as a second copy beside
+  Nightly's, built from Octant's own journal with every frame and titled
+  "(from Octant)", and a later import continues that copy. A Code thread both
+  apps changed is held back instead and listed in the summary, because its
+  file and checkout ids derive from its thread id (maintainer decision,
+  2026-11-27); Octant's version stays in Octant. A setting or Project both
+  changed keeps Nightly's value, and the summary lists it. Deleting something
+  in either app never deletes it in the other. Comparisons use journal
+  positions and event ids. Octant's new events for a stream are appended only
+  where Nightly's stream ends exactly where Octant's next event expects it;
+  anywhere else the stream counts as changed in both apps. Versions are never
+  renumbered, because several streams store their own version and refuse a
+  shifted one, except the checkout and retention streams compaction and purge
+  already renumber. On the first import, a stream both stores hold (a
+  setting) takes Octant's, and the confirmation says so.
+- **Work in flight arrives settled.** Queued messages and pending approvals
+  arrive cancelled, coordinator wakes held, wake-ups missed, routines blocked
+  as belonging to another host, and goal loops paused, each through the event
+  the host already writes for that state, so nothing imported runs until the
+  person starts it. Restart continuations stay behind.
+- **Code checkouts stay Octant's.** Nightly never removes a worktree folder
+  that came from Octant: reclaim, archive cleanup and purge refuse it. A purge
+  deletes the receipt but keeps a digest of the folder's path, so Disk cleanup
+  still refuses the folder as Octant's. Nightly's own host keeps its managed
+  worktrees under `.octant-nightly-worktrees` beside the repository, where
+  Octant keeps `.octant-worktrees`, because a worktree's folder is fixed by its
+  thread id and the two apps would otherwise share a path (maintainer
+  decision, 2026-11-27). Continuing an imported Code thread in Nightly first
+  gives it its own branch and worktree there, made from the thread's current
+  branch, and starts a fresh provider session with a text handoff, since
+  Octant's session is tied to Octant's checkout. This holds whether the thread
+  was on a worktree of Octant's or on a checkout both apps reach, such as the
+  Project's own folder; the import's record lists the Code threads it brought,
+  since such a checkout has no receipt. Uncommitted changes in Octant's folder
+  do not come over, and the thread says so. With Octant's folder gone, the
+  branch is used; with the branch gone too, the turn refuses and says why. A
+  thread in another of the Project's folders, or in a folder that is not a Git
+  repository, also refuses its turn and says why.
+- **Where it starts.** Settings › Updates › Data offers "Import from Octant"
+  while Nightly runs on its own data and Octant's data folder exists, with the
+  time of the last import. The renderer sends only whether to copy keys;
+  Nightly's main process resolves both fixed folders, stops its own host, runs
+  the import as a maintenance step, copies preferences and keys, starts the
+  host again and shows what came over, what was held back and why an import
+  refused. A first import replaces the allowlisted window preferences; later
+  imports only add ones Nightly lacks. The keys to copy are the ones Octant's
+  data names, listed by the host without their values.
 
 ## Starting a closed Stable host
 
@@ -941,7 +1060,8 @@ that has no preflight and builds as before.
    [synthetic client smoke](#synthetic-client-smoke)).
 3. **Unsigned packaged Nightly.** `scripts/smoke-packaged-nightly-unsigned.ts`
    packages Nightly without signing and checks its version, its
-   development-build refusal and its test-data host start; the bundle then
+   development-build refusal on Octant's data and its own-host start with no
+   Data choice; the bundle then
    passes the packaged client check below without the Developer ID. The
    refusal alert is read through System Events, so on a runner without
    Accessibility access that one check is skipped: the job prints a warning
@@ -1011,9 +1131,9 @@ checks. Packaging refuses any payload with a harness entry or its marker.
 
 `scripts/smoke-packaged-nightly-unsigned.ts` is run locally: it packages
 Nightly with a dated preview version and no signing identity, checks the
-bundle's identity and version, that an ordinary launch refuses as a
-development build, and that the packaged bundle starts its own test host on a
-throwaway home's test data, then deletes what it built and unregisters the
+bundle's identity and version, that a launch set to Octant's data refuses as
+a development build, and that with no Data choice the
+packaged bundle starts its own host on a throwaway home's data, then deletes what it built and unregisters the
 staged copy from Launch Services. It reads the refusal through System Events,
 so without Accessibility access it reports that check unverified (on
 2026-11-06 the alert was read with another accessibility client instead). It
@@ -1384,8 +1504,9 @@ the same as on macOS; only the transport and the peer check differ.
   [Fixed packaged entry](#fixed-packaged-entry). Chromium can rewrite a Linux process's command
   line, so the native binding does not re-read it; the JavaScript entry check
   is the gate.
-- **The renderer sandbox.** Nightly registers no window, and never starts
-  Octant's host, while its renderers would run without Chromium's sandbox:
+- **The renderer sandbox.** Set to Octant's data, Nightly registers no window,
+  and never starts Octant's host, while its renderers would run without
+  Chromium's sandbox:
   `--no-sandbox`, `--disable-setuid-sandbox` or `ELECTRON_DISABLE_SANDBOX`
   refuse with a message naming them.
 
@@ -1427,17 +1548,17 @@ AppImage pair on a real Linux desktop has not been exercised.
 
 The apps differ only in what macOS and Linux need to keep two apps apart:
 
-| Value                       | Octant                                 | Octant Nightly                                                                     |
-| --------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------- |
-| Product name and menu title | Octant                                 | Octant Nightly                                                                     |
-| Bundle id                   | `app.octant.desktop`                   | `app.octant.desktop.nightly`                                                       |
-| Host data folder            | `~/Library/Application Support/Octant` | The same folder, through Octant's host; with test data, `Octant Nightly/Test Data` |
-| Window storage (macOS)      | Inside the data folder, as today       | `~/Library/Application Support/Octant Nightly`                                     |
-| Host port                   | `13773`                                | None of its own; with test data, `13774`                                           |
-| Link scheme                 | `octant://`                            | `octant-nightly://`                                                                |
-| Command-line tool           | `octant`                               | `octant-nightly`                                                                   |
-| Rings                       | `stable` (default), `candidate`        | `preview`                                                                          |
-| Icon                        | The Octant icon                        | The Octant icon with its colours inverted                                          |
+| Value                       | Octant                                 | Octant Nightly                                                                    |
+| --------------------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| Product name and menu title | Octant                                 | Octant Nightly                                                                    |
+| Bundle id                   | `app.octant.desktop`                   | `app.octant.desktop.nightly`                                                      |
+| Host data folder            | `~/Library/Application Support/Octant` | By default `Octant Nightly/Test Data`, its own host's; on Octant's data, Octant's |
+| Window storage (macOS)      | Inside the data folder, as today       | `~/Library/Application Support/Octant Nightly`                                    |
+| Host port                   | `13773`                                | By default `13774`, its own host's; none on Octant's data                         |
+| Link scheme                 | `octant://`                            | `octant-nightly://`                                                               |
+| Command-line tool           | `octant`                               | `octant-nightly`                                                                  |
+| Rings                       | `stable` (default), `candidate`        | `preview`                                                                         |
+| Icon                        | The Octant icon                        | The Octant icon with its colours inverted                                         |
 
 - Window storage is the desktop process's own browser storage (window
   positions, local storage, cookies of the app's renderer) and the
@@ -1465,32 +1586,35 @@ from that record; `--version` prints the name and the release version packaging
 stamps beside the bundle (`development` from source). The tool prints no link,
 so the link scheme does not appear in it.
 
-- **Which host.** By default `octant-nightly` attaches to Octant's host: the
-  same data folder, host receipt, bridge-secret discovery and window authority
-  as `octant`. When Nightly's stored Data choice is Separate test data, it
-  attaches to Nightly's test host on its folder and port `13774` instead. It
-  reads `data-choice.json` with the desktop's own rule (the same host-runtime
-  reader): only an exact `{"data":"test-data"}` regular file selects test
-  data, and a missing, oversized, linked, malformed or unreadable choice means
-  Octant's data. A stored test-data choice on Linux refuses with a message, as
-  the desktop does. `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` override either,
-  as for `octant`; an explicit `OCTANT_DATA_DIR` skips the stored choice.
+- **Which host.** `octant-nightly` attaches to the host Nightly's Data choice
+  names, read from `data-choice.json` with the desktop's own rule (the same
+  host-runtime reader). On Nightly's own data, the default on macOS and Linux,
+  it attaches to Nightly's own host on its folder and port `13774`, with that
+  host's log folder (`~/Library/Logs/Octant Nightly`, or
+  `$XDG_STATE_HOME/octant-nightly/logs` on Linux). On Octant's data it attaches
+  to Octant's host: the same data folder, host receipt, bridge-secret discovery
+  and window authority as `octant`. A stored own-data choice on Windows
+  refuses with a message. `OCTANT_DATA_DIR` and `OCTANT_SERVER_PORT` override
+  either, as for `octant`; an explicit `OCTANT_DATA_DIR` skips the stored
+  choice.
 - **Never a host.** `octant-nightly` never starts, stops, installs, upgrades or
   runs a host, and never writes a login or boot service, so it can never own or
   migrate Octant's data. `server start|stop|restart|enable|disable|run|install|upgrade|uninstall`,
   `web --dev`, `hub enable --install-service` and `hub disable --remove-service`
   refuse before anything runs, and help lists only what it offers. `hub enable`
-  and `hub disable` never print a boot-service command either. With test data,
-  `server status` and `server logs` refuse and name `octant-nightly status` and
-  the test host's log, because the only service they read is Octant's. When no
-  host is running, a command that `octant` would answer by starting one says
-  which host is missing and how to start it: Octant (the app or
-  `octant server start`) or, with test data, Octant Nightly.
-- **Not the test host either.** `octant` starts its own host in the analogous
-  case, but that start runs Octant's login service without Nightly's test-host
-  environment (its Keychain service family, default folder and log folder),
-  so a host started that way would keep test-data credentials under Octant's
-  Keychain names. The test host therefore starts only with Octant Nightly.
+  and `hub disable` never print a boot-service command either. On Nightly's
+  own data, `server status` and `server logs` refuse and name
+  `octant-nightly status` and its own host's log, because the only service
+  they read is Octant's. When no host is running, a command that `octant`
+  would answer by starting one says which host is missing and how to start
+  it: Octant (the app or `octant server start`) or, on its own data, Octant
+  Nightly.
+- **Not Nightly's own host either.** `octant` starts its own host in the
+  analogous case, but that start runs Octant's login service without
+  Nightly's own-host environment (its Keychain service family, default folder
+  and log folder), so a host started that way would keep Nightly's
+  credentials under Octant's Keychain names. Nightly's own host therefore
+  starts only with Octant Nightly.
 - **Needs a newer Octant.** A host answers a route it does not have with its
   catch-all plain `Not Found`, and a missing resource on a route it has with a
   JSON refusal. When a command's request meets the catch-all, or the host does
@@ -1509,7 +1633,7 @@ so the link scheme does not appear in it.
   sealed by the app signature. Octant ships no such folder. Stable installs no
   `octant` on `PATH` and has no Settings action for it, so Nightly has none
   either: a person links the command (user guide). Linux Nightly ships no
-  command yet.
+  command yet; the attach rule above already covers Linux for when it does.
 
 ## Getting Octant Nightly
 
@@ -1568,8 +1692,9 @@ so the link scheme does not appear in it.
     publisher, so packaged Linux Octant does not offer the row and refuses an
     install as not supported on this platform; Linux Nightly comes from the
     website.
-- **From the website.** octant.sh offers both downloads. The Nightly download
-  says it works with Octant and needs it installed.
+- **From the website.** octant.sh offers both downloads. Nightly works on its
+  own data without Octant; the download says that working on Octant's data
+  needs Octant installed.
 - Switching Octant to Stable or Preview leaves an installed Nightly in place;
   the row stays while Nightly is installed so it can still be opened or
   removed, and is hidden otherwise. Main still allows an install only while
@@ -1638,12 +1763,14 @@ is never in that job: a separate `feed` job checks out the workflow's own
 commit, downloads the uploaded archive, hashes it into the signature and
 publishes, without running any of the built source's code.
 
-The code rolls back; test data does not. A Nightly running its own host on
-separate test data may have migrated that data, and the host of the older
-build it is rolled forward to refuses to open data a newer schema wrote, as
-every host refuses a downgrade. The way out is **Remove test data** in
-Nightly's Settings › Updates, which moves it to the Trash so the next start
-begins clean.
+The code rolls back; Nightly's own data does not. A Nightly running its own
+host may have migrated that data, and the host of the older build it is
+rolled forward to refuses to open data a newer schema wrote, as every host
+refuses a downgrade. Now that this data is a person's real work, the way out
+is the next build that carries the newer schema again; moving the data to the
+Trash (Settings › Updates, while Nightly runs on Octant's data) starts clean
+but loses work done only in Nightly. Restoring the backup the host takes
+before each migration is not offered yet.
 Octant's own data is never migrated by Nightly, so a rollback never touches
 it.
 
@@ -1763,9 +1890,12 @@ before it is ever used as a release gate outside CI.
 - Quitting either app leaves the other's windows working.
 - An `octant://` link opens Octant, and an `octant-nightly://` link opens
   Nightly.
-- `octant` and `octant-nightly` both reach the one running host. With test data,
-  `octant-nightly` reaches Nightly's test host, and with no host running it
-  starts none.
+- `octant` and `octant-nightly` both reach the one running host. On Nightly's
+  own data, `octant-nightly` reaches Nightly's own host, and with no host
+  running it starts none.
+- With no Data choice stored on macOS or Linux, Nightly starts its own host
+  and needs no Octant. Set to Octant's data with no compatible Octant, its
+  startup window offers "Use Nightly's own data", which relaunches it there.
 - Install from Settings is offered only while Octant follows Preview, and
   refuses a build whose signature, hash, or code signature does not verify.
   Remove leaves the data untouched.
@@ -1776,20 +1906,21 @@ before it is ever used as a release gate outside CI.
   than the installed candidate. Equal or older builds are never offered.
 - Octant offers stable and candidate updates and refuses a feed signed for
   `preview`. Nightly offers only preview and refuses `stable` and `candidate`.
-- With separate test data, Nightly's host runs beside Octant's, each on its own
-  folder and port; Octant's data, Keychain items and host are untouched, and
-  switching back to Octant's data after a relaunch reconnects as a client.
+- On its own data, Nightly's host runs beside Octant's, each on its own folder
+  and port; Octant's data, Keychain items and host are untouched, and
+  switching to Octant's data after a relaunch connects as a client.
 - The [synthetic client smoke](#synthetic-client-smoke) passes on every pull
   request, standing in only for the signed native binding; the signed pair's
   own quit-one, quit-last and reconnect run is a maintainer check.
 
 ## Rationale: whose host owns the data
 
-Octant's host owns the data, so a nightly can never upgrade it out from under
-the app a person works in. The cost is that Nightly tests new screens, while
-host changes (agents, providers, tools) run only once they ship in Octant.
-The separate test-data host closes that gap for development and testing
-without touching a person's real data.
+Octant's host owns Octant's data, so a nightly can never upgrade it out from
+under the app a person works in. Nightly's own host, on its own folder, closes
+the gap the client mode leaves (host changes reach a person only once they
+ship in Octant), and since 2026-11-27 it is the default, because a client
+needs a compatible Octant and no stable release existed while Nightly
+published daily. Nightly never runs a host on Octant's folder in either mode.
 Rejected: the newest installed host owns the data and serves both apps.
 Nightly would then test everything, but once it migrated the data Octant
 alone could not open it until Octant updated (the host keeps a backup before

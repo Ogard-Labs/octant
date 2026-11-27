@@ -45,6 +45,8 @@ import {
 } from "./persistence/migrationErrors";
 import { migrateStoreWithBackup } from "./persistence/migrationBackup";
 import { MIGRATIONS } from "./persistence/migrations";
+import { listCredentialReferencesFromOctant } from "./persistence/octantCredentialReferences";
+import { importFromOctant } from "./persistence/octantImport";
 import {
   IsolatedProjectionRebuildRejected,
   UnknownProjection,
@@ -102,6 +104,8 @@ const usage = [
   "       bun run db:reset -- --confirm",
   "       bun run db:remove -- --confirm",
   "       bun run db:remove -- --dry-run",
+  "       bun run db:import-octant -- --from <Octant data folder>",
+  "       bun run db:list-credential-references -- --from <Octant data folder>",
 ].join("\n");
 
 export function runDatabaseCommand(
@@ -147,6 +151,15 @@ export function runDatabaseCommand(
       case "remove":
         output = parsed.dryRun ? services.previewRemoveAll() : services.removeAll();
         break;
+      case "import-octant":
+      case "list-credential-references":
+        // runDatabaseCli runs it before opening the store, since it swaps
+        // the store file; a dispatcher holding a connection never may.
+        return {
+          exitCode: 2,
+          stdout: "",
+          stderr: `${parsed.command} runs only with no store connection open.\n`,
+        };
     }
     return {
       exitCode,
@@ -174,6 +187,12 @@ export type ParsedCommand =
   | { readonly ok: true; readonly command: "restore" }
   | { readonly ok: true; readonly command: "reset" }
   | { readonly ok: true; readonly command: "remove"; readonly dryRun: boolean }
+  | { readonly ok: true; readonly command: "import-octant"; readonly octantDataDirectory: string }
+  | {
+      readonly ok: true;
+      readonly command: "list-credential-references";
+      readonly octantDataDirectory: string;
+    }
   | { readonly ok: false; readonly message: string };
 
 export function parseDatabaseCommand(args: ReadonlyArray<string>): ParsedCommand {
@@ -183,6 +202,13 @@ export function parseDatabaseCommand(args: ReadonlyArray<string>): ParsedCommand
       ok: false,
       message: "Expected status, verify, rebuild, backup, restore, reset, or remove.",
     };
+  }
+  if (command === "import-octant" || command === "list-credential-references") {
+    const folder = args[2];
+    if (args.length !== 3 || args[1] !== "--from" || folder === undefined || folder.trim() === "") {
+      return { ok: false, message: `${command} requires --from <Octant data folder>.` };
+    }
+    return { ok: true, command, octantDataDirectory: folder };
   }
   if (command === "status" || command === "verify" || command === "backup") {
     return args.length === 1
@@ -379,6 +405,32 @@ export async function runDatabaseCli(args: ReadonlyArray<string>): Promise<numbe
     runtimeOwner = ownership;
     const dataDirectory = paths.dataDirectory;
     const databasePath = join(dataDirectory, "octant.sqlite3");
+
+    if (parsed.command === "import-octant") {
+      const outcome = importFromOctant({
+        octantDataDirectory: parsed.octantDataDirectory,
+        nightlyDataDirectory: dataDirectory,
+        clock,
+      });
+      process.stdout.write(prettyJson(outcome));
+      return outcome.kind === "imported" ? 0 : 1;
+    }
+
+    if (parsed.command === "list-credential-references") {
+      // The desktop reads exactly {"references":[...]} on exit 0; a refusal or
+      // failure is the same report as the import's, with a nonzero exit.
+      const outcome = listCredentialReferencesFromOctant({
+        octantDataDirectory: parsed.octantDataDirectory,
+        nightlyDataDirectory: dataDirectory,
+        clock,
+      });
+      if (outcome.kind === "listed") {
+        process.stdout.write(JSON.stringify({ references: outcome.references }));
+        return 0;
+      }
+      process.stdout.write(prettyJson(outcome));
+      return 1;
+    }
 
     if (parsed.command === "remove") {
       const credentialPurgeIdentifiers =
@@ -666,6 +718,10 @@ async function runOnlineOwnerCommand(
   ownership: HostRuntimeAttachment,
 ): Promise<DatabaseCommandResult | undefined> {
   if (!parsed.ok) return undefined;
+  if (parsed.command === "import-octant" || parsed.command === "list-credential-references") {
+    // The import swaps the store file, so it waits for the host to stop.
+    return { exitCode: 1, stdout: prettyJson({ kind: "refused", reason: "busy" }), stderr: "" };
+  }
   if (parsed.command === "backup") {
     const response = await ownership.request({
       type: "backup",

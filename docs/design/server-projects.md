@@ -835,9 +835,10 @@ Project's connection, under the same levels, approvals, and journal.
   is read with Git on the server (`git for-each-ref`). Creating the thread
   runs `git worktree add` on the server, on a new branch (the thread's
   delivery branch) from the chosen source, at
-  `<parent of the folder>/.octant-worktrees/<repository id>/<thread id>`: beside
-  the folder, where a local managed worktree sits beside its repository, at
-  a path derived from the Project and the thread alone. Start from origin
+  `<parent of the folder>/.octant-worktrees/<repository id>/<thread id>`
+  (`.octant-nightly-worktrees` for [Nightly's own host](nightly-app.md#importing-from-octant)):
+  beside the folder, where a local managed worktree sits beside its
+  repository, at a path derived from the Project and the thread alone. Start from origin
   fetches only that branch there. Nothing is created, read, or fetched on
   this host.
 - A worktree is made only when the Project's folder is its repository's top

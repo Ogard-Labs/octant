@@ -29,6 +29,11 @@ vi.mock("node:fs", () => ({
   readFileSync: () =>
     JSON.stringify({ octantDesktopFlavor: "nightly", version: "0.1.0-preview.20261104.1" }),
 }));
+// A Nightly set to Octant's data: with no stored choice it would run its own host.
+vi.mock("./nightlyTestData", async (original) => ({
+  ...(await original<typeof import("./nightlyTestData")>()),
+  resolveStartupHostRole: () => ({ kind: "octant-client" }),
+}));
 vi.mock("./desktopPeerStatus", () => ({
   loadDesktopPeerStatus: () => ({}),
   ensureNightlyHostReady: async () => ({ kind: "ready", protocol: 1, version: "0.1.0" }),

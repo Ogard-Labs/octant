@@ -78,6 +78,20 @@ async function filesUnder(folder: string): Promise<ReadonlyArray<string>> {
     .sort();
 }
 
+/** Nightly's window storage under a test HOME, where its Data choice lives. */
+function nightlyStorage(home: string): string {
+  return process.platform === "darwin"
+    ? join(home, "Library", "Application Support", "Octant Nightly")
+    : join(home, ".config", "Octant Nightly");
+}
+
+/** Points Nightly at Octant's host; with no choice it uses its own data. */
+async function chooseOctantData(home: string): Promise<void> {
+  if (process.platform === "win32") return;
+  await mkdir(nightlyStorage(home), { recursive: true });
+  await writeFile(join(nightlyStorage(home), "data-choice.json"), '{"data":"octant"}\n');
+}
+
 function runNightly(
   args: ReadonlyArray<string>,
   home: string,
@@ -86,6 +100,10 @@ function runNightly(
   delete env.OCTANT_DATA_DIR;
   delete env.OCTANT_SERVER_PORT;
   delete env.OCTANT_DESKTOP_BRIDGE_SECRET;
+  // Nightly's window storage and own data then follow HOME on every platform.
+  delete env.XDG_CONFIG_HOME;
+  delete env.XDG_DATA_HOME;
+  delete env.XDG_STATE_HOME;
   return new Promise((resolve) => {
     execFile(
       "bun",
@@ -124,6 +142,7 @@ describe("octant-nightly", { timeout: 180_000 }, () => {
   it("refuses when Octant's host is not running and never starts one on Octant's data", async () => {
     const home = await mkdtemp(join(tmpdir(), "octant-nightly-home-"));
     try {
+      await chooseOctantData(home);
       const agent = await runNightly(["agent", "--prompt", "hello", "--plain"], home);
       const start = await runNightly(["server", "start"], home);
 
@@ -149,7 +168,9 @@ describe("octant-nightly", { timeout: 180_000 }, () => {
         );
       }
       // No host wrote anything: no receipt, secret, journal or service file.
-      expect(await filesUnder(join(home, "Library", "Application Support"))).toEqual([]);
+      expect(await filesUnder(join(home, "Library", "Application Support"))).toEqual(
+        process.platform === "darwin" ? ["Octant Nightly/data-choice.json"] : [],
+      );
       expect(await filesUnder(join(home, "Library", "LaunchAgents"))).toEqual([]);
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -157,26 +178,22 @@ describe("octant-nightly", { timeout: 180_000 }, () => {
   });
 
   it.runIf(process.platform === "darwin")(
-    "names Nightly's test host when the Data choice is test data and that host is not running",
+    "names Nightly's own host when no Data choice is stored and that host is not running",
     async () => {
       const home = await mkdtemp(join(tmpdir(), "octant-nightly-home-"));
       try {
-        const storage = join(home, "Library", "Application Support", "Octant Nightly");
-        await mkdir(storage, { recursive: true });
-        await writeFile(join(storage, "data-choice.json"), '{"data":"test-data"}\n');
-
         const project = await runNightly(["project", "add", home], home);
 
         expect(project.code).toBe(1);
         expect(project.stderr).toBe(
-          "Octant Nightly's test host is not running. Open Octant Nightly with Data set to Separate test data to start it; octant-nightly never starts a host.\n",
+          "Octant Nightly's own host is not running. Open Octant Nightly to start it; octant-nightly never starts a host.\n",
         );
         const logs = await runNightly(["server", "logs"], home);
         expect(logs.code).toBe(1);
         expect(logs.stderr).toBe(
-          `Octant Nightly's test host has no service. Use \`octant-nightly status\` for its state; its log is ${join(home, "Library", "Logs", "Octant Nightly")}/service.log.\n`,
+          `Octant Nightly's own host has no service. Use \`octant-nightly status\` for its state; its log is ${join(home, "Library", "Logs", "Octant Nightly")}/service.log.\n`,
         );
-        expect(await filesUnder(storage)).toEqual(["data-choice.json"]);
+        expect(await filesUnder(join(home, "Library", "Application Support"))).toEqual([]);
       } finally {
         await rm(home, { recursive: true, force: true });
       }

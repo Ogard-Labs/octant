@@ -3,6 +3,7 @@ import {
   decodeDesktopDataChoice,
   decodeKeychainServiceFamily,
   keychainServicePrefix,
+  managedWorktreesFolderName,
   desktopDataDirectoriesOverlap,
   desktopIdentity,
   desktopIdentityForPackage,
@@ -92,10 +93,20 @@ describe("desktop application identity", () => {
       });
     });
 
-    it("connects Nightly to Octant's host unless separate test data was chosen", () => {
+    it("connects Nightly to Octant's host only when Octant's data was chosen", () => {
       expect(resolveDesktopHostRole(desktopIdentity("nightly"), "octant", mac)).toEqual({
         kind: "octant-client",
       });
+    });
+
+    it("keeps Nightly a client of Octant's host where it has no host of its own", () => {
+      expect(
+        resolveDesktopHostRole(desktopIdentity("nightly"), "test-data", {
+          platform: "win32",
+          home: "C:\\Users\\test",
+          env: {},
+        }),
+      ).toEqual({ kind: "octant-client" });
     });
 
     it("gives Nightly's test host its own folder, port and Keychain services", () => {
@@ -127,19 +138,25 @@ describe("desktop application identity", () => {
       "not json",
       "[]",
       "null",
-      '{"data":"octant"}',
+      '{"data":"Octant"}',
       '{"data":"Test-Data"}',
-      '{"data":"test-data","dataDirectory":"/Users/test/Library/Application Support/Octant"}',
+      '{"data":"octant","dataDirectory":"/Users/test/Library/Application Support/Octant"}',
       '{"data":true}',
-    ])("reads a missing, malformed or unexpected choice %j as Octant's data", (raw) => {
-      expect(decodeDesktopDataChoice(raw)).toBe("octant");
-    });
+    ])(
+      "reads a missing, malformed or unexpected choice %j as Nightly's own data where it has a host",
+      (raw) => {
+        expect(decodeDesktopDataChoice(raw, "darwin")).toBe("test-data");
+        expect(decodeDesktopDataChoice(raw, "linux")).toBe("test-data");
+        expect(decodeDesktopDataChoice(raw, "win32")).toBe("octant");
+      },
+    );
 
     it("reads back the choice it stores", () => {
-      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("test-data"))).toBe("test-data");
-      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("octant"))).toBe("octant");
+      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("test-data"), "darwin")).toBe(
+        "test-data",
+      );
+      expect(decodeDesktopDataChoice(encodeDesktopDataChoice("octant"), "darwin")).toBe("octant");
     });
-
     it("finds an overlap only by whole path segments", () => {
       const octant = "/Users/test/Library/Application Support/Octant";
       expect(desktopDataDirectoriesOverlap(octant, octant)).toBe(true);
@@ -164,6 +181,13 @@ describe("desktop application identity", () => {
     expect(keychainServicePrefix("octant")).toBe("app.octant.");
     expect(keychainServicePrefix("octant-nightly-test-data")).toBe(
       "app.octant.desktop.nightly.test-data.",
+    );
+  });
+
+  it("keeps Nightly's own host's managed worktrees under a folder name Octant never uses", () => {
+    expect(managedWorktreesFolderName("octant")).toBe(".octant-worktrees");
+    expect(managedWorktreesFolderName("octant-nightly-test-data")).toBe(
+      ".octant-nightly-worktrees",
     );
   });
 });

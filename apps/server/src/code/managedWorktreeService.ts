@@ -17,15 +17,17 @@ import {
   type ManagedRootParent,
   type ManagedRootGrantStore,
 } from "./managedRootGrantStore";
-import type {
-  CreateManagedWorktreeReceiptInput,
-  ManagedWorktreeReceipt,
-  ManagedWorktreeReceiptLookup,
-  ManagedWorktreeReceiptState,
-  ManagedWorktreeSourceProvenance,
+import {
+  isImportedReceipt,
+  type CreateManagedWorktreeReceiptInput,
+  type ManagedWorktreeReceipt,
+  type ManagedWorktreeReceiptLookup,
+  type ManagedWorktreeReceiptState,
+  type ManagedWorktreeSourceProvenance,
 } from "./managedWorktreeReceiptStore";
 import { forReceipt } from "./boundedGit";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { recognizedManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 
 export type ManagedWorktreeRefObservation =
@@ -296,6 +298,7 @@ export type ManagedWorktreeRefusalReason =
   | "not-reclaimed"
   | "restore-mismatch"
   | "unowned"
+  | "imported-from-octant"
   | "unrecoverable-files"
   | "unsupported-checkout"
   | "unverified"
@@ -657,7 +660,7 @@ export class ManagedWorktreeService {
     } catch {
       return { status: "interrupted" };
     }
-    if (receipt === undefined) return { status: "refused" };
+    if (receipt === undefined || isImportedReceipt(receipt)) return { status: "refused" };
     if (receipt.state === "removed") return { status: "removed" };
     if (receipt.state !== "creating" && receipt.state !== "ready") return { status: "refused" };
 
@@ -851,6 +854,7 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    if (isImportedReceipt(receipt)) return { status: "refused", reason: "imported-from-octant" };
     // A restorable cleanup keeps what a restore needs; finishing it as a
     // removal here would throw that away, so only the reclaim path touches it.
     if (
@@ -863,11 +867,10 @@ export class ManagedWorktreeService {
     if (
       discard !== undefined &&
       (receipt.branchIntent !== discard ||
-        receipt.checkoutId !==
-          deriveManagedWorktreeCheckoutId({
-            repositoryId: receipt.repositoryId,
-            threadId: receipt.threadId,
-          }))
+        !recognizedManagedWorktreeCheckoutId(
+          { repositoryId: receipt.repositoryId, threadId: receipt.threadId },
+          receipt.checkoutId,
+        ))
     ) {
       return { status: "refused", reason: "mismatched" };
     }
@@ -913,12 +916,14 @@ export class ManagedWorktreeService {
       return { status: "refused", reason: "inventory-ambiguous" };
     }
 
-    const expectedTarget = managedTargetPath(
-      observation.repositoryRoot,
-      receipt.repositoryId,
-      receipt.threadId,
-    );
-    if (expectedTarget !== receipt.canonicalWorktreePath) {
+    if (
+      !recognizedManagedTargetPath(
+        observation.repositoryRoot,
+        receipt.repositoryId,
+        receipt.threadId,
+        receipt.canonicalWorktreePath,
+      )
+    ) {
       return { status: "refused", reason: "mismatched" };
     }
 
@@ -1343,9 +1348,38 @@ export function managedTargetPath(
   return join(managedWorktreeRoot(repositoryRoot, repositoryId), threadId);
 }
 
-/** The directory the service keeps one repository's managed worktrees under. */
+/**
+ * The directory the service keeps one repository's managed worktrees under,
+ * in this host's own folder (see `managedWorktreeHostScope`).
+ */
 export function managedWorktreeRoot(repositoryRoot: string, repositoryId: string): string {
-  return join(dirname(repositoryRoot), ".octant-worktrees", repositoryId);
+  return join(dirname(repositoryRoot), managedWorktreeHostScope().folderName, repositoryId);
+}
+
+/**
+ * Every directory one repository's managed worktrees of this host may sit
+ * under: its own folder, and on Nightly's own host the folder it used before
+ * it had one (see `managedWorktreeHostScope`).
+ */
+export function recognizedManagedWorktreeRoots(
+  repositoryRoot: string,
+  repositoryId: string,
+): ReadonlyArray<string> {
+  return managedWorktreeHostScope().recognized.map((names) =>
+    join(dirname(repositoryRoot), names.folderName, repositoryId),
+  );
+}
+
+/** Whether a receipt's folder is one this host derives, or derived, for the thread. */
+export function recognizedManagedTargetPath(
+  repositoryRoot: string,
+  repositoryId: string,
+  threadId: string,
+  path: string,
+): boolean {
+  return recognizedManagedWorktreeRoots(repositoryRoot, repositoryId).some(
+    (root) => join(root, threadId) === path,
+  );
 }
 
 export function branchRef(branchIntent: string): string {

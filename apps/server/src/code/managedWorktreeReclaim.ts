@@ -1,9 +1,13 @@
 import { forReceipt, waitForSurvivingGit } from "./boundedGit";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
-import type { ManagedWorktreeReceipt, ManagedWorktreeReclaim } from "./managedWorktreeReceiptStore";
+import { recognizedManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import {
+  isImportedReceipt,
+  type ManagedWorktreeReceipt,
+  type ManagedWorktreeReclaim,
+} from "./managedWorktreeReceiptStore";
 import {
   branchRef,
-  managedTargetPath,
+  recognizedManagedTargetPath,
   type ManagedWorktreeAuthorityPort,
   type ManagedWorktreeFileSystemPort,
   type ManagedWorktreeGitPort,
@@ -261,6 +265,7 @@ export class ManagedWorktreeReclaimService {
       return { status: "interrupted" };
     }
     if (receipt === undefined) return { status: "refused", reason: "unowned" };
+    if (isImportedReceipt(receipt)) return { status: "refused", reason: "imported-from-octant" };
     if (receipt.state === "reclaimed") return { status: "reclaimed", receipt };
     const resuming = receipt.state === "cleanup-pending" && receipt.reclaim !== undefined;
     if (receipt.state !== "ready" && !resuming) return { status: "refused", reason: "mismatched" };
@@ -777,11 +782,10 @@ export class ManagedWorktreeReclaimService {
     if (
       authority.repositoryId !== receipt.repositoryId ||
       authority.checkoutId !== receipt.checkoutId ||
-      receipt.checkoutId !==
-        deriveManagedWorktreeCheckoutId({
-          repositoryId: receipt.repositoryId,
-          threadId: receipt.threadId,
-        })
+      !recognizedManagedWorktreeCheckoutId(
+        { repositoryId: receipt.repositoryId, threadId: receipt.threadId },
+        receipt.checkoutId,
+      )
     ) {
       return { status: "refused", reason: "mismatched" };
     }
@@ -824,8 +828,12 @@ export class ManagedWorktreeReclaimService {
     }
     // The folder is only ever the one the service derives for this thread.
     if (
-      managedTargetPath(observation.repositoryRoot, receipt.repositoryId, receipt.threadId) !==
-      receipt.canonicalWorktreePath
+      !recognizedManagedTargetPath(
+        observation.repositoryRoot,
+        receipt.repositoryId,
+        receipt.threadId,
+        receipt.canonicalWorktreePath,
+      )
     ) {
       return { status: "stopped", result: { status: "refused", reason: "mismatched" } };
     }

@@ -2,7 +2,7 @@ import { projectReportsReader } from "../code/projectReports";
 import type { HubActScopeSlot } from "../hub/hubActScope";
 import { createXcodeDerivedData } from "../apple/xcodeDerivedData";
 import { scanHostWorktrees } from "../code/hostWorktreeDiscovery";
-import { removeHostWorktree } from "../code/hostWorktreeRemoval";
+import { octantOwnedWorktreePaths, removeHostWorktree } from "../code/hostWorktreeRemoval";
 import { createDiskCleanupRouteHandler } from "../diskCleanupRoutes";
 import { createArchivedWorktreeRouteHandler } from "../archivedWorktreeRoutes";
 import { createArchivedWorktrees } from "../code/archivedWorktrees";
@@ -94,6 +94,11 @@ import {
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
+import {
+  createImportedCodeThreadProvenance,
+  createImportedCodeWorktreePort,
+} from "../code/importedCodeWorktree";
+import { readImportedWorktreeKeys } from "../code/importedWorktreeRecords";
 import type { ManagedWorktreeRepositoryPort } from "../code/managedWorktreeService";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
 import { CodeEnvironmentService } from "../codeEnvironmentService";
@@ -807,21 +812,15 @@ export function wireCode(deps: CodeDependencies) {
       windowAuthorityStore,
     });
     // Worktrees Octant made and still owns are cleaned up through their
-    // threads, so the computer-wide list leaves them out and refuses them.
-    const ownedWorktreePaths = async (): Promise<ReadonlySet<string>> => {
-      const owned = new Set<string>();
-      for (const thread of persistence.readCodeThreads()) {
-        const checkout = persistence.readCodeCheckout(thread.checkoutId);
-        if (checkout?.kind !== "managed-worktree") continue;
-        const receipt = await managedWorktreeReceipts
-          .load(String(checkout.ownershipReceiptId))
-          .catch(() => undefined);
-        if (receipt !== undefined && receipt.state !== "removed") {
-          owned.add(receipt.canonicalWorktreePath);
-        }
-      }
-      return owned;
-    };
+    // threads, and ones imported from Octant are Octant's, so the
+    // computer-wide list leaves them out and refuses them.
+    const octantWorktreeKeys = () => readImportedWorktreeKeys(persistence.dataDirectory);
+    const ownedWorktreePaths = () =>
+      octantOwnedWorktreePaths({
+        readCodeThreads: persistence.readCodeThreads,
+        readCodeCheckout: persistence.readCodeCheckout,
+        receipts: managedWorktreeReceipts,
+      });
     const diskCleanupRoutes = createDiskCleanupRouteHandler({
       scan: (signal) =>
         scanHostWorktrees(
@@ -837,12 +836,17 @@ export function wireCode(deps: CodeDependencies) {
                     : [],
                 ),
             ownedWorktreePaths,
+            octantWorktreeKeys,
             now: Date.now,
           },
           signal,
         ),
       remove: (request, signal) =>
-        removeHostWorktree(request, { ownedWorktreePaths, now: Date.now }, signal),
+        removeHostWorktree(
+          request,
+          { ownedWorktreePaths, octantWorktreeKeys, now: Date.now },
+          signal,
+        ),
       derivedData: createXcodeDerivedData({
         root:
           process.platform === "darwin"
@@ -901,7 +905,8 @@ export function wireCode(deps: CodeDependencies) {
         // The server remains available while Code file mutations fail closed as unavailable.
       }
     }
-    const repository = options.codeRepositoryPort ?? createManagedWorktreeNodePorts().repository;
+    const managedWorktreeNodePorts = createManagedWorktreeNodePorts();
+    const repository = options.codeRepositoryPort ?? managedWorktreeNodePorts.repository;
     const localCheckouts = createExistingWorktreeCodeCheckoutObservation({
       projects: projectService,
       readProject: persistence.readProject,
@@ -1200,6 +1205,12 @@ export function wireCode(deps: CodeDependencies) {
                     contextInputPolicy,
                   ),
           },
+          importedThreads: createImportedCodeThreadProvenance(persistence.journal),
+          importedWorktrees: createImportedCodeWorktreePort({
+            loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+            repository,
+            git: managedWorktreeNodePorts.git,
+          }),
           managedThreadCreation: withServerWorktreeCreation(
             { store: serverProjectStore, connection: serverConnection },
             {

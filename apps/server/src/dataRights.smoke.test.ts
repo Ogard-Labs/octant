@@ -41,7 +41,7 @@ import { WorkAttachmentStore } from "./work/workAttachmentStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
 import { BrowserCaptureStore } from "./browser/browserCaptureStore";
 import { GeneratedImageStore } from "./image/generatedImageStore";
-import { managedWorktreeRoot } from "./code/managedWorktreeService";
+import { recognizedManagedWorktreeRoots } from "./code/managedWorktreeService";
 import { readChatThreadView, writeChatContent } from "./persistence/chatProjection";
 import { Journal } from "./persistence/journal";
 import { readProjectMemory } from "./persistence/projectProjection";
@@ -272,7 +272,7 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
           dataDirectory: store.directory,
           mode,
           threadId: String(threadId),
-          managedWorktreeRootPath: managedWorktreeRoot,
+          managedWorktreeRootPaths: recognizedManagedWorktreeRoots,
           purgeChatAttachments: (id) =>
             new ChatAttachmentStore(join(store.directory, "chat")).purgeThread(
               decodeChatThreadId(id),

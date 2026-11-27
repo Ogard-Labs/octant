@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { deriveManagedWorktreeCheckoutId } from "./managedCodeThreadCreation";
+import { deriveManagedWorktreeCheckoutId, managedThreadFolder } from "./managedCodeThreadCreation";
 import { ManagedRootGrantStore } from "./managedRootGrantStore";
 import type {
   CreateManagedWorktreeReceiptInput,
@@ -19,6 +19,7 @@ import type {
 import type { RepositoryIdentityObservation } from "./repositoryIdentity";
 import {
   ManagedWorktreeService,
+  managedTargetPath,
   type ManagedWorktreeAuthorityPort,
   type ManagedWorktreeFileSystemPort,
   type ManagedWorktreeGitPort,
@@ -311,6 +312,78 @@ async function plan(service: ManagedWorktreeService) {
   if (result.status !== "planned") throw new Error(`expected plan, received ${result.status}`);
   return result;
 }
+
+describe("which host's folder a managed worktree sits in", () => {
+  it("puts Nightly's own host's worktree in its own folder and under its own checkout id, Octant's where it always was", () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      expect(managedTargetPath(repositoryRoot, repositoryId, threadId)).toBe(
+        `/workspace/.octant-nightly-worktrees/${repositoryId}/${threadId}`,
+      );
+      const nightlyCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+      vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", undefined);
+      expect(managedTargetPath(repositoryRoot, repositoryId, threadId)).toBe(targetPath);
+      // Octant's id is the one it always derived, so its receipts keep resolving.
+      expect(String(deriveManagedWorktreeCheckoutId({ repositoryId, threadId }))).toBe(
+        "a0365414-78fb-4ddb-8178-bb9f240d048f",
+      );
+      expect(String(nightlyCheckout)).not.toBe("a0365414-78fb-4ddb-8178-bb9f240d048f");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("a worktree Nightly's own host made in the folder it used before", () => {
+  it("is still cleaned up from the folder its receipt records", async () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      const { service, receipts, git } = harness({
+        observations: [repositoryObservation({ target: "ready" })],
+      });
+      const receipt = await receipts.create({
+        repositoryId,
+        threadId,
+        checkoutId,
+        canonicalRepositoryPath: repositoryRoot,
+        canonicalWorktreePath: targetPath,
+        branchIntent,
+        refIntent: branchRef,
+        expectedHead: head,
+      });
+      await receipts.transition(receipt.receiptId, "ready");
+      await expect(
+        service.cleanup(
+          { receiptId: receipt.receiptId, confirmedByLocalUser: true },
+          new AbortController().signal,
+        ),
+      ).resolves.toMatchObject({ status: "removed" });
+      expect(git.removeWorktree).toHaveBeenCalledWith(
+        { repositoryRoot, targetPath },
+        expect.any(AbortSignal),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("names the folder a thread's checkout id says it was made in", () => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", undefined);
+    const legacyCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      const ownCheckout = deriveManagedWorktreeCheckoutId({ repositoryId, threadId });
+      expect(managedThreadFolder(repositoryRoot, repositoryId, threadId, legacyCheckout)).toBe(
+        targetPath,
+      );
+      expect(managedThreadFolder(repositoryRoot, repositoryId, threadId, ownCheckout)).toBe(
+        `/workspace/.octant-nightly-worktrees/${repositoryId}/${threadId}`,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
 
 describe("ManagedWorktreeService", () => {
   it("returns unavailable when host time recovery refuses managed-root grant issuance", async () => {

@@ -361,6 +361,107 @@ export const NightlyDataState = Schema.Struct({
 export type NightlyDataState = typeof NightlyDataState.Type;
 
 /**
+ * What Nightly's Settings may know before it offers to import Octant's data
+ * (docs/design/nightly-app.md#importing-from-octant). The request carries no
+ * path: Nightly's main process resolves both fixed folders. `lastImportedAt`
+ * is the end of the newest import Nightly finished.
+ */
+export const NightlyOctantImportPreview = Schema.Struct({
+  octantDataPresent: Schema.Boolean,
+  /** An ISO 8601 UTC time. */
+  lastImportedAt: Schema.optional(Schema.String.pipe(Schema.maxLength(64))),
+}).annotations(strict);
+export type NightlyOctantImportPreview = typeof NightlyOctantImportPreview.Type;
+
+const ImportCount = Schema.Int.pipe(Schema.nonNegative());
+
+/**
+ * Saved keys do not pass through the import: the main process reads each
+ * allowlisted item from Octant's Keychain names and writes it under Nightly's,
+ * never replacing one Nightly already has. `unavailable` says the keys could
+ * not be listed or reached, so nothing was copied.
+ */
+export const NightlyOctantImportKeys = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("not-requested") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("copied"),
+    copied: ImportCount,
+    /** Items Nightly already had, left as they were. */
+    existing: ImportCount,
+    failed: ImportCount,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.Literal("cannot-list", "unsupported-platform"),
+  }).annotations(strict),
+);
+export type NightlyOctantImportKeys = typeof NightlyOctantImportKeys.Type;
+
+/** Window preferences come over from Octant's renderer storage, on a fixed allowlist. */
+export const NightlyOctantImportPreferences = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("copied"), copied: ImportCount }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: Schema.Literal("origin-differs", "octant-storage-missing", "relaunch-needed", "failed"),
+  }).annotations(strict),
+);
+export type NightlyOctantImportPreferences = typeof NightlyOctantImportPreferences.Type;
+
+export const NIGHTLY_OCTANT_IMPORT_REFUSALS = [
+  "octant-missing",
+  "octant-newer",
+  "busy",
+  "unsafe-folder",
+  "unreadable-event",
+  "not-test-host",
+] as const;
+
+/** The server's import stages, then the desktop's own steps around them. */
+export const NIGHTLY_OCTANT_IMPORT_STAGES = [
+  "snapshot",
+  "migrate-snapshot",
+  "settle",
+  "open-nightly",
+  "backup",
+  "merge",
+  "rebuild",
+  "verify",
+  "swap",
+  "stop-host",
+  "maintenance",
+  /** The import finished, but its report could not be read. */
+  "report",
+  "start-host",
+] as const;
+
+export const NightlyOctantImportOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("imported"),
+    counts: Schema.Struct({
+      events: ImportCount,
+      threads: ImportCount,
+      contentRows: ImportCount,
+      settled: ImportCount,
+    }).annotations(strict),
+    /** Threads both apps changed since the last import; Nightly's stayed as they were. */
+    conflicts: ImportCount,
+    /** Settings, Projects and other records both changed; Nightly's value stayed. */
+    heldBack: ImportCount,
+    keys: NightlyOctantImportKeys,
+    preferences: NightlyOctantImportPreferences,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal(...NIGHTLY_OCTANT_IMPORT_REFUSALS),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("failed"),
+    stage: Schema.Literal(...NIGHTLY_OCTANT_IMPORT_STAGES),
+  }).annotations(strict),
+);
+export type NightlyOctantImportOutcome = typeof NightlyOctantImportOutcome.Type;
+
+/**
  * Everything an update check discloses, in the words the user guide uses.
  *
  * Kept in the contract rather than only in prose so the claim and the code

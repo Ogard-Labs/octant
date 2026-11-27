@@ -419,7 +419,15 @@ export async function runNightlyClient(
   // Every other channel refuses by its class in the closed table: Octant-only
   // administration says where it lives, and a feature awaiting its broker says
   // it is not here yet. No arbitrary channel is proxied.
-  const gaps = nightlyClientChannelGaps(supported, new Set(offersTestData ? [] : dataChannels));
+  // The import needs Nightly's own host, which a client never runs.
+  const importChannels = [
+    DESKTOP_IPC_CHANNELS.nightlyDataImportPreview,
+    DESKTOP_IPC_CHANNELS.nightlyDataImport,
+  ];
+  const gaps = nightlyClientChannelGaps(
+    supported,
+    new Set([...(offersTestData ? [] : dataChannels), ...importChannels]),
+  );
   if (gaps.unmarked.length > 0)
     throw new Error("Octant Nightly answers a channel its table does not mark local.");
   if (gaps.unanswered.length > 0)

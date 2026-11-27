@@ -20,6 +20,7 @@ import type {
   BundledWhatsNew,
   OctantHostBridge,
 } from "../shell/hostBridge";
+import { NightlyOctantImportRow } from "./NightlyOctantImportRow";
 import { SettingRow, SettingsDisclosure } from "./primitives";
 import { acknowledgeWhatsNewOnce } from "./whatsNewAcknowledgement";
 import { WhatsNewDialog } from "./WhatsNewDialog";
@@ -51,7 +52,7 @@ export interface AppUpdateSettingsProps {
 export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const bridge = props.hostBridge;
   const localPreferences = bridge?.appUpdatePreferenceScope === "local";
-  // Nightly's own test host keeps its preferences on that host, but it is
+  // Nightly's own host keeps its preferences on that host, but it is
   // still Nightly: it follows Nightly's ring and never offers to install itself.
   const nightly = localPreferences || bridge?.applicationIdentity?.flavor === "nightly";
   const productName = nightly ? "Octant Nightly" : "Octant";
@@ -274,6 +275,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
       )}
 
       <NightlyDataRow bridge={bridge} />
+      <NightlyOctantImportRow bridge={bridge} />
 
       <SettingRow
         description={`Turning this off stops ${productName} contacting the update service; you can still check by hand.`}
@@ -495,8 +497,8 @@ function NightlyInstallRow(props: {
 }
 
 const NIGHTLY_DATA_LABELS: Readonly<Record<NightlyDataChoice, string>> = {
+  "test-data": "Nightly's own data",
   octant: "Octant's data",
-  "test-data": "Separate test data",
 };
 
 const NIGHTLY_DATA_REMOVAL_MESSAGES: Readonly<
@@ -505,18 +507,17 @@ const NIGHTLY_DATA_REMOVAL_MESSAGES: Readonly<
   removed: undefined,
   absent: undefined,
   "test-host-running":
-    "Octant Nightly is running on its test data. Switch to Octant's data and relaunch before removing it.",
-  "unsafe-folder": "Octant Nightly did not remove the test data: its folder is not one it made.",
-  "not-nightly": "Only Octant Nightly removes its test data.",
-  failed: "Octant Nightly could not move the test data to the Trash.",
+    "Octant Nightly is running on its own data. Switch to Octant's data and relaunch before removing it.",
+  "unsafe-folder": "Octant Nightly did not remove its data: the folder is not one it made.",
+  "not-nightly": "Only Octant Nightly removes its own data.",
+  failed: "Octant Nightly could not move its data to the Trash.",
 };
 
 /**
- * Nightly's Data row: Octant's data through Octant's host (the default), or a
- * host of Nightly's own on separate test data for development and testing.
- * A change applies on the next launch, so the row says so and offers the
- * relaunch. The test data can be moved to the Trash while Nightly is not
- * running on it.
+ * Nightly's Data row: a host of Nightly's own on its own data (the default),
+ * or Octant's data through Octant's host. A change applies on the next
+ * launch, so the row says so and offers the relaunch. Nightly's own data can
+ * be moved to the Trash while Nightly is not running on it.
  */
 function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }) {
   const read = props.bridge?.readNightlyData;
@@ -564,8 +565,8 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
   return (
     <>
       <SettingRow
-        description="Whether Octant Nightly works on Octant's data or on separate test data."
-        more="Octant's data uses Octant's host and your real work. Separate test data runs Nightly's own host on data that is never Octant's, for development and testing; you sign in again there. A change applies when Octant Nightly relaunches."
+        description="Whether Octant Nightly works on its own data or on Octant's data."
+        more="Nightly's own data runs Nightly's own host, so it works without Octant installed and never changes Octant's data. Octant's data uses Octant's host and needs a compatible Octant running. A change applies when Octant Nightly relaunches."
         label="Data"
         scope="app"
         settingId="app-nightly-data"
@@ -580,18 +581,15 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
           }}
           value={[data.chosen]}
         >
-          <OctantToggleGroupItem value="octant">{NIGHTLY_DATA_LABELS.octant}</OctantToggleGroupItem>
           <OctantToggleGroupItem value="test-data">
             {NIGHTLY_DATA_LABELS["test-data"]}
           </OctantToggleGroupItem>
+          <OctantToggleGroupItem value="octant">{NIGHTLY_DATA_LABELS.octant}</OctantToggleGroupItem>
         </OctantToggleGroup>
       </SettingRow>
       {pending ? (
         <OctantAlert tone="neutral">
-          <span>
-            Octant Nightly uses {NIGHTLY_DATA_LABELS[data.chosen].toLowerCase()} after it
-            relaunches.
-          </span>{" "}
+          <span>Octant Nightly uses {NIGHTLY_DATA_LABELS[data.chosen]} after it relaunches.</span>{" "}
           <OctantButton
             disabled={busy || relaunch === undefined}
             onClick={() => {
@@ -619,10 +617,10 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
         <SettingRow
           description={
             data.running === "test-data"
-              ? "Octant Nightly is running on its test data; switch to Octant's data and relaunch before removing it."
-              : "Moves Octant Nightly's test data to the Trash; Octant's data is not touched."
+              ? "Octant Nightly is running on its own data; switch to Octant's data and relaunch before removing it."
+              : "Moves Octant Nightly's own data to the Trash; Octant's data is not touched."
           }
-          label="Test data"
+          label="Nightly's own data"
           scope="app"
           settingId="app-nightly-test-data"
         >
@@ -633,7 +631,7 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
             type="button"
             variant="secondary"
           >
-            Remove test data
+            Move to Trash
           </OctantButton>
         </SettingRow>
       ) : null}

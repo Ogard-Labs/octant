@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
 import { decodeCodeCheckoutId, decodeCodeRepositoryId, type Project } from "@octant/contracts";
 import type {
   CodeForkFiles,
@@ -13,6 +14,7 @@ import type {
   ManagedWorktreeRepositoryPort,
   ManagedWorktreeService,
 } from "./managedWorktreeService";
+import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 
 export interface ManagedCodeThreadCreationDeps {
   readonly readProject: (
@@ -32,12 +34,53 @@ export interface ManagedCodeThreadCreationDeps {
   ) => Promise<"applied" | "failed">;
 }
 
+/** Derived under this host's own label (see `managedWorktreeHostScope`). */
 export function deriveManagedWorktreeCheckoutId(input: {
   readonly repositoryId: string;
   readonly threadId: string;
 }) {
+  return checkoutIdUnder(managedWorktreeHostScope().checkoutLabel, input);
+}
+
+/**
+ * Whether a managed worktree's checkout id is one this host derives for the
+ * thread, or derived before it had names of its own.
+ */
+export function recognizedManagedWorktreeCheckoutId(
+  input: { readonly repositoryId: string; readonly threadId: string },
+  checkoutId: string,
+): boolean {
+  return managedWorktreeHostScope().recognized.some(
+    (names) => String(checkoutIdUnder(names.checkoutLabel, input)) === checkoutId,
+  );
+}
+
+/**
+ * The folder of a thread's managed worktree, from what its checkout id says
+ * it was made under, without reading its receipt: a worktree Nightly's own
+ * host made before it had a folder of its own is in the folder it used then.
+ */
+export function managedThreadFolder(
+  repositoryRoot: string,
+  repositoryId: string,
+  threadId: string,
+  checkoutId: string,
+): string {
+  const scope = managedWorktreeHostScope();
+  const names =
+    scope.recognized.find(
+      (candidate) =>
+        String(checkoutIdUnder(candidate.checkoutLabel, { repositoryId, threadId })) === checkoutId,
+    ) ?? scope;
+  return join(dirname(repositoryRoot), names.folderName, repositoryId, threadId);
+}
+
+function checkoutIdUnder(
+  label: string,
+  input: { readonly repositoryId: string; readonly threadId: string },
+) {
   const digest = createHash("sha256")
-    .update("octant.managed-worktree-checkout.v1\0")
+    .update(`${label}\0`)
     .update(input.repositoryId)
     .update("\0")
     .update(input.threadId)

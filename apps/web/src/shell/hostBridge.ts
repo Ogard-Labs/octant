@@ -5,6 +5,8 @@ import type {
   AppUpdateState,
   NightlyDataChoice,
   NightlyDataState,
+  NightlyOctantImportOutcome,
+  NightlyOctantImportPreview,
   NightlyInstallState,
 } from "@octant/contracts/app-updates";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
@@ -660,6 +662,9 @@ export interface OctantHostBridge
   readonly readNightlyData?: () => Promise<NightlyDataState>;
   readonly chooseNightlyData?: (choice: NightlyDataChoice) => Promise<NightlyDataState>;
   readonly removeNightlyTestData?: () => Promise<NightlyDataState>;
+  /** Present only on Nightly's own data; the request names no folder. */
+  readonly previewNightlyOctantImport?: () => Promise<NightlyOctantImportPreview>;
+  readonly importNightlyOctantData?: (copyKeys: boolean) => Promise<NightlyOctantImportOutcome>;
   readonly relaunchNightly?: () => Promise<{ readonly kind: "relaunching" | "unchanged" }>;
   readonly downloadAppUpdate?: () => Promise<AppUpdateState>;
   readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;

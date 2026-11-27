@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +53,8 @@ async function world(
     readonly withoutIgnoredCheck?: boolean;
     readonly removalTimeLimitMs?: number;
     readonly restoreWaitMs?: number;
+    /** A receipt that came with data imported from Octant. */
+    readonly imported?: true;
   } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "octant-reclaim-"));
@@ -70,6 +72,11 @@ async function world(
     expectedHead: head,
   });
   await receipts.transition(created.receiptId, "ready");
+  if (options.imported === true) {
+    const file = join(directory, "managed-worktree-receipts", `${created.receiptId}.json`);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(file, `${JSON.stringify({ ...stored, importedFrom: "octant" })}\n`);
+  }
   const state = {
     repositoryId: repositoryId as string,
     worktrees: new Map<string, Listed>([[target, { branch: `refs/heads/${branch}`, head }]]),
@@ -308,6 +315,48 @@ async function world(
   };
 }
 
+describe("a worktree Nightly's own host made before its folder was its own", () => {
+  it("is still reclaimed from the folder and under the checkout id its receipt records", async () => {
+    // Made under Octant's folder name and checkout label, which Nightly's own
+    // host used until it had names of its own.
+    const w = await world();
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+      expect(w.state.disk.has(target)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("a worktree that came from Octant", () => {
+  it("keeps its folder through the inactivity sweep, an archive cleanup and a confirmed removal", async () => {
+    const w = await world({ imported: true });
+    await expect(w.reclaim()).resolves.toEqual({
+      status: "refused",
+      reason: "imported-from-octant",
+    });
+    await expect(w.reclaim({ trigger: "inactivity" })).resolves.toMatchObject({
+      status: "refused",
+    });
+    await expect(w.plainCleanup()).resolves.toEqual({
+      status: "refused",
+      reason: "imported-from-octant",
+    });
+    expect(w.state.disk.has(target)).toBe(true);
+    expect(w.state.calls).not.toContain("removalStarted");
+    expect(await w.current()).toMatchObject({ state: "ready", importedFrom: "octant" });
+  });
+
+  it("still cleans a receipt without the field, as before", async () => {
+    const w = await world();
+    await expect(w.reclaim()).resolves.toMatchObject({ status: "reclaimed" });
+    expect(w.state.disk.has(target)).toBe(false);
+    expect((await w.current()).importedFrom).toBeUndefined();
+  });
+});
+
 describe("restorable cleanup of a managed worktree", () => {
   it("removes a clean, idle worktree of an open thread, and keeps its branch, its checkpoint refs and a record to restore from", async () => {
     const w = await world();
@@ -340,7 +389,7 @@ describe("restorable cleanup of a managed worktree", () => {
     });
     expect(await startsMeanwhile.current()).toMatchObject({ state: "ready" });
     expect((await startsMeanwhile.current()).reclaim).toBeUndefined();
-    expect(startsMeanwhile.state.calls).not.toContain("removeWorktree");
+    expect(startsMeanwhile.state.calls).not.toContain("removalStarted");
   });
 
   it("gives up and leaves the worktree ready when a commit, a checkout or an edit lands after the receipt left ready", async () => {
@@ -888,7 +937,7 @@ describe("a cleanup or restore killed at any instant", () => {
     w.state.folderMatches = false;
     w.state.calls.length = 0;
     await expect(w.restore()).resolves.toEqual({ status: "refused", reason: "partial-folder" });
-    expect(w.state.calls).not.toContain("removeWorktree");
+    expect(w.state.calls).not.toContain("removalStarted");
     expect(w.state.disk.has(target)).toBe(true);
     expect((await w.current()).state).toBe("restoring");
   });
@@ -929,7 +978,7 @@ describe("a cleanup or restore killed at any instant", () => {
       status: "refused",
       reason: "partial-folder",
     });
-    expect(foreign.state.calls).not.toContain("removeWorktree");
+    expect(foreign.state.calls).not.toContain("removalStarted");
     expect((await foreign.current()).state).toBe("restoring");
 
     const stubborn = await reclaimed();
@@ -966,7 +1015,7 @@ describe("a cleanup or restore killed at any instant", () => {
     await w.receipts.beginReclaim(w.receiptId, { branch, head });
     w.state.damage = { missingTrackedFiles: 2, otherChanges: 0 };
     await expect(w.reclaim()).resolves.toEqual({ status: "refused", reason: "dirty" });
-    expect(w.state.calls).not.toContain("removeWorktree");
+    expect(w.state.calls).not.toContain("removalStarted");
     // Their deletion stays theirs: nothing was put back.
     expect(w.state.calls).not.toContain("restoreMissingFiles");
     expect((await w.current()).state).toBe("ready");

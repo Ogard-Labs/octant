@@ -51,7 +51,7 @@ import { REMOTE_ACCESS_PROTOCOL_VERSION } from "@octant/contracts/remote-access"
 import { canvasOutsideContentWriters } from "../canvas/canvasOutsideContentMark";
 import { conversationInputSource } from "./conversationInputs";
 import type { ThreadPartsDestination, ThreadPartsSource } from "../hub/movedThreadParts";
-import { managedWorktreeRoot } from "../code/managedWorktreeService";
+import { recognizedManagedWorktreeRoots } from "../code/managedWorktreeService";
 import { purgeThreadArtifacts, removeMirrorFiles } from "../persistence/threadArtifactPurge";
 import { readHostIdentity, readRemoteAccessPaused } from "../persistence/remoteAccessProjection";
 import { AgentProfileService } from "../agentProfileService";
@@ -3338,7 +3338,7 @@ export function wireRemote(deps: RemoteDependencies) {
         dataDirectory: persistence.dataDirectory,
         mode,
         threadId: String(threadId),
-        managedWorktreeRootPath: managedWorktreeRoot,
+        managedWorktreeRootPaths: recognizedManagedWorktreeRoots,
         // A cleanup or restore holds a receipt for as long as one Git call may
         // run; the purge waits a little, then fails the way its other steps do
         // and is retried, and its removal never runs once it has given up.

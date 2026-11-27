@@ -3,6 +3,7 @@ import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { measureFolder, type FolderSize } from "./archivedWorktrees";
 import { hostPathKey, sameHostPath } from "./hostPaths";
+import { importedWorktreeKey } from "./importedWorktreeRecords";
 import { parseWorktreeList, runHostGit, type ListedWorktree } from "./hostGitReads";
 
 /**
@@ -90,6 +91,8 @@ export interface HostWorktreeDiscoveryDependencies {
   readonly projectFolders: () => ReadonlyArray<string>;
   /** Folders of worktrees Octant made and still owns; those are cleaned up through their threads. */
   readonly ownedWorktreePaths: () => Promise<ReadonlySet<string>>;
+  /** Keys (`importedWorktreeKey`) of Octant's checkouts whose imported thread was purged. */
+  readonly octantWorktreeKeys?: () => Promise<ReadonlySet<string>>;
   readonly now: () => number;
   readonly limits?: Partial<ScanLimits>;
 }
@@ -127,6 +130,7 @@ export async function scanHostWorktrees(
 
   const owned = await dependencies.ownedWorktreePaths();
   const platform = dependencies.platform;
+  const octantKeys = (await dependencies.octantWorktreeKeys?.()) ?? new Set<string>();
   const ownedCanonical = new Set([...owned].map((path) => hostPathKey(path, platform)));
   const repositories: DiscoveredRepository[] = [];
   for (const common of commons.values()) {
@@ -148,7 +152,9 @@ export async function scanHostWorktrees(
     if (linked.length === 0) continue;
     const worktrees: DiscoveredWorktree[] = [];
     for (const entry of linked) {
-      worktrees.push(await describe(common, entry, ownedCanonical, limits, platform, signal));
+      worktrees.push(
+        await describe(common, entry, ownedCanonical, octantKeys, limits, platform, signal),
+      );
     }
     repositories.push({ path: main.path, commonDirectory: common, worktrees });
   }
@@ -160,6 +166,7 @@ async function describe(
   common: string,
   entry: ListedWorktree,
   owned: ReadonlySet<string>,
+  octantKeys: ReadonlySet<string>,
   limits: ScanLimits,
   platform: NodeJS.Platform,
   signal: AbortSignal,
@@ -180,7 +187,9 @@ async function describe(
         : await isDelivered(common, entry.head, entry.branch, signal),
     lastActivityMs: activity,
     size: missing ? undefined : await measureFolder(entry.path, limits.sizeEntries),
-    ownedByOctant: owned.has(hostPathKey(entry.path, platform)),
+    ownedByOctant:
+      owned.has(hostPathKey(entry.path, platform)) ||
+      octantKeys.has(importedWorktreeKey(entry.path, platform)),
   };
 }
 

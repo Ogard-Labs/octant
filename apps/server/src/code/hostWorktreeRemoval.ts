@@ -2,7 +2,10 @@ import { lstat, realpath, rm } from "node:fs/promises";
 import { join, relative, resolve, isAbsolute } from "node:path";
 import { readWorktreeStatus, parseWorktreeList, runHostGit } from "./hostGitReads";
 import { sameHostPath } from "./hostPaths";
+import type { CodeCheckoutIdentity, CodeThread } from "@octant/contracts";
 import { worktreeAdminDirectory } from "./hostWorktreeDiscovery";
+import { importedWorktreeKey } from "./importedWorktreeRecords";
+import type { ManagedWorktreeReceiptStore } from "./managedWorktreeReceiptStore";
 
 /** A worktree changed this recently may have a program working in it now. */
 export const RECENT_ACTIVITY_MS = 15 * 60 * 1000;
@@ -54,9 +57,37 @@ export interface HostWorktreeRemovalRequest {
 
 export interface HostWorktreeRemovalDependencies {
   readonly ownedWorktreePaths: () => Promise<ReadonlySet<string>>;
+  /** See `HostWorktreeDiscoveryDependencies.octantWorktreeKeys`. */
+  readonly octantWorktreeKeys?: () => Promise<ReadonlySet<string>>;
   readonly now: () => number;
   /** Override for tests; production uses `process.platform`. */
   readonly platform?: NodeJS.Platform;
+}
+
+/**
+ * The folders Disk cleanup leaves to their threads and never removes: the
+ * worktree each Code thread's receipt names, and every worktree that came with
+ * data imported from Octant. Once an imported thread moves to a worktree of
+ * this host's own, no thread points at Octant's folder any more, but it is
+ * still Octant's live checkout.
+ */
+export async function octantOwnedWorktreePaths(input: {
+  readonly readCodeThreads: () => ReadonlyArray<Pick<CodeThread, "checkoutId">>;
+  readonly readCodeCheckout: (id: CodeThread["checkoutId"]) => CodeCheckoutIdentity | undefined;
+  readonly receipts: Pick<ManagedWorktreeReceiptStore, "load" | "importedWorktreePaths">;
+}): Promise<ReadonlySet<string>> {
+  const owned = new Set(await input.receipts.importedWorktreePaths());
+  for (const thread of input.readCodeThreads()) {
+    const checkout = input.readCodeCheckout(thread.checkoutId);
+    if (checkout?.kind !== "managed-worktree") continue;
+    const receipt = await input.receipts
+      .load(String(checkout.ownershipReceiptId))
+      .catch(() => undefined);
+    if (receipt !== undefined && receipt.state !== "removed") {
+      owned.add(receipt.canonicalWorktreePath);
+    }
+  }
+  return owned;
 }
 
 /**
@@ -90,7 +121,12 @@ export async function removeHostWorktree(
   if (entry.bare) return refused("bare");
   if (entry.locked !== undefined) return refused("locked", entry.locked || undefined);
   const owned = await dependencies.ownedWorktreePaths();
-  if ([...owned].some((path) => sameHostPath(path, request.worktreePath, platform))) {
+  const octantKeys = (await dependencies.octantWorktreeKeys?.()) ?? new Set<string>();
+  if (
+    [...owned].some((path) => sameHostPath(path, request.worktreePath, platform)) ||
+    octantKeys.has(importedWorktreeKey(request.worktreePath, platform)) ||
+    octantKeys.has(importedWorktreeKey(entry.path, platform))
+  ) {
     return refused("owned-by-octant");
   }
 

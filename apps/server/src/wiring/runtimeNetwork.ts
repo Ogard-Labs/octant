@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import { decodeCodeThreadId, decodeProjectId } from "@octant/contracts";
+import { managedWorktreeHostScope } from "../code/managedWorktreeHostScope";
 import type { ToolEgressRules } from "../harness/nativeHarnessEgressRules";
 import {
   ProviderRuntimeNetwork,
@@ -11,9 +12,6 @@ import {
 import { SafeNetworkStore } from "../network/safeNetworkStore";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-
-/** The folder name managed worktrees sit under, beside the repository they come from. */
-const MANAGED_WORKTREES_FOLDER = ".octant-worktrees";
 
 /**
  * Safe networks and the provider runtime network. Both rebuild from the
@@ -99,7 +97,10 @@ export function resolveRuntimeProject(
   } catch {
     // A folder that does not resolve is compared as written.
   }
-  if (basename(dirname(dirname(folder))) === MANAGED_WORKTREES_FOLDER) {
+  // Managed worktrees sit in this host's folder beside the repository they
+  // come from, or in the one Nightly's own host used before it had its own.
+  const container = basename(dirname(dirname(folder)));
+  if (managedWorktreeHostScope().recognized.some((names) => names.folderName === container)) {
     try {
       const thread = persistence.readCodeThread(decodeCodeThreadId(basename(folder)));
       if (thread !== undefined) return String(thread.projectId);

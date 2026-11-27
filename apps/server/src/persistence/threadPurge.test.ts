@@ -37,7 +37,7 @@ import {
   THREAD_SECRET_EVENT_NAME,
 } from "@octant/contracts/thread-secrets";
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AgentMessageProjection,
   hydrateAgentMessageProjectionFromJournal,
@@ -75,7 +75,7 @@ import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
 import { THREAD_AGGREGATE_TYPE_BY_MODE } from "./threadIdentity";
 import { erasePurgedProjectData, erasePurgedThread } from "./threadPurge";
-import { managedWorktreeRoot } from "../code/managedWorktreeService";
+import { recognizedManagedWorktreeRoots } from "../code/managedWorktreeService";
 import { ThreadCheckpointProjection } from "./threadCheckpointProjection";
 import { ThreadRetentionService } from "../threadRetentionService";
 
@@ -1255,6 +1255,61 @@ describe("thread purge sweep", () => {
     ).toBe(true);
   });
 
+  it("deletes an imported worktree's receipt with its thread but leaves Octant's checkout folder in place", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+    const receipt = join(
+      harness.directory,
+      "managed-worktree-receipts",
+      `${uuidFor("code", "worktree")}.json`,
+    );
+    writeFileSync(
+      receipt,
+      JSON.stringify({ ...JSON.parse(readFileSync(receipt, "utf8")), importedFrom: "octant" }),
+    );
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: thread.mode,
+          threadId: decodeThreadRetentionThreadId(thread.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+
+    expect(existsSync(receipt)).toBe(false);
+    expect(existsSync(worktreeLayout(harness.directory).worktreeFor(thread.id))).toBe(true);
+  });
+
+  it("on Nightly's own host, removes a worktree it made in the folder it used before with its thread", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    const thread = threads.code;
+    seedThreadTraces(harness, thread);
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      await harness.service.purge(
+        {
+          scope: {
+            kind: "thread",
+            mode: thread.mode,
+            threadId: decodeThreadRetentionThreadId(thread.id),
+          },
+          confirm: true,
+        },
+        "local-window",
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(existsSync(worktreeLayout(harness.directory).worktreeFor(thread.id))).toBe(false);
+  });
+
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
     const harness = openHarness();
     seedControlThread(harness);
@@ -1343,7 +1398,7 @@ function openHarness(
         dataDirectory: directory,
         mode,
         threadId: String(threadId),
-        managedWorktreeRootPath: managedWorktreeRoot,
+        managedWorktreeRootPaths: recognizedManagedWorktreeRoots,
         ...(whileReceiptIdle === undefined ? {} : { whileReceiptIdle }),
         purgeChatAttachments: (id) => chatAttachments.purgeThread(decodeChatThreadId(id)),
         purgeWorkAttachments: (id) => workAttachments.purgeThread(decodeWorkThreadId(id)),

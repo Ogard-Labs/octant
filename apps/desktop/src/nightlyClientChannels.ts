@@ -80,6 +80,8 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   nightlyDataChoose: "local",
   nightlyDataRemove: "local",
   nightlyDataRelaunch: "local",
+  nightlyDataImportPreview: "local",
+  nightlyDataImport: "local",
   approvalSurfacePalette: "local",
   clearProviderCredential: "local",
   codeDeepLink: "local",

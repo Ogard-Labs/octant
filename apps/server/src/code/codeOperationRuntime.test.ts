@@ -11919,6 +11919,101 @@ describe("provider switch handoff", () => {
     }
   });
 
+  it("starts a thread imported from Octant on a worktree of its own and a new session, never resuming Octant's", async () => {
+    const drivers = twoHarnesses();
+    const ownCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000097");
+    const ownCheckout = decodeCodeCheckoutIdentity({
+      id: ownCheckoutId,
+      repositoryId: thread().repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "octant/imported-nightly", oid: "a".repeat(40) },
+      ownershipReceiptId: "90000000-0000-4000-8000-000000000098",
+      observedAt: "2026-07-30T12:00:00.000Z",
+    });
+    let imported = false;
+    let continued = false;
+    const continueImportedThread = vi.fn(async () => {
+      if (!imported || continued) return { status: "own" as const };
+      // What the Code service journals: the move off Octant's checkout.
+      continued = true;
+      fixture.setThread(
+        decodeCodeThread({
+          ...onProvider(providerInstance, "model-a", 3),
+          checkoutId: ownCheckoutId,
+        }),
+      );
+      return { status: "continued" as const, checkoutId: ownCheckoutId };
+    });
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      movedCheckout: ownCheckout,
+      readThreadMove: () =>
+        continued ? { fromCheckoutId: checkoutId, toCheckoutId: ownCheckoutId } : undefined,
+      continueImportedThread,
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      // The session Octant left, as the import brings it.
+      await finishFirstTurn(fixture, drivers, providerInstance);
+      imported = true;
+      const prompt = storedEvidence(86, "Carry on in Nightly.");
+      fixture.evidenceValues.set(prompt.contentId, "Carry on in Nightly.");
+      // The window still names the imported checkout.
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId,
+        sessionId: switchSession,
+        prompt,
+      });
+      await vi.waitFor(() => expect(drivers.provider.send).toHaveBeenCalledTimes(2));
+      expect(continueImportedThread).toHaveBeenCalledWith(windowId, threadId);
+      expect(drivers.provider.resume).not.toHaveBeenCalled();
+      expect(
+        JSON.stringify(vi.mocked(drivers.provider.send).mock.calls[1]?.[0]?.context),
+      ).toContain("First reply.");
+      const frames = await fixture.runtime.subscribe(windowId, threadId, operationId(85), 0, 50);
+      expect(
+        frames.find((frame) => frame.event.kind === "context-handoff-attached")?.event,
+      ).toMatchObject({ nativeSessionTransferred: false });
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("refuses the first turn of an imported thread whose worktree and branch are both gone, with a message", async () => {
+    const drivers = twoHarnesses();
+    const fixture = runtimeFixture({
+      resolveProviderDriver: drivers.resolveProviderDriver,
+      continueImportedThread: async () => ({ status: "refused", reason: "branch-missing" }),
+    });
+    fixture.setThread(onProvider(providerInstance, "model-a"));
+    try {
+      const prompt = storedEvidence(86, "Carry on.");
+      fixture.evidenceValues.set(prompt.contentId, "Carry on.");
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(85),
+        threadId,
+        checkoutId,
+        sessionId: switchSession,
+        prompt,
+      });
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        admission: "refused",
+        failure: { message: expect.stringContaining("worktree and branch there are both gone") },
+      });
+      expect(drivers.provider.send).not.toHaveBeenCalled();
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it("still refuses a session from another checkout when the thread was not moved there", async () => {
     const drivers = twoHarnesses();
     const otherCheckoutId = decodeCodeCheckoutId("90000000-0000-4000-8000-000000000095");
@@ -14378,6 +14473,9 @@ function runtimeFixture(options: {
   /** A second checkout the thread can be moved onto. */
   movedCheckout?: ReturnType<typeof decodeCodeCheckoutIdentity>;
   readThreadMove?: Parameters<typeof createCodeOperationRuntime>[0]["readThreadMove"];
+  continueImportedThread?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["continueImportedThread"];
   contributedTools?: Parameters<typeof createCodeOperationRuntime>[0]["contributedTools"];
   serverCodeTurn?: Parameters<typeof createCodeOperationRuntime>[0]["serverCodeTurn"];
   holdsServerThread?: Parameters<typeof createCodeOperationRuntime>[0]["holdsServerThread"];
@@ -14849,6 +14947,9 @@ function runtimeFixture(options: {
       : { readThreadExternalContentTaint: options.readThreadExternalContentTaint }),
     ...(options.threads === undefined ? {} : { threads: options.threads }),
     ...(options.readThreadMove === undefined ? {} : { readThreadMove: options.readThreadMove }),
+    ...(options.continueImportedThread === undefined
+      ? {}
+      : { continueImportedThread: options.continueImportedThread }),
     ...(options.moveThreadToWorktree === undefined
       ? {}
       : { moveThreadToWorktree: options.moveThreadToWorktree }),

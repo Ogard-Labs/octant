@@ -187,6 +187,14 @@ describe("runDatabaseCommand", () => {
     ).resolves.toEqual({ kind: "unavailable" });
   });
 
+  it("reads the Octant data folder an import names", () => {
+    expect(parseDatabaseCommand(["import-octant", "--from", "/Octant"])).toEqual({
+      ok: true,
+      command: "import-octant",
+      octantDataDirectory: "/Octant",
+    });
+  });
+
   it("validates remove confirmation before any destructive operation can be requested", () => {
     expect(parseDatabaseCommand(["remove"])).toMatchObject({
       ok: false,
@@ -258,6 +266,8 @@ describe("runDatabaseCommand", () => {
       ["remove", "--dry-run", "extra"],
       "The remove operation is destructive; pass --confirm to proceed, or --dry-run",
     ],
+    [["import-octant"], "import-octant requires --from <Octant data folder>."],
+    [["import-octant", "--from", " "], "import-octant requires --from <Octant data folder>."],
   ])("rejects invalid arguments with actionable redacted usage", (args, message) => {
     const result = runDatabaseCommand(args, services());
 

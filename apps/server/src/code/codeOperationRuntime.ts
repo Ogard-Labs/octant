@@ -530,6 +530,8 @@ export interface CodeOperationRuntimeOptions {
    * the worktree with the conversation handed over as text, instead of being
    * refused for a session from another checkout.
    */
+  /** See `CodeOperationServiceOptions.continueImportedThread`. */
+  readonly continueImportedThread?: CodeOperationServiceOptions["continueImportedThread"];
   readonly readThreadMove?: (threadId: CodeThreadId) =>
     | {
         readonly fromCheckoutId: CodeThread["checkoutId"];
@@ -1656,6 +1658,9 @@ export function createCodeOperationRuntime(
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    ...(options.continueImportedThread === undefined
+      ? {}
+      : { continueImportedThread: options.continueImportedThread }),
     ...(options.platform === undefined ? {} : { platform: options.platform }),
     threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
     providerDriverKind: async (thread: CodeThread) =>

@@ -1139,7 +1139,19 @@ else {
 let providerAccount = providerCredentialAccount(providerInstanceId: account, storeScope: storeScope)
 
 let commonKeys: Set<String> = ["version", "operation", "providerInstanceId", "storeScope"]
-let allowedKeys = operation == "set" ? commonKeys.union(["credential"]) : commonKeys
+// `readOnly` asks has/resolve to read this exact scoped item and nothing more:
+// no re-scoping of an earlier record and no fallback to an unscoped legacy item,
+// so reading another app's store never writes to it.
+var readOnly = false
+if request.keys.contains("readOnly") {
+    guard operation == "has" || operation == "resolve", request["readOnly"] as? Bool == true else {
+        fail(.failed)
+    }
+    readOnly = true
+}
+let allowedKeys = operation == "set"
+    ? commonKeys.union(["credential"])
+    : (readOnly ? commonKeys.union(["readOnly"]) : commonKeys)
 guard Set(request.keys) == allowedKeys else {
     fail(.failed)
 }
@@ -1198,7 +1210,7 @@ case "has":
     var query = baseQuery(service: providerService, account: providerAccount, storeScope: storeScope)
     query[kSecMatchLimit as String] = kSecMatchLimitOne
     var status = SecItemCopyMatching(query as CFDictionary, nil)
-    if status == errSecItemNotFound {
+    if status == errSecItemNotFound && !readOnly {
         do {
             try migrateScopedProviderCredentialIfPresent(providerInstanceId: account, storeScope: storeScope)
         } catch let error as StableError {
@@ -1209,14 +1221,16 @@ case "has":
         status = SecItemCopyMatching(query as CFDictionary, nil)
     }
     if status == errSecItemNotFound {
-        do {
-            if try legacyProviderCredentialIfPresent(providerInstanceId: account) != nil {
-                emit(["version": protocolVersion, "ok": true, "present": true])
+        if !readOnly {
+            do {
+                if try legacyProviderCredentialIfPresent(providerInstanceId: account) != nil {
+                    emit(["version": protocolVersion, "ok": true, "present": true])
+                }
+            } catch let error as StableError {
+                fail(error)
+            } catch {
+                fail(.failed)
             }
-        } catch let error as StableError {
-            fail(error)
-        } catch {
-            fail(.failed)
         }
         emit(["version": protocolVersion, "ok": true, "present": false])
     }
@@ -1229,7 +1243,7 @@ case "resolve":
     query[kSecReturnData as String] = true
     var result: CFTypeRef?
     var status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound {
+    if status == errSecItemNotFound && !readOnly {
         do {
             try migrateScopedProviderCredentialIfPresent(providerInstanceId: account, storeScope: storeScope)
         } catch let error as StableError {
@@ -1240,7 +1254,7 @@ case "resolve":
         result = nil
         status = SecItemCopyMatching(query as CFDictionary, &result)
     }
-    if status == errSecItemNotFound {
+    if status == errSecItemNotFound && !readOnly {
         do {
             guard let legacy = try legacyProviderCredentialIfPresent(providerInstanceId: account) else {
                 fail(.missing)

@@ -251,7 +251,7 @@ function makeRetention(input: {
         dataDirectory: input.dataDirectory,
         mode,
         threadId: String(threadId),
-        managedWorktreeRootPath: (root) => root,
+        managedWorktreeRootPaths: (root) => [root],
         purgeChatAttachments: async () => undefined,
         purgeWorkAttachments: async () => undefined,
         purgeCodeAttachments: async () => undefined,

@@ -35,6 +35,8 @@ import {
   ChildWorktreeSeedUpdated,
   THREAD_WAKEUP_CHANGED,
   ThreadWakeupChanged,
+  OCTANT_IMPORT_RECORDED,
+  OctantImportRecorded,
 } from "@octant/contracts";
 import {
   LEGACY_OWNER_BROWSER_AUDIT_EVENT,
@@ -965,6 +967,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
     .register(THREAD_WAKEUP_CHANGED, 1, ThreadWakeupChanged)
+    .register(OCTANT_IMPORT_RECORDED, 1, OctantImportRecorded)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
     .register("zen.space-snapshot-recorded@1", 1, ZenSpaceSnapshotRecordedV1)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)

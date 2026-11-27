@@ -3996,7 +3996,8 @@ Status: Partly built. Since: 2026-11-19. Detail: [Hub and spokes: the hub coordi
 
 Octant Nightly is a second desktop app that installs beside Octant, follows the preview ring, and works on the same data, whose folder Octant's host alone owns. Octant is one binary with the channel switch Stable | Preview | Nightly, and never follows preview itself (maintainer decision, 2026-11-05).
 
-- By default Nightly is a client of Octant's running host and never runs a host on Octant's data. For testing it can run its own host on separate test data.
+- On macOS and Linux Nightly runs its own host on its own data by default, so it works without Octant installed; set to Octant's data it is a client of Octant's running host. It never runs a host on Octant's data, and Windows Nightly is always a client (maintainer decision, 2026-11-27).
+- Nightly can import Octant's history, settings and keys into its own data, and a later import merges Octant's newer work while keeping Nightly's own. Octant's data is only read (maintainer decision, 2026-11-27).
 - Each app validates its own signed identity and its peer's on every exchange, refuses a feed signed for the other, and never installs the other through its update (maintainer decision, 2026-11-06).
 - A Nightly client reaches native operations only through a closed, lease-bound allowlist. Remote access, hubs, pairing, owner unlock and host identity stay Octant-only (maintainer decision, 2026-11-06).
 - Every embedded Browser gap, accessibility included, blocks the first Nightly publication, and Nightly's popups add no authority (maintainer decision, 2026-11-06).
@@ -4007,9 +4008,10 @@ Not built yet:
 
 - A signed Nightly installation: waiting on the maintainer checks below.
 - Maintainer checks owed: a signed pair and signed install (the Preview install row included), a signed test-data host and `octant-nightly` run, real-account sign-ins, a packaged Electron run with physical IME and VoiceOver, an Octant candidate carrying the host feature list, roll-forward on a published release, the preflight on a scheduled release, a packaged Linux pair on a real desktop, packaged Windows lifecycle acceptance, and approval of the first scheduled publication.
+- A packaged run of importing from Octant (the window preference copy runs only there), and showing in the thread that uncommitted changes stayed in Octant's folder.
 - Windows Nightly test data, installation, and Work and Code: separate gates.
 
-Status: Partly built. Since: 2026-11-05. Detail: [Octant Nightly](nightly-app.md): [one host serves both](nightly-app.md#one-host-serves-both), [maintainer decisions](nightly-app.md#maintainer-decisions-2026-11-06), [native-main admission](nightly-app.md#native-main-admission), [Windows client trust](nightly-app.md#windows-client-trust), [Linux client trust](nightly-app.md#linux-client-trust) and [the usable-client preflight](nightly-app.md#the-usable-client-preflight).
+Status: Partly built. Since: 2026-11-05. Detail: [Octant Nightly](nightly-app.md): [one host serves both](nightly-app.md#one-host-serves-both), [Nightly's own data](nightly-app.md#nightlys-own-data), [importing from Octant](nightly-app.md#importing-from-octant), [maintainer decisions](nightly-app.md#maintainer-decisions-2026-11-06), [native-main admission](nightly-app.md#native-main-admission), [Windows client trust](nightly-app.md#windows-client-trust), [Linux client trust](nightly-app.md#linux-client-trust) and [the usable-client preflight](nightly-app.md#the-usable-client-preflight).
 
 ## Code tooling
 

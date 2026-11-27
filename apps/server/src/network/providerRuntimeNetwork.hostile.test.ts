@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:f
 import { isIP, connect as netConnect, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { decodeWindowId, ToolEgressRuleId, type AggregateId } from "@octant/contracts";
@@ -1060,6 +1060,29 @@ describe("runtime Project resolution", () => {
     expect(resolveRuntimeProject(persistence, worktree)).toBe(otherProjectId);
     expect(resolveRuntimeProject(persistence, `${outer}-sibling`)).toBeUndefined();
     expect(resolveRuntimeProject(persistence, "/")).toBeUndefined();
+  });
+
+  it("on Nightly's own host, gives a worktree it made in the folder it used before, and one in its own folder, their thread's Project", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-runtime-project-")));
+    directories.push(base);
+    const threadOf = "00000000-0000-4000-8000-0000000000c2";
+    const legacy = join(base, ".octant-worktrees", "repo-id", threadOf);
+    const own = join(base, ".octant-nightly-worktrees", "repo-id", threadOf);
+    for (const folder of [legacy, own]) mkdirSync(folder, { recursive: true });
+    const persistence = {
+      readProjects: () => [],
+      readCodeThread: (threadId: unknown) =>
+        String(threadId) === threadOf ? ({ projectId: otherProjectId } as never) : undefined,
+    };
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+    try {
+      expect(resolveRuntimeProject(persistence, legacy)).toBe(otherProjectId);
+      expect(resolveRuntimeProject(persistence, own)).toBe(otherProjectId);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // Octant never had Nightly's folder.
+    expect(resolveRuntimeProject(persistence, own)).toBeUndefined();
   });
 });
 
