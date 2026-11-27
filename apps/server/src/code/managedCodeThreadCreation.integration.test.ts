@@ -61,7 +61,10 @@ import type {
 } from "./managedWorktreeService";
 import { ManagedWorktreeService } from "./managedWorktreeService";
 import { CodeContentStore } from "./codeContentStore";
-import { createImportedCodeWorktreePort } from "./importedCodeWorktree";
+import {
+  createImportedCodeThreadProvenance,
+  createImportedCodeWorktreePort,
+} from "./importedCodeWorktree";
 import type {
   CreateManagedWorktreeReceiptInput,
   ManagedWorktreeReceipt,
@@ -174,6 +177,7 @@ function harness(
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly captureOverride?: NonNullable<CodeServiceOptions["forkPoints"]>["capture"];
     readonly importedWorktrees?: CodeServiceOptions["importedWorktrees"];
+    readonly importedThreads?: CodeServiceOptions["importedThreads"];
   } = {},
 ) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
@@ -312,6 +316,7 @@ function harness(
     ...(options.importedWorktrees === undefined
       ? {}
       : { importedWorktrees: options.importedWorktrees }),
+    ...(options.importedThreads === undefined ? {} : { importedThreads: options.importedThreads }),
   });
   return { codeService, git, receipts, journal, repository };
 }
@@ -1898,5 +1903,182 @@ describe("continuing a Code thread imported from Octant", () => {
     expect(fixture.isDirty).not.toHaveBeenCalled();
     expect(fixture.git.addWorktree).not.toHaveBeenCalled();
     expect(fixture.journal.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("continuing a Code thread imported from Octant on the Project's own checkout", () => {
+  const sharedCheckoutId = "60000000-0000-4000-8000-000000000083";
+  const sharedHead = "c".repeat(40);
+  const nightlyPath = `/workspace/.octant-nightly-worktrees/${repositoryId}/${sourceThreadId}`;
+  const checkoutOf = (kind: "existing-worktree" | "plain-folder") =>
+    decodeCodeCheckoutIdentity({
+      id: sharedCheckoutId,
+      repositoryId,
+      kind,
+      availability: "available",
+      head:
+        kind === "plain-folder"
+          ? { kind: "none" }
+          : { kind: "branch", name: "development", oid: sharedHead },
+      observedAt: now,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("OCTANT_KEYCHAIN_SERVICE_FAMILY", "octant-nightly-test-data");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function onShared(
+    options: {
+      readonly imported?: boolean;
+      readonly dirty?: boolean;
+      readonly kind?: "existing-worktree" | "plain-folder";
+    } = {},
+  ) {
+    const applySourceFiles = vi.fn(async () => "applied" as const);
+    const isDirty = vi.fn(async () => ({
+      status: "observed" as const,
+      dirty: options.dirty === true,
+    }));
+    let created: { readonly branch: string; readonly head: string } | undefined;
+    const observe = vi.fn(async () => {
+      const base = observation(false);
+      return {
+        ...base,
+        worktrees: [
+          ...base.worktrees,
+          ...(created === undefined
+            ? []
+            : [
+                {
+                  status: "present" as const,
+                  reportedPath: nightlyPath,
+                  canonicalPath: nightlyPath,
+                  head: created.head,
+                  branch: `refs/heads/${created.branch}`,
+                  detached: false,
+                },
+              ]),
+        ],
+      };
+    });
+    const awaitsOwnWorktree = vi.fn(() => options.imported ?? true);
+    const fixture = harness({
+      threads: [decodeCodeThread({ ...sourceThread(), checkoutId: sharedCheckoutId })],
+      checkouts: [checkoutOf(options.kind ?? "existing-worktree")],
+      applySourceFiles,
+      importedWorktrees: createImportedCodeWorktreePort({
+        loadReceipt: async () => undefined,
+        repository: { observe },
+        git: { isDirty },
+      }),
+      importedThreads: { awaitsOwnWorktree },
+    });
+    (fixture.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(observe);
+    (fixture.git.resolveRef as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_root: string, ref: string) => ({ status: "resolved" as const, oid: ref }),
+    );
+    (fixture.git.addWorktree as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: { readonly branchIntent: string; readonly startPoint: string }) => {
+        created = { branch: input.branchIntent, head: input.startPoint };
+        return { status: "created" as const };
+      },
+    );
+    return { ...fixture, applySourceFiles, isDirty, awaitsOwnWorktree, observe };
+  }
+
+  it("gives it a worktree of its own on its first turn and writes nothing in the Project's folder", async () => {
+    const fixture = onShared({ dirty: true });
+    const result = await fixture.codeService.continueImportedThread(windowId, sourceThreadId);
+    if (result.status !== "continued") throw new Error(JSON.stringify(result));
+    expect(fixture.git.addWorktree).toHaveBeenCalledTimes(1);
+    expect(fixture.git.addWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetPath: nightlyPath,
+        branchIntent: "development-nightly",
+        startPoint: sharedHead,
+      }),
+      expect.anything(),
+    );
+    // The folder is only read: no worktree is removed and nothing is laid over or into it.
+    expect(fixture.isDirty).toHaveBeenCalledWith(repositoryRoot, expect.anything());
+    expect(fixture.git.removeWorktree).not.toHaveBeenCalled();
+    expect(fixture.applySourceFiles).not.toHaveBeenCalled();
+    const append = fixture.journal.append.mock.calls
+      .map(([request]) => request)
+      .find((request) => request.aggregate.aggregateType === "code-thread");
+    expect(append?.events[0]?.payload).toMatchObject({
+      fromCheckoutId: sharedCheckoutId,
+      toCheckoutId: String(result.checkoutId),
+      branch: "development-nightly",
+      sourceHead: sharedHead,
+      fromOctant: { octantFolder: "uncommitted-changes-left" },
+    });
+  });
+
+  it("leaves a thread of Nightly's own on that checkout as it is", async () => {
+    const fixture = onShared({ imported: false });
+    expect(await fixture.codeService.continueImportedThread(windowId, sourceThreadId)).toEqual({
+      status: "own",
+    });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+    expect(fixture.isDirty).not.toHaveBeenCalled();
+  });
+
+  it("refuses as not-a-repository when the imported thread works in a plain folder", async () => {
+    const fixture = onShared({ kind: "plain-folder" });
+    fixture.observe.mockResolvedValue({
+      status: "unavailable",
+      reason: "not-repository",
+    } as never);
+    expect(await fixture.codeService.continueImportedThread(windowId, sourceThreadId)).toEqual({
+      status: "refused",
+      reason: "not-a-repository",
+    });
+    expect(fixture.git.addWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe("which Code threads came from Octant", () => {
+  const imported = "60000000-0000-4000-8000-000000000090";
+  const record = (codeThreadIds?: ReadonlyArray<string>) => ({
+    aggregateVersion: 1,
+    eventName: "data.octant-import-recorded@1",
+    payload: {
+      importId: "60000000-0000-4000-8000-000000000091",
+      octantMark: 10,
+      copies: [],
+      conflicts: [],
+      heldBack: [],
+      counts: { events: 1, threads: 1, contentRows: 0, settled: 0 },
+      ...(codeThreadIds === undefined ? {} : { codeThreadIds }),
+    },
+  });
+  const provenance = (records: ReadonlyArray<unknown>, moves: ReadonlyArray<unknown> = []) =>
+    createImportedCodeThreadProvenance({
+      replayAggregate: () => records as never,
+      replayAggregateType: () => moves as never,
+    });
+
+  it("names a thread the import's record lists until it has left for a worktree of its own", () => {
+    expect(provenance([record([imported])]).awaitsOwnWorktree(imported)).toBe(true);
+    expect(provenance([record([imported])]).awaitsOwnWorktree(String(threadId))).toBe(false);
+    // A record written before the field existed names no thread.
+    expect(provenance([record()]).awaitsOwnWorktree(imported)).toBe(false);
+    const left = {
+      payload: {
+        kind: "thread-moved-to-worktree",
+        threadId: imported,
+        fromCheckoutId: "60000000-0000-4000-8000-000000000092",
+        toCheckoutId: "60000000-0000-4000-8000-000000000093",
+        branch: "development-nightly",
+        sourceHead: "c".repeat(40),
+        fromOctant: { octantFolder: "clean" },
+        movedAt: now,
+      },
+    };
+    expect(provenance([record([imported])], [left]).awaitsOwnWorktree(imported)).toBe(false);
   });
 });

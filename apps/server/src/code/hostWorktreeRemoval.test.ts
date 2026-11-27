@@ -7,7 +7,12 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { scanHostWorktrees } from "./hostWorktreeDiscovery";
 import { octantOwnedWorktreePaths, removeHostWorktree } from "./hostWorktreeRemoval";
+import { readImportedWorktreeKeys } from "./importedWorktreeRecords";
 import { ManagedWorktreeReceiptStore } from "./managedWorktreeReceiptStore";
+import { recognizedManagedWorktreeRoots } from "./managedWorktreeService";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { openSqlite } from "../persistence/sqlitePort";
+import { purgeThreadArtifacts } from "../persistence/threadArtifactPurge";
 
 const execFileAsync = promisify(execFile);
 const signal = new AbortController().signal;
@@ -99,6 +104,87 @@ describe("a worktree imported from Octant that no thread points at any more", ()
       removeHostWorktree(
         { repositoryPath: repo, worktreePath: octantFolder },
         { ownedWorktreePaths, now: later },
+        signal,
+      ),
+    ).resolves.toMatchObject({ reason: "owned-by-octant" });
+    expect(existsSync(octantFolder)).toBe(true);
+  });
+});
+
+describe("a worktree imported from Octant whose thread was purged", () => {
+  it("is still listed as Octant's own and refused by Disk cleanup", async () => {
+    const { root, repo } = await fixture();
+    const repositoryId = `repo_${"a".repeat(64)}`;
+    const threadId = "60000000-0000-4000-8000-000000000003";
+    // Where Octant keeps its managed worktrees, beside the repository.
+    const octantFolder = join(root, ".octant-worktrees", repositoryId, threadId);
+    await git("-C", repo, "worktree", "add", "-q", "-b", "octant/purged", octantFolder);
+    const head = (await git("-C", octantFolder, "rev-parse", "HEAD")).stdout.trim();
+    const dataDirectory = join(root, "data");
+    const receipts = new ManagedWorktreeReceiptStore({ dataDirectory });
+    const created = await receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId: "60000000-0000-4000-8000-000000000004",
+      canonicalRepositoryPath: repo,
+      canonicalWorktreePath: octantFolder,
+      branchIntent: "octant/purged",
+      refIntent: "refs/heads/octant/purged",
+      expectedHead: head,
+    });
+    const file = join(dataDirectory, "managed-worktree-receipts", `${created.receiptId}.json`);
+    const stored = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+    await writeFile(
+      file,
+      `${JSON.stringify({ ...stored, state: "ready", importedFrom: "octant" })}\n`,
+    );
+    const connection = openSqlite(join(dataDirectory, "events.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => new Date().toISOString());
+    const nothing = async () => undefined;
+    await purgeThreadArtifacts({
+      connection,
+      dataDirectory,
+      mode: "code",
+      threadId,
+      managedWorktreeRootPaths: recognizedManagedWorktreeRoots,
+      purgeChatAttachments: nothing,
+      purgeWorkAttachments: nothing,
+      purgeCodeAttachments: nothing,
+      purgeGeneratedImages: nothing,
+      purgeBrowserCaptures: nothing,
+      purgeAgentMessages: nothing,
+    });
+    connection.close();
+    // The purge takes the thread's receipt and leaves Octant's checkout.
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(octantFolder)).toBe(true);
+
+    const ownedWorktreePaths = () =>
+      octantOwnedWorktreePaths({
+        readCodeThreads: () => [],
+        readCodeCheckout: () => undefined,
+        receipts,
+      });
+    const octantWorktreeKeys = () => readImportedWorktreeKeys(dataDirectory);
+    const scan = await scanHostWorktrees(
+      {
+        homeDirectory: root,
+        platform: process.platform,
+        projectFolders: () => [repo],
+        ownedWorktreePaths,
+        octantWorktreeKeys,
+        now: Date.now,
+      },
+      signal,
+    );
+    const listed = scan.repositories
+      .flatMap((repository) => repository.worktrees)
+      .find((worktree) => worktree.path === octantFolder);
+    expect(listed?.ownedByOctant).toBe(true);
+    await expect(
+      removeHostWorktree(
+        { repositoryPath: repo, worktreePath: octantFolder },
+        { ownedWorktreePaths, octantWorktreeKeys, now: later },
         signal,
       ),
     ).resolves.toMatchObject({ reason: "owned-by-octant" });

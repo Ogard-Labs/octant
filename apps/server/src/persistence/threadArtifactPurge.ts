@@ -2,6 +2,7 @@ import { readdir, readFile, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { OctantMode } from "@octant/contracts";
 import { createArtifactMirrorFilePort } from "../canvas/artifactMirrorFilePort";
+import { keepImportedWorktreeRecord } from "../code/importedWorktreeRecords";
 import type { SqliteConnection } from "./sqlitePort";
 import { listThreadFileAnchors } from "./threadPurge";
 
@@ -229,6 +230,10 @@ async function removeOwnedWorktrees(
   const blocked = receipts.some((receipt) => !receipt.deletable);
   for (const receipt of receipts) {
     if (receipt.threadId !== input.threadId || !receipt.deletable) continue;
+    // Octant's checkout outlives the receipt that named it here.
+    if (receipt.importedFromOctant && receipt.path !== undefined) {
+      await keepImportedWorktreeRecord(input.dataDirectory, receipt.path);
+    }
     await rm(receipt.file, { force: true });
     if (
       !blocked &&

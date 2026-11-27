@@ -94,7 +94,11 @@ import {
 import { createFileHelperProcessTransport } from "../code/fileHelperProcessTransport";
 import { FileOperationPort } from "../code/fileOperationPort";
 import { createManagedWorktreeNodePorts } from "../code/managedWorktreeNodePorts";
-import { createImportedCodeWorktreePort } from "../code/importedCodeWorktree";
+import {
+  createImportedCodeThreadProvenance,
+  createImportedCodeWorktreePort,
+} from "../code/importedCodeWorktree";
+import { readImportedWorktreeKeys } from "../code/importedWorktreeRecords";
 import type { ManagedWorktreeRepositoryPort } from "../code/managedWorktreeService";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
 import { CodeEnvironmentService } from "../codeEnvironmentService";
@@ -810,6 +814,7 @@ export function wireCode(deps: CodeDependencies) {
     // Worktrees Octant made and still owns are cleaned up through their
     // threads, and ones imported from Octant are Octant's, so the
     // computer-wide list leaves them out and refuses them.
+    const octantWorktreeKeys = () => readImportedWorktreeKeys(persistence.dataDirectory);
     const ownedWorktreePaths = () =>
       octantOwnedWorktreePaths({
         readCodeThreads: persistence.readCodeThreads,
@@ -831,12 +836,17 @@ export function wireCode(deps: CodeDependencies) {
                     : [],
                 ),
             ownedWorktreePaths,
+            octantWorktreeKeys,
             now: Date.now,
           },
           signal,
         ),
       remove: (request, signal) =>
-        removeHostWorktree(request, { ownedWorktreePaths, now: Date.now }, signal),
+        removeHostWorktree(
+          request,
+          { ownedWorktreePaths, octantWorktreeKeys, now: Date.now },
+          signal,
+        ),
       derivedData: createXcodeDerivedData({
         root:
           process.platform === "darwin"
@@ -1195,6 +1205,7 @@ export function wireCode(deps: CodeDependencies) {
                     contextInputPolicy,
                   ),
           },
+          importedThreads: createImportedCodeThreadProvenance(persistence.journal),
           importedWorktrees: createImportedCodeWorktreePort({
             loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
             repository,

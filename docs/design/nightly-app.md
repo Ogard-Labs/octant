@@ -262,7 +262,11 @@ extension install leaves its package files in Nightly.
 - **What stays behind.** Everything that belongs to Octant's host: its
   identity, private listener and certificates, paired devices and push
   registrations, hub membership, artifact sync membership, service and owner
-  records, logs, caches and health samples.
+  records, logs, caches and health samples. Octant's Canvas mirror receipts stay too,
+  so a purge in Nightly never removes a file Octant mirrored, and a mirror
+  setting that writes to a folder outside the Project's repository is held
+  back and listed, so Nightly never writes into a folder Octant writes to; the
+  person chooses Nightly's own.
 - **Octant's data is only read.** While Octant runs, Nightly opens Octant's
   store read-only and writes a self-contained copy (`VACUUM INTO`) into its
   own folder; SQLite's own shared-memory file `octant.sqlite3-shm` is the only
@@ -302,18 +306,23 @@ extension install leaves its package files in Nightly.
   the host already writes for that state, so nothing imported runs until the
   person starts it. Restart continuations stay behind.
 - **Code checkouts stay Octant's.** Nightly never removes a worktree folder
-  that came from Octant: reclaim, archive cleanup and purge refuse it, and a
-  purge deletes only the receipt. Nightly's own host keeps its managed
+  that came from Octant: reclaim, archive cleanup and purge refuse it. A purge
+  deletes the receipt but keeps a digest of the folder's path, so Disk cleanup
+  still refuses the folder as Octant's. Nightly's own host keeps its managed
   worktrees under `.octant-nightly-worktrees` beside the repository, where
   Octant keeps `.octant-worktrees`, because a worktree's folder is fixed by its
   thread id and the two apps would otherwise share a path (maintainer
   decision, 2026-11-27). Continuing an imported Code thread in Nightly first
   gives it its own branch and worktree there, made from the thread's current
   branch, and starts a fresh provider session with a text handoff, since
-  Octant's session is tied to Octant's checkout. Uncommitted changes in
-  Octant's folder do not come over, and the thread says so. With Octant's
-  folder gone, the branch is used; with the branch gone too, the turn refuses
-  and says why.
+  Octant's session is tied to Octant's checkout. This holds whether the thread
+  was on a worktree of Octant's or on a checkout both apps reach, such as the
+  Project's own folder; the import's record lists the Code threads it brought,
+  since such a checkout has no receipt. Uncommitted changes in Octant's folder
+  do not come over, and the thread says so. With Octant's folder gone, the
+  branch is used; with the branch gone too, the turn refuses and says why. A
+  thread in another of the Project's folders, or in a folder that is not a Git
+  repository, also refuses its turn and says why.
 - **Where it starts.** Settings › Updates › Data offers "Import from Octant"
   while Nightly runs on its own data and Octant's data folder exists, with the
   time of the last import. The renderer sends only whether to copy keys;

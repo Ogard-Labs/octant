@@ -262,6 +262,7 @@ import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { managedWorktreeHostScope } from "./managedWorktreeHostScope";
 import {
   continuationBranchName,
+  type ImportedCodeThreadProvenance,
   type ImportedCodeWorktreePort,
   type ImportedThreadContinuation,
   type ImportedThreadContinuationRefusal,
@@ -947,6 +948,8 @@ export interface CodeServiceOptions {
    * taken as this host's own.
    */
   readonly importedWorktrees?: ImportedCodeWorktreePort;
+  /** Which Code threads came from Octant, for those on a checkout with no receipt. */
+  readonly importedThreads?: ImportedCodeThreadProvenance;
   /** Where a fork starts; without it a fork refuses as unavailable. */
   readonly forkPoints?: CodeForkPointPort;
   /**
@@ -1318,6 +1321,7 @@ export class CodeService {
   readonly #worktreeCleanup: CodeServiceOptions["worktreeCleanup"];
   readonly #managedThreadCreation: ManagedCodeThreadCreationPort | undefined;
   readonly #importedWorktrees: ImportedCodeWorktreePort | undefined;
+  readonly #importedThreads: ImportedCodeThreadProvenance | undefined;
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
   readonly #forkConversation: CodeForkConversationReader | undefined;
@@ -1397,6 +1401,7 @@ export class CodeService {
     this.#worktreeCleanup = options.worktreeCleanup;
     this.#managedThreadCreation = options.managedThreadCreation;
     this.#importedWorktrees = options.importedWorktrees;
+    this.#importedThreads = options.importedThreads;
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
     this.#forkConversation = options.forkConversation;
@@ -5894,9 +5899,17 @@ export class CodeService {
     const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
     // Decided before the guard below, so a thread of this host's own is never
     // answered with the refusal an imported thread's move gives.
-    if (checkout === undefined || !(await this.#importedWorktrees.isImported(checkout))) {
-      return { status: "own" };
-    }
+    // A managed worktree says by its receipt that it came from Octant; a
+    // checkout both apps reach (the Project's own folder) has no receipt, so
+    // the import's record says which of its threads came from Octant.
+    const imported =
+      checkout === undefined
+        ? false
+        : checkout.kind === "managed-worktree"
+          ? await this.#importedWorktrees.isImported(checkout)
+          : (checkout.kind === "existing-worktree" || checkout.kind === "plain-folder") &&
+            this.#importedThreads?.awaitsOwnWorktree(String(current.id)) === true;
+    if (!imported) return { status: "own" };
     const key = String(current.id);
     if (this.#movingToWorktree.has(key)) return { status: "refused", reason: "turn-running" };
     this.#movingToWorktree.add(key);
@@ -5924,10 +5937,27 @@ export class CodeService {
     const checkout = this.#persistence.readCodeCheckout(current.checkoutId);
     const project = this.#persistence.readProject?.(current.projectId);
     if (checkout === undefined || project?.type !== "code") return { status: "own" };
+    // As for a move: a worktree is made from the Project's main folder, so a
+    // task working in another of its folders would keep editing that one.
+    if (current.workingFolderId !== undefined) {
+      let root: string | undefined;
+      try {
+        root = approvedWorkingFolderRoot(project, current.workingFolderId);
+      } catch {
+        root = undefined;
+      }
+      if (root !== project.binding.canonicalRoot) return refused("working-folder");
+    }
     const signal = new AbortController().signal;
-    const reading = await importedWorktrees.read(checkout, project.binding.canonicalRoot, signal);
+    const reading = await importedWorktrees.read(
+      checkout,
+      project.binding.canonicalRoot,
+      signal,
+      current.deliveryTarget.branchIntent,
+    );
     if (reading.status === "own") return reading;
     if (reading.status === "unavailable") return refused("unavailable");
+    if (reading.status === "not-a-repository") return refused("not-a-repository");
     if (reading.head === undefined) return refused("branch-missing");
     const head = reading.head;
     const executing = () =>

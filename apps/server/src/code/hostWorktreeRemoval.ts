@@ -4,6 +4,7 @@ import { readWorktreeStatus, parseWorktreeList, runHostGit } from "./hostGitRead
 import { sameHostPath } from "./hostPaths";
 import type { CodeCheckoutIdentity, CodeThread } from "@octant/contracts";
 import { worktreeAdminDirectory } from "./hostWorktreeDiscovery";
+import { importedWorktreeKey } from "./importedWorktreeRecords";
 import type { ManagedWorktreeReceiptStore } from "./managedWorktreeReceiptStore";
 
 /** A worktree changed this recently may have a program working in it now. */
@@ -56,6 +57,8 @@ export interface HostWorktreeRemovalRequest {
 
 export interface HostWorktreeRemovalDependencies {
   readonly ownedWorktreePaths: () => Promise<ReadonlySet<string>>;
+  /** See `HostWorktreeDiscoveryDependencies.octantWorktreeKeys`. */
+  readonly octantWorktreeKeys?: () => Promise<ReadonlySet<string>>;
   readonly now: () => number;
   /** Override for tests; production uses `process.platform`. */
   readonly platform?: NodeJS.Platform;
@@ -118,7 +121,12 @@ export async function removeHostWorktree(
   if (entry.bare) return refused("bare");
   if (entry.locked !== undefined) return refused("locked", entry.locked || undefined);
   const owned = await dependencies.ownedWorktreePaths();
-  if ([...owned].some((path) => sameHostPath(path, request.worktreePath, platform))) {
+  const octantKeys = (await dependencies.octantWorktreeKeys?.()) ?? new Set<string>();
+  if (
+    [...owned].some((path) => sameHostPath(path, request.worktreePath, platform)) ||
+    octantKeys.has(importedWorktreeKey(request.worktreePath, platform)) ||
+    octantKeys.has(importedWorktreeKey(entry.path, platform))
+  ) {
     return refused("owned-by-octant");
   }
 

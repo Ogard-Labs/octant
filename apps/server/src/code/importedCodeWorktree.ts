@@ -1,4 +1,13 @@
-import type { CodeCheckoutIdentity } from "@octant/contracts";
+import {
+  CODE_THREAD_MOVED_TO_WORKTREE,
+  decodeCodeThreadMovedToWorktree,
+  decodeOctantImportRecorded,
+  OCTANT_IMPORT_AGGREGATE_ID,
+  OCTANT_IMPORT_AGGREGATE_TYPE,
+  OCTANT_IMPORT_RECORDED,
+  type CodeCheckoutIdentity,
+} from "@octant/contracts";
+import type { Journal } from "../persistence/journal";
 import { branchNameTaken, isValidBranchName } from "@octant/domain/code-worktree-naming";
 import { isImportedReceipt, type ManagedWorktreeReceipt } from "./managedWorktreeReceiptStore";
 import type {
@@ -26,7 +35,18 @@ export type ImportedCodeWorktreeReading =
       /** Names the new branch must not take; empty when they could not all be read. */
       takenBranchNames: ReadonlyArray<string>;
     }>
+  /** The thread works in a folder that is not a Git repository: no worktree can be made. */
+  | Readonly<{ status: "not-a-repository" }>
   | Readonly<{ status: "unavailable" }>;
+
+/**
+ * Which Code threads came from Octant and have not yet moved onto a worktree
+ * of this host's own. A thread on a checkout both apps reach (the Project's
+ * own folder) has no receipt to say so, so the import's own record does.
+ */
+export interface ImportedCodeThreadProvenance {
+  awaitsOwnWorktree(threadId: string): boolean;
+}
 
 export interface ImportedCodeWorktreePort {
   /**
@@ -35,10 +55,18 @@ export interface ImportedCodeWorktreePort {
    * own checks then decide, as for any thread of this host.
    */
   isImported(checkout: CodeCheckoutIdentity): Promise<boolean>;
+  /**
+   * What to continue from. A managed worktree is read only when its receipt
+   * says it came from Octant; a shared checkout (the Project's own folder, or
+   * a plain folder) is read as it stands, since only the caller knows from
+   * the import's record that its thread came from Octant. `fallbackBranch`
+   * names the new branch when that folder's HEAD is detached.
+   */
   read(
     checkout: CodeCheckoutIdentity,
     repositoryRoot: string,
     signal: AbortSignal,
+    fallbackBranch?: string,
   ): Promise<ImportedCodeWorktreeReading>;
 }
 
@@ -57,7 +85,10 @@ export function createImportedCodeWorktreePort(deps: {
         return false;
       }
     },
-    read: async (checkout, repositoryRoot, signal) => {
+    read: async (checkout, repositoryRoot, signal, fallbackBranch) => {
+      if (checkout.kind === "existing-worktree" || checkout.kind === "plain-folder") {
+        return readSharedCheckout(deps, checkout, repositoryRoot, signal, fallbackBranch);
+      }
       if (checkout.kind !== "managed-worktree") return { status: "own" };
       let receipt: ManagedWorktreeReceipt | undefined;
       try {
@@ -124,6 +155,50 @@ export function createImportedCodeWorktreePort(deps: {
   };
 }
 
+/**
+ * The folder a thread shares with Octant, read and never written: its
+ * commit and branch from Git's worktree list, and whether it holds changes
+ * with Git's optional locks off.
+ */
+async function readSharedCheckout(
+  deps: Parameters<typeof createImportedCodeWorktreePort>[0],
+  checkout: CodeCheckoutIdentity,
+  repositoryRoot: string,
+  signal: AbortSignal,
+  fallbackBranch: string | undefined,
+): Promise<ImportedCodeWorktreeReading> {
+  try {
+    const observation = await deps.repository.observe(repositoryRoot, signal);
+    if (observation.status === "unavailable" && observation.reason === "not-repository") {
+      return { status: "not-a-repository" };
+    }
+    if (
+      observation.status !== "available" ||
+      observation.repositoryRoot !== repositoryRoot ||
+      (checkout.kind === "existing-worktree" &&
+        observation.repositoryId !== String(checkout.repositoryId))
+    ) {
+      return checkout.kind === "plain-folder"
+        ? { status: "not-a-repository" }
+        : { status: "unavailable" };
+    }
+    const sourceBranch = branchOfRef(observation.checkout.branch) ?? fallbackBranch;
+    if (sourceBranch === undefined) return { status: "unavailable" };
+    const names = await deps.git.listBranchNames?.(repositoryRoot, signal);
+    const dirty = await deps.git.isDirty(repositoryRoot, signal);
+    return {
+      status: "imported",
+      sourceBranch,
+      head: observation.checkout.head,
+      octantFolder:
+        dirty.status !== "observed" ? "unread" : dirty.dirty ? "uncommitted-changes-left" : "clean",
+      takenBranchNames: names?.status === "observed" && !names.truncated ? names.names : [],
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
 function branchOfRef(ref: string | undefined): string | undefined {
   return ref?.startsWith("refs/heads/") === true ? ref.slice("refs/heads/".length) : undefined;
 }
@@ -148,7 +223,12 @@ export function continuationBranchName(
 }
 
 /** Why an imported thread's turn did not start; each is an expected answer. */
-export type ImportedThreadContinuationRefusal = "branch-missing" | "turn-running" | "unavailable";
+export type ImportedThreadContinuationRefusal =
+  | "branch-missing"
+  | "not-a-repository"
+  | "working-folder"
+  | "turn-running"
+  | "unavailable";
 
 /** What preparing an imported thread's first turn here did. */
 export type ImportedThreadContinuation =
@@ -163,9 +243,65 @@ export function importedThreadContinuationMessage(
   switch (reason) {
     case "branch-missing":
       return "This task came from Octant, and its worktree and branch there are both gone, so Octant Nightly has nothing to continue it from.";
+    case "not-a-repository":
+      return "This task came from Octant and works in a folder that is not a Git repository, so Octant Nightly cannot give it a worktree of its own. Continue it in Octant, or start a new task here.";
+    case "working-folder":
+      return "This task came from Octant and works in another of the Project's folders, so Octant Nightly cannot give it a worktree of its own. Continue it in Octant, or start a new task here.";
     case "turn-running":
       return "This task is already being given a worktree of its own. Send the message again in a moment.";
     case "unavailable":
       return "This task came from Octant, and Octant Nightly could not give it a worktree of its own. Check that its repository is available and send the message again.";
   }
+}
+
+/**
+ * Reads which Code threads came from Octant from the import's own records,
+ * and whether each has since left for a worktree of this host's own (its move
+ * record says `fromOctant`). Read on each turn start, so the answer follows
+ * the journal without a cache to keep current.
+ */
+export function createImportedCodeThreadProvenance(
+  journal: Pick<Journal, "replayAggregate" | "replayAggregateType">,
+): ImportedCodeThreadProvenance {
+  return {
+    awaitsOwnWorktree: (threadId) => {
+      let imported = false;
+      for (let afterVersion = 0; !imported;) {
+        const page = journal.replayAggregate({
+          aggregateType: OCTANT_IMPORT_AGGREGATE_TYPE,
+          aggregateId: OCTANT_IMPORT_AGGREGATE_ID,
+          afterVersion,
+          limit: 100,
+        });
+        for (const envelope of page) {
+          afterVersion = envelope.aggregateVersion;
+          if (envelope.eventName !== OCTANT_IMPORT_RECORDED) continue;
+          try {
+            if (decodeOctantImportRecorded(envelope.payload).codeThreadIds?.includes(threadId)) {
+              imported = true;
+            }
+          } catch {
+            // A record this host cannot read names no thread.
+          }
+        }
+        if (page.length < 100) break;
+      }
+      if (!imported) return false;
+      const moves = journal.replayAggregateType({
+        aggregateType: "code-thread",
+        eventName: CODE_THREAD_MOVED_TO_WORKTREE,
+        payloadPrefix: { path: "threadId", prefix: threadId },
+        afterSequence: 0,
+        limit: 8,
+      });
+      return !moves.some((envelope) => {
+        try {
+          const moved = decodeCodeThreadMovedToWorktree(envelope.payload);
+          return String(moved.threadId) === threadId && moved.fromOctant !== undefined;
+        } catch {
+          return false;
+        }
+      });
+    },
+  };
 }
