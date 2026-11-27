@@ -15,6 +15,7 @@ import {
   HardwareAddress,
   HubAutoApplyKind,
   HubDirectPushEnvironment,
+  HUB_GRANT_ITEMS,
   HubGrant,
   HubMemberId,
   HubOfferBody,
@@ -634,6 +635,41 @@ export const HubState = Schema.Struct({
 export type HubState = typeof HubState.Type;
 
 const decodeState = Schema.decodeUnknownSync(HubState);
+const KNOWN_HUB_GRANT_ITEMS: ReadonlySet<string> = new Set(HUB_GRANT_ITEMS);
+
+/**
+ * Drop a hub grant item this build does not know.
+ *
+ * A newer Octant build can add a grant item to `HUB_GRANT_ITEMS`. If the
+ * person later moves back to an older build, decoding the whole hub state
+ * strictly would drop the spoke's entire hub link, roster, and grant. Keeping
+ * non-string entries untouched ensures genuine corruption still fails decode.
+ */
+function withoutUnknownGrantItems(raw: unknown): unknown {
+  if (!isObject(raw)) return raw;
+  const link = raw.link;
+  if (!isObject(link)) return raw;
+  const grant = link.grant;
+  if (!isObject(grant) || !Array.isArray(grant.items)) return raw;
+  const filtered = grant.items.filter(
+    (item) => typeof item !== "string" || KNOWN_HUB_GRANT_ITEMS.has(item),
+  );
+  if (filtered.length === grant.items.length) return raw;
+  return {
+    ...raw,
+    link: {
+      ...link,
+      grant: {
+        ...grant,
+        items: filtered,
+      },
+    },
+  };
+}
+
+function decodeStoredHubState(raw: unknown): HubState {
+  return decodeState(withoutUnknownGrantItems(withoutFeedsMissingTheirApp(raw)));
+}
 
 /**
  * Drop a stored update feed whose release does not name its app.
@@ -698,7 +734,7 @@ export function createHubStateStore(
   const native = nativeAuthorityState(
     dataDirectory,
     nativeFile,
-    (value) => decodeState(withoutFeedsMissingTheirApp(value)),
+    decodeStoredHubState,
     Schema.encodeSync(HubState),
     () => ({}),
   );
@@ -708,7 +744,7 @@ export function createHubStateStore(
   return {
     load: () => {
       try {
-        return decodeState(withoutFeedsMissingTheirApp(JSON.parse(readFileSync(path, "utf8"))));
+        return decodeStoredHubState(JSON.parse(readFileSync(path, "utf8")));
       } catch {
         return {};
       }
