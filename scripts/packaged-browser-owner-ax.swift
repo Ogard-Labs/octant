@@ -4,6 +4,81 @@ import Foundation
 import Darwin
 import Security
 
+enum PostGoPollStep: Equatable {
+    case completed
+    case pending
+    case transientInvalidElement
+    case failed
+}
+
+struct PostGoPollOutcome: Equatable {
+    let completed: Bool
+    let attempts: Int
+    let transientInvalidElementCount: Int
+    let stoppedOnNonTransientError: Bool
+}
+
+// Fail closed unless every native AX error recorded during a single post-Return
+// read step is kAXErrorInvalidUIElement (-25202) and none were dropped by the cap.
+func postGoOnlyInvalidElementErrors(
+    errorsAdded: Int,
+    recordedStatuses: [Int32],
+    logCapacityReached: Bool
+) -> Bool {
+    guard errorsAdded > 0, !logCapacityReached, recordedStatuses.count >= errorsAdded else {
+        return false
+    }
+    return recordedStatuses.allSatisfy { $0 == AXError.invalidUIElement.rawValue }
+}
+
+// After Return dismisses the nested Go-to-Folder sheet, macOS can tear down
+// the focused field or sheet mid-read and return kAXErrorInvalidUIElement
+// (-25202). Only this read-only poll tolerates transient -25202 reads within
+// its existing deadline and identity checks; Return is never resent.
+func pollPostGoObservation(
+    hasTimeRemaining: () -> Bool,
+    identitiesValid: () -> Bool,
+    readStep: () -> PostGoPollStep,
+    pause: () -> Void
+) -> PostGoPollOutcome {
+    var attempts = 0
+    var transientInvalidElementCount = 0
+    while hasTimeRemaining(), identitiesValid() {
+        attempts += 1
+        switch readStep() {
+        case .completed:
+            return PostGoPollOutcome(
+                completed: true,
+                attempts: attempts,
+                transientInvalidElementCount: transientInvalidElementCount,
+                stoppedOnNonTransientError: false
+            )
+        case .pending:
+            if hasTimeRemaining(), identitiesValid() {
+                pause()
+            }
+        case .transientInvalidElement:
+            transientInvalidElementCount += 1
+            if hasTimeRemaining(), identitiesValid() {
+                pause()
+            }
+        case .failed:
+            return PostGoPollOutcome(
+                completed: false,
+                attempts: attempts,
+                transientInvalidElementCount: transientInvalidElementCount,
+                stoppedOnNonTransientError: true
+            )
+        }
+    }
+    return PostGoPollOutcome(
+        completed: false,
+        attempts: attempts,
+        transientInvalidElementCount: transientInvalidElementCount,
+        stoppedOnNonTransientError: false
+    )
+}
+
 // Owned-runner native UI QA. Never requests a TCC permission or reads text-field
 // values or credentials. Dock reads retain only the exact staged bundle icon.
 guard (3...6).contains(CommandLine.arguments.count),
@@ -964,14 +1039,23 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                     roleOnly(focus.ancestors[1], kAXRoleAttribute as CFString) == "AXSheet" && errors == priorErrors
                             }
                             func onlyOriginalSheet(_ focus: (node: AXUIElement, role: String, subrole: String, ancestors: [AXUIElement])) -> Bool {
+                                let errorsAtEntry = errors
                                 guard focus.role != "AXTextField", focus.ancestors.last.map({ CFEqual($0, sheet) }) == true else { return false }
                                 var sheets = 0
                                 for ancestor in focus.ancestors {
+                                    guard Date() < deadline else { return false }
                                     var pid: pid_t = 0
-                                    guard Date() < deadline, AXUIElementGetPid(ancestor, &pid) == .success, pid == processId else { return false }
+                                    let pidStatus = AXUIElementGetPid(ancestor, &pid)
+                                    guard pidStatus == .success, pid == processId else {
+                                        if pidStatus != .success {
+                                            errors += 1
+                                            recordPickerError("original-sheet-ancestor-pid", pidStatus)
+                                        }
+                                        return false
+                                    }
                                     if roleOnly(ancestor, kAXRoleAttribute as CFString) == "AXSheet" { sheets += 1 }
                                 }
-                                return sheets == 1 && errors == priorErrors
+                                return sheets == 1 && errors == errorsAtEntry
                             }
                             func fieldReady(_ field: AXUIElement) -> Bool {
                                 guard ownedFixturePath() == fixturePath, associationUnchanged(),
@@ -1065,16 +1149,42 @@ if mode == "picker-metadata" || mode == "picker-location-prompt" || (fixesOwnedF
                                     down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                                     fixedFolder["goDispatched"] = true
                                     fixedFolder["status"] = "go-dispatched-shape-unconfirmed"
-                                    while Date() < deadline, errors == priorErrors, identitiesUnchanged() {
-                                        if let after = focusInSheet() {
-                                            fixedFolder["postGoFocusRole"] = after.role
-                                            fixedFolder["postGoFocusSubrole"] = after.subrole
-                                            if onlyOriginalSheet(after), associationUnchanged(), ownedFixturePath() == fixturePath {
-                                                fixedFolder["postGoOriginalChooserObserved"] = true
-                                                fixedFolder["status"] = "completed"; break
+                                    let pollOutcome = pollPostGoObservation(
+                                        hasTimeRemaining: { Date() < deadline },
+                                        identitiesValid: { identitiesUnchanged() && ownedFixturePath() == fixturePath },
+                                        readStep: {
+                                            let stepErrorsBefore = errors
+                                            let stepNativeErrorsBefore = pickerNativeErrors.count
+                                            if let after = focusInSheet() {
+                                                fixedFolder["postGoFocusRole"] = after.role
+                                                fixedFolder["postGoFocusSubrole"] = after.subrole
+                                                if onlyOriginalSheet(after), associationUnchanged(), ownedFixturePath() == fixturePath,
+                                                   errors == stepErrorsBefore {
+                                                    fixedFolder["postGoOriginalChooserObserved"] = true
+                                                    return .completed
+                                                }
                                             }
+                                            let errorsAdded = errors - stepErrorsBefore
+                                            if errorsAdded == 0 {
+                                                return .pending
+                                            }
+                                            let recordedStatuses = pickerNativeErrors[stepNativeErrorsBefore...].compactMap {
+                                                $0["status"] as? Int32
+                                            }
+                                            return postGoOnlyInvalidElementErrors(
+                                                errorsAdded: errorsAdded,
+                                                recordedStatuses: recordedStatuses,
+                                                logCapacityReached: pickerNativeErrors.count >= 512
+                                            ) ? .transientInvalidElement : .failed
+                                        },
+                                        pause: {
+                                            Thread.sleep(forTimeInterval: min(0.05, max(0, deadline.timeIntervalSinceNow)))
                                         }
-                                        Thread.sleep(forTimeInterval: 0.05)
+                                    )
+                                    fixedFolder["postGoPollAttempts"] = pollOutcome.attempts
+                                    fixedFolder["postGoTransientInvalidElementErrors"] = pollOutcome.transientInvalidElementCount
+                                    if pollOutcome.completed {
+                                        fixedFolder["status"] = "completed"
                                     }
                                 }
                             }
