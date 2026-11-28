@@ -96,3 +96,14 @@ export function buildMobileThreadDeepLink(target: MobileDeepLinkTarget): string 
   }
   return `octant://hosts/${target.hostId}/threads/${target.mode}/${target.threadId}`;
 }
+
+export const MOBILE_SHARE_DEEP_LINK = "octant://share";
+
+/**
+ * Parse the Android share handoff link. Only bare `octant://share` with no
+ * path, query, or fragment is accepted, so no outside link can name a file
+ * or inject parameters into the staging reader.
+ */
+export function parseMobileShareDeepLink(url: string): boolean {
+  return url === MOBILE_SHARE_DEEP_LINK;
+}

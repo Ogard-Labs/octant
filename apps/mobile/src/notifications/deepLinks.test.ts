@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildMobileMovesDeepLink,
   buildMobileThreadDeepLink,
+  MOBILE_SHARE_DEEP_LINK,
   parseMobileMovesDeepLink,
   parseMobileNewDevicesDeepLink,
+  parseMobileShareDeepLink,
   parseMobileThreadDeepLink,
 } from "./deepLinks";
 
@@ -46,5 +48,13 @@ describe("mobile deep links", () => {
       parseMobileNewDevicesDeepLink(`octant://hosts/${hostId}/new-devices/extra`),
     ).toBeUndefined();
     expect(parseMobileNewDevicesDeepLink(`https://hosts/${hostId}/new-devices`)).toBeUndefined();
+  });
+
+  it("accepts only bare octant://share for Android share handoff and rejects any parameter", () => {
+    expect(parseMobileShareDeepLink(MOBILE_SHARE_DEEP_LINK)).toBe(true);
+    expect(parseMobileShareDeepLink("octant://share?path=/tmp/x")).toBe(false);
+    expect(parseMobileShareDeepLink("octant://share/extra")).toBe(false);
+    expect(parseMobileShareDeepLink("octant://share#frag")).toBe(false);
+    expect(parseMobileThreadDeepLink(MOBILE_SHARE_DEEP_LINK)).toBeUndefined();
   });
 });

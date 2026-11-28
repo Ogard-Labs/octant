@@ -7,6 +7,7 @@ export interface PendingAttachment {
 
 export type PendingAttachmentEvent =
   | { readonly type: "uploaded"; readonly attachment: PendingAttachment }
+  | { readonly type: "staged"; readonly attachments: ReadonlyArray<PendingAttachment> }
   | { readonly type: "sent" }
   | { readonly type: "thread-changed" };
 
@@ -20,6 +21,12 @@ export function pendingAttachmentsReducer(
   event: PendingAttachmentEvent,
 ): ReadonlyArray<PendingAttachment> {
   if (event.type === "uploaded") return [...current, event.attachment];
+  if (event.type === "staged") {
+    if (event.attachments.length === 0) return current;
+    const seen = new Set(current.map((item) => item.id));
+    const added = event.attachments.filter((item) => !seen.has(item.id));
+    return added.length === 0 ? current : [...current, ...added];
+  }
   return current.length === 0 ? current : [];
 }
 

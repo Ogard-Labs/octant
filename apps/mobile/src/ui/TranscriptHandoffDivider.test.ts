@@ -111,6 +111,7 @@ function renderChatTranscript(
     reconnecting: false,
     refresh: vi.fn(async () => {}),
     attach: vi.fn(async () => {}),
+    receiveStagedAttachments: vi.fn(),
     attachmentsSent: () => undefined,
     send: vi.fn(async () => undefined),
     stop: vi.fn(async () => {}),

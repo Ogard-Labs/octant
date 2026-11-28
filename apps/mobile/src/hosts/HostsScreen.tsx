@@ -15,6 +15,8 @@ import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthe
 import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { createMobileHostRemover } from "../session/mobileSessionLifecycle";
+import { mobileShareStagingFs } from "../share/mobileShareStaging";
+import { clearAllStagedShares } from "../share/shareStagingStore";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { ListRow, ListSection } from "../ui/NativeChrome";
 import { AccessActivityPanel } from "./AccessActivityPanel";
@@ -78,7 +80,14 @@ export function HostsScreen(props: {
   const [removeFailed, setRemoveFailed] = useState(false);
   const [notificationKeyKept, setNotificationKeyKept] = useState(false);
   const removeMobileHostInTurn = useMemo(
-    () => createMobileHostRemover({ registry, hub, deviceKeyStore, relayChoices }),
+    () =>
+      createMobileHostRemover({
+        registry,
+        hub,
+        deviceKeyStore,
+        relayChoices,
+        onLastHostRemoved: () => clearAllStagedShares(mobileShareStagingFs),
+      }),
     [deviceKeyStore, hub, registry, relayChoices],
   );
   const notificationPermission = mobileNotificationPort;

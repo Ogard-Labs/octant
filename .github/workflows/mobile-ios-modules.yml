@@ -76,7 +76,7 @@ jobs:
       - name: Build the module targets for the Simulator
         working-directory: apps/mobile/ios
         run: |
-          for scheme in OctantDeviceProtection OctantPinnedTls OctantPush OctantVideoSave; do
+          for scheme in OctantDeviceProtection OctantPinnedTls OctantPush OctantShare OctantVideoSave; do
             xcodebuild build \
               -workspace Octant.xcworkspace \
               -scheme "$scheme" \
@@ -85,14 +85,23 @@ jobs:
               -configuration Debug \
               CODE_SIGNING_ALLOWED=NO
           done
-      # The notification service extension is a target of the app project, added
-      # by the app's config plugin, so it is built from that project.
+      # The notification service and share extensions are targets of the app
+      # project, added by its config plugins, so they are built from it.
       - name: Build the notification service extension for the Simulator
         working-directory: apps/mobile/ios
         run: |
           xcodebuild build \
             -project Octant.xcodeproj \
             -target OctantNotificationService \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Build the share extension for the Simulator
+        working-directory: apps/mobile/ios
+        run: |
+          xcodebuild build \
+            -project Octant.xcodeproj \
+            -target OctantShareExtension \
             -sdk iphonesimulator \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO

@@ -5,6 +5,7 @@ import type { MobileComputersDeepLinkTarget } from "../notifications/deepLinks";
 import {
   captureMobileDeepLink,
   consumeMobileDeepLink,
+  consumeMobileShareSignal,
   type MobileDeepLinkCaptureState,
 } from "./mobileDeepLinkCaptureState";
 
@@ -13,6 +14,8 @@ export function MobileDeepLinkCapture(props: {
     pendingDeepLinkRow: MobileInboxRow | undefined,
     onDeepLinkConsumed: () => void,
     pendingComputersLink: MobileComputersDeepLinkTarget | undefined,
+    pendingShareSignal: number | undefined,
+    onShareSignalConsumed: () => void,
   ) => ReactNode;
 }) {
   const [state, setState] = useState<MobileDeepLinkCaptureState>({});
@@ -27,9 +30,14 @@ export function MobileDeepLinkCapture(props: {
     return () => subscription.remove();
   }, [openUrl]);
 
+  const onDeepLinkConsumed = useCallback(() => setState(consumeMobileDeepLink), []);
+  const onShareSignalConsumed = useCallback(() => setState(consumeMobileShareSignal), []);
+
   return props.children(
     state.pendingDeepLinkRow,
-    () => setState(consumeMobileDeepLink),
+    onDeepLinkConsumed,
     state.pendingComputersLink,
+    state.pendingShareSignal,
+    onShareSignalConsumed,
   );
 }

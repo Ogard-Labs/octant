@@ -60,6 +60,13 @@ vi.mock("../../design-system/ScreenCanvas", () => ({
 }));
 vi.mock("../inbox/MobileThreadsContext", () => ({
   MobileThreadsProvider: (props: { readonly children: unknown }) => props.children,
+  useMobileThreads: () => ({
+    rows: [],
+    projectName: () => undefined,
+    lastStanding: () => undefined,
+    noteStanding: () => undefined,
+    refresh: async () => undefined,
+  }),
 }));
 vi.mock("../inbox/NewThreadContext", () => ({
   NewThreadProvider: (props: { readonly children: unknown }) => props.children,

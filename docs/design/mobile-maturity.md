@@ -153,7 +153,8 @@ These rules hold for every phase and are not reopened by any slice:
 | Push policy | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency |
 | Push on the host | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to the gateway transport (`gatewayPushDeliveryTransport.ts`), which sends only while Settings › General › Phone notifications is on (`pushGatewaySetting.ts`, owner-only `remote/push-gateway-setting.json`, off by default), as [Gateway rules](#gateway-rules) describes |
 | Push on the phone | `enablePhoneNotifications.ts` trades the platform token for a gateway capability bound to the paired computer's key fingerprint at the gateway compiled into the build (`MOBILE_PUSH_GATEWAY_URL`) and registers only the capability with the computer, as [Phone rules](#phone-rules) describes; removing a computer or revoking this phone from it calls the port's `forgetHost`. The in-tree `octant-push` module (`apps/mobile/modules/octant-push`) is the native port (`mobileNotificationPort.native.ts`): the system's permission, the Apple or Firebase token, one X25519 notification key per computer, and the iPhone's notification service extension and the Android messaging service that open sealed content. `rotatePhoneNotifications` re-registers a changed token, and `PushNotificationsPanel.tsx` offers enablement only where the port reports `available`, as [Phone rules](#phone-rules) describes; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}` a held move's `octant://hosts/{hostId}/moves`, and a new device's `octant://hosts/{hostId}/new-devices` |
-| Capture | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
+| Capture | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. Every mode accepts a file of any type from a paired device within the 10 MiB bound (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired image upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
+| Share into Octant | Text, links, images, and files shared from other apps on iOS (`OctantShare` share extension in `apps/mobile/modules/octant-share/share-extension/`, App Group `group.app.octant.mobile.share` only, no Keychain group, saves and says `"Saved. Open Octant to send."`) and Android (`ShareReceiverActivity` with `SEND` / `SEND_MULTIPLE` intent filters and no extra permission, opening bare `octant://share`) are staged locally and validated by strict `ShareManifestV1`, UUID folder, non-symlink regular-file checks, matching sizes, and byte-level MIME recheck (`apps/mobile/src/share/`). `SendToSheet.tsx` opens behind `AppVaultGate` over `MobileSessionContext`, lists paired computers (disabling stale, unreachable, and restricted ones with the reason), offers New chat (creating the thread only on Send), open threads, and the `ShareDestination` union (`new-chat \| thread \| bot`), populates the composer without auto-sending or marking text typed, uploads via `useThreadAttachments.ts` and the existing mode attachment routes, and cleans up after sending, on Discard, after one day, and when the last computer is removed. Physical-device share passes on iPhone and Android are maintainer gates |
 | Voice | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use |
 | Reply detail | The phone draws a thread at its own Reply detail level, else the host's default ([DESIGN.md: Transcript](thread-view.md#transcript)): `useThreadReplyDetail.ts` reads `GET /api/reply-detail` (`replyDetailRoutes.ts`, `settings.read-non-secret`, read-only) when a thread opens and when the app returns to the foreground, and draws Low until it answers. The reasoning panel opens at High and shows its first line at Medium; a settled run of tool calls folds behind "N tool calls" at Low, and a finished call's detail opens at High (`apps/mobile/src/ui/replyDetailPresentation.ts`, `ToolActivity.tsx`). The phone cannot change a level. |
 | Fork and rewind | Every message of a Chat, Work, or Code thread the phone opens offers Fork from here and Rewind to here (`apps/mobile/src/inbox/thread/useThreadTurnActions.ts`, `packages/client-runtime/src/mobileThreadRewind.ts`), through the host's own commands, as [Fork and rewind](#fork-and-rewind) describes. The phone shows the host's preview and asks once, returns the removed message to its composer, and offers nothing while a turn runs or the host is stale. A Code rewind offers files only under Full access; otherwise it rewinds the conversation only and says why. |
@@ -799,11 +800,13 @@ that reaches it.
 
 - The listener admits each mode's attachment upload route for a paired device:
   `POST /api/chat/attachments`, and `PUT /api/work/attachments` and
-  `PUT /api/code/attachments`, each only for the media types that mode takes
-  (Chat: text, PNG, JPEG, WebP, GIF, PDF; Work and Code: the four image
-  types) and with that mode's identity headers. Staging a Work image is the
-  Work turn action and a Code image the Code turn action; the route still
-  checks the thread's own authority. No other product route takes an image.
+  `PUT /api/code/attachments`. Since 2026-11-16 every mode takes a file of any
+  type from a paired device (`acceptsAnyAttachmentType` in
+  `remoteRoutePolicy.ts`), with that mode's identity headers, while any `image/*`
+  upload must still be one of the four formats the host cleans (JPEG, PNG,
+  WebP, GIF). Staging a Work attachment is the Work turn action and a Code
+  attachment the Code turn action; the route still checks the thread's own
+  authority. No other product route takes an image.
 - A paired upload is at most 10 MiB in every mode, the Work and Code bound,
   even though Chat at the host takes 25 MiB: the listener holds the whole body
   to check the device's proof before forwarding it, so the bound is what a
@@ -837,6 +840,58 @@ that reaches it.
   Attachments upload as soon as they are picked, under the thread's authority,
   and the turn carries only their ids. The copy the camera or picker left in
   the app's cache is deleted when the upload ends, either way.
+
+### Share into Octant from other apps
+
+Approved 2026-11-28: a person can share text, links, images, and files from
+other apps on iOS and Android into Octant, then choose a paired computer and a
+destination inside the unlocked app. All processing stays on the host through
+its existing routes; no new host route, route class, event, or stored secret is
+added.
+
+- **Targets and isolation.** `apps/mobile/plugins/withOctantShare.ts` adds the
+  `OctantShare` iOS share extension target and its dedicated App Group
+  (`group.app.octant.mobile.share`, separate from any widget group) and
+  registers it in EAS `appExtensions`, plus Android's `ShareReceiverActivity`
+  with `SEND` and `SEND_MULTIPLE` intent filters and no extra permission. The
+  iOS extension carries only the App Group entitlement — never a Keychain
+  access group, device key, session, host list, or network code — and saves
+  staged files before showing `"Saved. Open Octant to send."` (never walking
+  the responder chain to open the app).
+- **Staging and bounds.** iOS stages under the App Group's
+  `Library/Caches/share/<uuid>/` with `completeUntilFirstUserAuthentication`
+  file protection and backup exclusion, writing `manifest.json` last by rename.
+  Android copies `content://` streams to `cacheDir/share/<uuid>/` (backup is
+  off) and opens bare `octant://share`. Bounds: at most 16 items per share,
+  10 MiB per item, 40 MiB total, and 5 queued shares (a sixth is refused).
+- **Validation and cleanup.** `parseMobileShareDeepLink` accepts only bare
+  `octant://share` with no parameters, path, or fragment. On launch, foreground
+  return, and `octant://share`, the app requires a UUID folder, strict
+  phone-only `ShareManifestV1` (no unknown fields), regular files (no symlinks),
+  matching sizes, and a byte-level MIME recheck; anything structurally invalid
+  is deleted and named. Staged items are deleted after sending, on Discard,
+  when older than one day (at launch or next share), and when the last paired
+  computer is removed.
+- **Send to… sheet and mapping.** Opens after `AppVaultGate` over
+  `MobileSessionContext`. Lists all paired computers (disabling stale,
+  unreachable, and restricted ones with the reason), offers New chat, open
+  threads the session may send to, and the `ShareDestination` union
+  (`new-chat | thread | bot`, ready for bots to supply rows), and searches
+  across loaded titles. Text up to 20,000 characters goes into the composer and
+  longer text becomes a `.txt` attachment; http and https links become text and
+  are never fetched; JPEG, PNG, WebP, and GIF become image attachments; HEIC is
+  converted to JPEG while staging or else refused; other images are refused
+  because the host cannot clean their metadata; any other file becomes a file
+  attachment. Turn limits stand (Chat 16, Work and Code 8).
+- **Explicit send and provenance.** Choosing a destination populates the
+  composer; nothing is sent automatically, shared text is never marked typed by
+  the person unless edited by them, and shared items never wait in the offline
+  outbox on their own. New chat names the chosen computer on Send and creates
+  its thread only on Send (`createMobileChatThread`, upload via
+  `uploadMobileChatAttachment`, then `sendMobileChatTurn`), so discarding
+  leaves no empty thread. Existing threads upload via `useThreadAttachments.ts`
+  and the mode's existing attachment route. Older hosts that refuse a file type
+  with 403 or 415 keep the items for Retry or Discard.
 
 ### Voice
 
@@ -976,6 +1031,10 @@ its T2, T7, and T9 residuals are closed by Phase C.
 | P10 | Android build weaker than iOS (screenshots, key storage) | Parity adapters are acceptance criteria; missing ones named unavailable, never passed |
 | P11 | Release credential exposed through CI | Manual dispatch from `main`, protected environment, Expo token only; signing material stays in EAS |
 | P12 | Store build or demo exposes host data or bypasses pairing | Demo has no network and no pairing; store build is the same client with the same authority |
+| T12 | Another app plants items into share staging | Only a share or this app's dedicated App Group writes there; strict `ShareManifestV1`, symlinks refused, bytes rechecked, bounds enforced, and a person's explicit Send |
+| T13 | Staged shared files read later on disk | App sandbox, `completeUntilFirstUserAuthentication` file protection, `Caches` with backup exclusion, and deletion on Send, Discard, after one day, or when the last computer is removed |
+| T14 | Share extension reaches a paired computer | No Keychain group, device key, session, host list, or network code in the extension; verified by automated source and entitlement scans |
+| T15 | Shared text steers an agent or claims personal typing | Populated as an unsent draft the person reviews before tapping Send; never marked typed by the person unless edited by them, and never auto-outboxed |
 
 Residual: a compromised host can still send whatever notifications its policy
 allows; the gateway operator can observe delivery timing, host and phone IP
@@ -983,6 +1042,9 @@ addresses, and platform tokens. Anyone holding a phone's platform token can mint
 their own capability for it and send that phone placeholder notifications, at most
 twelve a minute however many capabilities they mint, and that flood shares
 the phone's limit with its real notifications ([M7](#maintainer-decisions)).
+When sharing from another app, a person can still pick the wrong paired
+computer; the Send control names the chosen computer. The host continues to
+strip image metadata from every paired upload.
 
 ## Settled by existing specifications
 

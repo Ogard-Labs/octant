@@ -311,6 +311,7 @@ export function useChatThread(
     reconnecting,
     refresh,
     attach: attachments.attach,
+    receiveStagedAttachments: attachments.receiveStaged,
     attachmentsSent: attachments.sent,
     send,
     stop,

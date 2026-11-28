@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { buildMobileMovesDeepLink, buildMobileThreadDeepLink } from "../notifications/deepLinks";
 import { DEEP_LINK_HOST_NOT_PAIRED, computersLinkOpening } from "./deepLinkNavigation";
-import { captureMobileDeepLink, consumeMobileDeepLink } from "./mobileDeepLinkCaptureState";
+import {
+  captureMobileDeepLink,
+  consumeMobileDeepLink,
+  consumeMobileShareSignal,
+} from "./mobileDeepLinkCaptureState";
 
 describe("mobile deep-link capture", () => {
   it("retains a warm link until the unlocked navigator consumes it", () => {
@@ -59,5 +63,12 @@ describe("mobile deep-link capture", () => {
     const hostId = "11111111-1111-4111-8111-111111111111";
     const captured = captureMobileDeepLink({}, `octant://hosts/${hostId}/new-devices`);
     expect(captured).toEqual({ pendingComputersLink: { hostId } });
+  });
+
+  it("captures bare octant://share without dropping an unrelated link and ignores parameterized share links", () => {
+    const captured = captureMobileDeepLink({}, "octant://share");
+    expect(captured).toEqual({ pendingShareSignal: 1 });
+    expect(captureMobileDeepLink(captured, "octant://share?file=/etc/passwd")).toBe(captured);
+    expect(consumeMobileShareSignal(captured)).toEqual({});
   });
 });

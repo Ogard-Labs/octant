@@ -67,13 +67,13 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Provider runtimes](#provider-runtimes)                                               | 7         | 5       | 1            | 1                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 4         | 2       | 2            | 0                   |
-| [Device workbench and mobile](#device-workbench-and-mobile)                           | 8         | 4       | 4            | 0                   |
+| [Device workbench and mobile](#device-workbench-and-mobile)                           | 9         | 5       | 4            | 0                   |
 | [Hubs and Nightly](#hubs-and-nightly)                                                 | 9         | 2       | 7            | 0                   |
 | [Code tooling](#code-tooling)                                                         | 2         | 0       | 2            | 0                   |
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **324**   | **216** | **104**      | **4**               |
+| **All areas**                                                                         | **325**   | **217** | **104**      | **4**               |
 
 ## Principles and hard lines
 
@@ -3871,6 +3871,17 @@ The phone can attach a camera photo, library image or file, and dictate a prompt
 - Owed checks: physical-device passes.
 
 Status: Built. Since: 2026-10-26. Detail: [Mobile maturity: capture](mobile-maturity.md#capture) and [voice](mobile-maturity.md#voice).
+
+### Sharing into Octant from other apps
+
+From the system share sheet on iOS and Android, a person can send text, links, images, or files into Octant, then pick a paired computer and New chat, a thread, or a bot inside the unlocked app (maintainer decisions, 2026-11-24, 2026-11-25, and 2026-11-28).
+
+- The iOS share extension (`OctantShare`) carries only a dedicated App Group (`group.app.octant.mobile.share`) — no Keychain group, device key, session, host list, or network code — and saves with `"Saved. Open Octant to send."`. Android receives `SEND` and `SEND_MULTIPLE` with no extra permission and opens bare `octant://share` with no parameters.
+- Staged items are strictly validated (UUID folder, `ShareManifestV1`, regular files with no symlinks, matching sizes, byte-level MIME recheck, 10 MiB per item, 40 MiB total, 16 items, 5 shares) and deleted after sending, on Discard, after one day, and when the last paired computer is removed.
+- "Send to…" opens behind the app's vault gate over the live session, disables stale, unreachable, and restricted computers with the reason, never auto-sends or auto-outboxes, never marks shared text typed, and creates a New chat thread only on Send through the existing attachment and Chat routes.
+- Owed checks: physical-device passes sharing from Photos, Safari, and Files on iPhone and from Gallery and Chrome on Android.
+
+Status: Built. Since: 2026-11-28. Detail: [Mobile maturity: share into Octant from other apps](mobile-maturity.md#share-into-octant-from-other-apps).
 
 ### Android builds and public stores
 
