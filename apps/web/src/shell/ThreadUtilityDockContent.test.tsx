@@ -118,10 +118,10 @@ describe("thread utility dock content", () => {
     );
     expect(await screen.findByRole("status")).toHaveTextContent(/Loading Agents/i);
     expect(
-      await screen.findByRole("heading", { name: "Subagents" }, { timeout: 10_000 }),
+      await screen.findByRole("heading", { name: "Agents" }, { timeout: 10_000 }),
     ).toBeVisible();
     expect(
-      await screen.findByText(/They appear here when the agent hands off/, undefined, {
+      await screen.findByText(/They appear here when the thread hands off/, undefined, {
         timeout: 10_000,
       }),
     ).toBeVisible();
@@ -169,9 +169,7 @@ describe("thread utility dock content", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("region", { name: "Subagent" }, { timeout: 10_000 }),
-    ).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Agent" }, { timeout: 10_000 })).toBeVisible();
   });
 
   it("opens Agents on a zero-child thread and shows the Off refusal without a create form", async () => {
@@ -205,7 +203,7 @@ describe("thread utility dock content", () => {
       />,
     );
     expect(
-      await screen.findAllByText("Subagents are turned off", {}, { timeout: 10_000 }),
+      await screen.findAllByText("Agents are turned off", {}, { timeout: 10_000 }),
     ).not.toHaveLength(0);
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();

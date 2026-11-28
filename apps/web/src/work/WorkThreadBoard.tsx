@@ -142,7 +142,7 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
       },
       (error: unknown) => {
         if (!active) return;
-        const message = error instanceof Error ? error.message : "The task board is unavailable.";
+        const message = error instanceof Error ? error.message : "The thread board is unavailable.";
         setBoard((previous) => {
           const view = lastUsefulView(previous);
           return view === undefined
@@ -391,10 +391,10 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
         board={board}
         cardsOf={(view) => view.cards}
         copy={{
-          eyebrow: "Tasks",
-          emptyTitle: "No tasks yet",
-          emptyFilteredTitle: "No tasks match these filters",
-          emptyDetail: "Create a task to see it here.",
+          eyebrow: "Threads",
+          emptyTitle: "No threads yet",
+          emptyFilteredTitle: "No threads match these filters",
+          emptyDetail: "Create a thread to see it here.",
         }}
         groupCards={(cards) =>
           waitingColumnOldestFirst(

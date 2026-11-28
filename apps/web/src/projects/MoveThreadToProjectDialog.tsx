@@ -70,11 +70,11 @@ export interface MoveThreadToProjectDialogProps {
 const CODE_SAME_FOLDER =
   "A Code thread can only move to a Project bound to the same repository folder.";
 const WORKING_FOLDER_BOUND =
-  "This task's working folder is bound to its current Project. Start a new task in the destination Project.";
+  "This thread's working folder is bound to its current Project. Start a new thread in the destination Project.";
 const CHECKOUT_UNAVAILABLE = "Code thread checkout is unavailable.";
 
 const KIND: Record<MovableThreadMode, { readonly noun: string; readonly project: string }> = {
-  work: { noun: "task", project: "Work Project" },
+  work: { noun: "thread", project: "Work Project" },
   code: { noun: "thread", project: "Code Project" },
 };
 
@@ -199,7 +199,7 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
       </div>
       <p id={descriptionId}>
         &ldquo;{props.threadTitle}&rdquo; keeps its history and its access level, and stays a{" "}
-        {props.mode === "work" ? "Work task" : "Code thread"}.{" "}
+        {props.mode === "work" ? "Work thread" : "Code thread"}.{" "}
         {props.mode === "work"
           ? "It can move to another Work Project whose folder is the same as, or contains, its folder."
           : "It can move to another Code Project with the same repository folder."}

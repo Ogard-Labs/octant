@@ -299,7 +299,7 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
                           // Named from what the card recorded at pinning,
                           // never from the window's current Work task, which
                           // may use another provider by now.
-                          providerProgramName: element.programName ?? "The task's provider",
+                          providerProgramName: element.programName ?? "The thread's provider",
                         }
                       : {})}
                     {...(props.workProviderTerminal === undefined ||

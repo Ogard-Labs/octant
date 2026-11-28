@@ -5,10 +5,13 @@ import {
   type DesktopPaneRequest,
 } from "@octant/contracts/desktop-lease";
 import { useEffect, useState } from "react";
+import { CUA_SPACES_URL, isCuaDaemonMissing } from "../desktop/desktopPaneModel";
+import type { ExternalUrlHost } from "../shell/openExternalUrl";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { SettingRow, SettingsSection } from "./primitives";
+import { SettingsSetupLink } from "./SettingsSetupLink";
 
 type Loaded =
   | { readonly status: "loading" }
@@ -35,10 +38,12 @@ const COUNT_OPTIONS = Array.from({ length: DESKTOP_LEASE_COUNT_MAXIMUM }, (_, in
  */
 export function DesktopLeaseSettings(props: {
   readonly client: Pick<DesktopPaneClient, "request">;
+  readonly externalUrlHost?: ExternalUrlHost | undefined;
   readonly focusedSetting?: string | undefined;
 }) {
   const { client } = props;
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
+  const [cuaNeedsDaemon, setCuaNeedsDaemon] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
 
@@ -60,6 +65,17 @@ export function DesktopLeaseSettings(props: {
       },
       () => {
         if (!controller.signal.aborted) setLoaded({ status: "failed" });
+      },
+    );
+    client.request({ kind: "recipe-providers" }, controller.signal).then(
+      (answer) => {
+        if (controller.signal.aborted) return;
+        setCuaNeedsDaemon(
+          answer.status === "recipe-providers" && answer.providers.some(isCuaDaemonMissing),
+        );
+      },
+      () => {
+        if (!controller.signal.aborted) setCuaNeedsDaemon(false);
       },
     );
     return () => controller.abort();
@@ -143,6 +159,19 @@ export function DesktopLeaseSettings(props: {
             value={String(settings?.hostLocalLeasesPerHost ?? 2)}
           />
         </SettingRow>
+        {cuaNeedsDaemon ? (
+          <SettingRow
+            settingId="desktop-cua-spaces"
+            label="Cua Spaces"
+            description="Cua Spaces isn't running on this computer; start it and sign in to lease Spaces here."
+            scope="host"
+            focused={props.focusedSetting === "desktop-cua-spaces"}
+          >
+            <SettingsSetupLink host={props.externalUrlHost} href={CUA_SPACES_URL}>
+              Get Cua Spaces
+            </SettingsSetupLink>
+          </SettingRow>
+        ) : null}
       </div>
       {status === undefined ? null : (
         <p className="provider-settings__field-guidance" role="status">

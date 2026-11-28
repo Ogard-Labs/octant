@@ -1538,6 +1538,12 @@ function seedCanvasFamily(harness: Harness, thread: SeededThread): void {
     versionId: uuidFor(thread.mode, "version"),
     writerId: thread.marker,
   });
+  insertEvent(harness.connection, "canvas-version-images", canvasId, {
+    canvasId,
+    versionId: uuidFor(thread.mode, "version"),
+    images: [{ blockId: "design", assetId: "shot", status: "unavailable" }],
+    marker: thread.marker,
+  });
   // A person's "Allow network" choice for the Canvas names it and nothing else.
   insertEvent(harness.connection, "canvas-network-access", canvasId, { canvasId, allowed: true });
   const shareId = uuidFor(thread.mode, "share");

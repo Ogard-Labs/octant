@@ -37,7 +37,7 @@ export function ThreadInfoSubagents() {
     // Rows sit directly in the panel, so they are drawn as its other rows are.
     <>
       <p className="thread-info-subagents__heading">
-        Subagents
+        Agents
         <span className="thread-info__value">
           {running.length === 0
             ? `${String(previous.length)} earlier`

@@ -900,7 +900,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                       );
                       void openWorkThread(
                         threadId,
-                        title ?? thread?.title ?? "Task",
+                        title ?? thread?.title ?? "Thread",
                         undefined,
                         projectId,
                       );

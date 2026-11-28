@@ -123,11 +123,11 @@ describe("AgentHierarchyPanel", () => {
 
     rerender(<AgentHierarchyPanel entries={[]} onViewChange={vi.fn()} view="graph" />);
     expect(screen.queryByRole("group", { name: "View" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("No subagents yet");
+    expect(screen.getByRole("status")).toHaveTextContent("No agents yet");
 
     rerender(<AgentHierarchyPanel entries={entries} onViewChange={vi.fn()} view="list" />);
     expect(screen.getByRole("group", { name: "View" })).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Subagent graph" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Agent graph" })).not.toBeInTheDocument();
   });
 
   it("asks for the graph when Graph is chosen", async () => {
@@ -167,7 +167,7 @@ describe("AgentHierarchyPanel", () => {
       />,
     );
 
-    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    const graph = screen.getByRole("group", { name: "Agent graph" });
     // The graph replaces the two list sections; it does not sit beside them.
     expect(screen.queryByRole("region", { name: "Working" })).not.toBeInTheDocument();
     expect(within(graph).getAllByRole("button")).toHaveLength(3);
@@ -281,7 +281,7 @@ describe("AgentHierarchyPanel", () => {
         view="graph"
       />,
     );
-    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    const graph = screen.getByRole("group", { name: "Agent graph" });
     const card = within(graph).getByRole("button", { name: /Inspect parser/ });
     expect(card).toHaveTextContent("Started by 55555555-5555-4555-8555-555555555555");
     expect(graph.querySelectorAll('path[data-kind="after"]')).toHaveLength(0);
@@ -369,7 +369,7 @@ describe("AgentHierarchyPanel", () => {
       const section = screen.getByRole("region", { name: "Workers" });
       expect(within(section).getByRole("heading", { name: "Workers · 2" })).toBeVisible();
       expect(within(section).getByRole("button", { name: /Add dark mode/ })).toHaveTextContent(
-        "Working · 2 subagents · 1 working",
+        "Working · 2 agents · 1 working",
       );
       expect(within(section).getByRole("button", { name: /Audit dependencies/ })).toHaveTextContent(
         "Needs attention",
@@ -407,7 +407,7 @@ describe("AgentHierarchyPanel", () => {
         />,
       );
 
-      const graph = screen.getByRole("group", { name: "Subagents of Add dark mode" });
+      const graph = screen.getByRole("group", { name: "Agents of Add dark mode" });
       expect(within(graph).getAllByRole("button")).toHaveLength(2);
       expect(graph.querySelectorAll('path[data-kind="after"]')).toHaveLength(1);
       // A worker that handed off nothing has a row and no graph.
@@ -444,9 +444,9 @@ describe("AgentHierarchyPanel", () => {
     // The shared state: one line that says it, one muted line under it.
     const state = screen.getByRole("status");
     expect(state).toHaveClass("surface-empty");
-    expect(within(state).getByText("No subagents yet")).toHaveClass("oct-row-label");
+    expect(within(state).getByText("No agents yet")).toHaveClass("oct-row-label");
     expect(
-      within(state).getByText("They appear here when the agent hands off part of its work."),
+      within(state).getByText("They appear here when the thread hands off part of its work."),
     ).toHaveClass("oct-row-detail");
   });
 });

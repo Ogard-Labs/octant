@@ -189,10 +189,10 @@ export function buildAgentHierarchyModel(input: {
       ? {
           empty:
             creationPosture === "off"
-              ? { title: "Subagents are turned off", detail: "Turn them on in Settings." }
+              ? { title: "Agents are turned off", detail: "Turn them on in Settings." }
               : {
-                  title: "No subagents yet",
-                  detail: "They appear here when the agent hands off part of its work.",
+                  title: "No agents yet",
+                  detail: "They appear here when the thread hands off part of its work.",
                 },
         }
       : {}),

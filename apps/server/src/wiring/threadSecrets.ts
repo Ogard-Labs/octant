@@ -213,6 +213,7 @@ export function codeThreadSecrets(
     readonly operationId?: string | undefined;
     /** A routine's turn has nobody at a window to answer a card. */
     readonly routineRun: boolean;
+    readonly hasHandleConsumer?: (() => boolean) | undefined;
   },
 ): ThreadSecretOperations | undefined {
   const { thread, windowId, folders } = input;
@@ -282,6 +283,9 @@ export function codeThreadSecrets(
       planning: () => input.readThread()?.executionPolicy === "plan",
       // A server Project's turn is never offered this host's tools.
       onServer: false,
+      ...(input.hasHandleConsumer === undefined
+        ? {}
+        : { hasHandleConsumer: input.hasHandleConsumer }),
     }),
   );
 }
@@ -299,6 +303,7 @@ export function workThreadSecrets(
     readonly routineRun: boolean;
     /** The running turn's level. */
     readonly posture: () => ProviderExecutionPolicy;
+    readonly hasHandleConsumer?: (() => boolean) | undefined;
   },
 ): ThreadSecretOperations | undefined {
   const { thread, windowId } = input;
@@ -362,6 +367,9 @@ export function workThreadSecrets(
           }),
       planning: () => input.posture() === "plan",
       onServer: false,
+      ...(input.hasHandleConsumer === undefined
+        ? {}
+        : { hasHandleConsumer: input.hasHandleConsumer }),
     }),
   );
 }

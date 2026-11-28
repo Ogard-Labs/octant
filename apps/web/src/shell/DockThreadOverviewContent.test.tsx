@@ -209,7 +209,7 @@ describe("the dock overview's subagents", () => {
       onOpenSubagent,
     });
 
-    const card = await screen.findByRole("region", { name: "Subagents" });
+    const card = await screen.findByRole("region", { name: "Agents" });
     expect(screen.queryByRole("region", { name: "Background tasks" })).toBeNull();
     expect(card).toHaveTextContent("1 running");
     // Requested 07:55, still working at 08:00: five minutes, not the age of its last update.
@@ -258,7 +258,7 @@ describe("the dock overview's subagents", () => {
     const read = vi.spyOn(client, "parentSummary");
     renderOverview(threadA, { agentRunClient: client });
     await vi.waitFor(() => expect(read).toHaveBeenCalled());
-    expect(screen.queryByRole("region", { name: "Subagents" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Agents" })).toBeNull();
   });
 });
 

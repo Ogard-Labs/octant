@@ -153,7 +153,7 @@ describe("FollowUpSuggestionChips", () => {
         <EnvironmentSuggestedTasks />
       </FollowUpSuggestionContext>,
     );
-    const card = await screen.findByRole("group", { name: "Suggested tasks" });
+    const card = await screen.findByRole("group", { name: "Suggested threads" });
     expect(card).toHaveTextContent("Add tests");
     unmount();
 
@@ -166,7 +166,7 @@ describe("FollowUpSuggestionChips", () => {
       </FollowUpSuggestionContext>,
     );
     await waitFor(() => expect(none.suggestions).toHaveBeenCalled());
-    expect(screen.queryByRole("group", { name: "Suggested tasks" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Suggested threads" })).toBeNull();
   });
 
   it("hides the Environment copy too when the person dismisses the cards in the thread", async () => {
@@ -188,10 +188,10 @@ describe("FollowUpSuggestionChips", () => {
         <EnvironmentSuggestedTasks />
       </FollowUpSuggestionContext>,
     );
-    expect(await screen.findByRole("group", { name: "Suggested tasks" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Suggested threads" })).toBeVisible();
     const [dismiss] = await screen.findAllByRole("button", { name: "Dismiss Add tests" });
     await userEvent.click(dismiss!);
-    expect(screen.queryByRole("group", { name: "Suggested tasks" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Suggested threads" })).toBeNull();
     expect(screen.queryAllByRole("region", { name: "Suggested follow-ups" })).toHaveLength(0);
   });
 

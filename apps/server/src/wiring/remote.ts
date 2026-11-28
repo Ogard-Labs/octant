@@ -395,6 +395,7 @@ export type RemoteDependencies = {
     | "canvasRoutes"
     | "canvasPublicShareService"
     | "canvasService"
+    | "canvasVersionImages"
     | "forgetCanvasShareImages"
   > &
   Pick<
@@ -481,6 +482,7 @@ export function wireRemote(deps: RemoteDependencies) {
     canvasNetworkAccess,
     canvasPublicShareService,
     canvasRoutes,
+    canvasVersionImages,
     forgetCanvasShareImages,
     chatAttachmentStore,
     codeAttachments,
@@ -3270,6 +3272,8 @@ export function wireRemote(deps: RemoteDependencies) {
       canvasPublicShareService.forget(canvasIds);
       // Its "Allow network" choice and its running pages' tokens go with it.
       canvasNetworkAccess.forget(canvasIds);
+      // Drop cached per-version image digests for purged Canvases.
+      canvasVersionImages.evict(canvasIds);
       // So do the image bytes its shared snapshots kept, which no revoke can
       // reach once the Canvas is gone.
       void forgetCanvasShareImages(canvasIds);

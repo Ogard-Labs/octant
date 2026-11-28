@@ -169,14 +169,14 @@ export function AgentHierarchyPanel(props: {
   );
   return (
     <section
-      aria-label="Subagents"
+      aria-label={hosted === undefined ? "Agents" : undefined}
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
       {hosted !== undefined ? (
-        <h2 className="visually-hidden">Subagents</h2>
+        <h2 className="visually-hidden">Agents</h2>
       ) : (
         <header className="agent-hierarchy__header">
-          <h2>Subagents</h2>
+          <h2>Agents</h2>
           {onViewChange === undefined || !anythingToArrange ? null : (
             <OctantToggleGroup<AgentHierarchyView>
               aria-label="View"
@@ -305,20 +305,20 @@ function WorkerRow(props: {
       </OctantButton>
       {props.graph && worker.runs.length > 0 ? (
         <AgentRunDependencyGraph
-          label={`Subagents of ${worker.title}`}
+          label={`Agents of ${worker.title}`}
           onOpen={open}
           rows={worker.runs}
           {...(props.providers === undefined ? {} : { providers: props.providers })}
         />
       ) : null}
       {worker.runsTruncated ? (
-        <p className="agent-hierarchy__banner">Its earlier subagents are not listed.</p>
+        <p className="agent-hierarchy__banner">Its earlier agents are not listed.</p>
       ) : null}
     </>
   );
 }
 
-/** "Working · 3 subagents · 1 working": the thread's state, then what it handed off. */
+/** "Working · 3 agents · 1 working": the thread's state, then what it handed off. */
 function workerFacts(worker: SubagentWorker): string {
   const working = worker.runs.filter((run) =>
     isActiveAgentHierarchyStatus(run.lifecycleStatus),
@@ -329,7 +329,7 @@ function workerFacts(worker: SubagentWorker): string {
     worker.choiceNote,
     worker.runs.length === 0
       ? undefined
-      : `${worker.runs.length} ${worker.runs.length === 1 ? "subagent" : "subagents"}`,
+      : `${worker.runs.length} ${worker.runs.length === 1 ? "agent" : "agents"}`,
     working === 0 ? undefined : `${working} working`,
   ]
     .filter((part): part is string => part !== undefined)

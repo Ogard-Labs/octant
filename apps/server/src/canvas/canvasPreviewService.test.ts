@@ -112,7 +112,11 @@ describe("createCanvasPreviewService", () => {
 
     const outcome = await service.preview(request(), context, project);
 
-    expect(resolveDesignAssets).toHaveBeenCalledWith(design, provenance);
+    expect(resolveDesignAssets).toHaveBeenCalledWith(design, provenance, {
+      canvasId,
+      versionId: "version-1",
+      marks: "labelled",
+    });
     expect(outcome).toMatchObject({
       kind: "preview",
       warnings: [

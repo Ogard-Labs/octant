@@ -164,7 +164,8 @@
     "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts",
     "./strict-policy": "./src/strictPolicy.ts",
     "./pull-request-review-policy": "./src/pullRequestReviewPolicy.ts",
-    "./repository-bootstrap-policy": "./src/repositoryBootstrapPolicy.ts"
+    "./repository-bootstrap-policy": "./src/repositoryBootstrapPolicy.ts",
+    "./fleet-update-policy": "./src/fleetUpdatePolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

@@ -179,4 +179,18 @@ describe("desktop artifact read", () => {
       }),
     ).resolves.toEqual({ status: "refused", reason: "path-unverifiable" });
   });
+
+  it.runIf(process.platform === "darwin")(
+    "refuses a checkout file on macOS with the default file opener until a handle-path check exists",
+    async () => {
+      const { root } = checkoutWith("built app");
+      await expect(
+        readDesktopArtifact({
+          root,
+          path: "app.bin",
+          maximumBytes: 1_024,
+        }),
+      ).resolves.toEqual({ status: "refused", reason: "path-unverifiable" });
+    },
+  );
 });

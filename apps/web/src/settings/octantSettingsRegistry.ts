@@ -84,7 +84,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Updates",
           scope: "app",
           keywords:
-            "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes",
+            "update updates upgrade version release automatic check download install relaunch privacy signed notarized what's new notes fleet all computers headless servers provider cli",
         },
         {
           id: settingId("quit-shortcut-second-press"),
@@ -1088,38 +1088,38 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("subagent-creation-posture"),
-          label: "Helper agents",
+          label: "Agents",
           scope: "app",
           keywords: "helper agents subagents child runs creation posture off on automatic delegate",
         },
         {
           id: settingId("subagent-concurrency-on-host"),
-          label: "Helper agents at once across Octant",
+          label: "Agents at once across Octant",
           scope: "app",
           keywords: "helper agents subagents concurrency at once limit parallel",
         },
         {
           id: settingId("subagent-concurrency-per-thread"),
-          label: "Helper agents at once in one thread",
+          label: "Agents at once in one thread",
           scope: "app",
           keywords: "helper agents subagents concurrency at once limit parallel thread",
         },
         {
           id: settingId("subagent-working-minutes"),
-          label: "Working minutes per helper attempt",
+          label: "Working minutes per agent attempt",
           scope: "app",
           keywords:
             "helper agents subagents working time minutes limit budget retry resume approval question waits",
         },
         {
           id: settingId("subagent-no-limit-full-access"),
-          label: "No helper time limit at Full access",
+          label: "No agent time limit at Full access",
           scope: "app",
           keywords: "helper agents subagents working time limit none unlimited full access",
         },
         {
           id: settingId("subagent-provider-wait-minutes"),
-          label: "Minutes a helper waits for a full provider",
+          label: "Minutes an agent waits for a full provider",
           scope: "app",
           keywords:
             "helper agents subagents provider full capacity wait minutes request slot limit",
@@ -1382,6 +1382,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Desktops on this host",
           scope: "host",
           keywords: "disposable desktop lease limit count host local how many",
+        },
+        {
+          id: settingId("desktop-cua-spaces"),
+          label: "Cua Spaces",
+          scope: "host",
+          keywords: "disposable desktop cua spaces daemon link setup",
         },
         {
           id: settingId("managed-tools-automatic-updates"),
@@ -1718,7 +1724,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("child-run-wait-limit"),
-          label: "Longest wait for a helper",
+          label: "Longest wait for an agent",
           scope: "host",
           keywords: "helper agent child subagent wait seconds limit timeout",
         },
@@ -1748,7 +1754,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("agent-routines-start-active"),
-          label: "Start agent-created routines active at Full access",
+          label: "Start agent-created automations active at Full access",
           scope: "host",
           keywords: "routines automation agent created paused enabled active full access",
         },
@@ -2275,7 +2281,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("resource-maxAgents"),
-          label: "Helper agent limit",
+          label: "Agent limit",
           scope: "host",
           keywords: "subagent helper concurrency",
         },

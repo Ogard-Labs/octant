@@ -288,7 +288,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const freshThreadAction =
     !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
       ? undefined
-      : { label: "New task in this Project", onClick: () => onNewThreadInProject(project.id) };
+      : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
   const observed = controller.observation;
   const readyObservation = observed?.status === "ready" ? observed : undefined;
   // The section holds the working tree's state and the branch, not how far the
@@ -419,7 +419,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : [
           {
             value: "new-task-branch",
-            label: "New task on another branch…",
+            label: "New thread on another branch…",
             icon: <Plus aria-hidden="true" size={16} />,
             run: props.onNewTaskOnBranch,
           },
@@ -461,7 +461,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       : [
           {
             value: "new-task",
-            label: "New task in this Project",
+            label: "New thread in this Project",
             icon: <Plus aria-hidden="true" size={16} />,
             run: () => onNewThreadInProject(project.id),
           },
@@ -873,14 +873,14 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                       // The caveat that used to open the body; the body is now one
                       // line, so the tooltip keeps what it said (maintainer
                       // request 2026-11-17).
-                      hint: "Shared folder, outside this task's worktree. Git, changed files, Review and pull requests cover the Code checkout only.",
+                      hint: "Shared folder, outside this thread's worktree. Git, changed files, Review and pull requests cover the Code checkout only.",
                     }
                   : {})}
               >
                 {readyObservation?.workingFolderUnavailable === true ? (
                   <p>
                     The recorded working folder is unavailable. Restore its original binding or
-                    start a new task in a current approved folder; output is never redirected.
+                    start a new thread in a current approved folder; output is never redirected.
                   </p>
                 ) : readyObservation?.workingFolder === undefined ? (
                   <ChangeWorkingFolder
@@ -905,7 +905,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     }}
                   />
                 ) : (
-                  <p>Fixed for this task. Start a new task to change it.</p>
+                  <p>Fixed for this thread. Start a new thread to change it.</p>
                 )}
               </EnvironmentGroup>
             )}

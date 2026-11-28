@@ -41,6 +41,7 @@ import {
   createGhCommandPort,
   type GhCommandPort,
 } from "../code/ghPullRequestPort";
+import type { PullRequestLinkReader } from "../code/pullRequestLinkService";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
@@ -159,6 +160,7 @@ export interface CreatePullRequestReviewHostRuntimeOptions {
   ) => Promise<CodeReviewFinding>;
   readonly spendCeiling: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
   readonly turnMetrics: Pick<TurnMetricsStore, "record">;
+  readonly pullRequestLinks?: PullRequestLinkReader;
 }
 
 export interface PullRequestReviewRuntimeWiring {
@@ -205,6 +207,14 @@ export function createPullRequestReviewHostRuntime(
       signal,
     );
     if (summary.status !== "read" || summary.state !== "open") return undefined;
+    // Fail closed if GitHub reports a different PR node ID for reused coordinates.
+    if (
+      target.pullRequestNodeId !== undefined &&
+      summary.pullRequestNodeId !== undefined &&
+      summary.pullRequestNodeId !== target.pullRequestNodeId
+    ) {
+      return undefined;
+    }
     return summary;
   };
 
@@ -524,11 +534,23 @@ export function createPullRequestReviewHostRuntime(
       if (row.state !== "open") continue;
       const linked = row.linkedThreads[0];
       if (linked === undefined) continue;
+      const link =
+        row.linkId !== undefined
+          ? options.pullRequestLinks?.resolveCanonical(row.linkId)
+          : options.pullRequestLinks?.resolveLink({
+              projectId: row.projectId,
+              repositoryOwner: row.repositoryOwner,
+              repositoryName: row.repositoryName,
+              number: row.number,
+            });
       const target: PullRequestReviewTarget = {
         projectId: row.projectId,
         repositoryOwner: row.repositoryOwner,
         repositoryName: row.repositoryName,
         number: row.number,
+        ...(link?.pullRequestNodeId === undefined
+          ? {}
+          : { pullRequestNodeId: link.pullRequestNodeId }),
       };
       const controller = new AbortController();
       const summary = await readPullRequestSummary(target, controller.signal).catch(

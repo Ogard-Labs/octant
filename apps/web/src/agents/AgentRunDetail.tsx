@@ -92,17 +92,17 @@ export function AgentRunDetail(props: {
   ].filter((part): part is string => part !== undefined);
 
   return (
-    <section aria-label="Subagent" className="agent-run-detail">
+    <section aria-label="Agent" className="agent-run-detail">
       <div className="agent-run-detail__nav">
         <OctantButton
-          aria-label="Back to subagents"
+          aria-label="Back to agents"
           onClick={props.onBack}
           size="xs"
           type="button"
           variant="ghost"
         >
           <ArrowLeft aria-hidden="true" size={12} />
-          Subagents
+          Agents
         </OctantButton>
       </div>
 
@@ -140,7 +140,7 @@ export function AgentRunDetail(props: {
         ) : null}
         {row.executionKind !== "octant-managed" ? null : (
           <p className="agent-run-detail__fact">
-            Retry and Resume start a fresh working-time window using Helper agents settings (
+            Retry and Resume start a fresh working-time window using Agents settings (
             {DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES} minutes by default). Waiting for your input
             does not count. Project and thread ceilings still apply.
           </p>
@@ -159,7 +159,7 @@ export function AgentRunDetail(props: {
         )}
       </header>
 
-      <div aria-label="Subagent conversation" className="agent-run-detail__transcript" role="log">
+      <div aria-label="Agent conversation" className="agent-run-detail__transcript" role="log">
         <div className="agent-run-detail__brief">
           <span className="agent-run-detail__label">Brief</span>
           <p>{row.task}</p>
@@ -167,7 +167,7 @@ export function AgentRunDetail(props: {
         {props.conversation?.inputManifest === undefined ? null : (
           <div className="agent-run-detail__brief" aria-label="Original inputs">
             <span className="agent-run-detail__label">Original inputs</span>
-            <p>Inputs picked for this helper, apart from its brief and report.</p>
+            <p>Inputs picked for this agent, apart from its brief and report.</p>
             {props.conversation.inputManifest.sourceMetadataUnavailable === true ? (
               <p>
                 Some original input details were unavailable and explicitly omitted; their names and
@@ -219,7 +219,7 @@ export function AgentRunDetail(props: {
           {props.steerNotice}
         </p>
       )}
-      <div aria-label="Subagent actions" className="agent-run-detail__actions" role="group">
+      <div aria-label="Agent actions" className="agent-run-detail__actions" role="group">
         {row.needsAcknowledgement ? (
           <OctantButton onClick={() => props.onAcknowledge?.(command)} size="sm" type="button">
             Mark reviewed
@@ -271,7 +271,7 @@ export function AgentRunDetail(props: {
           </OctantButton>
         ) : canArmUsageResume ? (
           <OctantButton
-            aria-label="Resume this subagent when the provider limit resets"
+            aria-label="Resume this agent when the provider limit resets"
             onClick={() => props.onUsageResume?.({ ...command, action: "schedule" })}
             size="sm"
             type="button"
@@ -282,7 +282,7 @@ export function AgentRunDetail(props: {
         ) : null}
         {active && managed ? (
           <OctantButton
-            aria-label="Cancel this subagent"
+            aria-label="Cancel this agent"
             onClick={() => props.onCancel?.({ runId: row.runId })}
             size="sm"
             type="button"
@@ -368,12 +368,12 @@ function AgentRunReply(props: {
     result !== undefined
       ? "The reply is no longer retained."
       : conversation?.status === "unavailable"
-        ? "The live conversation is unavailable for this subagent."
+        ? "The live conversation is unavailable for this agent."
         : props.active
           ? subagentPhase(props.row.lifecycleStatus) === "waiting"
             ? "Waiting. No reply yet."
             : "No reply yet."
-          : "This subagent left no reply to show.";
+          : "This agent left no reply to show.";
   return (
     <>
       <p className="agent-run-detail__note" role="status">

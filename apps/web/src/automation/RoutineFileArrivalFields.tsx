@@ -126,7 +126,7 @@ export function RoutineFileArrivalFields(props: {
             re-arm; quiet time and restarting do not reset the limit.
           </li>
           <li>
-            Matching changes while the routine or known Project activity is busy are held for
+            Matching changes while the automation or known Project activity is busy are held for
             review; Octant cannot tell which program wrote a file.
           </li>
           <li>

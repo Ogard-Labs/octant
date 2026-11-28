@@ -271,13 +271,13 @@ describe("the Needs you card", () => {
     );
     const card = await findCard();
     const row = await within(card).findByRole("group", {
-      name: "Quarterly report has a subagent waiting for you",
+      name: "Quarterly report has an agent waiting for you",
     });
-    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).getByText("Research agent needs your approval")).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
     expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
     expect(
-      within(card).getByRole("group", { name: "Fix the parser has a subagent waiting for you" }),
+      within(card).getByRole("group", { name: "Fix the parser has an agent waiting for you" }),
     ).toBeInTheDocument();
 
     await user.click(within(row).getByRole("button", { name: "Review request" }));

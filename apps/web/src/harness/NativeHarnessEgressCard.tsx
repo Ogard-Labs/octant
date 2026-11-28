@@ -307,7 +307,7 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
                     {proposal.attempts === 1 ? "1 try" : `${String(proposal.attempts)} tries`}
                     {proposal.childThreadId === undefined
                       ? ""
-                      : ` · subagent ${String(proposal.childThreadId).slice(0, 8)}`}
+                      : ` · agent ${String(proposal.childThreadId).slice(0, 8)}`}
                     {proposal.threadTainted && !view.threadTainted ? " · one command only" : ""}
                   </span>
                 </span>

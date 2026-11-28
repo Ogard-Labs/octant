@@ -19,6 +19,10 @@ import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyStore,
 } from "@octant/client-runtime/remote-pairing-client";
+import {
+  createHubWindowIdentityStore,
+  type HubWindowComputersSync,
+} from "@octant/client-runtime/hub-window-computers";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 import { syncHubComputersInWindow, withHubComputerDismissals } from "./hubWindowComputers";
@@ -28,6 +32,51 @@ import { createPairedComputerFetch } from "./pairedComputerFetch";
 const HUB_COMPUTERS_REFRESH_MS = 5 * 60 * 1_000;
 /** The least time between two rounds of asking paired computers where their hub's relay is. */
 const RELAY_LEARN_SPACING_MS = 30_000;
+
+export interface HubWindowRefusalEntry {
+  readonly memberId: string;
+  readonly kind: string;
+}
+
+export interface HubWindowRefusalsStore {
+  readonly list: () => ReadonlyArray<HubWindowRefusalEntry>;
+  readonly windowGuestMemberId: () => string | undefined;
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
+function createHubWindowRefusalsStore(): HubWindowRefusalsStore & {
+  readonly update: (
+    outcome: HubWindowComputersSync,
+    windowGuestMemberId: string | undefined,
+  ) => void;
+} {
+  let refusals: ReadonlyArray<HubWindowRefusalEntry> = [];
+  let guestMemberId: string | undefined;
+  const listeners = new Set<() => void>();
+  const emit = () => {
+    for (const listener of listeners) listener();
+  };
+  return {
+    list: () => refusals,
+    windowGuestMemberId: () => guestMemberId,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    update: (outcome, nextGuestMemberId) => {
+      guestMemberId = nextGuestMemberId;
+      if (outcome.status === "synced") {
+        refusals = outcome.refused;
+        emit();
+      } else if (outcome.status === "not-in-hub") {
+        refusals = [];
+        emit();
+      }
+    },
+  };
+}
 
 /**
  * Boot the shared Post-preview B6 lifecycle stack for Settings / shell chrome.
@@ -43,6 +92,8 @@ export interface HostFederationStack {
   readonly deviceKeyStore: RemoteDeviceKeyStore;
   /** Each paired computer's last reading of its threads and asks, kept stale when it stops answering. */
   readonly cache: HostReadModelCache;
+  /** Latest member refusals from this window's hub sync (e.g. `guest-not-confirmed`). */
+  readonly hubWindowRefusals?: HubWindowRefusalsStore;
 }
 
 export function useHostFederationLifecycle(
@@ -87,6 +138,7 @@ export function useHostFederationLifecycle(
         },
       });
       const cache = createHostReadModelCache();
+      const hubWindowRefusals = createHubWindowRefusalsStore();
       const rosterLifecycle = createHostFederationLifecycle({
         registry,
         transports,
@@ -116,6 +168,7 @@ export function useHostFederationLifecycle(
         deviceKeyStore,
         storage,
         cache,
+        hubWindowRefusals,
       };
     } catch {
       return undefined;
@@ -125,19 +178,26 @@ export function useHostFederationLifecycle(
   useEffect(() => {
     if (built === undefined) return;
     let cancelled = false;
-    const { storage, rosterLifecycle, ...stackOnly } = built;
+    const { storage, rosterLifecycle, hubWindowRefusals, ...stackBase } = built;
+    const stackOnly: HostFederationStack = { ...stackBase, hubWindowRefusals };
     // A desktop window on a hub member lists the hub's other members too. Only
     // the desktop offers the introduction; a browser joins a hub as a guest.
     const syncHubComputers = async (): Promise<void> => {
       const introduce = introduceToHub.current;
       const request = requestComputer.current;
       if (introduce === undefined || request === undefined) return;
-      await syncHubComputersInWindow({
+      const outcome = await syncHubComputersInWindow({
         bridge: { introduceWindowToHub: introduce, requestPairedComputer: request },
         stack: stackOnly,
         storage,
         removeHost: (hostId) => rosterLifecycle.removeLocal(hostId),
       }).catch(() => undefined);
+      if (outcome !== undefined && !cancelled) {
+        const identity = await createHubWindowIdentityStore(storage)
+          .load()
+          .catch(() => undefined);
+        hubWindowRefusals.update(outcome, identity?.memberId);
+      }
     };
     // In the desktop app each paired computer tells main where its hub's relay
     // is, answering only at home; main keeps the address from that answer, so

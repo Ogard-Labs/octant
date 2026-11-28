@@ -6,9 +6,13 @@ import {
 } from "@octant/contracts";
 import {
   decodeComputerControlResult,
+  decodeComputerSecretTargetInspection,
   decodeComputerUseStatus,
   type ComputerControlCommand,
   type ComputerControlResult,
+  type ComputerHostTypeSecretRequest,
+  type ComputerSecretTargetInspection,
+  type ComputerSecretTargetRequest,
   type ComputerUseOwner,
   type ComputerUseSettings,
   type ComputerUseStatus,
@@ -26,6 +30,16 @@ export interface DesktopComputerUsePort {
   readonly execute: (
     owner: ComputerUseOwner,
     command: ComputerControlCommand,
+    signal?: AbortSignal,
+  ) => Promise<ComputerControlResult>;
+  readonly inspectSecretTarget?: (
+    owner: ComputerUseOwner,
+    target: ComputerSecretTargetRequest,
+    signal?: AbortSignal,
+  ) => Promise<ComputerSecretTargetInspection>;
+  readonly typeSecret?: (
+    owner: ComputerUseOwner,
+    input: ComputerHostTypeSecretRequest,
     signal?: AbortSignal,
   ) => Promise<ComputerControlResult>;
   readonly release: (owner: ComputerUseOwner) => Promise<void>;
@@ -114,6 +128,14 @@ export function createDesktopComputerUsePort(
     },
     execute: async (owner, command, signal) =>
       decodeComputerControlResult(await request({ operation: "execute", owner, command }, signal)),
+    inspectSecretTarget: async (owner, target, signal) =>
+      decodeComputerSecretTargetInspection(
+        await request({ operation: "inspect-secret-target", owner, target }, signal),
+      ),
+    typeSecret: async (owner, input, signal) =>
+      decodeComputerControlResult(
+        await request({ operation: "type-secret", owner, input }, signal),
+      ),
     release: async (owner) => {
       await request({ operation: "release", owner });
     },

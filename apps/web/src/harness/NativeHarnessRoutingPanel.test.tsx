@@ -282,7 +282,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
     expect(screen.getByRole("button", { name: "Sees images model" })).toHaveTextContent("Off");
     expect(screen.queryByRole("group", { name: "Planner" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Small jobs" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Coordinator workers and helper agents use these roles/)).toBeVisible();
+    expect(screen.getByText(/Coordinator workers and agents use these roles/)).toBeVisible();
     await openOtherRoles(user);
     expect(screen.getByRole("button", { name: "Advisor model" })).toHaveTextContent("Off");
   });
@@ -316,7 +316,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
       "Implementing role",
       "Reviewing finished work role",
       "Reading images role",
-      "Custom helper agents role",
+      "Custom agents role",
     ]) {
       expect(screen.getByRole("combobox", { name: resolved })).toBeInTheDocument();
     }

@@ -443,7 +443,9 @@ version id), journaled on the call's step like a routine receipt
 (`ThreadCanvasPreviewReceipt`); the picture the agent was shown is never
 journaled. Opening that row in Chat, Work, or Code draws the version as an
 inert miniature, read under the window's own Canvas authority with its images
-resolved by the host for that version, captioned with its version, so a person can see what the agent checked; a window that cannot
+resolved by the host for that version (always comparing recorded Project image
+digests, even when the previewed version is still the newest, and labelling an
+unrecorded version), captioned `"Version N, previewed by the agent"`, so a person can see what the agent checked; a window that cannot
 read the Canvas sees a plain line instead. A running design runs in the preview as
 it does for a reader: the host builds its page with `renderCanvasDesignPage`,
 answers it at a path under the preview page's own origin with the page
@@ -1742,9 +1744,49 @@ vector art. Each image is capped at 3 MiB and a design at 5 MiB, which keeps
 the base64 response inside the remote gateway's 8 MiB. The renderer replaces
 each literal reference with a `data:` image before writing the page, so the
 frame still loads nothing; an image that is loading, missing, refused, too
-large, or not an image draws a labelled placeholder, and the agent's
-`preview` reports a `design-asset-unavailable` warning naming the block, the
-asset id, the reason, and the frames that name it, never the bytes. An
+large, not an image, or changed since this version draws a labelled
+placeholder, and the agent's `preview` reports a `design-asset-unavailable`
+warning naming the block, the asset id, the reason, and the frames that name
+it, never the bytes.
+
+**Older versions and replaced Project images** (maintainer decision,
+2026-11-28). A Canvas version records a path for a `project-file` asset, never
+a copy of the file's bytes. Whenever a locally authored version commits
+(`create`, `importHtml`, `revise`, board edits, or `refresh`) and holds at
+least one design declaring a `project-file` asset, the host reads each declared
+Project file under the version's unchanged authority and caps, computes its
+SHA-256 digest, and appends one `canvas.version-images-recorded@1` event to a
+separate per-Canvas aggregate (`canvas-version-images`, erased with the Canvas
+on thread and Project purge). No image bytes are ever journaled or copied. A
+file whose change time (`ctime`) is later than the version's `createdAt` is
+recorded as `unavailable` rather than stamped as the original, so a replacement
+made between commit and read never masquerades as the version's image. Versions
+that declare no `project-file` append nothing, and carried-in or
+replica-adopted versions record nothing rather than stamping this machine's
+current files onto historical versions.
+
+The newest version keeps drawing live Project files in the workspace, HTML
+file, export, and running prototype so an agent or person can edit an image and
+look again without revising the Canvas. Any superseded version — across
+`GET /api/canvas/design-assets`, `POST /api/canvas/html-file`, picture exports,
+running prototype pages (`GET /api/canvas/design-page`), and agent previews of
+older versions — compares each `project-file` against the version's recorded
+digest; the preview miniature always compares even on the newest version. When
+a version has a record and the file's current bytes differ (or the asset was
+recorded `unavailable`), the host withholds the bytes and returns `unavailable`
+with reason `changed`, which draws the placeholder (`Image changed since this
+version`); restoring identical bytes draws the image again. Generated images
+and Browser captures are unaffected. Versions without a record (pre-existing,
+carried-in, replica-adopted, or interrupted before recording finished) keep
+drawing live Project files with `mark: "unrecorded"`, which displays `"Project
+images are shown as they are now"` in the Canvas workspace and preview
+miniature. For version skew, `GET /api/canvas/design-assets` accepts an
+optional `marks` parameter (`labelled` for the workspace, `recorded` for the
+preview miniature): without `marks`, a new host sends `missing` instead of
+`changed` and omits `mark` so older clients draw a placeholder; against an
+older host that refuses `marks` with 400, a newer client retries without it for
+the newest version only and leaves older versions and preview miniatures as
+placeholders. An
 authenticated snapshot carries a design's frames, static or running, from
 share version 10, as the author wrote them. The secret filter reads values,
 not markup, so a Canvas that holds a design is shared only when the sharer

@@ -788,7 +788,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
           actions.setWorkBoardOpen(false);
           void actions.openWorkThread(
             target.threadId,
-            thread?.title ?? "Task",
+            thread?.title ?? "Thread",
             undefined,
             target.projectId,
           );

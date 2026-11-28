@@ -164,7 +164,7 @@ export function ManagedToolsSettingsView(props: {
             focused={props.focusedSetting === "managed-tools-update-check"}
             settingId="managed-tools-update-check"
             label="Check device tools for updates"
-            description="Checks again without waiting for the daily routine."
+            description="Checks again without waiting for the daily check."
             scope="host"
           >
             <div className="settings-view__actions">

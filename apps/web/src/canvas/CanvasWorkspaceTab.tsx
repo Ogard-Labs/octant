@@ -419,18 +419,44 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
 
   // A design's images are resolved by the host for the version on screen,
   // each time it is drawn, under that version's own thread authority.
+  const [hasUnrecordedProjectImages, setHasUnrecordedProjectImages] = useState(false);
+  const activeAssetVersion = useRef("");
+  const isCurrentVersion =
+    selectedVersionId !== undefined &&
+    (tipVersionId === "" || String(selectedVersionId) === tipVersionId);
+  useEffect(() => {
+    activeAssetVersion.current =
+      selectedVersionId === undefined
+        ? ""
+        : `${String(props.tab.canvasId)}:${String(selectedVersionId)}`;
+    setHasUnrecordedProjectImages(false);
+  }, [props.tab.canvasId, selectedVersionId]);
   const designAssetRuntime = useMemo<DesignAssetRuntime | undefined>(() => {
     const designAssets = props.client?.designAssets;
     if (designAssets === undefined || selectedVersionId === undefined) return undefined;
     const canvasId = props.tab.canvasId;
     const versionId = String(selectedVersionId);
+    const requestKey = `${String(canvasId)}:${versionId}`;
     return {
       resolve: async (blockId) => {
-        const outcome = await designAssets({ canvasId, versionId, blockId });
-        return outcome.kind === "ready" ? outcome.assets : undefined;
+        const outcome = await designAssets({
+          canvasId,
+          versionId,
+          blockId,
+          marks: "labelled",
+          isCurrentVersion,
+        });
+        if (outcome.kind !== "ready") return undefined;
+        if (
+          activeAssetVersion.current === requestKey &&
+          outcome.assets.some((asset) => asset.status === "resolved" && asset.mark === "unrecorded")
+        ) {
+          setHasUnrecordedProjectImages(true);
+        }
+        return outcome.assets;
       },
     };
-  }, [props.client, props.tab.canvasId, selectedVersionId]);
+  }, [isCurrentVersion, props.client, props.tab.canvasId, selectedVersionId]);
 
   // A Canvas's "Allow network" switch matters only to a prototype. It is the
   // same switch in a browser on the host's machine and in the desktop app,
@@ -1282,6 +1308,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   );
   const htmlFileNotice = (
     <>
+      {hasUnrecordedProjectImages ? (
+        <p
+          className="canvas-workspace-tab__notice"
+          data-testid="canvas-unrecorded-images-notice"
+          role="status"
+        >
+          Project images are shown as they are now
+        </p>
+      ) : null}
       {htmlFileMessage === undefined ? null : (
         <p
           className="canvas-workspace-tab__notice"

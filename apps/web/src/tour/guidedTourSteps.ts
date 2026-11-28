@@ -30,8 +30,8 @@ export const GUIDED_TOUR_STEPS: ReadonlyArray<GuidedTourStep> = [
     id: "new-thread",
     topic: "New thread",
     title: "Start work in a new thread",
-    body: "New chat or New task opens a thread in Chat, Work or Code. Pick the agent and model before you send.",
-    targets: ['button[aria-label="New chat"]', 'button[aria-label="New task"]'],
+    body: "New chat or New thread opens a thread in Chat, Work or Code. Pick the agent and model before you send.",
+    targets: ['button[aria-label="New chat"]', 'button[aria-label="New thread"]'],
     sides: ["below", "right"],
   },
   {

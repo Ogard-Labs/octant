@@ -205,7 +205,7 @@ describe("feedback surface through the actual typed host client", () => {
     await act(async () => {
       expect(await view.result.current.prepare(point)).toBe(false);
     });
-    expect(view.result.current.message).toContain("different task");
+    expect(view.result.current.message).toContain("different thread");
     expect(view.result.current.preview).toBeUndefined();
     await act(async () => {
       expect(await view.result.current.commit("Keep my comment")).toBe(false);

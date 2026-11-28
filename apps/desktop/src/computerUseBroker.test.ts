@@ -39,6 +39,13 @@ function fixture() {
         _signal?: AbortSignal,
       ) => ({ kind: "stopped" as const }),
     ),
+    inspectSecretTarget: vi.fn(async () => ({
+      kind: "secure-target" as const,
+      appId: "com.example.Auth",
+      windowId: 7 as never,
+      windowTitle: "Unlock",
+    })),
+    typeSecret: vi.fn(async () => ({ kind: "typed" as const })),
     requestPermissions: status,
     openPermissionSettings: async () => {},
     checkUpdates: status,
@@ -113,5 +120,39 @@ describe("Private computer-use broker", () => {
     expect(service.execute).toHaveBeenCalledWith(owner, { operation: "stop" }, sent.signal);
     abort.abort();
     expect(service.execute.mock.calls[0]?.[2]?.aborted).toBe(true);
+  });
+
+  it("routes authenticated secret-target inspection and secret typing to the desktop service", async () => {
+    const { service, handle } = fixture();
+    const observationId = "55555555-5555-4555-8555-555555555555";
+    const inspected = await handle(
+      request({
+        operation: "inspect-secret-target",
+        owner,
+        target: { observationId, elementIndex: 4 },
+      }),
+    );
+    expect(inspected.status).toBe(200);
+    expect(await inspected.json()).toEqual({
+      kind: "secure-target",
+      appId: "com.example.Auth",
+      windowId: 7,
+      windowTitle: "Unlock",
+    });
+
+    const typed = await handle(
+      request({
+        operation: "type-secret",
+        owner,
+        input: { observationId, elementIndex: 4, text: "hunter2" },
+      }),
+    );
+    expect(typed.status).toBe(200);
+    expect(await typed.json()).toEqual({ kind: "typed" });
+    expect(service.typeSecret).toHaveBeenCalledWith(
+      owner,
+      { observationId, elementIndex: 4, text: "hunter2" },
+      expect.any(AbortSignal),
+    );
   });
 });

@@ -2634,7 +2634,7 @@ describe("BrowserWorkspace", () => {
         );
         await userEvent.click(screen.getByRole("menuitem", { name: /Profile: Personal/ }));
         expect(
-          await screen.findByText("Change this task’s default Browser profile?"),
+          await screen.findByText("Change this thread’s default Browser profile?"),
         ).toBeVisible();
         expect(browser.stop).not.toHaveBeenCalled();
       } finally {
@@ -2651,7 +2651,7 @@ describe("BrowserWorkspace", () => {
       globalThis.localStorage.setItem(`octant.browser.profile.${authority.projectId}`, "personal");
       render(<BrowserWorkspace client={browser} tab={tab} />);
       const user = userEvent.setup();
-      await screen.findByText(/task.*default could not be loaded/i);
+      await screen.findByText(/thread.*default could not be loaded/i);
       enterAddress("https://example.com/private");
       fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
       expect(browser.create).not.toHaveBeenCalled();
@@ -2673,7 +2673,7 @@ describe("BrowserWorkspace", () => {
         browser.selectTaskProfile = vi.fn();
         const rendered = render(<BrowserWorkspace client={browser} tab={tab} />);
         await screen.findByRole("button", {
-          name: "Default browser profile for this task: Personal",
+          name: "Default browser profile for this thread: Personal",
         });
         let finish!: (selection: typeof initial) => void;
         const held = new Promise<typeof initial>((resolve) => {
@@ -2705,7 +2705,7 @@ describe("BrowserWorkspace", () => {
         );
         expect(
           await screen.findByRole("button", {
-            name: "Default browser profile for this task: Private",
+            name: "Default browser profile for this thread: Private",
           }),
         ).toBeEnabled();
       },
@@ -2726,7 +2726,7 @@ describe("BrowserWorkspace", () => {
       render(<BrowserWorkspace client={browser} hostBridge={nativeBridge} tab={tab} />);
       const user = userEvent.setup();
       const control = await screen.findByRole("button", {
-        name: "Default browser profile for this task: Private",
+        name: "Default browser profile for this thread: Private",
       });
       await waitFor(() => expect(control).toBeEnabled());
       await user.click(control);
@@ -2810,7 +2810,7 @@ describe("BrowserWorkspace", () => {
         );
         const user = userEvent.setup();
         const control = await screen.findByRole("button", {
-          name: "Default browser profile for this task: Private",
+          name: "Default browser profile for this thread: Private",
         });
         await waitFor(() => expect(control).toBeEnabled());
         await user.click(control);
@@ -2827,10 +2827,14 @@ describe("BrowserWorkspace", () => {
           expect(await screen.findByText("Task changed. Original page kept.")).toBeVisible();
           expect(created).not.toHaveBeenCalled();
           expect(
-            screen.getByRole("button", { name: "Default browser profile for this task: Private" }),
+            screen.getByRole("button", {
+              name: "Default browser profile for this thread: Private",
+            }),
           ).toBeVisible();
           await user.click(
-            screen.getByRole("button", { name: "Default browser profile for this task: Private" }),
+            screen.getByRole("button", {
+              name: "Default browser profile for this thread: Private",
+            }),
           );
           await user.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
           await user.click(screen.getByRole("button", { name: "Change profile" }));

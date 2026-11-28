@@ -57,7 +57,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 7       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 8       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
-| [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
+| [Updates and development](#updates-and-development)                                   | 6         | 5       | 1            | 0                   |
 | [Design system](#design-system)                                                       | 12        | 11      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 17      | 4            | 0                   |
 | [Start screen](#start-screen)                                                         | 5         | 5       | 0            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **323**   | **216** | **103**      | **4**               |
+| **All areas**                                                                         | **324**   | **216** | **104**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1291,7 +1291,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes, Merge when ready
 
 A bundled, switchable first-party plugin reviews pushed heads of linked Code threads' pull requests, only through the `pull-request-reviewer` seam and the host's review port.
 
-- Off by default; enabled per Code Project with a per-thread override, and off until a model is picked. Its settings change only from a local window or a host-person-paired device.
+- Off by default; enabled per Code Project with a per-thread override, and off until a model is picked. Its settings change only from a local window or a host-person-paired device. Per-PR settings and review runs are keyed by the linked pull request's GitHub node ID (with safe legacy coordinate replay fallback), so repository renames preserve them and reused repository names never share them (maintainer decision, 2026-11-28).
 - It runs at most once per pushed head at Plan's read-only gate, whatever the thread's level; a head that moves mid-run publishes nothing.
 - Posting a comment and handing blocking findings to the worker are opt-ins, off by default. It never approves or requests changes. Under Strict hand-backs stop at Auto-fix's attempt limit; outside Strict there is no cap.
 - It counts toward the parent's spend ceiling, and when unavailable it names the reason and never falls back to another model.
@@ -1303,7 +1303,7 @@ Status: Built. Since: 2026-11-20. Detail: [Architecture: Modes, Merge when ready
 
 A pull request's reading pane has a Guide tab, an ordered list of stops through the change written for one pushed head by a read-only model run, and the Changes tab marks files Viewed with GitHub's own state (maintainer decision, 2026-11-26).
 
-- A guide belongs to one head; after a push it reads as written for an older push and offers Rewrite. Anchors outside the diff at that head are dropped.
+- A guide belongs to one head and is keyed by the linked pull request's GitHub node ID (with safe legacy coordinate replay fallback), so repository renames keep prior guides and reused repository names never share them (maintainer decision, 2026-11-28); after a push it reads as written for an older push and offers Rewrite. Anchors outside the diff at that head are dropped.
 - A run goes through the `pull-request-guide-writer` plugin seam (`@octant/plugin-api/pull-request-guide-writer` and `@octant/plugin-host/pull-request-guide-writers`): the bundled writer is registered as a switchable first-party plugin resolved through effective activation (installation, trust, and enablement stay separate preconditions and discovery grants nothing), and disabling the writer plugin refuses runs (`not-effective`) and bills nothing. One read-only turn at Plan's gate on the guide model the person picked, with no default, under the spend ceiling, one per link at a time. A closed or merged pull request offers no run.
 - A person starts a run from a local window; a paired phone only reads guides. The agent's `guide` reads without asking; `guide-write` asks below Full access and is refused in Plan. Guide text is outside content.
 - Viewed is read and written in GitHub under the person's own `gh` login, from a local window only, and refused once a push moved the reviewed head. Octant keeps no copy and journals nothing for it.
@@ -2002,6 +2002,7 @@ Core capabilities (browser and computer use, tests, Apple validation, approvals,
 - A file sent into the thread's desktop on this machine does not ask at Full access; below it asks once per thread, and a Project remember never covers a cloud desktop (maintainer decision, 2026-11-13).
 - Under Strict an answer from before the thread read outside content does not cover it afterwards; outside Strict it keeps covering (maintainer decision, 2026-11-22).
 - Computer use treats application content as untrusted, fails closed if evidence recording fails, is refused in Plan, and never controls Octant itself.
+- On this Mac, Computer use's `type-secret` redeems a one-use [thread-secret](#thread-secrets) handle through `ComputerUseHostPort.typeSecret` in host memory (loopback broker and private driver Unix socket only) into a fresh verified `AXTextField` with `subrole === "AXSecureTextField"`, refusing any other element with `not-a-password-field` and returning only `typed`, `refused`, or `cancelled` without the value or a screenshot; below Full access and under Strict, each typing asks once naming the app, window title, and secret label, while Full access outside Strict skips approval (maintainer decisions, 2026-11-24 and 2026-11-28; disposable desktops deferred and fail closed; `reservedApps` stay blocked).
 - A device the host's own person paired lists and stops every Computer use session; a hub-introduced device is refused (maintainer decision, 2026-11-16; [Paired devices act as the person](#paired-devices-act-as-the-person)).
 - The driver is a bundled, pinned, publisher-verified copy that updates itself daily unless the person turned that off (maintainer decision, 2026-11-26).
 - Managed device tools run pinned, verified releases in a device-scoped native sandbox that never grants a Project or provider account; a missing sandbox keeps the native fallback rather than running the tool unconfined ([Managed device tools](device-workbench.md#managed-device-tools)).
@@ -2687,7 +2688,7 @@ An agent in a Code or Work thread can ask the person for a secret in a private c
 
 - A value is entered only in the card: an agent cannot pass one, and one pasted in chat is ignored. Chat is refused.
 - Strict offers neither 24 hours nor Remember, and an account password never offers Remember.
-- A handle is used once by a registered consumer, never by a command. `run-with-secret` runs under the thread's level, Shield and sandbox; Plan refuses it.
+- A handle is used once by a registered consumer (Computer use on this Mac for `type-secret` into verified password fields; maintainer decisions, 2026-11-24 and 2026-11-28), never by a command. `run-with-secret` runs under the thread's level, Shield and sandbox; Plan refuses it.
 - Every confined launch is denied the secrets folder by a rule the person cannot remove. Nothing is usable before its journal record, which holds no value.
 
 Status: Built. Since: 2026-11-24. Detail: [Architecture: Thread secrets](../architecture.md#thread-secrets), [Thread view: Secret cards](thread-view.md#secret-cards) and [Settings: Secret stores](settings.md#secret-stores).
@@ -2744,6 +2745,22 @@ The desktop updater verifies a feed's Ed25519 signature against the compiled-in 
 - The first release run that publishes a headless build listing is still owed.
 
 Status: Built. Detail: [Architecture: Security and authority, Update feed signing keys are per ring](../architecture.md#security-and-authority).
+
+### Fleet updates across connected computers
+
+From one confirmation in Settings › Updates, the person can update outdated provider CLIs and Octant across connected computers — desktop apps and headless servers alike — with this local app restarting last (maintainer decision, 2026-11-28).
+
+- Only a device the host's own person paired at Full (or the hub that installed a server over SSH) can start updates; lower access levels, hub-introduced devices, agent grants, routines, peers and hubs acting on unowned hosts are refused.
+- A connected headless server is never skipped merely because it has no desktop app. Valid skip reasons are concrete connectivity, permission, ring (a ring that publishes no headless build), remote-desktop-not-yet-built, or manual-update-required facts.
+- Order is strictly: outdated provider CLIs first via existing `update-provider-cli` (no second updater; the desktop paired-computer channel allows `POST /api/providers/commands` with a 150-second timeout, and a channel timeout re-reads the observed version rather than posting again), then remote Octant servers with one shared drain choice (**Wait up to N minutes for running work** or **Stop now**), then this local app last (**Later** defers only this local app). One host's failure never stops another.
+- Servers installed over SSH reuse the existing hub upkeep path (`/api/shield/servers/member-install`) without new authority.
+
+Not built yet:
+
+- Remote updates for standalone headless hosts through `/api/host-control/update` (offline store restore in the CLI, detached upgrade runner outside the service, result file, `host-update.requested@1` and `host-update.step@1` events, and `hostDataMap` disclosure): follows in the next delivery part.
+- Remote desktop app updates (listed as "Update on that machine." until built): follows in a later slice.
+
+Status: Partly built. Since: 2026-11-28. Detail: [Architecture: Security and authority, Fleet updates across connected computers](../architecture.md#security-and-authority).
 
 ### A guided tour on the first start
 
@@ -3180,7 +3197,7 @@ Every start screen shows one question, its composer, and one calm list under the
 
 - The composer paints first. Cards read only what the window's own authority returns, and never show fake rows.
 - Answers, Open, Stop and Start a fix use the commands the open thread uses; Start a fix only opens a draft.
-- Chat, Work and Code share one top-anchored start screen, so New task, choosing a Project or switching mode moves nothing (maintainer request, 2026-11-16).
+- Chat, Work and Code share one top-anchored start screen, so New thread, choosing a Project or switching mode moves nothing (maintainer request, 2026-11-16).
 - The list is laid out from its first frame and nothing above a section moves while it loads (maintainer request, 2026-11-15).
 - A start screen has no dock ([Right dock and thread tools](#right-dock-and-thread-tools)).
 
@@ -3246,7 +3263,7 @@ The agent's `preview` returns typed layout warnings and a picture drawn in a no-
 
 - A model that accepts no images, or a host with no browser, still gets the warnings and a sentence saying why no picture was taken.
 - A Canvas read or previewed by another thread carries its outside-content mark to the reader.
-- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23).
+- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23), always comparing Project image files against the version's recorded digests even on the newest version (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Canvas: Preview and placement in the thread](canvas.md#preview-and-placement-in-the-thread).
 
@@ -3258,6 +3275,7 @@ A design is the author's own markup in sandboxed frames. A design that runs scri
 - A prototype runs only on Run. Allow network is off by default and only the person sets it, at a window or on a device the host's own person paired; agents, routines, hub-introduced and restricted devices are refused (maintainer decision, 2026-11-12).
 - With it on, a page on the host's machine reaches public addresses only through the host's filtering proxy, under a short-lived renewed token (maintainer decision, 2026-11-13). In a browser on another machine the prototype is not network-contained, and says so.
 - Sharing design markup needs the person's acknowledgement that it leaves as written.
+- Locally authored versions declaring Project image files record their SHA-256 digests (never image bytes) in a separate per-Canvas aggregate (`canvas-version-images`, purged with the Canvas); the newest version keeps drawing live files while superseded versions (and preview miniatures even on the newest version) withhold changed files as `changed`, and unrecorded versions (pre-existing, carried-in, or replica-adopted) draw live files labelled `"Project images are shown as they are now"` (maintainer decision, 2026-11-28).
 
 Not built yet:
 
@@ -3989,6 +4007,8 @@ A person starts and manages a coding session on whichever of their computers the
 - The hub admits a member's window guest only to the Projects its own Act list names, set only from a window on the hub (maintainer decision, 2026-11-21).
 - Every connected device is told when a new device joins or pairs, and Remove stays with a window on the host and an owner device (maintainer decision, 2026-11-19).
 - A window acting as its own person can bootstrap a local Code Project onto another computer over the direct paired session, never the hub, copying only ignored files the person ticked (maintainer decision, 2026-11-24). A two-machine smoke is an owed maintainer check.
+- Settings › Remote access shows a connections map and keyboard-accessible list separating transport path (LAN or Tailscale) from trust reason (`Paired by you` or `Introduced by the hub`), showing unconfirmed members clearly, drawing hub peer edges unmeasured as `Both in the hub`, and starting existing local pairing or hub join-code flows from drag or multi-select only when one end is this computer (maintainer decision, 2026-11-28).
+- A hub-introduced window opens threads on reachable hub members directly (never relayed); when the thread's Project is outside `Act`, it renders a read-only Watching bar with Connect to reply (ordinary pairing verified against that computer's origin and pin) and hides composer, approval, and Stop controls while the host refuses mutations. Residual risk accepted: with `Act` unticked, a hub-introduced device can still read Code transcripts on that member (maintainer decision, 2026-11-28). Two computers and a hub on a real Tailscale network plus one Connect is an owed maintainer check.
 
 Not built yet:
 
@@ -4089,6 +4109,7 @@ A desktop holds no host credential and no checkout. Host files enter only throug
 Not built yet:
 
 - Network for a host-local desktop through the filtered egress proxy: not built, so today a host-local desktop never has network and a recipe that asks for it is refused. Only a cloud recipe without a placement may allow network.
+- Artifact transfer on macOS: reads refuse `path-unverifiable` until a macOS handle-path check is built, while screen and input ship first (maintainer decision, 2026-11-28).
 
 Status: Partly built. Since: 2026-10-26. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation), [artifact transfer](disposable-desktops.md#artifact-transfer) and [lease-bound dev-server preview](disposable-desktops.md#lease-bound-dev-server-preview).
 
@@ -4109,6 +4130,7 @@ Desktop providers are plugin contributions through the `desktop-provider` seam: 
 - A person confirms each billed or off-machine lease unless they turned off "Confirm each billed desktop", which is on by default and set only by a person at a local window or a person-paired device (maintainer decisions, 2026-11-12 and 2026-11-13).
 - Billed desktops are off until a person sets a mandatory monthly spend cap; each lease is estimated and refused over it. Agents cannot change the cap, and a hub-introduced device is refused (maintainer request and decision, 2026-11-12).
 - A billed provider must set a provider-side expiry, or the host destroys the desktop. Octant never installs, starts or stores a credential for a daemon.
+- Cua Spaces is offered on Linux and macOS hosts behind the local daemon socket; when no daemon is found, Settings shows a plain "Get Cua Spaces" link only and never bundles, installs, starts, updates, or signs it in (maintainer decisions, 2026-11-28).
 
 Not built yet:
 

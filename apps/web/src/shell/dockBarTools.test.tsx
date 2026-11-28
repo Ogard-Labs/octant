@@ -48,7 +48,7 @@ describe.each(placements)("a converted tool placed %s", (placement) => {
       />,
     );
     expect(document.querySelector(".agent-hierarchy__header")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Subagents" })).toHaveClass("visually-hidden");
+    expect(screen.getByRole("heading", { name: "Agents" })).toHaveClass("visually-hidden");
     const choice = items().find((item) => item.kind === "choice");
     expect(choice).toMatchObject({ label: "View", value: "list" });
     if (choice?.kind !== "choice") throw new Error("Expected a view switch.");
@@ -120,7 +120,7 @@ describe("a converted tool placed where nothing hosts it", () => {
         view="list"
       />,
     );
-    expect(screen.getByRole("heading", { name: "Subagents" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
     render(<SideChatPanel renderSidecar={() => null} sourceTitle="Fix the build" />);
     expect(screen.getByText("Side Chat about Fix the build")).toBeInTheDocument();
   });

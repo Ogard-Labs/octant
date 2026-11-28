@@ -64,7 +64,7 @@ describe("CodeOverview", () => {
       render(element);
       await screen.findByText("Only this described task.");
       expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
-      await userEvent.click(screen.getByRole("button", { name: "Inspect submitted task" }));
+      await userEvent.click(screen.getByRole("button", { name: "Inspect submitted thread" }));
       expect(onOpenThread).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000021");
       expect(onCreateThread).not.toHaveBeenCalled();
       expect(executePlannerProposal).not.toHaveBeenCalled();
@@ -136,9 +136,11 @@ describe("CodeOverview", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Only the described parser fix.",
     );
-    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
     expect(
-      screen.getByText("Choose an available provider and model before approving this task."),
+      screen.getByRole("button", { name: "Approve and start described thread" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Choose an available provider and model before approving this thread."),
     ).toBeVisible();
     expect(onCreateThread).not.toHaveBeenCalled();
     rerender(
@@ -917,7 +919,9 @@ describe("CoordinatorProposalCards", () => {
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
       "Intent of worker 01.",
     );
-    expect(screen.getByRole("button", { name: "Approve and start described task" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Approve and start described thread" }),
+    ).toBeDisabled();
     expect(onCreateThread).not.toHaveBeenCalled();
   });
 

@@ -94,7 +94,7 @@ describe.each(HOSTS)("Computer use Settings on a $hostPlatform host", (host) => 
     );
 
     expect(
-      screen.getByText(`Allow tasks to request access to applications on ${host.computer}.`),
+      screen.getByText(`Allow threads to request access to applications on ${host.computer}.`),
     ).toBeVisible();
     // Computer use runs only on macOS, so its permission section keeps naming macOS.
     expect(screen.getByText("macOS permissions")).toBeVisible();

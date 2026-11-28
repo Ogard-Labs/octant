@@ -108,7 +108,7 @@ export function DesktopPreview(props: {
       } else {
         setReview(undefined);
         setNotice(
-          "The host refused this preview. Check that the dev server runs in this task’s own worktree, then review again.",
+          "The host refused this preview. Check that the dev server runs in this thread’s own worktree, then review again.",
         );
       }
     } catch {

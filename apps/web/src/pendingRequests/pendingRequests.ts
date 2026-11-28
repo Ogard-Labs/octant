@@ -161,7 +161,7 @@ const ROLE_WORD: Readonly<Record<ChildPendingRequest["child"]["role"], string>> 
  * subagent needs your approval" or "Review subagent asked a question".
  */
 export function childRequestHeadline(request: ChildPendingRequest): string {
-  const subject = `${ROLE_WORD[request.child.role]} subagent`;
+  const subject = `${ROLE_WORD[request.child.role]} agent`;
   return request.kind === "child-approval"
     ? `${subject} needs your approval`
     : `${subject} asked a question`;

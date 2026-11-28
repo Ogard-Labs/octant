@@ -143,7 +143,7 @@ export function BrowserSessionGrantsSection(props: {
   return (
     <SettingsSection
       title="Browser session permissions"
-      description="Allow a selected caller to use an existing sign-in on this host for exact sites. A routine's or child's permission is kept across a restart until it expires, is revoked or its caller changes; a terminal's ends with the host. File transfers and login or script permissions stay separate."
+      description="Allow a selected caller to use an existing sign-in on this host for exact sites. An automation's or child's permission is kept across a restart until it expires, is revoked or its caller changes; a terminal's ends with the host. File transfers and login or script permissions stay separate."
     >
       <SettingRow
         label="Session permissions"
@@ -154,7 +154,7 @@ export function BrowserSessionGrantsSection(props: {
           props.profiles.length === 0
             ? "No Browser profiles are available on this host. Check Browser profiles above, then reopen this page to reload them."
             : loaded && targets.length === 0
-              ? "No eligible routine or managed child in this Project. A caller needs current tool authority and a supported provider. Reviewing a permission starts nothing."
+              ? "No eligible automation or managed child in this Project. A caller needs current tool authority and a supported provider. Reviewing a permission starts nothing."
               : "Choose the caller and profile explicitly, then review sites and expiry."
         }
       >
@@ -248,8 +248,8 @@ export function BrowserSessionGrantsSection(props: {
             details={
               <>
                 <p>
-                  Permissions end at the displayed expiry or on revocation. Granting starts no task
-                  or routine.
+                  Permissions end at the displayed expiry or on revocation. Granting starts no
+                  thread or automation.
                 </p>
                 {review === undefined ? null : (
                   <p>
@@ -276,7 +276,7 @@ export function BrowserSessionGrantsSection(props: {
                         onValueChange={setTargetId}
                         options={targets.map((target) => ({
                           id: JSON.stringify(target.grantee),
-                          label: `${target.grantee.kind === "child" ? "Child" : target.grantee.kind === "routine" ? "Routine" : "Terminal"} · ${target.label}`,
+                          label: `${target.grantee.kind === "child" ? "Child" : target.grantee.kind === "routine" ? "Automation" : "Terminal"} · ${target.label}`,
                         }))}
                       />
                     </label>
@@ -343,7 +343,7 @@ export function BrowserSessionGrantsSection(props: {
             }
           >
             This caller can act as the account already signed in to this profile on the listed
-            sites. Grant only the intended task. Other sites, callers, login actions and file
+            sites. Grant only the intended thread. Other sites, callers, login actions and file
             transfers are not authorized.
           </OctantConfirmDialog>
         )}

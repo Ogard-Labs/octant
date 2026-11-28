@@ -372,6 +372,7 @@ describe("a window's request to a paired computer", () => {
         "POST /api/projects/repository-bootstrap/land-files",
         "POST /api/projects/commands",
         "GET /api/providers/bootstrap",
+        "POST /api/providers/commands",
         "GET /api/pending-requests",
         "POST /api/extensions/tool-approvals",
         "POST /api/hub/guest",
@@ -929,5 +930,36 @@ describe("reaching a paired computer through its hub when away", () => {
       enabled: true,
       address: { hubMemberId: HUB, relayUrl: RELAY_URL },
     });
+  });
+
+  it("allows POST /api/providers/commands with room for slow provider CLI updates", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const providerUpdate = await ask({
+        origin: ORIGIN,
+        method: "POST",
+        path: "/api/providers/commands",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "update-provider-cli",
+          instanceId: "80000000-0000-4000-8000-000000000001",
+        }),
+      });
+      expect(providerUpdate.answer.status).toBe("answered");
+      expect(timeoutSpy).toHaveBeenCalledWith(
+        PAIRED_COMPUTER_REQUEST_LIMITS.providerCommandTimeoutMs,
+      );
+
+      timeoutSpy.mockClear();
+      const bootstrap = await ask({
+        origin: ORIGIN,
+        method: "GET",
+        path: "/api/providers/bootstrap",
+      });
+      expect(bootstrap.answer.status).toBe("answered");
+      expect(timeoutSpy).toHaveBeenCalledWith(PAIRED_COMPUTER_REQUEST_LIMITS.timeoutMs);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 });

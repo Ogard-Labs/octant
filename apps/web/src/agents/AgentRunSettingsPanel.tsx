@@ -25,8 +25,8 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 // so Off is the only way to hold them back; there is no manual start to fall
 // back on.
 const DESCRIPTION: Readonly<Record<AgentRunSelectableCreationPosture, string>> = {
-  automatic: "The agent can hand work to a helper, which never gets more access than its thread.",
-  off: "Off: the agent does all the work itself, and helpers already started stay visible.",
+  automatic: "The thread can hand work to an agent, which never gets more access than its thread.",
+  off: "Off: the thread does all the work itself, and agents already started stay visible.",
 };
 
 /**
@@ -56,7 +56,7 @@ export function AgentRunSettingsPanel(props: {
       setMessage(
         error instanceof AgentRunSettingsClientFailure
           ? error.message
-          : "Helper agent settings are unavailable.",
+          : "Agent settings are unavailable.",
       );
       setStatus("error");
     }
@@ -85,13 +85,13 @@ export function AgentRunSettingsPanel(props: {
         setSettings(updated);
       } catch (error) {
         if (error instanceof AgentRunSettingsClientFailure && error.code === "conflict") {
-          setMessage("Helper agent settings changed elsewhere. Reloaded the current settings.");
+          setMessage("Agent settings changed elsewhere. Reloaded the current settings.");
           await load();
         } else {
           setMessage(
             error instanceof AgentRunSettingsClientFailure
               ? error.message
-              : "Saving helper agent settings failed.",
+              : "Saving agent settings failed.",
           );
         }
       } finally {
@@ -118,12 +118,12 @@ export function AgentRunSettingsPanel(props: {
   );
 
   if (status === "loading") {
-    return <p role="status">Loading helper agent settings…</p>;
+    return <p role="status">Loading agent settings…</p>;
   }
   if (status === "error") {
     return (
       <OctantAlert className="agent-run-settings-panel__error" tone="danger">
-        {message ?? "Helper agent settings are unavailable."}
+        {message ?? "Agent settings are unavailable."}
       </OctantAlert>
     );
   }
@@ -132,12 +132,12 @@ export function AgentRunSettingsPanel(props: {
   const limits = effectiveAgentRunConcurrency(settings ?? {});
 
   return (
-    <section aria-label="Helper agents" className="agent-run-settings-panel">
-      <SettingsSection title="Helper agents">
+    <section aria-label="Agents" className="agent-run-settings-panel">
+      <SettingsSection title="Agents">
         <div className="setgroup">
           <SettingRow
             description={DESCRIPTION[on ? "automatic" : "off"]}
-            label="Let the agent start helper agents"
+            label="Let threads start agents"
             focused={props.focused === true}
             scope="app"
             settingId="subagent-creation-posture"
@@ -145,13 +145,13 @@ export function AgentRunSettingsPanel(props: {
             <OctantSwitch
               checked={on}
               disabled={saving}
-              label="Let the agent start helper agents"
+              label="Let threads start agents"
               onCheckedChange={(checked) => void choose(checked ? "automatic" : "off")}
             />
           </SettingRow>
           <SettingRow
-            description="How many helpers one thread runs at once."
-            more="Waiting helpers don't count."
+            description="How many agents one thread runs at once."
+            more="Waiting agents don't count."
             label="At once in one thread"
             scope="app"
             settingId="subagent-concurrency-per-thread"
@@ -166,7 +166,7 @@ export function AgentRunSettingsPanel(props: {
             />
           </SettingRow>
           <SettingRow
-            description="How many helpers run at once across all threads."
+            description="How many agents run at once across all threads."
             label="At once across Octant"
             scope="app"
             settingId="subagent-concurrency-on-host"
@@ -187,7 +187,7 @@ export function AgentRunSettingsPanel(props: {
               DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES
             }
             defaultValue={String(DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES)}
-            description="How long a helper may work per attempt, not counting waits for approval or answers."
+            description="How long an agent may work per attempt, not counting waits for approval or answers."
             more="Project and thread ceilings still apply, and a change affects the next attempt."
             scope="app"
             settingId="subagent-working-minutes"
@@ -205,8 +205,8 @@ export function AgentRunSettingsPanel(props: {
           </SettingRow>
           <SettingRow
             label="No time limit at Full access"
-            description="Helpers of a thread at Full access work until they finish or you cancel them."
-            more="A helper whose provider stops responding then keeps its place until you cancel it. Other threads keep the limit above."
+            description="Agents of a thread at Full access work until they finish or you cancel them."
+            more="An agent whose provider stops responding then keeps its place until you cancel it. Other threads keep the limit above."
             scope="app"
             settingId="subagent-no-limit-full-access"
           >
@@ -227,8 +227,8 @@ export function AgentRunSettingsPanel(props: {
               DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES
             }
             defaultValue={String(DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES)}
-            description="How long a helper waits when its provider is taking no more requests, before it stops and can be retried."
-            more="A change applies to helpers already waiting."
+            description="How long an agent waits when its provider is taking no more requests, before it stops and can be retried."
+            more="A change applies to agents already waiting."
             scope="app"
             settingId="subagent-provider-wait-minutes"
           >

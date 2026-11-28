@@ -79,7 +79,7 @@ export function AgentRunDependencyGraph(props: {
   return (
     <div className="agent-run-graph__scroll" ref={setScroller}>
       <div
-        aria-label={props.label ?? "Subagent graph"}
+        aria-label={props.label ?? "Agent graph"}
         className="agent-run-graph"
         role="group"
         style={{ width: layout.width, height: layout.height }}
