@@ -18,11 +18,21 @@ import {
   AUTOMATION_WEBHOOK_SOURCE_ID,
   EventActor,
   decodeAutomationCommand,
-  type AutomationRun,
+  decodeWorkThreadId,
   type HubGrant,
   type UtcTimestamp,
 } from "@octant/contracts";
+import {
+  WORK_TURN_CAPABILITIES,
+  decodeStartWorkThreadTurnCommand,
+  decodeWorkTurnAccepted,
+  decodeWorkTurnUpdated,
+} from "@octant/contracts/work-turns";
 import { AutomationCommandService } from "../automation/automationCommandService";
+import {
+  AutomationDispatchService,
+  buildAutomationAuthorityFactsFromHost,
+} from "../automation/automationDispatchService";
 import {
   AutomationEventSources,
   prepareAutomationEventDefinition,
@@ -34,10 +44,13 @@ import {
   automationDefinitionDraftFixture,
   automationLocalWindowPrincipal,
 } from "../automation/automationTestFixtures";
+import { createAutomationWorkDispatchPort } from "../automation/automationWorkDispatchPort";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import { WorkTurnProjection } from "../work/workTurnProjection";
+import { workExternalInputReceipt } from "../work/workExternalInput";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
 import { startPublicEntrance } from "./publicEntrance";
 
@@ -141,13 +154,14 @@ describe("webhook triggers through the hub", () => {
       projections: runtime.projections,
       clock: now,
     });
+    const actor = Schema.decodeUnknownSync(EventActor)({
+      kind: "system",
+      actorId: AUTOMATION_TEST_IDS.actor,
+    });
     const store = new AutomationEventStore({
       journal,
       uuid: randomUUID,
-      actor: Schema.decodeUnknownSync(EventActor)({
-        kind: "system",
-        actorId: AUTOMATION_TEST_IDS.actor,
-      }),
+      actor,
     });
     const commands = new AutomationCommandService({
       store,
@@ -155,14 +169,144 @@ describe("webhook triggers through the hub", () => {
       hostId: "local",
       clock: now,
     });
-    const dispatched: AutomationRun[] = [];
-    const offers = vi.fn(({ run }: { readonly run: AutomationRun }) => {
-      dispatched.push(run);
+    const workTurns = new WorkTurnProjection();
+    const launchedThreads: string[] = [];
+    const launchedTurns: Array<{
+      readonly threadId: string;
+      readonly prompt: string;
+      readonly externalDataText?: string | undefined;
+    }> = [];
+    const work = createAutomationWorkDispatchPort({
+      threads: {
+        bootstrap: async () => ({ threads: [] }),
+        execute: async (_scope, raw) => {
+          if (typeof raw !== "object" || raw === null || !("threadId" in raw)) {
+            throw new Error("Missing created work thread identity.");
+          }
+          const threadId = decodeWorkThreadId(raw.threadId);
+          launchedThreads.push(String(threadId));
+          return { kind: "thread-created", thread: { id: threadId } };
+        },
+      },
+      turns: {
+        startFirstTurn: async (_scope, raw, options) => {
+          const command = decodeStartWorkThreadTurnCommand(raw);
+          launchedTurns.push({
+            threadId: String(command.threadId),
+            prompt: command.prompt,
+            externalDataText: options?.externalData?.content.text,
+          });
+          const acceptedAt = now();
+          const externalInput =
+            options?.externalData === undefined
+              ? undefined
+              : workExternalInputReceipt(options.externalData);
+          const accepted = decodeWorkTurnAccepted({
+            kind: "turn-accepted",
+            requestId: command.requestId,
+            threadId: command.threadId,
+            turnId: command.turnId,
+            projectId: AUTOMATION_TEST_IDS.project,
+            authority: command.authority,
+            providerSessionId: command.requestId,
+            prompt: command.prompt,
+            ...(externalInput === undefined ? {} : { externalInput }),
+            capabilities: WORK_TURN_CAPABILITIES,
+            acceptedAt,
+          });
+          const completed = decodeWorkTurnUpdated({
+            kind: "turn-updated",
+            requestId: command.requestId,
+            threadId: command.threadId,
+            turnId: command.turnId,
+            status: "completed",
+            response: "Webhook routine completed",
+            updatedAt: acceptedAt,
+          });
+          journal.append({
+            aggregate: { aggregateType: "work-turn", aggregateId: command.requestId },
+            expectedVersion: 0,
+            events: [
+              {
+                eventId: randomUUID(),
+                eventName: "work.turn-accepted@1",
+                eventVersion: 1,
+                correlationId: randomUUID(),
+                actor,
+                payload: accepted,
+                occurredAt: accepted.acceptedAt,
+              },
+              {
+                eventId: randomUUID(),
+                eventName: "work.turn-updated@1",
+                eventVersion: 1,
+                correlationId: randomUUID(),
+                actor,
+                payload: completed,
+                occurredAt: completed.updatedAt,
+              },
+            ],
+          });
+          workTurns.apply(accepted);
+          workTurns.apply(completed);
+          const persisted = workTurns.lookup(command.requestId);
+          if (persisted === undefined) throw new Error("Missing journaled Work turn.");
+          return { kind: "accepted", turn: persisted };
+        },
+      },
+      readTurn: (requestId) => workTurns.lookup(requestId),
+      prepareFileInput: async () => () => true,
+      markFileInput: () => true,
+      clock: now,
+      uuid: randomUUID,
+    });
+    const dispatch = new AutomationDispatchService({
+      store,
+      projection,
+      code: {
+        createApprovalGatedThread: async () => {
+          throw new Error("Unexpected Code dispatch in Work webhook routine smoke.");
+        },
+        startOrRecoverFirstTurn: async () => {
+          throw new Error("Unexpected Code turn launch in Work webhook routine smoke.");
+        },
+      },
+      work,
+      capacity: {
+        admit: () => ({ kind: "admitted", release: () => undefined }),
+      },
+      resolveFacts: ({ definition }) =>
+        buildAutomationAuthorityFactsFromHost({
+          hostId: "local",
+          project: {
+            id: definition.projectId,
+            type: definition.mode,
+            lifecycle: "active",
+            version: definition.projectVersion,
+            binding: { canonicalRoot: autoDir },
+            bindingHistory: [
+              {
+                revisionId: AUTOMATION_TEST_IDS.bindingRevision,
+                currentBinding: { canonicalRoot: autoDir },
+              },
+            ],
+          } as never,
+          providerInstance: {
+            id: AUTOMATION_TEST_IDS.providerInstance,
+            enabled: true,
+          } as never,
+          providerSupportsModel: true,
+          executionProfileMatches: true,
+          authorityDigestMatches: true,
+          codeBindingMatches: true,
+          workBindingMatches: true,
+        }),
+      now,
     });
     const scheduler = new AutomationSchedulerService({
       store,
       projection,
-      dispatch: { offer: offers },
+      dispatch,
       now,
     });
 
@@ -234,7 +378,8 @@ describe("webhook triggers through the hub", () => {
 
     // The routine is armed before anything arrives: its first look is the baseline.
     await look();
-    expect(offers).not.toHaveBeenCalled();
+    expect(launchedThreads).toEqual([]);
+    expect(launchedTurns).toEqual([]);
 
     network.stop(laptop.address);
     const answer = await postDelivery(entrance.port, created.endpointId, created.secret, "msg_1");
@@ -247,16 +392,22 @@ describe("webhook triggers through the hub", () => {
     await hub.webhooks.tick();
     expect(hub.webhooks.status()).toMatchObject({ queued: 0, forwarded: 1 });
     await look();
-    expect(offers).toHaveBeenCalledOnce();
-    expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]?.occurrence.kind).toBe("integration-event");
-    if (dispatched[0]?.occurrence.kind === "integration-event") {
-      expect(dispatched[0].occurrence.source.event.id).toBe(`${created.endpointId}:msg_1`);
-    }
-
-    // Complete the run so a duplicate delivery would claim a second run if dedupe did not stop it.
+    await vi.waitFor(() => {
+      expect(launchedThreads).toHaveLength(1);
+      expect(launchedTurns).toHaveLength(1);
+      expect(projection.activeRun(routineCreated.automation.id)?.lifecycle).toBe("running");
+    });
     const firstRun = projection.activeRun(routineCreated.automation.id);
-    if (firstRun === undefined) throw new Error("Expected active dispatched run.");
+    if (firstRun === undefined) throw new Error("Expected active running routine run.");
+    expect(firstRun.threadId).toBe(launchedThreads[0]);
+    expect(firstRun.occurrence.kind).toBe("integration-event");
+    if (firstRun.occurrence.kind === "integration-event") {
+      expect(firstRun.occurrence.source.event.id).toBe(`${created.endpointId}:msg_1`);
+    }
+    expect(launchedTurns[0]?.externalDataText).toContain("Nightly CI");
+    expect(launchedTurns[0]?.externalDataText).toContain("msg_1");
+
+    // Complete the run so a duplicate delivery would launch a second thread if dedupe did not stop it.
     store.appendRunStatusChanged({
       automationId: routineCreated.automation.id,
       runId: firstRun.id,
@@ -268,14 +419,15 @@ describe("webhook triggers through the hub", () => {
     });
 
     // The sender redelivers the same id through the real public entrance once the hub's queue is
-    // empty: the spoke's own claim stops it and the scheduler dispatches no second run.
+    // empty: the spoke's own claim stops it and the scheduler dispatches no second run or thread.
     expect(
       (await postDelivery(entrance.port, created.endpointId, created.secret, "msg_1")).status,
     ).toBe(202);
     await hub.webhooks.tick();
     expect(laptop.spokeWebhooks.view().log.at(-1)?.outcome).toBe("duplicate");
     await look();
-    expect(offers).toHaveBeenCalledOnce();
+    expect(launchedThreads).toHaveLength(1);
+    expect(launchedTurns).toHaveLength(1);
     expect(
       projection.listRuns({ automationId: routineCreated.automation.id, limit: 10 }).runs,
     ).toHaveLength(1);

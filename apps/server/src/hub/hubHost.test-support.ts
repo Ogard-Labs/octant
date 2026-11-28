@@ -26,6 +26,8 @@ import type {
   HubDelegationRecordedPayload,
   HubMembershipChangedPayload,
   HubSignInKind,
+  PublicForwardAnswer,
+  PublicForwardEnvelope,
 } from "@octant/contracts";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -58,6 +60,8 @@ import { askVisitorSpoke, spokeVisitorHubPort } from "./visitorLinks";
 import { HubRelayService, hubRelayAddress } from "./hubRelayService";
 import { hubPublicOrigin } from "./hubPublicOrigin";
 import { SpokeRelayService } from "./spokeRelayService";
+import type { PublicEntrance } from "./publicEntrance";
+import { forwardToActingHub } from "./publicEntranceForwarding";
 import { openRelayTunnel, spokeRelayHubPort } from "./relayLinks";
 import {
   WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
@@ -320,6 +324,12 @@ export interface HubTestHost {
   readonly privateKey: KeyObject;
   /** Moves the clock the owner routes read; the rest of the host keeps real time. */
   readonly clock: { offset: number };
+  /** Attaches a test public entrance so forwarded member requests reach its route table. */
+  readonly attachPublicEntrance: (entrance: Pick<PublicEntrance, "dispatchForwarded">) => void;
+  /** Forwards an admitted public request to the acting hub over the signed private transport. */
+  readonly forwardPublicRequest: (
+    envelope: PublicForwardEnvelope,
+  ) => Promise<PublicForwardAnswer | undefined>;
 }
 
 export async function startHubTestHost(input: {
@@ -445,6 +455,7 @@ export async function startHubTestHost(input: {
     | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
     | undefined;
   let listenerPort = 8443;
+  let networkPort = 8443;
   if (input.useNodeServe === true) {
     const served = await nodeServe({
       hostname: "127.0.0.1",
@@ -469,8 +480,9 @@ export async function startHubTestHost(input: {
       },
     });
     listenerPort = Number(served.url.port);
+    networkPort = listenerPort;
     origin = `https://${input.address}:${listenerPort}`;
-    input.network.register(input.address, listenerPort);
+    input.network.register(input.address, networkPort);
     input.cleanups.push(() => served.stop(true));
   }
   const identity: HubHostIdentity = {
@@ -917,6 +929,7 @@ export async function startHubTestHost(input: {
     serve: (socket, facts) => gateway?.listener()?.serveRelayed(socket, facts) ?? false,
     record: (change) => records.push(change),
   });
+  let attachedPublicEntrance: Pick<PublicEntrance, "dispatchForwarded"> | undefined;
   const hubLinkRoutes = createHubLinkRouteHandler({
     hub,
     spoke,
@@ -949,6 +962,12 @@ export async function startHubTestHost(input: {
     spokeVisitors,
     relay: relayHub,
     spokeRelay,
+    publicEntrance: {
+      dispatchForwarded: async (envelope) =>
+        attachedPublicEntrance === undefined
+          ? { status: 404, headers: {}, body: "" }
+          : attachedPublicEntrance.dispatchForwarded(envelope),
+    },
     publicState: () => state.load(),
     ...(input.wakeClock === undefined ? {} : { now: input.wakeClock }),
   });
@@ -1196,8 +1215,8 @@ export async function startHubTestHost(input: {
     await new Promise<void>((resolve) => testServer.listen(0, "127.0.0.1", resolve));
     const address = testServer.address();
     if (address === null || typeof address === "string") throw new Error("No listener port.");
-    input.network.register(input.address, address.port);
-    listenerPort = address.port;
+    networkPort = address.port;
+    input.network.register(input.address, networkPort);
     server = testServer;
     input.cleanups.push(
       () =>
@@ -1280,7 +1299,7 @@ export async function startHubTestHost(input: {
       Object.assign(listener, { hostname: moved, origin, tlsPin: renamed.tlsPin });
       server?.setSecureContext(renamed.tls);
       gateway = await startGateway(moved, renamed.tls);
-      input.network.register(moved, listenerPort);
+      input.network.register(moved, networkPort);
     },
     requests,
     hubLink,
@@ -1288,5 +1307,16 @@ export async function startHubTestHost(input: {
     hostPublicKey: publicDer.toString("base64url"),
     privateKey: keys.privateKey,
     clock,
+    attachPublicEntrance: (entrance) => {
+      attachedPublicEntrance = entrance;
+    },
+    forwardPublicRequest: (envelope) =>
+      forwardToActingHub({
+        state,
+        identity: () => identity,
+        transport,
+        envelope,
+        now: Date.now(),
+      }),
   };
 }

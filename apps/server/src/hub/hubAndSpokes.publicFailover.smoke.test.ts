@@ -46,18 +46,24 @@ function start(network: HubTestNetwork, name: string, last: number) {
 async function startEntrance(host: HubTestHost): Promise<PublicEntrance> {
   const entrance = await startPublicEntrance({
     port: 0,
-    role: () =>
-      servesPublicEntrance({
-        hubEnabled: host.hub.status().enabled,
-        state: host.state.load(),
-      })
-        ? "serve"
-        : "closed",
+    role: () => {
+      if (
+        servesPublicEntrance({
+          hubEnabled: host.hub.status().enabled,
+          state: host.state.load(),
+        })
+      ) {
+        return "serve";
+      }
+      return host.spoke.status().membership === "member" ? "forward" : "closed";
+    },
     handlers: () => ({
       webhook: (request) => host.webhooks.handle(request),
       ...host.visitors.handlers(),
     }),
+    forward: (envelope) => host.forwardPublicRequest(envelope),
   });
+  host.attachPublicEntrance(entrance);
   cleanups.push(() => entrance.close());
   return entrance;
 }
@@ -180,7 +186,8 @@ describe("the public entrance during failover", () => {
     const revoked = await share(spoke);
     expect(standby.visitors.heldGrants()).toHaveLength(2);
 
-    // Through the hub's public entrance, as on any day. The standby holds copies but serves nothing.
+    // Through the hub's public entrance, as on any day. While the hub is up, an enabled standby
+    // forwards webhooks to the acting hub (never serving locally) and refuses forwarded visitor opens.
     expect((await postDelivery(hubEntrance, created.endpointId, created.secret, "m1")).status).toBe(
       202,
     );
@@ -188,9 +195,12 @@ describe("the public entrance during failover", () => {
     const visitor = browser();
     expect((await openLink(hubEntrance, kept.linkId, kept.secret, visitor)).status).toBe(200);
     expect(
-      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m2")).status,
-    ).toBe(404);
-    expect((await openLink(standbyEntrance, kept.linkId, kept.secret, visitor)).status).toBe(404);
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m0")).status,
+    ).toBe(202);
+    expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 0 });
+    await hub.webhooks.tick();
+    expect((await openLink(standbyEntrance, kept.linkId, kept.secret, visitor)).status).toBe(501);
+    expect(standby.visitors.handlers()).toEqual({});
 
     // The hub stops; after the failover time the standby stands in and serves both through its public listener.
     network.stop(hub.address);
@@ -240,18 +250,21 @@ describe("the public entrance during failover", () => {
     // m3 was already queued on the hub, so only m4 is added: three wait, each once.
     expect(hub.webhooks.status().queued).toBe(3);
     expect(hub.records.map((record) => record.change)).toContain("webhook-deliveries-handed-back");
-    // Back to closed: the standby's entrance serves nothing once it steps down.
+    // Back to forwarding: after hand-back, the standby forwards webhooks to the returned hub rather
+    // than queuing or serving them locally.
     expect(
       (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m5")).status,
-    ).toBe(404);
+    ).toBe(202);
+    expect(standby.webhooks.status().queued).toBe(0);
+    expect(hub.webhooks.status().queued).toBe(4);
 
     network.start(spoke.address);
     await hub.webhooks.tick();
     expect(hub.webhooks.status()).toMatchObject({ queued: 0 });
     const view = spoke.spokeWebhooks.view();
-    // m1 to m4 each ran once; m2's second arrival is a duplicate the spoke's own claim stopped.
-    expect(view.endpoints[0]?.deliveries).toBe(4);
-    expect(view.log.filter((entry) => entry.outcome === "accepted")).toHaveLength(4);
+    // m0, m1..m5 each ran once; m2's second arrival is a duplicate the spoke's own claim stopped.
+    expect(view.endpoints[0]?.deliveries).toBe(6);
+    expect(view.log.filter((entry) => entry.outcome === "accepted")).toHaveLength(6);
     expect(view.log.filter((entry) => entry.outcome === "duplicate")).toHaveLength(1);
   });
 
@@ -286,7 +299,8 @@ describe("the public entrance during failover", () => {
     expect(standby.visitors.handlers()).toEqual({});
     expect(
       (await postDelivery(standbyEntrance, created.endpointId, created.secret, "x")).status,
-    ).toBe(404);
+    ).toBe(503);
+    expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 0 });
   });
 
   it("a standby serves its own webhook endpoint and visitor link through its public entrance while it stands in", async () => {
