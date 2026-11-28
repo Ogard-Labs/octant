@@ -19,6 +19,7 @@ export type HostControlOperation =
   | "stop"
   | "drain"
   | "restart"
+  | "update"
   | "enable"
   | "disable"
   | "backup"
@@ -40,6 +41,7 @@ export const HOST_CONTROL_ACTION_NAMES: Readonly<Record<HostControlOperation, st
   stop: "host.service.stop",
   drain: "host.service.drain",
   restart: "host.service.restart",
+  update: "host.service.update",
   enable: "host.service.enable",
   disable: "host.service.disable",
   backup: "host.store.backup",

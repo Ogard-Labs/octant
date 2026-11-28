@@ -4,6 +4,8 @@ import {
   type HostLifecycleAction,
   HostLifecycleOutcome,
   HostRestoreOutcome,
+  type HostUpdateRequest,
+  HostUpdateStatus,
   SetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
@@ -43,6 +45,7 @@ export interface HostControlClient {
   status(): Promise<HostControlStatus>;
   readDataMap(): Promise<HostDataMap>;
   lifecycle(action: HostLifecycleAction): Promise<HostLifecycleOutcome>;
+  update(request: HostUpdateRequest): Promise<HostUpdateStatus>;
   backup(label?: string): Promise<HostBackupOutcome>;
   restore(): Promise<HostRestoreOutcome>;
   setMemoryLimits(request: SetHostMemoryLimitsRequest): Promise<SetHostMemoryLimitsOutcome>;
@@ -57,8 +60,10 @@ export interface HostControlClient {
 
 export class HostControlClientError extends Error {
   override readonly name = "HostControlClientError";
-  constructor(message: string) {
+  readonly statusCode?: number;
+  constructor(message: string, statusCode?: number) {
     super(message);
+    if (statusCode !== undefined) this.statusCode = statusCode;
   }
 }
 
@@ -104,6 +109,7 @@ export function createHostControlClient(options: HostControlClientOptions): Host
     if (!response.ok && !(input.decodableStatuses ?? []).includes(response.status)) {
       throw new HostControlClientError(
         `Host control request failed with status ${response.status}.`,
+        response.status,
       );
     }
 
@@ -138,6 +144,14 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         body: { action },
       });
       return decodeOrThrow(decodeHostAnswer(HostLifecycleOutcome), body);
+    },
+    async update(request) {
+      const body = await call({
+        path: "/api/host-control/update",
+        method: "POST",
+        body: request,
+      });
+      return decodeOrThrow(decodeHostAnswer(HostUpdateStatus), body);
     },
     async backup(label) {
       const body = await call({

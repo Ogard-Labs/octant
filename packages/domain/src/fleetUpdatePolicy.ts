@@ -100,11 +100,35 @@ export type FleetUpdateOctantInventory =
       readonly kind: "remote-desktop";
       readonly currentVersion?: string;
       readonly availableVersion?: string;
+      readonly ring?: AppReleaseRing;
+      readonly requestId?: string;
+      readonly state?:
+        | "update-available"
+        | "up-to-date"
+        | "already-updating"
+        | "manual-update-required"
+        | "offline"
+        | "no-permission"
+        | "unavailable";
+      readonly message?: string;
     }
   | {
       readonly kind: "standalone-headless";
       readonly currentVersion?: string;
+      readonly toVersion?: string;
       readonly ring?: AppReleaseRing;
+      readonly requestId?: string;
+      readonly storeMigration?: boolean;
+      readonly state?:
+        | "update-available"
+        | "up-to-date"
+        | "ring-no-headless-build"
+        | "already-updating"
+        | "manual-update-required"
+        | "offline"
+        | "no-permission"
+        | "unavailable";
+      readonly message?: string;
     }
   | {
       readonly kind: "none";
@@ -152,6 +176,17 @@ export type FleetUpdateStep =
       readonly storeMigration: boolean;
     }
   | {
+      readonly phase: "remote-octant-host-control";
+      readonly stepId: string;
+      readonly hostId: string;
+      readonly hostDisplayName: string;
+      readonly remoteHostKind: "headless" | "desktop";
+      readonly requestId: string;
+      readonly fromVersion: string;
+      readonly toVersion: string;
+      readonly storeMigration: boolean;
+    }
+  | {
       readonly phase: "local-app";
       readonly stepId: string;
       readonly hostId: string;
@@ -186,6 +221,7 @@ export interface FleetUpdateMachinePlan {
   readonly octantAction:
     | "local-app"
     | "remote-octant-ssh"
+    | "remote-octant-host-control"
     | "up-to-date"
     | "deferred"
     | "skipped"
@@ -261,15 +297,72 @@ function octantSkipForHost(
     }
   }
   if (host.octant.kind === "remote-desktop") {
-    return {
-      reason: "remote-desktop-not-yet-supported",
-      message: fleetUpdateSkipMessage("remote-desktop-not-yet-supported"),
-    };
+    switch (host.octant.state) {
+      case "update-available":
+      case "up-to-date":
+        return undefined;
+      case "already-updating":
+        return {
+          reason: "already-updating",
+          message: host.octant.message ?? fleetUpdateSkipMessage("already-updating"),
+        };
+      case "manual-update-required":
+        return {
+          reason: "manual-update-required",
+          message: host.octant.message ?? fleetUpdateSkipMessage("manual-update-required"),
+        };
+      case "no-permission":
+        return {
+          reason: "no-permission",
+          message: host.octant.message ?? fleetUpdateSkipMessage("no-permission"),
+        };
+      case "offline":
+      case "unavailable":
+        return {
+          reason: "offline",
+          message: host.octant.message ?? fleetUpdateSkipMessage("offline"),
+        };
+      case undefined:
+        return {
+          reason: "remote-desktop-not-yet-supported",
+          message:
+            host.octant.message ?? fleetUpdateSkipMessage("remote-desktop-not-yet-supported"),
+        };
+    }
   }
   if (host.octant.kind === "standalone-headless") {
-    const reason: FleetUpdateSkipReason =
-      host.octant.ring === "preview" ? "ring-no-headless-build" : "manual-update-required";
-    return { reason, message: fleetUpdateSkipMessage(reason) };
+    switch (host.octant.state) {
+      case "update-available":
+      case "up-to-date":
+        return undefined;
+      case "ring-no-headless-build":
+        return {
+          reason: "ring-no-headless-build",
+          message: host.octant.message ?? fleetUpdateSkipMessage("ring-no-headless-build"),
+        };
+      case "already-updating":
+        return {
+          reason: "already-updating",
+          message: host.octant.message ?? fleetUpdateSkipMessage("already-updating"),
+        };
+      case "no-permission":
+        return {
+          reason: "no-permission",
+          message: host.octant.message ?? fleetUpdateSkipMessage("no-permission"),
+        };
+      case "offline":
+      case "unavailable":
+        return {
+          reason: "offline",
+          message: host.octant.message ?? fleetUpdateSkipMessage("offline"),
+        };
+      case "manual-update-required":
+      case undefined: {
+        const reason: FleetUpdateSkipReason =
+          host.octant.ring === "preview" ? "ring-no-headless-build" : "manual-update-required";
+        return { reason, message: host.octant.message ?? fleetUpdateSkipMessage(reason) };
+      }
+    }
   }
   return undefined;
 }
@@ -299,14 +392,16 @@ export function planFleetUpdate(
   const machines: FleetUpdateMachinePlan[] = [];
   const providerSteps: Array<Extract<FleetUpdateStep, { readonly phase: "provider-cli" }>> = [];
   const remoteServerSteps: Array<
-    Extract<FleetUpdateStep, { readonly phase: "remote-octant-ssh" }>
+    Extract<FleetUpdateStep, { readonly phase: "remote-octant-ssh" | "remote-octant-host-control" }>
   > = [];
   const localAppSteps: Array<Extract<FleetUpdateStep, { readonly phase: "local-app" }>> = [];
 
   let hasLocalAppUpdate = false;
 
   for (const host of orderedHosts) {
-    const isHeadless = host.isHeadless === true || host.octant.kind === "ssh-member";
+    const isHeadless =
+      host.isHeadless ??
+      (host.octant.kind === "ssh-member" || host.octant.kind === "standalone-headless");
     const currentVersion =
       host.currentVersion ??
       (host.octant.kind === "ssh-member" ? host.octant.fromVersion : host.octant.currentVersion);
@@ -461,6 +556,60 @@ export function planFleetUpdate(
         octantSkipReason = skipped?.reason;
         octantNote = skipped?.message;
       }
+    } else if (host.octant.kind === "standalone-headless") {
+      if (
+        host.octant.state === "update-available" &&
+        host.octant.requestId !== undefined &&
+        host.octant.toVersion !== undefined
+      ) {
+        octantAction = "remote-octant-host-control";
+        targetOctantVersion = host.octant.toVersion;
+        remoteServerSteps.push({
+          phase: "remote-octant-host-control",
+          stepId: `host-control:${host.hostId}`,
+          hostId: host.hostId,
+          hostDisplayName: host.displayName,
+          remoteHostKind: "headless",
+          requestId: host.octant.requestId,
+          fromVersion: host.octant.currentVersion ?? currentVersion ?? "current",
+          toVersion: host.octant.toVersion,
+          storeMigration: host.octant.storeMigration === true,
+        });
+      } else if (host.octant.state === "up-to-date") {
+        octantAction = "up-to-date";
+      } else {
+        const skipped = octantSkipForHost(host);
+        octantAction = "skipped";
+        octantSkipReason = skipped?.reason;
+        octantNote = skipped?.message;
+      }
+    } else if (host.octant.kind === "remote-desktop") {
+      if (
+        host.octant.state === "update-available" &&
+        host.octant.requestId !== undefined &&
+        host.octant.availableVersion !== undefined
+      ) {
+        octantAction = "remote-octant-host-control";
+        targetOctantVersion = host.octant.availableVersion;
+        remoteServerSteps.push({
+          phase: "remote-octant-host-control",
+          stepId: `host-control:${host.hostId}`,
+          hostId: host.hostId,
+          hostDisplayName: host.displayName,
+          remoteHostKind: "desktop",
+          requestId: host.octant.requestId,
+          fromVersion: host.octant.currentVersion ?? currentVersion ?? "current",
+          toVersion: host.octant.availableVersion,
+          storeMigration: false,
+        });
+      } else if (host.octant.state === "up-to-date") {
+        octantAction = "up-to-date";
+      } else {
+        const skipped = octantSkipForHost(host);
+        octantAction = "skipped";
+        octantSkipReason = skipped?.reason;
+        octantNote = skipped?.message;
+      }
     } else {
       const skipped = octantSkipForHost(host);
       if (skipped !== undefined) {
@@ -473,7 +622,8 @@ export function planFleetUpdate(
     const hasMachineWork =
       outdatedProviders.length > 0 ||
       octantAction === "local-app" ||
-      octantAction === "remote-octant-ssh";
+      octantAction === "remote-octant-ssh" ||
+      octantAction === "remote-octant-host-control";
 
     let disposition: FleetUpdateMachineDisposition;
     let skipReason: FleetUpdateSkipReason | undefined;

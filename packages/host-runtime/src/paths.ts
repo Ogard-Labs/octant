@@ -65,6 +65,10 @@ export interface HostRuntimePaths {
   readonly hostInfoPath: string;
   readonly servicePolicyPath: string;
   readonly serviceLogPath: string;
+  /** Atomic terminal result written by the detached upgrade runner for the next host start to journal. */
+  readonly hostUpdateResultPath: string;
+  /** Pending update marker written before the detached upgrade runner launches. */
+  readonly hostUpdatePendingPath: string;
 }
 
 export function resolveHostRuntimePaths(
@@ -178,6 +182,8 @@ export function resolveHostRuntimePaths(
     hostInfoPath: join(dataDirectory, "octant-host.json"),
     servicePolicyPath: join(configDirectory, "service-policy.json"),
     serviceLogPath: join(logsDirectory, "service.log"),
+    hostUpdateResultPath: join(stateDirectory, "host-update-result.json"),
+    hostUpdatePendingPath: join(stateDirectory, "host-update-pending.json"),
   });
 }
 
