@@ -1,15 +1,15 @@
 {
   "claude": {
     "chat": {
-      "firstPromptBytes": 34079,
+      "firstPromptBytes": 34286,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49434,
+      "firstPromptBytes": 50114,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 65999,
+      "firstPromptBytes": 66679,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -27,15 +27,15 @@
   },
   "codex": {
     "chat": {
-      "firstPromptBytes": 34331,
+      "firstPromptBytes": 34538,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 49643,
+      "firstPromptBytes": 50323,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 66334,
+      "firstPromptBytes": 67014,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -53,15 +53,15 @@
   },
   "opencode": {
     "chat": {
-      "firstPromptBytes": 34978,
+      "firstPromptBytes": 35185,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 50695,
+      "firstPromptBytes": 51375,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 67535,
+      "firstPromptBytes": 68215,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -79,15 +79,15 @@
   },
   "acp": {
     "chat": {
-      "firstPromptBytes": 34978,
+      "firstPromptBytes": 35185,
       "laterTurnBytes": 4870
     },
     "work": {
-      "firstPromptBytes": 50695,
+      "firstPromptBytes": 51375,
       "laterTurnBytes": 8121
     },
     "code": {
-      "firstPromptBytes": 67535,
+      "firstPromptBytes": 68215,
       "laterTurnBytes": 8715
     },
     "chat-child": {
@@ -105,15 +105,15 @@
   },
   "pi": {
     "chat": {
-      "firstPromptBytes": 34978,
+      "firstPromptBytes": 35185,
       "laterTurnBytes": 0
     },
     "work": {
-      "firstPromptBytes": 50695,
+      "firstPromptBytes": 51375,
       "laterTurnBytes": 0
     },
     "code": {
-      "firstPromptBytes": 67535,
+      "firstPromptBytes": 68215,
       "laterTurnBytes": 0
     },
     "chat-child": {
@@ -131,16 +131,16 @@
   },
   "harness": {
     "chat": {
-      "firstPromptBytes": 43231,
-      "laterTurnBytes": 43231
+      "firstPromptBytes": 43438,
+      "laterTurnBytes": 43438
     },
     "work": {
-      "firstPromptBytes": 63145,
-      "laterTurnBytes": 63145
+      "firstPromptBytes": 63825,
+      "laterTurnBytes": 63825
     },
     "code": {
-      "firstPromptBytes": 80893,
-      "laterTurnBytes": 80893
+      "firstPromptBytes": 81573,
+      "laterTurnBytes": 81573
     },
     "chat-child": {
       "firstPromptBytes": 5156,

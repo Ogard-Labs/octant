@@ -190,6 +190,17 @@ describe("thread-finished arming and evaluation policy", () => {
     expect(
       evaluateThreadFinishWait({ wait: doneWait, target: presentTarget({ done: false }), now }),
     ).toEqual({ kind: "waiting" });
+    // Pre-existing Done evidence from before arming never fires or goes missed.
+    expect(
+      evaluateThreadFinishWait({
+        wait: doneWait,
+        target: presentTarget({
+          done: true,
+          doneAt: "2026-11-28T09:59:59.000Z" as UtcTimestamp,
+        }),
+        now,
+      }),
+    ).toEqual({ kind: "waiting" });
     expect(
       evaluateThreadFinishWait({
         wait: doneWait,

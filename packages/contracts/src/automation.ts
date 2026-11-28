@@ -313,19 +313,6 @@ export const AutomationFinishWaitSpec = Schema.Struct(AutomationFinishWaitSpecFi
   .pipe(Schema.filter((wait) => wait.expiresAt > wait.armedAt));
 export type AutomationFinishWaitSpec = typeof AutomationFinishWaitSpec.Type;
 
-export const AutomationFinishWaitRecord = Schema.Struct({
-  ...AutomationFinishWaitSpecFields,
-  state: AutomationFinishWaitState,
-  updatedAt: UtcTimestamp,
-  attestedTurnId: Schema.optional(AutomationOpaqueReference),
-  finishedAt: Schema.optional(UtcTimestamp),
-  runId: Schema.optional(AutomationRunId),
-  reason: Schema.optional(boundedText(512)),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((wait) => wait.expiresAt > wait.armedAt));
-export type AutomationFinishWaitRecord = typeof AutomationFinishWaitRecord.Type;
-
 export const AutomationScheduledTrigger = Schema.Union(
   AutomationOnceTrigger,
   AutomationIntervalTrigger,
@@ -485,6 +472,21 @@ export const AutomationAuthorPrincipal = Schema.Union(
   AutomationRemoteDevicePrincipal,
 );
 export type AutomationAuthorPrincipal = typeof AutomationAuthorPrincipal.Type;
+
+export const AutomationFinishWaitRecord = Schema.Struct({
+  ...AutomationFinishWaitSpecFields,
+  state: AutomationFinishWaitState,
+  updatedAt: UtcTimestamp,
+  /** Principal that armed this wait so revocation of that device blocks dispatch. */
+  armedBy: Schema.optional(AutomationAuthorPrincipal),
+  attestedTurnId: Schema.optional(AutomationOpaqueReference),
+  finishedAt: Schema.optional(UtcTimestamp),
+  runId: Schema.optional(AutomationRunId),
+  reason: Schema.optional(boundedText(512)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((wait) => wait.expiresAt > wait.armedAt));
+export type AutomationFinishWaitRecord = typeof AutomationFinishWaitRecord.Type;
 
 // Keep the authenticated command principal separate from author attribution:
 // a local-user actor UUID is not proof of an authenticated request.
@@ -968,6 +970,7 @@ export const AutomationThreadFinishedOccurrence = Schema.Struct({
   attestedTurnId: AutomationOpaqueReference,
   finishedAt: UtcTimestamp,
   waitId: Schema.optional(AutomationFinishWaitId),
+  armedBy: Schema.optional(AutomationAuthorPrincipal),
 }).annotations(strict);
 export type AutomationThreadFinishedOccurrence = typeof AutomationThreadFinishedOccurrence.Type;
 

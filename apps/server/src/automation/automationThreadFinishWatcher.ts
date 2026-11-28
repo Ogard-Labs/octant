@@ -248,6 +248,7 @@ export class AutomationThreadFinishWatcher {
       attestedTurnId: attestedTurnId as never,
       finishedAt,
       waitId: wait.waitId,
+      ...(wait.armedBy === undefined ? {} : { armedBy: wait.armedBy }),
     };
     const occurrenceKey = deriveAutomationOccurrenceKey(occurrence);
     if (this.#projection.isOccurrenceConsumed(definition.id, occurrenceKey)) {

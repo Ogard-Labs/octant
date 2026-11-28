@@ -77,7 +77,11 @@ export function revalidateAutomationAuthority(input: {
     !automationLevelFitsTrigger(snapshot) ||
     (input.run.occurrence?.kind === "thread-finished" &&
       (snapshot.projectLevel !== undefined ||
-        (snapshot.runLevel !== undefined && snapshot.runLevel !== "ask-first")))
+        (snapshot.runLevel !== undefined && snapshot.runLevel !== "ask-first") ||
+        (snapshot.mode === "work" &&
+          snapshot.runLevel === undefined &&
+          (snapshot.authorityProfile.effective.executionPolicy === "auto-accept-edits" ||
+            input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"))))
   ) {
     return blocked(
       "full-access-ineligible",

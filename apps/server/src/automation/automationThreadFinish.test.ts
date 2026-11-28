@@ -1040,4 +1040,154 @@ describe("thread-finished follow-ups and routine waits", () => {
     await hCoord.flushDispatches();
     expect(hCoord.dispatched).toHaveLength(0);
   });
+
+  it("revalidates the arming device on attached waits, enforces Ask first on captured auto-accept-edits Work authority, and hides attached finish-wait runs from legacy detail/history responses", async () => {
+    let deviceStillValid = true;
+    const h = createHarness({
+      principalOverride: remotePrincipal({ admittedBy: "host-person" }),
+      authorAuthorized: () => deviceStillValid,
+    });
+
+    // Locally-authored scheduled routine, wait attached by a paired device.
+    const routineId = decodeAutomationId(h.uuid());
+    const created = h.commands.execute(
+      decodeAutomationCommand({
+        kind: "create-automation",
+        automationId: routineId,
+        expectedVersion: 0,
+        principal: { kind: "local-window", windowId: String(WINDOW_ID), capabilityGeneration: 0 },
+        origin: { kind: "interactive" },
+        definition: automationDefinitionDraftFixture({
+          projectId: PROJECT as never,
+          trigger: { kind: "once", scheduledAt: "2026-12-01T09:00:00.000Z" as UtcTimestamp },
+        }),
+      }),
+    );
+    expect(created.kind).toBe("automation-created");
+
+    const attached = (await h.requestJson("/api/automations/follow-ups", {
+      method: "POST",
+      body: {
+        kind: "arm-routine-finish-wait",
+        automationId: routineId,
+        expectedVersion: 1,
+        targetThreadId: TARGET_THREAD,
+        targetMode: "code",
+        targetProjectId: TARGET_PROJECT,
+        condition: "turn-finished",
+      },
+    })) as { readonly status: number; readonly body: AutomationCommandResult };
+    expect(attached.status).toBe(200);
+    expect(attached.body.kind).toBe("automation-updated");
+
+    // Revoking the arming paired device must block the attached wait even though
+    // the routine itself was originally saved by a local window.
+    deviceStillValid = false;
+    h.setClock("2026-11-28T12:15:00.000Z");
+    h.targetFacts.set(
+      TARGET_THREAD,
+      presentTarget({
+        latestCompletedTurn: {
+          turnId: "turn-attached-revoked",
+          completedAt: "2026-11-28T12:15:00.000Z" as UtcTimestamp,
+        },
+      }),
+    );
+    h.watcher.reconcile();
+    await h.flushDispatches();
+    expect(h.dispatched).toHaveLength(0);
+    const allRuns = h.projection.listRuns({ automationId: routineId, limit: 10 }).runs;
+    expect(allRuns).toHaveLength(1);
+    expect(allRuns[0]?.lifecycle).toBe("failed");
+    expect(allRuns[0]?.failure?.reason).toBe("authority-mismatch");
+
+    // Legacy detail & history requests omit ?reads=thread-finished and must not
+    // receive thread-finished occurrence runs that older decoders cannot parse.
+    const oldDetail = (await h.requestJson(
+      `/api/automations/get?automationId=${String(routineId)}`,
+    )) as { readonly body: { readonly runs: ReadonlyArray<unknown> } };
+    expect(oldDetail.body.runs).toHaveLength(0);
+    const oldHistory = (await h.requestJson(
+      `/api/automations/history?automationId=${String(routineId)}`,
+    )) as { readonly body: { readonly runs: ReadonlyArray<unknown> } };
+    expect(oldHistory.body.runs).toHaveLength(0);
+
+    const newDetail = (await h.requestJson(
+      `/api/automations/get?automationId=${String(routineId)}&reads=thread-finished`,
+    )) as { readonly body: { readonly runs: ReadonlyArray<unknown> } };
+    expect(newDetail.body.runs).toHaveLength(1);
+    const newHistory = (await h.requestJson(
+      `/api/automations/history?automationId=${String(routineId)}&reads=thread-finished`,
+    )) as { readonly body: { readonly runs: ReadonlyArray<unknown> } };
+    expect(newHistory.body.runs).toHaveLength(1);
+
+    // A Work routine whose captured authority is auto-accept-edits with no
+    // explicit runLevel must not pass thread-finished Ask-first revalidation.
+    const hAutoAccept = createHarness();
+    const autoAcceptId = decodeAutomationId(hAutoAccept.uuid());
+    const baseDraft = automationDefinitionDraftFixture({
+      projectId: PROJECT as never,
+      trigger: { kind: "once", scheduledAt: "2026-12-01T09:00:00.000Z" as UtcTimestamp },
+    });
+    const autoAcceptCreated = hAutoAccept.commands.execute(
+      decodeAutomationCommand({
+        kind: "create-automation",
+        automationId: autoAcceptId,
+        expectedVersion: 0,
+        principal: { kind: "local-window", windowId: String(WINDOW_ID), capabilityGeneration: 0 },
+        origin: { kind: "interactive" },
+        definition: {
+          ...baseDraft,
+          executionProfile: {
+            ...baseDraft.executionProfile,
+            executionPolicy: "auto-accept-edits",
+          },
+          authorityProfile: {
+            ...baseDraft.authorityProfile,
+            requested: {
+              ...baseDraft.authorityProfile.requested,
+              executionPolicy: "auto-accept-edits",
+            },
+            effective: {
+              ...baseDraft.authorityProfile.effective,
+              executionPolicy: "auto-accept-edits",
+            },
+          },
+        },
+      }),
+    );
+    expect(autoAcceptCreated.kind).toBe("automation-created");
+    const autoAcceptAttached = (await hAutoAccept.requestJson("/api/automations/follow-ups", {
+      method: "POST",
+      body: {
+        kind: "arm-routine-finish-wait",
+        automationId: autoAcceptId,
+        expectedVersion: 1,
+        targetThreadId: TARGET_THREAD,
+        targetMode: "code",
+        targetProjectId: TARGET_PROJECT,
+        condition: "turn-finished",
+      },
+    })) as { readonly status: number; readonly body: AutomationCommandResult };
+    expect(autoAcceptAttached.status).toBe(200);
+    hAutoAccept.setClock("2026-11-28T12:15:00.000Z");
+    hAutoAccept.targetFacts.set(
+      TARGET_THREAD,
+      presentTarget({
+        latestCompletedTurn: {
+          turnId: "turn-auto-accept",
+          completedAt: "2026-11-28T12:15:00.000Z" as UtcTimestamp,
+        },
+      }),
+    );
+    hAutoAccept.watcher.reconcile();
+    await hAutoAccept.flushDispatches();
+    expect(hAutoAccept.dispatched).toHaveLength(0);
+    const autoRuns = hAutoAccept.projection.listRuns({
+      automationId: autoAcceptId,
+      limit: 10,
+    }).runs;
+    expect(autoRuns[0]?.lifecycle).toBe("failed");
+    expect(autoRuns[0]?.failure?.reason).toBe("full-access-ineligible");
+  });
 });

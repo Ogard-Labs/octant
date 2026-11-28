@@ -211,6 +211,7 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
     history(input, signal) {
       const url = new URL("/api/automations/history", options.baseUrl);
       url.searchParams.set("automationId", String(input.automationId));
+      url.searchParams.set("reads", AUTOMATION_THREAD_FINISHED_READS_FLAG);
       if (input.limit !== undefined) url.searchParams.set("limit", String(input.limit));
       if (input.cursor !== undefined) url.searchParams.set("cursor", input.cursor);
       return request(

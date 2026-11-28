@@ -137,6 +137,8 @@ export interface ListAutomationRunsInput {
   readonly automationId: AutomationId;
   readonly limit: number;
   readonly cursor?: string | undefined;
+  /** Older clients omit `?reads=thread-finished` and cannot decode `thread-finished` occurrences. */
+  readonly includeThreadFinished?: boolean | undefined;
 }
 
 export interface AutomationRunPage {
@@ -512,8 +514,13 @@ export class AutomationProjection implements Projection {
 
   listRuns(input: ListAutomationRunsInput): AutomationRunPage {
     const limit = clampLimit(input.limit, MAX_AUTOMATION_HISTORY_ENTRIES);
+    const includeThreadFinished = input.includeThreadFinished ?? true;
+    const allRuns = this.#runsNewestFirst(input.automationId);
+    const visibleRuns = includeThreadFinished
+      ? allRuns
+      : allRuns.filter((run) => run.occurrence.kind !== "thread-finished");
     const page = paginate(
-      this.#runsNewestFirst(input.automationId),
+      visibleRuns,
       (run) => cursorKey(run.createdAt, run.id),
       limit,
       input.cursor,

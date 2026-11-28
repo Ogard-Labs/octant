@@ -268,7 +268,7 @@ export function evaluateThreadFinishWait(input: {
     };
   }
 
-  const matched = matchFinishCondition(wait, target, now);
+  const matched = matchFinishCondition(wait, target);
   if (matched === undefined) {
     if (nowMs >= expiresMs) {
       return {
@@ -314,11 +314,19 @@ export function evaluateThreadFinishWait(input: {
 function matchFinishCondition(
   wait: Pick<AutomationFinishWaitSpec, "condition" | "armedAt" | "baselineTurnId">,
   target: Extract<ThreadFinishTargetFacts, { readonly kind: "present" }>,
-  now: UtcTimestamp,
 ): { readonly attestedTurnId: string; readonly finishedAt: UtcTimestamp } | undefined {
   if (wait.condition === "done") {
     if (!target.done) return undefined;
-    const finishedAt = target.doneAt ?? target.latestCompletedTurn?.completedAt ?? now;
+    const finishedAt = target.doneAt ?? target.latestCompletedTurn?.completedAt;
+    if (finishedAt === undefined) return undefined;
+    if (Date.parse(finishedAt) < Date.parse(wait.armedAt)) return undefined;
+    if (
+      target.doneAt === undefined &&
+      wait.baselineTurnId !== undefined &&
+      target.latestCompletedTurn?.turnId === String(wait.baselineTurnId)
+    ) {
+      return undefined;
+    }
     const attestedTurnId = target.latestCompletedTurn?.turnId ?? `done:${finishedAt}`;
     return { attestedTurnId, finishedAt };
   }

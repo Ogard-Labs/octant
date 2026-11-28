@@ -296,15 +296,17 @@ async function startOrRecover(
             externalData: fileContext,
             admissionCurrent: () => fileCurrent?.() === true,
           }),
-      ...(snapshot.projectLevel === "opted-in"
-        ? {}
-        : {
-            accessCeiling:
-              snapshot.runLevel ??
-              (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
-                ? "auto-accept-edits"
-                : "ask-first"),
-          }),
+      ...(input.run.occurrence.kind === "thread-finished"
+        ? { accessCeiling: "ask-first" as const }
+        : snapshot.projectLevel === "opted-in"
+          ? {}
+          : {
+              accessCeiling:
+                snapshot.runLevel ??
+                (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
+                  ? "auto-accept-edits"
+                  : "ask-first"),
+            }),
     });
     if (
       fileContext !== undefined &&

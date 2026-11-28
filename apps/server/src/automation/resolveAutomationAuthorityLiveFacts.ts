@@ -71,7 +71,8 @@ export function resolveAutomationAuthorityLiveFacts(
   input: {
     readonly definition: Pick<AutomationDefinition, "hostId"> &
       Partial<Pick<AutomationDefinition, "createdBy" | "updatedBy">>;
-    readonly run: Pick<AutomationRun, "definitionSnapshot">;
+    readonly run: Pick<AutomationRun, "definitionSnapshot"> &
+      Partial<Pick<AutomationRun, "occurrence">>;
   },
 ): AutomationAuthorityLiveFacts {
   const snapshot = input.run.definitionSnapshot;
@@ -115,10 +116,17 @@ export function resolveAutomationAuthorityLiveFacts(
     snapshot.authorityProfile.requested.executionPolicy !== "full-access";
 
   const author = input.definition.updatedBy ?? input.definition.createdBy;
-  const authorAuthorized =
+  const definitionAuthorAuthorized =
     author?.kind === "remote-device" && deps.isAuthorDeviceAuthorized !== undefined
       ? deps.isAuthorDeviceAuthorized(author)
       : true;
+  const armedBy =
+    input.run.occurrence?.kind === "thread-finished" ? input.run.occurrence.armedBy : undefined;
+  const armedByAuthorized =
+    armedBy?.kind === "remote-device" && deps.isAuthorDeviceAuthorized !== undefined
+      ? deps.isAuthorDeviceAuthorized(armedBy)
+      : true;
+  const authorAuthorized = definitionAuthorAuthorized && armedByAuthorized;
 
   return buildAutomationAuthorityFactsFromHost({
     hostId: deps.hostId,

@@ -446,7 +446,11 @@ async function handleGet(
   ) {
     return failureResponse("Automation is unavailable.", 404, origin);
   }
-  const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
+  const runs = dependencies.projection.listRuns({
+    automationId,
+    limit: DETAIL_RUNS_LIMIT,
+    includeThreadFinished,
+  });
   const fileSource = dependencies.projection.getFileSourceSummary(automationId);
   const eventSource = dependencies.projection.getEventSource(automationId);
   const finishWait = includeThreadFinished
@@ -472,13 +476,14 @@ async function handleHistory(
   url: URL,
   origin: string | null,
 ): Promise<Response> {
-  const allowed = new Set(["automationId", "limit", "cursor"]);
+  const allowed = new Set(["automationId", "limit", "cursor", "reads"]);
   if (
     !url.searchParams.has("automationId") ||
     ![...url.searchParams.keys()].every((key) => allowed.has(key))
   ) {
     return failureResponse("Automation history request is invalid.", 400, origin);
   }
+  const includeThreadFinished = readsThreadFinished(url);
   const automationId = parseAutomationId(url.searchParams.get("automationId"));
   if (automationId === undefined) {
     return failureResponse("Automation ID is invalid.", 400, origin);
@@ -493,12 +498,17 @@ async function handleHistory(
   }
   const definition = dependencies.projection.getDefinition(automationId);
   const accessible = await accessibleProjects(dependencies, context);
-  if (definition === undefined || !isDefinitionAccessible(definition, accessible)) {
+  if (
+    definition === undefined ||
+    !isDefinitionAccessible(definition, accessible) ||
+    (!includeThreadFinished && definition.trigger.kind === "thread-finished")
+  ) {
     return failureResponse("Automation is unavailable.", 404, origin);
   }
   const page = dependencies.projection.listRuns({
     automationId,
     limit,
+    includeThreadFinished,
     ...(cursor === undefined ? {} : { cursor }),
   });
   return jsonResponse(

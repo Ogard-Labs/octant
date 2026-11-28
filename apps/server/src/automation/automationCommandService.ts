@@ -478,6 +478,7 @@ export class AutomationCommandService {
         ...(trigger.baselineTurnId === undefined ? {} : { baselineTurnId: trigger.baselineTurnId }),
         state: "armed",
         updatedAt: now,
+        armedBy: command.principal,
       });
     }
     const now = this.#now();
@@ -981,6 +982,7 @@ export class AutomationCommandService {
       ...command.wait,
       state: "armed",
       updatedAt: now,
+      armedBy: command.principal,
     });
     this.#store.appendOccurrenceLedger({
       ...personActor(command.principal),
