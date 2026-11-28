@@ -642,4 +642,96 @@ describe("RemoteWorkspace", () => {
     );
     expect(list).not.toHaveBeenCalled();
   });
+
+  it("shows a Watching bar with Connect to reply and no composer when a hub-introduced window opens a thread outside Act", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    const onConnectToReply = vi.fn();
+    const restrictedClients = {
+      ...clients,
+      project: {
+        ...unused<ProjectClient>("project"),
+        bootstrap: async () => ({
+          active: [],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      } as unknown as ProjectClient,
+    };
+
+    render(
+      <RemoteCodeSurface
+        actsAsHostPerson={false}
+        clients={restrictedClients}
+        connected
+        extensionClient={undefined}
+        followsContinuationLink={false}
+        hostName="Studio"
+        initialThreadId={coordinator.id}
+        onConnectToReply={onConnectToReply}
+        onNavigate={() => undefined}
+        onOpenCanvas={() => undefined}
+        providerGroups={[]}
+      />,
+    );
+
+    const bar = await screen.findByTestId("watching-thread-bar");
+    expect(bar).toHaveTextContent("Watching");
+    expect(bar).toHaveTextContent("Read-only on Studio");
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Stop$/i })).toBeNull();
+
+    await userEvent.click(within(bar).getByRole("button", { name: "Connect to reply" }));
+    expect(onConnectToReply).toHaveBeenCalledOnce();
+  });
+
+  it("omits the Watching bar and Connect button when the thread's Project is in the host's Act bootstrap", async () => {
+    const { clients, coordinator } = coordinatorFixture();
+    const actClients = {
+      ...clients,
+      project: {
+        ...unused<ProjectClient>("project"),
+        bootstrap: async () => ({
+          active: [
+            {
+              id: coordinator.projectId,
+              type: "code",
+              name: "Octant",
+              lifecycle: "active",
+              pinned: false,
+              rank: "0/1",
+              version: 1,
+              createdAt: now,
+              updatedAt: now,
+              binding: { canonicalRoot: "/repositories/octant" },
+              bindingRevisionId: "32000000-0000-4000-8000-000000000009",
+              codeAccessPersistence: "current-session",
+            },
+          ],
+          archived: [],
+          availability: [],
+          memory: [],
+        }),
+      } as unknown as ProjectClient,
+    };
+
+    render(
+      <RemoteCodeSurface
+        actsAsHostPerson={false}
+        clients={actClients}
+        connected
+        extensionClient={undefined}
+        followsContinuationLink={false}
+        hostName="Studio"
+        initialThreadId={coordinator.id}
+        onConnectToReply={vi.fn()}
+        onNavigate={() => undefined}
+        onOpenCanvas={() => undefined}
+        providerGroups={[]}
+      />,
+    );
+
+    await waitFor(() => expect(screen.queryByTestId("watching-thread-bar")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Connect to reply" })).toBeNull();
+  });
 });

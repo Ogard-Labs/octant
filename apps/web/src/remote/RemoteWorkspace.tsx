@@ -23,7 +23,9 @@ import { RemoteProjectTools } from "./RemoteProjectTools";
 import { RemoteCodeThreadStart, RemoteWorkThreadStart } from "./RemoteThreadStart";
 import { ThreadNativeSetupProvider } from "../providers/ThreadNativeSetupControl";
 import { useProviderController } from "../providers/useProviderController";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
+import "../styles/machine-connections-map.css";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
@@ -602,6 +604,9 @@ export interface RemoteCodeSurfaceProps extends Omit<RemoteSurfaceProps, "client
     checkout: CodeCheckoutIdentity | undefined,
   ) => ReactNode;
   readonly onCloneFromThisComputer?: () => void;
+  readonly hostName?: string;
+  /** Starts direct pairing from the Watching bar when this window lacks write authority. */
+  readonly onConnectToReply?: () => void;
   readonly selectProjectRequest?: Readonly<{
     readonly projectId: string;
     readonly sequence: number;
@@ -629,6 +634,35 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     if (requestedCode !== undefined) setActiveThreadId(decodeCodeThreadId(requestedCode));
     else if (initialThreadId !== undefined) setActiveThreadId(initialThreadId);
   }, [requestedCode, initialThreadId, initialThreadRequest]);
+  const [actProjectIds, setActProjectIds] = useState<ReadonlySet<string>>();
+  useEffect(() => {
+    if (props.actsAsHostPerson || props.readOnly === true || !props.connected) {
+      setActProjectIds(undefined);
+      return;
+    }
+    let cancelled = false;
+    try {
+      void props.clients.project
+        .bootstrap()
+        .then((bootstrap) => {
+          if (cancelled) return;
+          const ids = new Set(
+            bootstrap.active
+              .filter((project) => project.type === "code" && project.lifecycle === "active")
+              .map((project) => String(project.id)),
+          );
+          setActProjectIds(ids);
+        })
+        .catch(() => {
+          if (!cancelled) setActProjectIds(undefined);
+        });
+    } catch {
+      setActProjectIds(undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [props.actsAsHostPerson, props.clients.project, props.connected, props.readOnly]);
   const controller = useCodeController({
     client: props.clients.code,
     ...(activeThreadId === undefined ? {} : { activeThreadId }),
@@ -638,6 +672,16 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     (thread) => thread.lifecycle === "active",
   );
   const activeThread = threads.find((thread) => String(thread.id) === String(activeThreadId));
+  const activeThreadInAct =
+    activeThread !== undefined &&
+    actProjectIds !== undefined &&
+    actProjectIds.has(String(activeThread.projectId));
+  const watchingActiveThread =
+    activeThreadId !== undefined &&
+    props.readOnly !== true &&
+    !props.actsAsHostPerson &&
+    !activeThreadInAct;
+  const threadReadOnly = props.readOnly === true || watchingActiveThread;
   return (
     <RemoteThreadPane
       mode="code"
@@ -687,6 +731,27 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
     >
       {activeThreadId === undefined ? null : (
         <>
+          {watchingActiveThread ? (
+            <div className="watching-thread-bar" data-testid="watching-thread-bar" role="status">
+              <div className="watching-thread-bar__copy">
+                <OctantBadge variant="outline">Watching</OctantBadge>
+                <span>
+                  Read-only on {props.hostName ?? "this computer"}. Connect directly to reply,
+                  answer approvals, or stop turns.
+                </span>
+              </div>
+              {props.onConnectToReply === undefined ? null : (
+                <OctantButton
+                  onClick={props.onConnectToReply}
+                  size="sm"
+                  type="button"
+                  variant="default"
+                >
+                  Connect to reply
+                </OctantButton>
+              )}
+            </div>
+          ) : null}
           {activeThread === undefined
             ? null
             : props.renderThreadExtras?.(
@@ -697,13 +762,13 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               )}
           {activeThread === undefined ? null : (
             <RemoteCoordinatorProposals
-              actsAsHostPerson={props.actsAsHostPerson && props.readOnly !== true}
+              actsAsHostPerson={props.actsAsHostPerson && !threadReadOnly}
               client={props.clients.code}
               connected={props.connected}
               thread={activeThread}
             />
           )}
-          {activeThread && props.connected && props.clients.desktop && (
+          {activeThread && props.connected && props.clients.desktop && !threadReadOnly && (
             <RemoteThreadDesktop
               key={activeThread.id}
               threadId={activeThread.id}
@@ -726,7 +791,7 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
               : { extensionClient: props.extensionClient })}
             pairedDevice
             {...(props.worktreePort === undefined ? {} : { worktreePort: props.worktreePort })}
-            readOnly={props.readOnly === true}
+            readOnly={threadReadOnly}
             threadId={activeThreadId}
             providerGroups={props.providerGroups}
           />
