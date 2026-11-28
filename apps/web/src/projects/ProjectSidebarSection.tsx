@@ -1735,16 +1735,21 @@ function ActivityThreadButton(props: {
     : NO_THREAD_ROW_STATE;
   const workingLine = useWorkingRowLine(props.thread, rowState.state?.status === "working");
   // A thread waiting on the person that the window does not show can be
-  // answered or opened from its row; the open one has its card in the thread.
+  // answered or opened from its row; one on screen has its card in the thread.
+  // A thread whose pane sits behind a page such as Board stays open, but its
+  // card is not on screen, so the window's shown threads decide, not the open ones.
   const pendingRequests = useContext(SidebarPendingRequestsContext);
-  const answersHere =
-    rowState.state?.status === "attention" &&
-    !selected &&
-    props.openThreadIds?.some((candidate) => candidate === rowId) !== true;
-  const listAsking = pendingRequests?.listAsking;
+  const onScreen =
+    pendingRequests?.shows(rowId) ??
+    (selected || props.openThreadIds?.some((candidate) => candidate === rowId) === true);
+  const answersHere = rowState.state?.status === "attention" && !onScreen;
+  const listWaiting = pendingRequests?.listWaiting;
+  const waitingThreadId = props.thread.threadId;
+  const movedAt = props.thread.updatedAt;
   useEffect(
-    () => (answersHere && listAsking !== undefined ? listAsking() : undefined),
-    [answersHere, listAsking],
+    () =>
+      answersHere && listWaiting !== undefined ? listWaiting(waitingThreadId, movedAt) : undefined,
+    [answersHere, listWaiting, movedAt, waitingThreadId],
   );
   const ask = answersHere ? pendingRequests?.forThread(props.thread.threadId) : undefined;
   const lastLine = ask === undefined ? workingLine : { ...workingLine, activity: ask.text };

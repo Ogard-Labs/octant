@@ -433,22 +433,36 @@ that matched nothing keeps its own message, which says nothing was deleted.
 
 **Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
 Needs-you row in Status or the Activity feed whose thread the window does not
-show (neither the focused thread nor one open in another pane) says on its
+show says on its
 third line what the thread asks, and carries its answers under it: **Allow
 once** and **Deny**, the approval card's own words, then **Open**, after the
-row and its own hover actions in keyboard order. The answers appear only when the host lists
-exactly one request for that thread and it is a plain approval: not a question,
-a decision or a secret, not a subagent's or the agent's own approval (which the
-thread finds rather than answers elsewhere), and not a Browser site ask, whose
-site the row has no room to name. Otherwise, and in a window with no
+row and its own hover actions in keyboard order. A thread the window shows is
+the focused thread or one in another pane while the workspace is on screen. A
+page that covers the workspace, such as Board, the Inbox or Settings, keeps the
+panes behind it open but shows none of them, so their rows offer answers. The
+answers appear only when the host lists exactly one request for that thread and
+the host says it approves one tool call (`approves: "tool-call"`): not an
+approval to enter or leave Plan, which changes the level the thread's later
+turns run at and, leaving Plan, accepts a plan only the thread's card shows;
+not an approval from a host that does not say what it approves; not a
+question, a decision or a secret; not a subagent's or the agent's own approval
+(which the thread finds rather than answers elsewhere); and not a Browser site
+ask, whose site the row has no room to name. Otherwise, and in a window with no
 pending-request reader, the row offers Open alone. Allow once and Deny send the
 same answer command the thread's approval card and Home's Needs you card send,
 through the clients the thread view already holds; Allow once never remembers
 the answer for the Project, which stays on the card. The host re-checks the
 answer, and a refusal is one quiet line under the buttons until the host stops
-listing the request. The window reads pending requests for this only while
-a row offering answers is listed, on the same signals the Needs you card reads, never on a
-timer. The open thread's row offers nothing: its card is in the thread.
+listing the request. The window reads pending requests for this only while a
+waiting row the window does not show is listed: once when such a row appears
+or its thread moves, and on the same signals the Needs you card reads only
+while some listed row offers answers, never on a timer. Rows that can only
+open their threads read nothing more. A thread the window shows offers nothing:
+its card is in the thread. A server Project's rows under On your servers keep
+the Project tree's row in every arrangement, so they offer no answers in place;
+the row opens the thread, whose card answers it. The arrangement belongs to the
+local list above them, and giving the server group the answers would mean
+moving it out of that list for one group.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -1357,7 +1371,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   shipped later arrives with its own default.
 - **Needs you elsewhere.** Board cards, the command palette, the Inbox, and the
   Review page read the same host list and answer in place through the same
-  commands. The desktop menu bar lists the same waiting threads but only opens
+  commands. Every one of them, and the Needs you card, answers an approval only
+  when the host says it approves one tool call; an approval to enter or leave
+  Plan, or one whose host does not say, offers Review request (in the palette,
+  only the thread's row), which opens the thread. The desktop menu bar lists the same waiting threads but only opens
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
@@ -3257,7 +3274,9 @@ stands: its status mark and a short age (a spinner and "9m" while a turn runs,
 a pause mark and "5m" while it waits on the person, the alert mark and "2h"
 while a usage limit holds it), or, with no state to report, how long ago it
 moved. The state's words ("Working 9m", "Needs you", "Limited 2h") stay in the
-mark's tooltip and the row's accessible name. A quiet second line in the meta
+mark's tooltip, and the row's accessible name says the state with its age in
+words ("Working, 9 minutes", "Needs attention, 5 minutes", "Limited, resets in
+2 hours"). A quiet second line in the meta
 ink names where the thread lives and what it carries, in a fixed order: the
 Project's 12px mark and name, the branch in the mono face, the counted marks,
 and the provider's mark at its end. A third line appears only for who started

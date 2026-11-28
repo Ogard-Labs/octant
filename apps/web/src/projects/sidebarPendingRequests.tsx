@@ -1,11 +1,21 @@
 import type { OctantMode } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
-import { createContext, useCallback, useMemo, useState, type ReactNode } from "react";
 import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  approvedOnlyInThread,
   isFindOnlyPendingRequest,
   pendingRequestKey,
   type PendingRequestAnswerResult,
 } from "../pendingRequests/pendingRequests";
+import type { PendingRequestFreshness } from "../pendingRequests/usePendingRequests";
 import {
   usePendingRequestRows,
   type PendingRequestRowEntry,
@@ -36,11 +46,20 @@ export interface SidebarPendingRequests {
   /** The request a thread waits on, as the host last listed it; undefined before a read. */
   readonly forThread: (threadId: string) => SidebarThreadAsk | undefined;
   /**
-   * A row that offers answers says so while it is listed, and calls the
-   * returned function when it no longer does. The reader runs only while one
-   * does, so a sidebar with nothing to answer reads nothing.
+   * Whether the window shows this thread now, so its own approval card is in
+   * view. A page that covers the workspace, such as Board, leaves the panes
+   * behind it open but shows none of them.
    */
-  readonly listAsking: () => () => void;
+  readonly shows: (threadId: string) => boolean;
+  /**
+   * A Needs-you row whose thread the window does not show lists it while it
+   * waits, with when the thread last moved, and calls the returned function
+   * when it stops. A thread that starts waiting, or moves while it waits, is
+   * read once. The reader goes on following the host's change signals only
+   * while some listed row offers answers, so a sidebar whose rows can only
+   * open their threads reads nothing more.
+   */
+  readonly listWaiting: (threadId: string, movedAt: string | undefined) => () => void;
 }
 
 /** Read by every Needs-you row in Status and the Activity feed. */
@@ -51,31 +70,67 @@ export const SidebarPendingRequestsContext = createContext<SidebarPendingRequest
 const EVERY_MODE: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 
 /**
- * Whether a row may answer this request in place. Only a plain approval
- * qualifies: a question, a decision or a secret needs the thread's own card;
- * a subagent's or the agent's own approval is found, not answered, outside its
- * thread; and a Browser site ask carries a site the row has no room to show.
+ * Change signals a reader that has not followed yet is given: they never
+ * change, so it reads when it starts and when a row asks, and at no other time.
+ */
+const NOT_FOLLOWING: PendingRequestFreshness = {
+  feedRevision: 0,
+  settings: undefined,
+  workspace: undefined,
+};
+
+/**
+ * Whether a row may answer this request in place. Only an approval the host
+ * says is one tool call qualifies: entering or leaving Plan changes the
+ * thread's level and hands over a plan only its card shows; a question, a
+ * decision or a secret needs the thread's own card; a subagent's or the
+ * agent's own approval is found, not answered, outside its thread; and a
+ * Browser site ask carries a site the row has no room to show.
  */
 function answerableInPlace(request: PendingRequest): boolean {
   return (
     request.kind === "approval" &&
+    !approvedOnlyInThread(request) &&
     !isFindOnlyPendingRequest(request) &&
     !("browserOrigin" in request && request.browserOrigin !== undefined)
   );
 }
 
+/** One waiting row's thread and when it last moved, as the row listed it. */
+function waitingKey(threadId: string, movedAt: string | undefined): string {
+  return `${threadId}\n${movedAt ?? ""}`;
+}
+
+function waitingThreadId(key: string): string {
+  return key.slice(0, key.indexOf("\n"));
+}
+
 /**
  * The sidebar's one pending-request reader, matched to rows by thread. It reads
- * on the same signals the Needs you card uses, and only while `enabled`. The
- * host re-checks every answer; a row only offers what the host listed.
+ * only while some row waits, and follows the same signals the Needs you card
+ * uses only while some waiting row offers answers. The host re-checks every
+ * answer; a row only offers what the host listed.
  */
 export function useSidebarPendingRequests(
   source: SidebarPendingRequestSource | undefined,
-  enabled: boolean,
+  waiting: ReadonlyArray<string>,
 ): SidebarPendingRequests["forThread"] {
-  const reading = enabled && source?.pendingRequestClient !== undefined;
-  const { rows, answer } = usePendingRequestRows(
-    reading && source !== undefined ? { ...source, modes: EVERY_MODE } : undefined,
+  const reading = waiting.length > 0 && source?.pendingRequestClient !== undefined;
+  const [following, setFollowing] = useState(false);
+  // A reader that stops following keeps the last signals it followed, so
+  // stopping is not itself a change that reads again; starting again reads
+  // once if anything moved meanwhile.
+  const [held, setHeld] = useState<PendingRequestFreshness>(NOT_FOLLOWING);
+  const feedRevision = source?.feedRevision ?? 0;
+  const settings = source?.settings;
+  const workspace = source?.workspace;
+  useEffect(() => {
+    if (following) setHeld({ feedRevision, settings, workspace });
+  }, [feedRevision, following, settings, workspace]);
+  const { rows, answer, refresh } = usePendingRequestRows(
+    reading && source !== undefined
+      ? { ...source, ...(following ? {} : held), modes: EVERY_MODE }
+      : undefined,
   );
   const byThread = useMemo(() => {
     const grouped = new Map<string, PendingRequestRowEntry[]>();
@@ -85,7 +140,7 @@ export function useSidebarPendingRequests(
     }
     return grouped;
   }, [reading, rows]);
-  return useCallback(
+  const forThread = useCallback(
     (threadId: string): SidebarThreadAsk | undefined => {
       const entries = byThread.get(threadId);
       const listed = entries?.filter((entry) => !entry.unlisted) ?? [];
@@ -105,6 +160,19 @@ export function useSidebarPendingRequests(
     },
     [answer, byThread],
   );
+  const answersSome = waiting.some((key) => forThread(waitingThreadId(key))?.answer !== undefined);
+  useEffect(() => setFollowing(answersSome), [answersSome]);
+  // A row that starts waiting, or whose thread moved, needs one read to say
+  // what it asks. The read the reader makes when it starts covers the first.
+  const listed = useRef<ReadonlySet<string>>(new Set());
+  const waitingList = waiting.join("\t");
+  useEffect(() => {
+    const now = waitingList === "" ? [] : waitingList.split("\t");
+    const before = listed.current;
+    listed.current = new Set(now);
+    if (before.size > 0 && now.some((key) => !before.has(key))) refresh();
+  }, [waitingList, refresh]);
+  return forThread;
 }
 
 /**
@@ -113,15 +181,28 @@ export function useSidebarPendingRequests(
  */
 export function SidebarPendingRequestsProvider(props: {
   readonly source: SidebarPendingRequestSource | undefined;
+  /** The threads the window shows now; empty while a page covers the workspace. */
+  readonly shownThreadIds: ReadonlyArray<string>;
   readonly children: ReactNode;
 }) {
-  const [asking, setAsking] = useState(0);
-  const listAsking = useCallback(() => {
-    setAsking((count) => count + 1);
-    return () => setAsking((count) => count - 1);
+  const [waiting, setWaiting] = useState<ReadonlyMap<string, number>>(new Map());
+  const listWaiting = useCallback((threadId: string, movedAt: string | undefined) => {
+    const key = waitingKey(threadId, movedAt);
+    setWaiting((current) => new Map(current).set(key, (current.get(key) ?? 0) + 1));
+    return () =>
+      setWaiting((current) => {
+        const next = new Map(current);
+        const count = (next.get(key) ?? 1) - 1;
+        if (count > 0) next.set(key, count);
+        else next.delete(key);
+        return next;
+      });
   }, []);
-  const forThread = useSidebarPendingRequests(props.source, asking > 0);
-  const value = useMemo(() => ({ forThread, listAsking }), [forThread, listAsking]);
+  const waitingKeys = useMemo(() => [...waiting.keys()].toSorted(), [waiting]);
+  const forThread = useSidebarPendingRequests(props.source, waitingKeys);
+  const shown = useMemo(() => new Set(props.shownThreadIds), [props.shownThreadIds]);
+  const shows = useCallback((threadId: string) => shown.has(threadId), [shown]);
+  const value = useMemo(() => ({ forThread, listWaiting, shows }), [forThread, listWaiting, shows]);
   return (
     <SidebarPendingRequestsContext.Provider value={value}>
       {props.children}

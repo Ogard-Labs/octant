@@ -68,6 +68,8 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     request: PendingRequest,
     response: PendingRequestResponse,
   ) => Promise<PendingRequestAnswerResult>;
+  /** Reads again now, or once more after the read in flight lands. */
+  readonly refresh: () => void;
 } {
   const { read, refresh } = usePendingRequests(
     source?.pendingRequestClient,
@@ -182,6 +184,7 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
   return {
     rows,
     answer,
+    refresh,
     defer,
     asks,
     answerAsk,

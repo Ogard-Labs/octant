@@ -932,8 +932,8 @@ one accessible name ("title, Project, branch, pull request, status or time"):
   and name in a hairline. The activity truncates first. A Needs-you row of a
   thread the window does not show says here what the thread asks, and carries
   the approval card's Allow once and Deny (small, primary and ghost) and a
-  ghost Open under it when the thread waits on one plain approval, or Open
-  alone ([Workspace](docs/design/workspace.md#sidebar)).
+  ghost Open under it when the thread waits on one approval of one tool call,
+  or Open alone ([Workspace](docs/design/workspace.md#sidebar)).
 
 Colour is spent on the state, the pull request's state and the Project's mark
 only; the row's other facts keep the ink roles. A row draws from two sizes, 13

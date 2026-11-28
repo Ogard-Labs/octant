@@ -7,6 +7,7 @@ import {
   BOARD_NOW,
   codeRequest,
   pendingReader,
+  workRequest,
 } from "../threadBoard/boardPendingRequests.test-fixtures";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
@@ -33,10 +34,11 @@ const approval = codeRequest({
 function source(
   requests: ReadonlyArray<PendingRequest>,
   clients = answerClients(),
+  feedRevision = 0,
 ): SidebarPendingRequestSource {
   return {
     answerClients: clients as never,
-    feedRevision: 0,
+    feedRevision,
     now: BOARD_NOW,
     pendingRequestClient: pendingReader(requests),
     settings: undefined,
@@ -48,10 +50,16 @@ function Sidebar(props: {
   readonly source?: SidebarPendingRequestSource;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
+  /** The threads whose panes are on screen; defaults to every open one. */
+  readonly shownThreadIds?: ReadonlyArray<string>;
   readonly onSelectThread?: (threadId: string) => void;
+  readonly thread?: ChatThreadNavigationItem;
 }) {
   return (
-    <SidebarPendingRequestsProvider source={props.source}>
+    <SidebarPendingRequestsProvider
+      shownThreadIds={props.shownThreadIds ?? props.openThreadIds ?? []}
+      source={props.source}
+    >
       <ProjectSidebarSection
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
         {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
@@ -66,7 +74,7 @@ function Sidebar(props: {
         onSelectThread={props.onSelectThread ?? vi.fn()}
         projects={[]}
         threadActions={{ onPinThread: vi.fn(), onArchiveThread: vi.fn() }}
-        threads={[waiting]}
+        threads={[props.thread ?? waiting]}
       />
     </SidebarPendingRequestsProvider>
   );
@@ -152,9 +160,117 @@ describe("answering a Needs-you row from the sidebar", () => {
     expect(onSelectThread).toHaveBeenCalledWith("thread-waiting");
   });
 
+  it("says how long the thread has waited in the row's name", async () => {
+    render(<Sidebar source={source([approval])} />);
+    await answersOnceRead();
+    expect(
+      screen.getByRole("button", { name: /^Rotate the dev API keys/ }).getAttribute("aria-label"),
+    ).toContain("Needs attention, 2 minutes");
+  });
+
+  it("offers only Open, with what it asks, when the thread asks to enter or leave Plan or its host does not say the approval is one tool call", async () => {
+    const enterPlan = codeRequest({
+      threadId: "thread-waiting",
+      threadTitle: "Rotate the dev API keys",
+      kind: "approval",
+      text: "Claude asks to plan first.",
+      minutesAgo: 2,
+      approves: "level-change",
+    });
+    const leavePlan = workRequest({
+      threadId: "thread-waiting",
+      threadTitle: "Rotate the dev API keys",
+      kind: "approval",
+      text: "Claude asks to leave Plan and carry out its plan.",
+      minutesAgo: 2,
+      approves: "level-change",
+    });
+    const unnamed = { ...approval, approves: undefined } as unknown as PendingRequest;
+    for (const request of [enterPlan, leavePlan, unnamed]) {
+      const clients = answerClients();
+      const { unmount } = render(<Sidebar source={source([request], clients)} />);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Rotate the dev API keys/ })).toHaveTextContent(
+          request.text,
+        ),
+      );
+      expect(
+        within(answers() as HTMLElement)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual(["Open"]);
+      expect(clients.codeClient.executeOperation).not.toHaveBeenCalled();
+      expect(clients.workRequestClient.execute).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it("offers Allow once on the row of a thread whose pane sits behind Board", async () => {
+    // Board covers the workspace: the waiting thread stays in a pane, so it
+    // is still open, but its approval card is not on screen.
+    render(
+      <Sidebar
+        openThreadIds={["thread-waiting"]}
+        shownThreadIds={[]}
+        source={source([approval])}
+      />,
+    );
+    const group = await answersOnceRead();
+    expect(within(group).getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("reads once for a row that can only open its thread, and follows the host's signals only while a row offers answers", async () => {
+    const question = codeRequest({
+      threadId: "thread-waiting",
+      threadTitle: "Rotate the dev API keys",
+      kind: "question",
+      text: "Which key should go first?",
+      minutesAgo: 1,
+      options: [{ label: "Staging" }],
+    });
+    const clients = answerClients();
+    const reader = pendingReader([question]);
+    const at = (feedRevision: number) => ({
+      ...source([], clients, feedRevision),
+      pendingRequestClient: reader,
+    });
+    const { rerender } = render(<Sidebar source={at(0)} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Rotate the dev API keys/ })).toHaveTextContent(
+        "Which key should go first?",
+      ),
+    );
+    expect(reader.list).toHaveBeenCalledOnce();
+    rerender(<Sidebar source={at(1)} />);
+    rerender(<Sidebar source={at(2)} />);
+    await Promise.resolve();
+    expect(reader.list).toHaveBeenCalledOnce();
+    // The thread moved while it waits, so what it asks may have changed.
+    const moved = { ...waiting, updatedAt: new Date(BOARD_NOW - 60_000).toISOString() };
+    rerender(<Sidebar source={at(2)} thread={moved} />);
+    await waitFor(() => expect(reader.list).toHaveBeenCalledTimes(2));
+
+    const following = pendingReader([approval]);
+    const answering = (feedRevision: number) => ({
+      ...source([], clients, feedRevision),
+      pendingRequestClient: following,
+    });
+    rerender(<Sidebar source={answering(0)} />);
+    await answersOnceRead();
+    const reads = vi.mocked(following.list).mock.calls.length;
+    rerender(<Sidebar source={answering(1)} />);
+    await waitFor(() => expect(following.list).toHaveBeenCalledTimes(reads + 1));
+  });
+
   it("offers nothing on the row of a thread the window already shows, and reads nothing for it", async () => {
     const shown = source([approval]);
-    const { rerender } = render(<Sidebar activeThreadId="thread-waiting" source={shown} />);
+    const { rerender } = render(
+      <Sidebar
+        activeThreadId="thread-waiting"
+        shownThreadIds={["thread-waiting"]}
+        source={shown}
+      />,
+    );
     await waitFor(() => expect(screen.getByTitle("Needs you")).toBeInTheDocument());
     expect(answers()).toBeNull();
     rerender(<Sidebar openThreadIds={["thread-waiting"]} source={shown} />);

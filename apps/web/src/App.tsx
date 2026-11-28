@@ -980,6 +980,9 @@ export function App(props: AppProps) {
   );
 }
 
+/** The sidebar shows no thread on screen while a page covers the workspace. */
+const NO_SHOWN_THREADS: ReadonlyArray<string> = [];
+
 function LaunchedShell(
   props: AppProps & {
     readonly launch: ShellLaunch & { readonly windowId: WindowId };
@@ -3097,6 +3100,16 @@ function LaunchedShell(
     // stayed in the tab order and the page had two h1s.
     artifactLibraryOpen ||
     imageLibraryOpen;
+  // The threads whose panes are on screen, for the sidebar's inline answers.
+  // A page that covers the workspace keeps the panes behind it, so their
+  // threads stay open in the sidebar while none of their cards can be seen.
+  const shownSidebarThreadIds = useMemo(
+    () =>
+      workspaceHidden || controller.settingsOpen || usageOpen
+        ? NO_SHOWN_THREADS
+        : (openSidebarThreadIds ?? NO_SHOWN_THREADS),
+    [controller.settingsOpen, openSidebarThreadIds, usageOpen, workspaceHidden],
+  );
   // Only a thread on screen: Settings, Usage, Zen, and the pages that cover
   // the workspace leave its active thread ids behind them.
   const replyDetailThread = replyDetailThreadInFront({
@@ -9659,7 +9672,10 @@ function LaunchedShell(
           transcriptWidth={controller.settings.transcriptWidth}
           sidebar={
             <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
-              <SidebarPendingRequestsProvider source={sidebarPendingRequests}>
+              <SidebarPendingRequestsProvider
+                shownThreadIds={shownSidebarThreadIds}
+                source={sidebarPendingRequests}
+              >
                 <SidebarContainer
                   zenEnabled={zen.enabled}
                   windowHistory={windowHistory}
