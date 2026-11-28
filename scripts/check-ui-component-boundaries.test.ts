@@ -279,7 +279,7 @@ describe("UI component boundary check", () => {
         ].join("\n"),
         "apps/web/src/composer/SlashMenu.ts": [
           "export function menu() {",
-          '  return createElement("ul", { role: "listbox" }, createElement("button", { role: "option" }));',
+          '  return createElement("ul", { role: "listbox" }, createElement("button", { "role": "option" }));',
           "}",
         ].join("\n"),
         "apps/web/src/ui/base/OctantListbox.tsx":

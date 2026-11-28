@@ -349,7 +349,7 @@ const RAW_INTERACTIVE_COLLECTION_ROLE =
   /\brole\s*=\s*(?:["'](radiogroup|listbox|combobox|option)["']|\{\s*[^}\n]*["'](radiogroup|listbox|combobox|option)["'][^}\n]*\})/g;
 
 const RAW_INTERACTIVE_COLLECTION_PROP_ROLE =
-  /\brole\s*:\s*["'](radiogroup|listbox|combobox|option)["']/g;
+  /(?:["']role["']|\brole)\s*:\s*["'](radiogroup|listbox|combobox|option)["']/g;
 
 /**
  * Radio groups, listboxes, comboboxes, and options must come from shared

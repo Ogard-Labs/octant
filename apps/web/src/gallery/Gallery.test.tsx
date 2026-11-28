@@ -1,6 +1,8 @@
-import { render } from "@testing-library/react";
+import { render, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ADAPTER_ROOTS } from "./adapterRoots.test-support";
+import { GalleryListboxSpecimen } from "./controls";
 import { Gallery } from "./Gallery";
 
 /**
@@ -104,5 +106,24 @@ describe("component gallery", () => {
     expect(cookies).not.toHaveBeenCalled();
     vi.restoreAllMocks();
     localStorage.clear();
+  });
+
+  it("keeps keyboard navigation active in the listbox specimen after clicking an option", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<GalleryListboxSpecimen />);
+    const specimen = within(container);
+
+    const input = specimen.getByRole("combobox", { name: "Filter choices" });
+    const second = specimen.getByRole("option", { name: "Second choice" });
+    const third = specimen.getByRole("option", { name: "Third choice" });
+
+    await user.click(second);
+    expect(input).toHaveFocus();
+    expect(second).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveAttribute("aria-activedescendant", second.id);
+
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveAttribute("aria-activedescendant", third.id);
+    expect(third).toHaveAttribute("data-active", "true");
   });
 });

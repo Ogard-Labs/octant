@@ -1,5 +1,5 @@
 import { Bell, Check, Plus, Settings, Trash2 } from "../ui/icons";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantKbd } from "../ui/base/OctantKbd";
@@ -676,7 +676,8 @@ const GALLERY_LISTBOX_CHOICES = [
   { id: "third", label: "Third choice" },
 ] as const;
 
-function GalleryListboxSpecimen() {
+export function GalleryListboxSpecimen() {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>("first");
   const visible = GALLERY_LISTBOX_CHOICES.filter((choice) =>
@@ -710,16 +711,29 @@ function GalleryListboxSpecimen() {
           controller.handleKeyDown(event);
         }}
         placeholder="Filter choices"
+        ref={inputRef}
         value={query}
       />
-      <OctantListbox aria-label="Choices" id="gallery-listbox-sample">
+      <OctantListbox
+        aria-label="Choices"
+        id="gallery-listbox-sample"
+        onKeyDown={(event) => {
+          controller.handleKeyDown(event);
+        }}
+      >
         {visible.map((choice, index) => (
           <OctantListboxOption
             active={index === controller.activeIndex}
             id={`gallery-listbox-sample-${choice.id}`}
             key={choice.id}
-            onClick={() => setSelectedId(choice.id)}
+            onClick={() => {
+              setSelectedId(choice.id);
+              controller.setActiveIndex(index);
+              inputRef.current?.focus();
+            }}
             selected={selectedId === choice.id}
+            size="sm"
+            variant={index === controller.activeIndex ? "secondary" : "ghost"}
           >
             {choice.label}
           </OctantListboxOption>
