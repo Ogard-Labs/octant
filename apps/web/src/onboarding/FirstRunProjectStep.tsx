@@ -370,27 +370,27 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
-        A task starts in a Project: one folder you choose. {MODE_COPY[props.mode].lead} Choosing a
+        A thread starts in a Project: one folder you choose. {MODE_COPY[props.mode].lead} Choosing a
         folder does not change access permissions.
       </p>
 
       {modes.length > 1 || hasProjects ? (
         <section
-          aria-label="First task"
+          aria-label="First thread"
           className="settings-card-section settings-card-section--open"
         >
-          <h2>First task</h2>
+          <h2>First thread</h2>
           <div className="setgroup">
             {modes.length > 1 ? (
               <SettingRow
-                description="The mode your first task starts in."
+                description="The mode your first thread starts in."
                 label="Mode"
                 scope="app"
                 settingId="first-run-task-mode"
               >
                 <OctantRadioGroup
                   appearance="segmented"
-                  aria-label="First task mode"
+                  aria-label="First thread mode"
                   disabled={importing}
                   onValueChange={(next) => {
                     if (importing) return;
@@ -408,14 +408,14 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
             ) : null}
             {hasProjects ? (
               <SettingRow
-                description="The Project your first task starts in."
+                description="The Project your first thread starts in."
                 label="Folder"
                 scope="app"
                 settingId="first-run-task-project"
               >
                 <OctantRadioGroup
                   appearance="segmented"
-                  aria-label="First task folder"
+                  aria-label="First thread folder"
                   onValueChange={(next) => {
                     const selected = props.projects.find((project) => String(project.id) === next);
                     if (selected !== undefined) props.onSelectProject(selected.id);
@@ -599,7 +599,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
       {hasProjects ? null : (
         <p className="first-run__caveat" role="note">
           No {MODE_COPY[props.mode].label} folder yet. You can skip this and choose one when you
-          start a task.
+          start a thread.
         </p>
       )}
     </div>

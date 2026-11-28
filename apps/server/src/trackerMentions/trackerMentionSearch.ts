@@ -26,6 +26,7 @@ export interface TrackerMentionRepository {
 export interface TrackerMentionProject {
   readonly repository?: TrackerMentionRepository | undefined;
   readonly linearTeamId?: string | undefined;
+  readonly linearAccountRef?: string | undefined;
 }
 
 export interface TrackerMentionSearchSources {
@@ -61,6 +62,7 @@ export interface TrackerMentionSearchSources {
     readonly list: (
       input: ({ readonly identifier: string } | { readonly search: string }) & {
         readonly teamId?: string;
+        readonly accountRef?: string;
       },
       signal: AbortSignal,
     ) => Promise<ReadonlyArray<LinearIssueRow>>;
@@ -139,6 +141,9 @@ export function createTrackerMentionSearch(
         {
           ...(query.kind === "key" ? { identifier: query.key } : { search: query.text }),
           ...(project.linearTeamId === undefined ? {} : { teamId: project.linearTeamId }),
+          ...(project.linearAccountRef === undefined
+            ? {}
+            : { accountRef: project.linearAccountRef }),
         },
         signal,
       );

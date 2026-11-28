@@ -61,6 +61,12 @@ export function threadSecretOperations(options: {
   readonly planning: () => boolean;
   /** The Project's folder is on another computer, where nothing of this host's is sent. */
   readonly onServer: boolean;
+  /**
+   * Whether this turn has access to a registered handle consumer (for example,
+   * Mac Computer use without a disposable-desktop binding). Defaults to the
+   * host-level service check when omitted.
+   */
+  readonly hasHandleConsumer?: (() => boolean) | undefined;
 }): ThreadSecretOperations {
   const { service, caller } = options;
   const signalOf = (signal: AbortSignal | undefined): AbortSignal =>
@@ -71,7 +77,11 @@ export function threadSecretOperations(options: {
       if (Either.isLeft(decoded)) return invalid;
       if (options.planning()) return replyRefused("plan", "Plan takes no secrets.");
       // Nobody is asked for what nothing could use.
-      if ((decoded.right.delivery ?? "handle") === "handle" && !service.hasConsumer())
+      const handleConsumerAvailable =
+        options.hasHandleConsumer === undefined
+          ? service.hasConsumer()
+          : options.hasHandleConsumer();
+      if ((decoded.right.delivery ?? "handle") === "handle" && !handleConsumerAvailable)
         return replyRefused(
           "unavailable",
           "Nothing here can use a handle. Ask again with delivery file, and use run-with-secret.",

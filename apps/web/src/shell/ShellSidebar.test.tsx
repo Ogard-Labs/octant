@@ -187,7 +187,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    await user.click(bandButton("New task"));
+    await user.click(bandButton("New thread"));
     await user.click(screen.getByRole("button", { name: "Board" }));
     await user.click(screen.getByRole("button", { name: "Account menu, Set your name" }));
     await user.click(await screen.findByRole("menuitem", { name: "Plugins" }));
@@ -220,7 +220,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    await user.click(bandButton("New task"));
+    await user.click(bandButton("New thread"));
     for (const label of ["Board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
@@ -926,7 +926,7 @@ describe("ShellSidebar", () => {
     );
 
     const more = screen.getByRole("button", { name: "More destinations" });
-    const newTask = bandButton("New task");
+    const newTask = bandButton("New thread");
     // More is the last destination row: after the rows, before the Project tree.
     expect(newTask.compareDocumentPosition(more)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 

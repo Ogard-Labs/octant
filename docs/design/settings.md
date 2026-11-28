@@ -159,12 +159,12 @@ command, in minutes, 10, up to 1,440, whose description says a secret held
 for the command is deleted when the time runs out; Longest
 Browser wait, in minutes, 10, up to 60, under Strict only, whose description
 says outside Strict there is no wait limit and a Claude Code
-thread still ends one tool call at eleven minutes; Longest wait for a helper,
-in seconds, 120, up to 3,600), then **Routines** with the switch **Start
-agent-created routines active at Full access**, on, whose description reads
-"A routine an agent suggests while its thread runs at Full access starts
+thread still ends one tool call at eleven minutes; Longest wait for an agent,
+in seconds, 120, up to 3,600), then **Automations** with the switch **Start
+agent-created automations active at Full access**, on, whose description reads
+"An automation an agent suggests while its thread runs at Full access starts
 enabled, with no card. Off, it is created paused and waits for you to turn it
-on. A routine you asked for starts enabled at every level, and below Full
+on. An automation you asked for starts enabled at every level, and below Full
 access a suggested one waits for you to confirm its card." Each change is the
 ordinary journaled settings replacement a local window or a device the host's
 own person paired makes; the server reads each value where it applies.

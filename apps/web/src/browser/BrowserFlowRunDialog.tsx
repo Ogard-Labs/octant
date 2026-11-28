@@ -28,7 +28,7 @@ export function BrowserFlowRunDialog(props: {
   const [titles, setTitles] = useState<Readonly<Record<number, string>>>({});
   const [pending, setPending] = useState(false);
   const [uncertain, setUncertain] = useState(false);
-  const [message, setMessage] = useState("Loading available tasks…");
+  const [message, setMessage] = useState("Loading available threads…");
   const current = useRef<BrowserFlowRun | undefined>(undefined);
   const lifetime = useRef<AbortController | undefined>(undefined);
   current.current = run;
@@ -44,7 +44,7 @@ export function BrowserFlowRunDialog(props: {
     setTasks([]);
     setUncertain(false);
     setPending(false);
-    setMessage("Loading available tasks…");
+    setMessage("Loading available threads…");
     void manage
       ?.call(client, { kind: "run-tasks", projectId: flow.projectId }, controller.signal)
       .then((result) => {
@@ -53,16 +53,16 @@ export function BrowserFlowRunDialog(props: {
           setTasks(result.tasks);
           setMessage(
             result.tasks.length === 0
-              ? "Open this Project and choose an active, idle Work or Code task first."
-              : "Choose the existing task whose Browser and permissions this run will use.",
+              ? "Open this Project and choose an active, idle Work or Code thread first."
+              : "Choose the existing thread whose Browser and permissions this run will use.",
           );
         } else
           setMessage(
-            result.kind === "browser-flows-refused" ? result.message : "Tasks are unavailable.",
+            result.kind === "browser-flows-refused" ? result.message : "Threads are unavailable.",
           );
       })
       .catch(() => {
-        if (!controller.signal.aborted) setMessage("Tasks are unavailable.");
+        if (!controller.signal.aborted) setMessage("Threads are unavailable.");
       });
     return () => {
       controller.abort();
@@ -195,10 +195,10 @@ export function BrowserFlowRunDialog(props: {
         <div className="grid min-w-0 gap-2">
           {run === undefined ? (
             <OctantSelectField
-              aria-label="Task to run this flow"
+              aria-label="Thread to run this flow"
               value={taskId}
               onValueChange={setTaskId}
-              placeholder="Choose a task"
+              placeholder="Choose a thread"
               options={tasks.map((candidate) => ({
                 id: `${candidate.mode}:${candidate.threadId}`,
                 label: `${candidate.title} · ${candidate.mode === "code" ? "Code" : "Work"}`,
@@ -272,9 +272,9 @@ export function BrowserFlowRunDialog(props: {
         </div>
       }
     >
-      Uses an existing task’s current model and permissions. Review the fixed steps before starting.
-      Edited text and expected titles apply only to this run. Closing an active run stops it; a step
-      already dispatched may have acted.
+      Uses an existing thread’s current model and permissions. Review the fixed steps before
+      starting. Edited text and expected titles apply only to this run. Closing an active run stops
+      it; a step already dispatched may have acted.
     </OctantConfirmDialog>
   );
 }

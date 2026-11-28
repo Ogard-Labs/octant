@@ -42,7 +42,7 @@ export function workspaceSurfaceTitle(
   return surface.kind === "welcome" &&
     surface.mode === "code" &&
     surface.title === "Welcome to Code"
-    ? "New task"
+    ? "New thread"
     : surface.title;
 }
 

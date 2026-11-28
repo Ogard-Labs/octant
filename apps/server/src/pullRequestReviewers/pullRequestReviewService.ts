@@ -3,6 +3,7 @@ import {
   ActorId,
   AggregateId,
   AggregateVersion,
+  CODE_PULL_REQUEST_LINK_AGGREGATE,
   CodeDigest,
   CorrelationId,
   EventId,
@@ -63,12 +64,18 @@ import {
   decidePullRequestReviewHandBack,
   evaluatePullRequestReviewHeadCurrency,
   parseUnifiedDiff,
-  pullRequestReviewTargetKey,
+  pullRequestReviewLegacyTargetKey,
+  pullRequestReviewNodeTargetKey,
   pullRequestReviewerExecutionPolicy,
   resolveEffectivePullRequestReviewConfig,
   shouldStartPullRequestReviewForHead,
   type PrincipalKind,
 } from "@octant/domain";
+import {
+  emptyPullRequestLinkRegistryState,
+  resolvePullRequestLink,
+  type PullRequestLinkRegistryState,
+} from "@octant/domain/pull-request-identity-policy";
 import type {
   PullRequestReviewDiffResult,
   PullRequestReviewHandBackResult,
@@ -81,6 +88,10 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Effect, Exit, Fiber, Schema, Stream } from "effect";
 import { deriveCodeFileId } from "../code/codeFileIdentity";
 import { retainedReviewTarget, type RetainedCodeReview } from "../code/codeReviewComparison";
+import {
+  decodePullRequestLinkEnvelopeEvent,
+  type PullRequestLinkReader,
+} from "../code/pullRequestLinkService";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
@@ -88,6 +99,12 @@ import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import type { TurnMetricsStore } from "../metrics/turnMetricsStore";
+import {
+  pullRequestLinkBucketKey,
+  resolvePullRequestReviewIdentity,
+  stepPullRequestLinkReplay,
+  type ResolvedPullRequestReviewIdentity,
+} from "./pullRequestReviewIdentity";
 import type { PullRequestReviewerRegistry } from "./pullRequestReviewerRegistry";
 import { SECOND_MODEL_PULL_REQUEST_REVIEWER_ID } from "./secondModelPullRequestReviewer";
 
@@ -242,7 +259,12 @@ export interface PullRequestReviewAuthorityPort {
     windowId: WindowId,
     target: PullRequestReviewTarget,
   ): Promise<
-    | { readonly status: "authorized"; readonly linkedThreadIds: ReadonlyArray<string> }
+    | {
+        readonly status: "authorized";
+        readonly linkedThreadIds: ReadonlyArray<string>;
+        readonly canonicalTarget?: PullRequestReviewTarget;
+        readonly pullRequestNodeId?: string;
+      }
     | { readonly status: "not-authorized" }
     | { readonly status: "disconnected" }
   >;
@@ -336,7 +358,6 @@ export type PullRequestReviewSettingResult<TView> =
     };
 
 interface RunFold {
-  version: number;
   readonly records: PullRequestReviewRunRecord[];
   /** Heads that settled with a completed (clean or findings-recorded) review. */
   readonly completedHeadShas: Set<string>;
@@ -614,6 +635,7 @@ export async function runDriverReadOnlyTurn(input: {
 export interface PullRequestReviewServiceOptions {
   readonly registry: PullRequestReviewerRegistry;
   readonly journal: Pick<Journal, "append" | "replayAggregateType">;
+  readonly pullRequestLinks?: PullRequestLinkReader;
   readonly authority: PullRequestReviewAuthorityPort;
   readonly threads: PullRequestReviewThreadPort;
   readonly runtime: PullRequestReviewHostRuntimePort;
@@ -632,6 +654,7 @@ export interface PullRequestReviewServiceOptions {
 export class PullRequestReviewService {
   readonly #registry: PullRequestReviewerRegistry;
   readonly #journal: Pick<Journal, "append" | "replayAggregateType">;
+  readonly #pullRequestLinks: PullRequestLinkReader | undefined;
   readonly #authority: PullRequestReviewAuthorityPort;
   readonly #threads: PullRequestReviewThreadPort;
   readonly #runtime: PullRequestReviewHostRuntimePort;
@@ -643,13 +666,19 @@ export class PullRequestReviewService {
   readonly #projectSettings = new Map<string, PullRequestReviewProjectSettings>();
   readonly #threadOverrides = new Map<string, PullRequestReviewThreadOverride>();
   readonly #prSettings = new Map<string, PullRequestReviewPullRequestSettings>();
+  readonly #prSettingsOrder = new Map<string, number>();
+  readonly #prSettingsAggregateVersions = new Map<string, number>();
   readonly #runs = new Map<string, RunFold>();
+  readonly #runAggregateVersions = new Map<string, number>();
+  readonly #recordSequence = new WeakMap<PullRequestReviewRunRecord, number>();
   readonly #latestByThread = new Map<string, PullRequestReviewRunRecord>();
   readonly #inFlightByTarget = new Map<string, InFlightReview>();
+  #eventOrder = 0;
 
   constructor(options: PullRequestReviewServiceOptions) {
     this.#registry = options.registry;
     this.#journal = options.journal;
+    this.#pullRequestLinks = options.pullRequestLinks;
     this.#authority = options.authority;
     this.#threads = options.threads;
     this.#runtime = options.runtime;
@@ -675,18 +704,85 @@ export class PullRequestReviewService {
     return this.#threadOverrides.get(String(threadId)) ?? defaultThreadOverride(threadId);
   }
 
-  #prSettingsFor(target: PullRequestReviewTarget): PullRequestReviewPullRequestSettings {
-    return (
-      this.#prSettings.get(pullRequestReviewTargetKey(target)) ?? defaultPullRequestSettings(target)
-    );
+  #resolveIdentity(
+    target: PullRequestReviewTarget,
+    authority?: {
+      readonly canonicalTarget?: PullRequestReviewTarget;
+      readonly pullRequestNodeId?: string;
+    },
+    trustTargetNodeId = false,
+  ): ResolvedPullRequestReviewIdentity {
+    const resolved = resolvePullRequestReviewIdentity({
+      target,
+      pullRequestLinks: this.#pullRequestLinks,
+      canonicalTarget: authority?.canonicalTarget,
+      pullRequestNodeId: authority?.pullRequestNodeId,
+      trustTargetNodeId,
+    });
+    for (const fromKey of resolved.adoptKeys) {
+      this.#mergeBuckets(fromKey, resolved.bucketKey);
+    }
+    return resolved;
   }
 
-  #runFoldFor(target: PullRequestReviewTarget): RunFold {
-    const key = pullRequestReviewTargetKey(target);
-    const existing = this.#runs.get(key);
+  #mergeBuckets(fromKey: string, toKey: string): void {
+    if (fromKey === toKey) return;
+    const sourceSettings = this.#prSettings.get(fromKey);
+    if (sourceSettings !== undefined) {
+      const sourceOrder = this.#prSettingsOrder.get(fromKey) ?? 0;
+      const destOrder = this.#prSettingsOrder.get(toKey) ?? -1;
+      if (!this.#prSettings.has(toKey) || sourceOrder >= destOrder) {
+        this.#prSettings.set(toKey, sourceSettings);
+        this.#prSettingsOrder.set(toKey, sourceOrder);
+      }
+      this.#prSettings.delete(fromKey);
+      this.#prSettingsOrder.delete(fromKey);
+    }
+
+    const sourceRun = this.#runs.get(fromKey);
+    if (sourceRun !== undefined) {
+      const destRun = this.#runs.get(toKey);
+      if (destRun === undefined) {
+        this.#runs.set(toKey, sourceRun);
+      } else {
+        destRun.records.push(...sourceRun.records);
+        destRun.records.sort(
+          (left, right) =>
+            (this.#recordSequence.get(left) ?? 0) - (this.#recordSequence.get(right) ?? 0),
+        );
+        for (const sha of sourceRun.completedHeadShas) destRun.completedHeadShas.add(sha);
+        for (const sha of sourceRun.reviewedHeadShas) destRun.reviewedHeadShas.add(sha);
+        for (const sha of sourceRun.publishedCommentHeads) destRun.publishedCommentHeads.add(sha);
+        for (const sha of sourceRun.handedBackHeads) destRun.handedBackHeads.add(sha);
+        for (const id of sourceRun.countedHandBackReviews) destRun.countedHandBackReviews.add(id);
+        destRun.handBackAttempts = destRun.countedHandBackReviews.size;
+        for (const [id, pending] of sourceRun.pendingStarts) {
+          if (!destRun.pendingStarts.has(id)) destRun.pendingStarts.set(id, pending);
+        }
+      }
+      this.#runs.delete(fromKey);
+    }
+
+    const inFlight = this.#inFlightByTarget.get(fromKey);
+    if (inFlight !== undefined) {
+      if (!this.#inFlightByTarget.has(toKey)) {
+        this.#inFlightByTarget.set(toKey, inFlight);
+      }
+      this.#inFlightByTarget.delete(fromKey);
+    }
+  }
+
+  #prSettingsForKey(
+    bucketKey: string,
+    target: PullRequestReviewTarget,
+  ): PullRequestReviewPullRequestSettings {
+    return this.#prSettings.get(bucketKey) ?? defaultPullRequestSettings(target);
+  }
+
+  #runFoldForKey(bucketKey: string): RunFold {
+    const existing = this.#runs.get(bucketKey);
     if (existing !== undefined) return existing;
     const created: RunFold = {
-      version: 0,
       records: [],
       completedHeadShas: new Set<string>(),
       reviewedHeadShas: new Set<string>(),
@@ -696,7 +792,7 @@ export class PullRequestReviewService {
       pendingStarts: new Map<string, PullRequestReviewRunStartedEvent>(),
       handBackAttempts: 0,
     };
-    this.#runs.set(key, created);
+    this.#runs.set(bucketKey, created);
     return created;
   }
 
@@ -704,11 +800,15 @@ export class PullRequestReviewService {
     readonly projectId: ProjectId;
     readonly threadId?: CodeThreadId;
     readonly target?: PullRequestReviewTarget;
+    readonly targetKey?: string;
   }): PullRequestReviewEffectiveConfig {
     const project = this.#projectSettingsFor(input.projectId);
     const thread =
       input.threadId === undefined ? undefined : this.#threadOverrideFor(input.threadId);
-    const pr = input.target === undefined ? undefined : this.#prSettingsFor(input.target);
+    const pr =
+      input.target === undefined || input.targetKey === undefined
+        ? undefined
+        : this.#prSettingsForKey(input.targetKey, input.target);
     const reviewerId = project.reviewerId ?? this.#defaultReviewerId;
     return resolveEffectivePullRequestReviewConfig({
       projectEnabled: project.enabled,
@@ -957,16 +1057,18 @@ export class PullRequestReviewService {
         message: "This window cannot access that pull request.",
       };
     }
-    const fold = this.#runFoldFor(target);
+    const resolved = this.#resolveIdentity(target, auth);
+    const fold = this.#runFoldForKey(resolved.bucketKey);
     const latestReview = fold.records.at(-1);
     return {
       status: "ok",
       view: decodePullRequestReviewPullRequestView({
-        settings: this.#prSettingsFor(target),
+        settings: this.#prSettingsForKey(resolved.bucketKey, resolved.target),
         effective: this.#effectiveConfigFor({
-          projectId: target.projectId,
+          projectId: resolved.target.projectId,
           ...(threadId === undefined ? {} : { threadId }),
-          target,
+          target: resolved.target,
+          targetKey: resolved.bucketKey,
         }),
         ...(latestReview === undefined ? {} : { latestReview }),
         handBackAttempts: fold.handBackAttempts,
@@ -996,21 +1098,24 @@ export class PullRequestReviewService {
         message: "This window cannot access that pull request.",
       };
     }
-    const key = pullRequestReviewTargetKey(command.target);
-    const existing = this.#prSettingsFor(command.target);
+    const resolved = this.#resolveIdentity(command.target, auth);
+    const aggregateId = targetAggregateId(resolved.writeKey);
+    const expectedVersion = decodeAggregateVersion(
+      this.#prSettingsAggregateVersions.get(String(aggregateId)) ?? 0,
+    );
     const occurredAt = decodeTimestamp(this.#clock());
-    const nextVersion = decodeAggregateVersion(existing.version + 1);
+    const nextVersion = decodeAggregateVersion(expectedVersion + 1);
     const payload = {
       kind: "pull-request-review-pr-settings-updated" as const,
-      target: command.target,
+      target: resolved.target,
       sendBlockingFindingsToWorker: command.sendBlockingFindingsToWorker,
     };
     this.#journal.append({
       aggregate: {
         aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.pullRequestSettings,
-        aggregateId: targetAggregateId(key),
+        aggregateId,
       },
-      expectedVersion: existing.version,
+      expectedVersion,
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
@@ -1023,22 +1128,26 @@ export class PullRequestReviewService {
         },
       ],
     });
+    this.#prSettingsAggregateVersions.set(String(aggregateId), nextVersion);
+    this.#eventOrder += 1;
     const updated: PullRequestReviewPullRequestSettings = {
-      target: command.target,
+      target: resolved.target,
       sendBlockingFindingsToWorker: command.sendBlockingFindingsToWorker,
       version: nextVersion,
       updatedAt: occurredAt,
     };
-    this.#prSettings.set(key, updated);
-    const fold = this.#runFoldFor(command.target);
+    this.#prSettings.set(resolved.bucketKey, updated);
+    this.#prSettingsOrder.set(resolved.bucketKey, this.#eventOrder);
+    const fold = this.#runFoldForKey(resolved.bucketKey);
     const latestReview = fold.records.at(-1);
     return {
       status: "ok",
       view: decodePullRequestReviewPullRequestView({
         settings: updated,
         effective: this.#effectiveConfigFor({
-          projectId: command.target.projectId,
-          target: command.target,
+          projectId: resolved.target.projectId,
+          target: resolved.target,
+          targetKey: resolved.bucketKey,
         }),
         ...(latestReview === undefined ? {} : { latestReview }),
         handBackAttempts: fold.handBackAttempts,
@@ -1076,8 +1185,11 @@ export class PullRequestReviewService {
       return undefined;
     }
 
-    const targetKey = pullRequestReviewTargetKey(observation.target);
-    const fold = this.#runFoldFor(observation.target);
+    const resolved = this.#resolveIdentity(observation.target, undefined, true);
+    const target = resolved.target;
+    const targetKey = resolved.bucketKey;
+    const writeKey = resolved.writeKey;
+    const fold = this.#runFoldForKey(targetKey);
     const existingInFlight = this.#inFlightByTarget.get(targetKey);
 
     // If a newer head arrived while an older review is still running, abort
@@ -1096,9 +1208,10 @@ export class PullRequestReviewService {
     if (!startDecision.start) return undefined;
 
     const effective = this.#effectiveConfigFor({
-      projectId: observation.target.projectId,
+      projectId: target.projectId,
       threadId: observation.threadId,
-      target: observation.target,
+      target,
+      targetKey,
     });
     const reviewerId = effective.reviewerId ?? this.#defaultReviewerId;
 
@@ -1112,7 +1225,7 @@ export class PullRequestReviewService {
       const refusedRecord = decodePullRequestReviewRunRecord({
         reviewId: decodePullRequestReviewId(this.#uuid()),
         reviewerId,
-        target: observation.target,
+        target,
         threadId: observation.threadId,
         headSha: observation.headSha,
         status: "refused",
@@ -1127,7 +1240,7 @@ export class PullRequestReviewService {
         startedAt,
         completedAt: startedAt,
       });
-      this.#recordRun(observation.target, refusedRecord);
+      this.#recordRun(targetKey, writeKey, refusedRecord);
       return refusedRecord;
     }
 
@@ -1137,11 +1250,11 @@ export class PullRequestReviewService {
     const startedAt = decodeTimestamp(this.#clock());
     // Persist durable per-head invocation reservation BEFORE starting provider
     // work so a crash or restart never repeats an already-started review.
-    this.#recordRunStarted({
+    this.#recordRunStarted(targetKey, writeKey, {
       kind: "pull-request-review-run-started",
       reviewId,
       reviewerId,
-      target: observation.target,
+      target,
       threadId: thread.id,
       headSha: observation.headSha,
       ...(effective.route === undefined ? {} : { route: effective.route }),
@@ -1153,7 +1266,7 @@ export class PullRequestReviewService {
     try {
       const request = decodePullRequestReviewRequest({
         reviewId,
-        target: observation.target,
+        target,
         threadId: thread.id,
         checkoutId: thread.checkoutId,
         headSha: observation.headSha,
@@ -1175,13 +1288,12 @@ export class PullRequestReviewService {
         request,
         signal: abort.signal,
         delegates: {
-          readCurrentHeadSha: (signal) =>
-            this.#runtime.readCurrentHeadSha(observation.target, signal),
+          readCurrentHeadSha: (signal) => this.#runtime.readCurrentHeadSha(target, signal),
 
           readPullRequestDiff: async (signal): Promise<PullRequestReviewDiffResult> => {
             const captured = await this.#runtime.capturePullRequestDiff(
               {
-                target: observation.target,
+                target,
                 thread,
                 headSha: observation.headSha,
                 baseRef: observation.baseRef,
@@ -1477,16 +1589,18 @@ export class PullRequestReviewService {
           },
 
           isPostSummaryCommentEnabled: () =>
-            this.#projectSettingsFor(observation.target.projectId).postSummaryComment,
+            this.#projectSettingsFor(target.projectId).postSummaryComment,
 
           postSummaryComment: async ({ body }, signal) => {
-            if (fold.publishedCommentHeads.has(observation.headSha)) {
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
+            const currentFold = this.#runFoldForKey(currentIdentity.bucketKey);
+            if (currentFold.publishedCommentHeads.has(observation.headSha)) {
               return { status: "refused", reason: "already-posted" };
             }
-            this.#recordPublication({
+            this.#recordPublication(currentIdentity.bucketKey, currentIdentity.writeKey, {
               kind: "pull-request-review-publication-recorded",
               reviewId,
-              target: observation.target,
+              target: currentIdentity.target,
               threadId: thread.id,
               headSha: observation.headSha,
               action: "summary-comment",
@@ -1494,13 +1608,13 @@ export class PullRequestReviewService {
               occurredAt: decodeTimestamp(this.#clock()),
             });
             const posted = await this.#runtime.postSummaryComment(
-              { target: observation.target, body },
+              { target: currentIdentity.target, body },
               signal,
             );
-            this.#recordPublication({
+            this.#recordPublication(currentIdentity.bucketKey, currentIdentity.writeKey, {
               kind: "pull-request-review-publication-recorded",
               reviewId,
-              target: observation.target,
+              target: currentIdentity.target,
               threadId: thread.id,
               headSha: observation.headSha,
               action: "summary-comment",
@@ -1510,23 +1624,30 @@ export class PullRequestReviewService {
             return posted;
           },
 
-          isSendBlockingFindingsEnabled: () =>
-            this.#prSettingsFor(observation.target).sendBlockingFindingsToWorker,
+          isSendBlockingFindingsEnabled: () => {
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
+            return this.#prSettingsForKey(currentIdentity.bucketKey, currentIdentity.target)
+              .sendBlockingFindingsToWorker;
+          },
 
           handBackBlockingFindings: async ({
             findings,
           }): Promise<PullRequestReviewHandBackResult> => {
-            if (fold.handedBackHeads.has(observation.headSha)) {
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
+            const currentFold = this.#runFoldForKey(currentIdentity.bucketKey);
+            if (currentFold.handedBackHeads.has(observation.headSha)) {
               return { status: "refused", reason: "already-handed-back" };
             }
             const strict = this.#threads.isStrict(thread.id);
             const maxStrictAttempts = this.#threads.maxStrictHandBackAttempts();
             const decision = decidePullRequestReviewHandBack({
-              sendBlockingFindingsToWorker: this.#prSettingsFor(observation.target)
-                .sendBlockingFindingsToWorker,
+              sendBlockingFindingsToWorker: this.#prSettingsForKey(
+                currentIdentity.bucketKey,
+                currentIdentity.target,
+              ).sendBlockingFindingsToWorker,
               blockingFindingCount: findings.length,
               strict,
-              attemptsUsed: fold.handBackAttempts,
+              attemptsUsed: currentFold.handBackAttempts,
               maxStrictAttempts,
             });
             if (decision.action === "disabled") return { status: "disabled" };
@@ -1537,7 +1658,7 @@ export class PullRequestReviewService {
               await this.#threads
                 .notifyPerson?.(
                   thread.id,
-                  `Second-model PR review hand-back stopped on pull request #${observation.target.number} after ${decision.maxAttempts} attempts under Strict.`,
+                  `Second-model PR review hand-back stopped on pull request #${currentIdentity.target.number} after ${decision.maxAttempts} attempts under Strict.`,
                 )
                 .catch(() => undefined);
               return { status: "attempt-limit" };
@@ -1555,10 +1676,10 @@ export class PullRequestReviewService {
 
             // Persist durable hand-back intent BEFORE waking the worker so a
             // crash mid-wake cannot repeat the hand-back on host restart.
-            this.#recordPublication({
+            this.#recordPublication(currentIdentity.bucketKey, currentIdentity.writeKey, {
               kind: "pull-request-review-publication-recorded",
               reviewId,
-              target: observation.target,
+              target: currentIdentity.target,
               threadId: thread.id,
               headSha: observation.headSha,
               action: "worker-hand-back",
@@ -1568,17 +1689,17 @@ export class PullRequestReviewService {
             });
 
             const text = formatHandBackTurnText({
-              target: observation.target,
+              target: currentIdentity.target,
               headSha: observation.headSha,
               findings,
               attempt: decision.attempt,
               ...(strict ? { maxStrictAttempts } : {}),
             });
             const started = await this.#threads.startWorkerTurn(thread.id, text).catch(() => false);
-            this.#recordPublication({
+            this.#recordPublication(currentIdentity.bucketKey, currentIdentity.writeKey, {
               kind: "pull-request-review-publication-recorded",
               reviewId,
-              target: observation.target,
+              target: currentIdentity.target,
               threadId: thread.id,
               headSha: observation.headSha,
               action: "worker-hand-back",
@@ -1595,11 +1716,12 @@ export class PullRequestReviewService {
         },
       });
 
+      const finalIdentity = this.#resolveIdentity(target, undefined, true);
       const completedAt = decodeTimestamp(this.#clock());
       const record = this.#outcomeToRecord({
         reviewId,
         reviewerId,
-        target: observation.target,
+        target: finalIdentity.target,
         threadId: thread.id,
         headSha: observation.headSha,
         ...(effective.route === undefined ? {} : { route: effective.route }),
@@ -1608,12 +1730,13 @@ export class PullRequestReviewService {
         completedAt,
         ...(handBackAttemptNumber === undefined ? {} : { handBackAttempt: handBackAttemptNumber }),
       });
-      this.#recordRun(observation.target, record);
+      this.#recordRun(finalIdentity.bucketKey, finalIdentity.writeKey, record);
       return record;
     } finally {
-      const current = this.#inFlightByTarget.get(targetKey);
-      if (current?.abort === abort) {
-        this.#inFlightByTarget.delete(targetKey);
+      for (const [key, active] of this.#inFlightByTarget) {
+        if (active.abort === abort) {
+          this.#inFlightByTarget.delete(key);
+        }
       }
     }
   }
@@ -1862,15 +1985,22 @@ export class PullRequestReviewService {
     }
   }
 
-  #recordRunStarted(payload: PullRequestReviewRunStartedEvent): void {
-    const key = pullRequestReviewTargetKey(payload.target);
-    const fold = this.#runFoldFor(payload.target);
+  #recordRunStarted(
+    bucketKey: string,
+    writeKey: string,
+    payload: PullRequestReviewRunStartedEvent,
+  ): void {
+    const fold = this.#runFoldForKey(bucketKey);
+    const aggregateId = targetAggregateId(writeKey);
+    const expectedVersion = decodeAggregateVersion(
+      this.#runAggregateVersions.get(String(aggregateId)) ?? 0,
+    );
     this.#journal.append({
       aggregate: {
         aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
-        aggregateId: targetAggregateId(key),
+        aggregateId,
       },
-      expectedVersion: decodeAggregateVersion(fold.version),
+      expectedVersion,
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
@@ -1883,23 +2013,30 @@ export class PullRequestReviewService {
         },
       ],
     });
+    this.#runAggregateVersions.set(String(aggregateId), expectedVersion + 1);
     this.#applyRunStarted(fold, payload);
   }
 
   #applyRunStarted(fold: RunFold, payload: PullRequestReviewRunStartedEvent): void {
-    fold.version += 1;
     fold.pendingStarts.set(String(payload.reviewId), payload);
   }
 
-  #recordPublication(payload: PullRequestReviewPublicationRecordedEvent): void {
-    const key = pullRequestReviewTargetKey(payload.target);
-    const fold = this.#runFoldFor(payload.target);
+  #recordPublication(
+    bucketKey: string,
+    writeKey: string,
+    payload: PullRequestReviewPublicationRecordedEvent,
+  ): void {
+    const fold = this.#runFoldForKey(bucketKey);
+    const aggregateId = targetAggregateId(writeKey);
+    const expectedVersion = decodeAggregateVersion(
+      this.#runAggregateVersions.get(String(aggregateId)) ?? 0,
+    );
     this.#journal.append({
       aggregate: {
         aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
-        aggregateId: targetAggregateId(key),
+        aggregateId,
       },
-      expectedVersion: decodeAggregateVersion(fold.version),
+      expectedVersion,
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
@@ -1912,11 +2049,11 @@ export class PullRequestReviewService {
         },
       ],
     });
+    this.#runAggregateVersions.set(String(aggregateId), expectedVersion + 1);
     this.#applyPublication(fold, payload);
   }
 
   #applyPublication(fold: RunFold, payload: PullRequestReviewPublicationRecordedEvent): void {
-    fold.version += 1;
     if (payload.action === "summary-comment") {
       if (payload.phase === "intent" || payload.phase === "completed") {
         fold.publishedCommentHeads.add(payload.headSha);
@@ -1932,8 +2069,8 @@ export class PullRequestReviewService {
     }
   }
 
-  #applyRunRecord(fold: RunFold, record: PullRequestReviewRunRecord): void {
-    fold.version += 1;
+  #applyRunRecord(fold: RunFold, record: PullRequestReviewRunRecord, sequence: number): void {
+    this.#recordSequence.set(record, sequence);
     fold.pendingStarts.delete(String(record.reviewId));
     fold.records.push(record);
     if (record.status === "completed") {
@@ -1955,16 +2092,19 @@ export class PullRequestReviewService {
     this.#latestByThread.set(String(record.threadId), record);
   }
 
-  #recordRun(target: PullRequestReviewTarget, record: PullRequestReviewRunRecord): void {
-    const key = pullRequestReviewTargetKey(target);
-    const fold = this.#runFoldFor(target);
+  #recordRun(bucketKey: string, writeKey: string, record: PullRequestReviewRunRecord): void {
+    const fold = this.#runFoldForKey(bucketKey);
+    const aggregateId = targetAggregateId(writeKey);
+    const expectedVersion = decodeAggregateVersion(
+      this.#runAggregateVersions.get(String(aggregateId)) ?? 0,
+    );
     const occurredAt = decodeTimestamp(this.#clock());
     this.#journal.append({
       aggregate: {
         aggregateType: PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
-        aggregateId: targetAggregateId(key),
+        aggregateId,
       },
-      expectedVersion: decodeAggregateVersion(fold.version),
+      expectedVersion,
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
@@ -1980,25 +2120,56 @@ export class PullRequestReviewService {
         },
       ],
     });
-    this.#applyRunRecord(fold, record);
+    this.#runAggregateVersions.set(String(aggregateId), expectedVersion + 1);
+    this.#eventOrder += 1;
+    this.#applyRunRecord(fold, record, this.#eventOrder);
   }
 
   #hydrate(): void {
     const envelopes = replayAggregateTypesInOrder(this.#journal, [
+      CODE_PULL_REQUEST_LINK_AGGREGATE,
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.projectSettings,
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.threadOverride,
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.pullRequestSettings,
       PULL_REQUEST_REVIEW_AGGREGATE_TYPES.run,
     ]);
+    let linkState: PullRequestLinkRegistryState = emptyPullRequestLinkRegistryState();
+    const resolveReplayBucketKey = (target: PullRequestReviewTarget): string => {
+      if (target.pullRequestNodeId !== undefined) {
+        return pullRequestReviewNodeTargetKey(target.projectId, target.pullRequestNodeId);
+      }
+      const link = resolvePullRequestLink(linkState, {
+        projectId: target.projectId,
+        repositoryOwner: target.repositoryOwner,
+        repositoryName: target.repositoryName,
+        number: target.number,
+      });
+      return link !== undefined
+        ? pullRequestLinkBucketKey(link)
+        : pullRequestReviewLegacyTargetKey(target);
+    };
+
     // Track original journal sequence per review so interrupted runs recovered
     // on restart keep their chronological place and never overwrite newer runs.
     const startSequenceByReview = new Map<string, number>();
-    const sequenceByRecord = new Map<PullRequestReviewRunRecord, number>();
     let replayOrder = 0;
 
     for (const envelope of envelopes) {
       replayOrder += 1;
       const sequence = envelope.globalSequence ?? replayOrder;
+      this.#eventOrder = Math.max(this.#eventOrder, sequence);
+
+      if (envelope.aggregateType === CODE_PULL_REQUEST_LINK_AGGREGATE) {
+        const decoded = decodePullRequestLinkEnvelopeEvent(envelope.eventName, envelope.payload);
+        if (decoded === undefined) continue;
+        const stepped = stepPullRequestLinkReplay(linkState, decoded, sequence);
+        linkState = stepped.nextState;
+        for (const migration of stepped.migrations) {
+          this.#mergeBuckets(migration.fromKey, migration.toKey);
+        }
+        continue;
+      }
+
       if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.projectSettingsUpdated) {
         const payload = envelope.payload as PullRequestReviewProjectSettingsEvent;
         const previous = this.#projectSettings.get(String(payload.projectId));
@@ -2025,26 +2196,50 @@ export class PullRequestReviewService {
       } else if (
         envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.pullRequestSettingsUpdated
       ) {
+        const aggregateKey = String(envelope.aggregateId);
+        const aggregateVersion = (this.#prSettingsAggregateVersions.get(aggregateKey) ?? 0) + 1;
+        this.#prSettingsAggregateVersions.set(aggregateKey, aggregateVersion);
         const payload = envelope.payload as PullRequestReviewPullRequestSettingsEvent;
-        const key = pullRequestReviewTargetKey(payload.target);
-        const previous = this.#prSettings.get(key);
+        const key = resolveReplayBucketKey(payload.target);
         this.#prSettings.set(key, {
           target: payload.target,
           sendBlockingFindingsToWorker: payload.sendBlockingFindingsToWorker,
-          version: decodeAggregateVersion((previous?.version ?? 0) + 1),
+          version: decodeAggregateVersion(aggregateVersion),
           updatedAt: decodeTimestamp(envelope.occurredAt),
         });
+        this.#prSettingsOrder.set(key, sequence);
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runStarted) {
+        const aggregateKey = String(envelope.aggregateId);
+        this.#runAggregateVersions.set(
+          aggregateKey,
+          (this.#runAggregateVersions.get(aggregateKey) ?? 0) + 1,
+        );
         const payload = envelope.payload as PullRequestReviewRunStartedEvent;
         startSequenceByReview.set(String(payload.reviewId), sequence);
-        this.#applyRunStarted(this.#runFoldFor(payload.target), payload);
+        this.#applyRunStarted(this.#runFoldForKey(resolveReplayBucketKey(payload.target)), payload);
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.publicationRecorded) {
+        const aggregateKey = String(envelope.aggregateId);
+        this.#runAggregateVersions.set(
+          aggregateKey,
+          (this.#runAggregateVersions.get(aggregateKey) ?? 0) + 1,
+        );
         const payload = envelope.payload as PullRequestReviewPublicationRecordedEvent;
-        this.#applyPublication(this.#runFoldFor(payload.target), payload);
+        this.#applyPublication(
+          this.#runFoldForKey(resolveReplayBucketKey(payload.target)),
+          payload,
+        );
       } else if (envelope.eventName === PULL_REQUEST_REVIEW_EVENT_NAMES.runRecorded) {
+        const aggregateKey = String(envelope.aggregateId);
+        this.#runAggregateVersions.set(
+          aggregateKey,
+          (this.#runAggregateVersions.get(aggregateKey) ?? 0) + 1,
+        );
         const payload = envelope.payload as PullRequestReviewRunRecordedEvent;
-        sequenceByRecord.set(payload.record, sequence);
-        this.#applyRunRecord(this.#runFoldFor(payload.record.target), payload.record);
+        this.#applyRunRecord(
+          this.#runFoldForKey(resolveReplayBucketKey(payload.record.target)),
+          payload.record,
+          sequence,
+        );
       }
     }
 
@@ -2072,13 +2267,18 @@ export class PullRequestReviewService {
             "The host restarted while this pull request review was in progress; Octant did not repeat external publication or hand-back.",
           startedAt: pending.startedAt,
         });
-        sequenceByRecord.set(recovered, startSequenceByReview.get(String(pending.reviewId)) ?? 0);
+        this.#recordSequence.set(
+          recovered,
+          startSequenceByReview.get(String(pending.reviewId)) ?? 0,
+        );
         fold.records.push(recovered);
       }
       fold.pendingStarts.clear();
-      fold.records.sort((a, b) => (sequenceByRecord.get(a) ?? 0) - (sequenceByRecord.get(b) ?? 0));
+      fold.records.sort(
+        (a, b) => (this.#recordSequence.get(a) ?? 0) - (this.#recordSequence.get(b) ?? 0),
+      );
       for (const record of fold.records) {
-        const seq = sequenceByRecord.get(record) ?? 0;
+        const seq = this.#recordSequence.get(record) ?? 0;
         const threadKey = String(record.threadId);
         const currentLatestSeq = latestThreadSequence.get(threadKey) ?? -1;
         if (seq >= currentLatestSeq) {

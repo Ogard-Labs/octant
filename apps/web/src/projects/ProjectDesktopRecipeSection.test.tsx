@@ -167,6 +167,61 @@ describe("ProjectDesktopRecipeSection", () => {
     expect(screen.getByRole("button", { name: "Set recipe" })).toBeDisabled();
   });
 
+  it("shows a plain Get Cua Spaces link when Cua has no daemon running, and omits it once ready", async () => {
+    const user = userEvent.setup();
+    const openBrowserExternal = vi.fn(async () => undefined);
+    const cuaDown = {
+      ...spaces,
+      providerId: "cua",
+      displayName: "Cua Spaces",
+      needsSetup: "daemon-not-connected",
+    } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([hostLocal, cuaDown])}
+        externalUrlHost={{ openBrowserExternal }}
+        onChange={vi.fn(async () => true)}
+        project={project()}
+      />,
+    );
+
+    const unselectedLink = await screen.findByRole("link", { name: "Get Cua Spaces" });
+    expect(unselectedLink).toHaveAttribute("href", "https://cua.ai");
+    await user.click(unselectedLink);
+    expect(openBrowserExternal).toHaveBeenCalledWith("https://cua.ai");
+    cleanup();
+
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([cuaDown])}
+        externalUrlHost={{ openBrowserExternal }}
+        onChange={vi.fn(async () => true)}
+        project={project()}
+      />,
+    );
+    expect(await screen.findByRole("link", { name: "Get Cua Spaces" })).toHaveAttribute(
+      "href",
+      "https://cua.ai",
+    );
+    cleanup();
+
+    const cuaReady = { ...spaces, providerId: "cua", displayName: "Cua Spaces" } as const;
+    render(
+      <ProjectDesktopRecipeSection
+        client={client([cuaReady])}
+        externalUrlHost={{ openBrowserExternal }}
+        onChange={vi.fn(async () => true)}
+        project={project()}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
+        "Cua Spaces",
+      ),
+    );
+    expect(screen.queryByRole("link", { name: "Get Cua Spaces" })).toBeNull();
+  });
+
   it("sets a recipe on a provider the host offers, with the screen chosen and no network", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn(async () => true);

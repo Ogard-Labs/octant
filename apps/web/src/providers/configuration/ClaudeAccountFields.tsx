@@ -165,7 +165,7 @@ export function ClaudeAccountSettingsFields(props: {
       settingPrefix={
         props.instanceId === undefined ? "provider-create-claude" : `provider-${props.instanceId}`
       }
-      signInDescription="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials. If you previously connected Claude for helpers, revoke that leftover token with Anthropic."
+      signInDescription="Sign in only with this unmodified command in a terminal for this account. Octant never reads, stores, or injects provider credentials. If you previously connected Claude for agents, revoke that leftover token with Anthropic."
     />
   );
 }

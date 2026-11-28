@@ -185,17 +185,17 @@ never the navigation grammar.
 sidebar's own actions when no rail stands beside it. It closes any reader and
 puts the active pane back on its mode's start screen (Code Home in Code), and
 it is current while that start screen shows. The `home` keybinding
-(Mod+Shift+H by default) does the same. A New task draft shares the start
+(Mod+Shift+H by default) does the same. A New thread draft shares the start
 screen's composer scope, so its unsent text comes back with it. Before Home,
 the start screen had no way back once a person left it.
 
-**A new task takes the whole window.** Started while the window shows a split,
-New task (the row, the band's button, the key, the palette, a Project's own
-New task) leaves its draft as the mode's only pane: the other panes close in
+**A new thread takes the whole window.** Started while the window shows a split,
+New thread (the row, the band's button, the key, the palette, a Project's own
+New thread) leaves its draft as the mode's only pane: the other panes close in
 the same server step, so nothing is drawn in between, and their threads stay
 in the list. A zoom on one pane ends with the split. Opened into one half, the
 draft stood beside a thread the person had not asked to keep in view, and
-half a window is not where a task starts. Every other open keeps the rule
+half a window is not where a thread starts. Every other open keeps the rule
 under [Panes and content navigation](#panes-and-content-navigation): it
 replaces one pane.
 
@@ -1272,7 +1272,7 @@ file. Save remains the explicit disk write.
 Every start screen is one column in every mode: the question, its composer
 directly under it, then the mode's prompt suggestions (Code's four cards, on one
 line; Chat's starter chips before its first thread) and one calm list. Home,
-where a mode lands with nothing chosen, and New task, which is Home with the
+where a mode lands with nothing chosen, and New thread, which is Home with the
 Project named, put the question and the composer in the same place. No start
 screen has tabs or action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
@@ -2315,10 +2315,10 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 
 Environment belongs to a
 thread as a context-aware dock tab opened from the thread header's tool row. Its
-Subagents row counts the active thread's server-authored child AgentRuns
+Agents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
-other AgentRun control stay. A compact, collapsible Subagents card sits above
+other AgentRun control stay. A compact, collapsible Agents card sits above
 the composer in normal layout, as wide as the message surface. Its head counts each
 state (failed, waiting, to review, working, done) and keeps failures, waits and
 unreviewed results first while collapsed; a result the parent already received is
@@ -2428,7 +2428,7 @@ some computers, it reads, lists and names only those (maintainer decision,
   asking window or device already lists there
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
-  read that run; elsewhere the row reads "Subagent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a wait for room, a slot or siblings under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
+  read that run; elsewhere the row reads "Agent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a wait for room, a slot or siblings under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your
   other computers"; a Work or Chat thread there cannot be shown by that screen,
@@ -2700,31 +2700,43 @@ deleting, and reconciles after restart without re-running work.
 Code also has a host-scoped Linear issues workspace contributed by the
 bundled Linear plugin (enabled by default) as `sidebar.destination` `linear-issues`, Code mode
 only. The sidebar row is shown only when that contribution is effective, its
-action is wired, and the Linear authentication snapshot reports `list-issues`
+action is wired, and at least one connected Linear account reports `list-issues`
 available. Browse goes through the Integration port
 ([operations](host-reads-and-commands.md#linear-issues)) with bounded page size
 and description bytes. Issue bodies are a live projection, not Octant source of
 truth; credentials and raw API payloads never enter prompts or tool output.
 Open in Linear is an external `linear.app` URL. Disabled, untrusted,
-unauthorized, expired, or rate-limited Linear contributes no sidebar item,
-catalogue rows, or thread context. Chat/Work browse and Linear writes are not
-this surface.
+unauthorized, expired, or rate-limited Linear accounts contribute no sidebar
+item, catalogue rows, or thread context. Chat/Work browse and Linear writes are
+not this surface.
 
-Composer `Create from…` also exposes a Linear tab when the Settings-owned
-connection reports `list-issues` available and the Linear plugin is effective.
-When the active Project is bound to a Linear team (and optional Linear
-project), the Linear tab and the Code Linear issue browser default to that
-binding while letting the person switch back to the whole Linear workspace;
+Composer `Create from…` also exposes a Linear tab when at least one Settings-owned
+Linear account reports `list-issues` available and the Linear plugin is effective.
+When more than one Linear account is ready, both `Create from…` and the Code
+Linear issue browser show a workspace switcher; when the active Project is bound
+to a Linear account, team, and optional Linear project, both default to that
+binding while letting the person switch back to the whole workspace or another
+connected workspace. Inbox and Start merge Linear issues across ready accounts
+and show the workspace name on each row when more than one account is connected;
 picking a Linear issue on Start automatically selects the uniquely matching
-bound Octant Project. Project-to-Linear bindings are edited on the host from
-Settings › Integrations (Linear projects matrix, alongside connected user, workspace,
-linked-project count, and personal API key controls with a direct creation
-link) and from each Project's Overview page.
-Selecting a row attaches only `{ id }`. At creation the server reauthorizes
-through the Integration port, frames redacted issue text
-(`identifier`, status, description, comments, links) as external content and
-journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
-Refusal fails creation visibly. A Code thread made this way is linked to the issue.
+bound Octant Project by account first so identical team keys across workspaces
+never cross-bind. Inline issue-key chips resolve through the active Project's
+bound account when bound, or through the sole ready account when unbound; on an
+unbound thread with multiple ready accounts, issue keys stay plain text rather
+than probing workspaces in turn.
+
+Multiple Linear accounts and Project-to-Linear bindings are managed on the host
+from Settings › Integrations (each connected account with workspace, user,
+state, linked-project count, Reconnect/Disconnect, Connect another account,
+personal API key controls with a direct creation link, **Add as account** when
+an unused legacy personal API key sits beside OAuth, and an Account → Team →
+Project bindings matrix, falling back to the single-account view against older
+hosts) and from each Project's Overview page. Selecting a row attaches
+`{ id, accountRef? }`. At creation the server reauthorizes through the
+Integration port on that account, frames redacted issue text (`identifier`,
+status, description, comments, links) as external content and journals that
+ingestion ([details](host-reads-and-commands.md#linear-issues)). Refusal fails
+creation visibly. A Code thread made this way is linked to the issue.
 
 <a id="linked-issues-kept-current"></a>
 **Linked issues kept current.** A Code thread works on up to ten linked
@@ -3323,7 +3335,7 @@ Project Overview are real features, not
 decorative shortcuts.
 
 The sidebar header carries the mode switcher, Search, and New thread (New
-chat in Chat, New task in Work and Code), which the New thread row at the head of the list repeats
+chat in Chat, New thread in Work and Code), which the New thread row at the head of the list repeats
 (see above). Under the header sit four count tiles in a 2×2 grid: Inbox (the
 threads that need the person: an approval, a question, a follow-up that is due,
 or a subagent request waiting on them; a finished turn is not one, and the
@@ -3686,9 +3698,9 @@ opens Review, and the thread's pull request with its checks in words.
 **Outputs** lists the documents and Canvases the window knows the thread has
 (those it had when opened and those its turns wrote since, never a deleted
 file), newest first and at most five, each a row that opens it in Document or
-Canvas, with the count at the title's right. **Subagents** lists the
+Canvas, with the count at the title's right. **Agents** lists the
 runs the thread's agent handed work to, from the same read and cadence as the
-Environment tab's Subagents row: each running one a spinner, task, and how long
+Environment tab's Agents row: each running one a spinner, task, and how long
 it has run, with the running count at the title's right, and the finished ones
 folded under one "N finished" row; each row shows its run time at the trailing
 edge in a fixed-width slot, by the same rule as the transcript's subagent rows
@@ -3984,7 +3996,7 @@ no meter, no zero and no summary. It never estimates. A Compact session button
 sits at its foot where the thread offers one, through the composer's own
 confirmation and host path (maintainer request, 2026-11-16).
 
-**Subagents in Environment.** The Subagents row carries the working, to
+**Agents in Environment.** The Agents row carries the working, to
 review and done counts. It opens by itself when a subagent starts working and
 then stays as the person left it; it never closes by itself, so the rows and
 the result lines do not vanish when the last run ends. Open, it holds one 28px
@@ -4001,7 +4013,7 @@ steering a subagent belong in Agents (maintainer request, 2026-11-16).
 request and no changes shows only what is true and what can be started
 (maintainer request, 2026-11-16). Local servers is a row only while a server
 runs on this computer, and Computer use only while a session exists; Running's
-folded summary says "Nothing running" otherwise. Subagents stays as "None", and
+folded summary says "Nothing running" otherwise. Agents stays as "None", and
 with nothing to open it is a plain row with no chevron and no button, as is any
 group whose opened body would only repeat its value. Pull requests is absent
 when the Project is not on GitHub (Delivery's summary says "Not on GitHub");
@@ -4022,11 +4034,11 @@ pull request for a named branch, because the section reads the working tree and
 the branch only, not how far the branch is ahead. Neither shows for an
 unreadable checkout. The items of a
 "…" menu (More for changes) at the right end of the Changes title row, shown
-while the section is open, hold only New task in this Project.
+while the section is open, hold only New thread in this Project.
 
 The rows above the section are themselves the actions their facts describe.
 The **Branch row** opens a menu (Branch) with Switch branch…, Move to a new
-worktree…, New task on another branch…, and Worktrees. Move to a new
+worktree…, New thread on another branch…, and Worktrees. Move to a new
 worktree… appears only for a thread on the checkout it shares with its
 Project, greyed with the reason while a turn runs or under Plan; its dialog
 (loaded when opened) takes an optional branch name, says the uncommitted
@@ -4036,7 +4048,7 @@ names the new branch and repeats that the source still has the changes
 reports a readable local Git checkout — a remote root or a plain folder has
 no local HEAD to move, and neither gets it — and waits, greyed with the
 reason, while a turn runs: switching under a running turn would move the
-ground beneath it, so the host also refuses mid-turn. New task on another
+ground beneath it, so the host also refuses mid-turn. New thread on another
 branch… opens the ordinary new-task draft in this Project on the New
 worktree choice with its Where > Start from picker already open and loading
 the checkout's real refs; it is absent without a connected, readable
@@ -4613,7 +4625,7 @@ through it.
 
 | Step | Points at                                               | Says                                                                    |
 | ---- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| 1    | New chat or New task                                    | Start work in Chat, Work or Code; pick the agent and model              |
+| 1    | New chat or New thread                                  | Start work in Chat, Work or Code; pick the agent and model              |
 | 2    | The Projects list in the sidebar (or the rail's button) | Each Project keeps its threads, files and settings together             |
 | 3    | The Tools buttons in the thread's header                | Environment, Terminal, Review, Browser and Files open beside the thread |
 | 4    | The composer                                            | Attach files, choose the mode, see what the agent may do                |

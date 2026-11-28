@@ -40,6 +40,7 @@ export interface FederatedHostTransportSlot {
   readonly kind: ClientHostKind;
   readonly displayName: string;
   readonly origin?: string;
+  readonly serverBuildVersion?: string;
   readonly state: FederatedTransportState;
   readonly bridge?: RemoteSessionBridge;
   readonly connection?: RemoteConnection;
@@ -126,11 +127,13 @@ function remoteSlot(
 ): FederatedHostTransportSlot {
   const state = bridge.getState();
   const connection = bridge.connection();
+  const serverBuildVersion = bridge.serverBuildVersion?.();
   return {
     hostId: registration.hostId,
     kind: "remote",
     displayName: registration.displayName,
     ...(registration.origin !== undefined ? { origin: registration.origin } : {}),
+    ...(serverBuildVersion !== undefined ? { serverBuildVersion } : {}),
     state,
     bridge,
     ...(connection !== undefined ? { connection } : {}),
@@ -229,8 +232,15 @@ export function createHostFederationTransports(
     const hostId = registration.hostId;
     const existing = bridges.get(hostId);
     if (existing !== undefined) {
-      registrations.set(hostId, registration);
-      return existing;
+      const previous = registrations.get(hostId);
+      const credentialChanged =
+        previous?.credential?.keyId !== registration.credential?.keyId ||
+        previous?.origin !== registration.origin;
+      if (!credentialChanged) {
+        registrations.set(hostId, registration);
+        return existing;
+      }
+      dropRemote(hostId);
     }
     const bridge = factory.createRemoteBridge(registration);
     bridges.set(hostId, bridge);

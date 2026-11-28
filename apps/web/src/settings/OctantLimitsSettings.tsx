@@ -252,9 +252,9 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
         {
           key: "childRunWaitLimitSeconds",
           id: "child-run-wait-limit",
-          label: "Longest wait for a helper, in seconds",
+          label: "Longest wait for an agent, in seconds",
           description:
-            "How long an agent may wait for a helper agent in one call before it hears the helper is still working.",
+            "How long a thread may wait for an agent in one call before it hears the agent is still working.",
           defaultValue: DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
           max: MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
         },
@@ -320,19 +320,19 @@ export function OctantLimitsSettings(props: {
           </div>
         </SettingsSection>
       ))}
-      <SettingsSection title="Routines">
+      <SettingsSection title="Automations">
         <div className="setgroup">
           <SettingRow
-            description="A routine an agent suggests while its thread runs at Full access starts enabled, with no card."
-            more="Off, it is created paused and waits for you to turn it on. A routine you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card."
+            description="An automation an agent suggests while its thread runs at Full access starts enabled, with no card."
+            more="Off, it is created paused and waits for you to turn it on. An automation you asked for starts enabled at every level, and below Full access a suggested one waits for you to confirm its card."
             focused={props.focusedSetting === settingId("agent-routines-start-active")}
-            label="Start agent-created routines active at Full access"
+            label="Start agent-created automations active at Full access"
             scope="host"
             settingId="agent-routines-start-active"
           >
             <OctantSwitch
               checked={props.settings.agentRoutinesStartActiveAtFullAccess}
-              label="Start agent-created routines active at Full access"
+              label="Start agent-created automations active at Full access"
               onCheckedChange={(checked) =>
                 props.onSettingsChange({ agentRoutinesStartActiveAtFullAccess: checked })
               }

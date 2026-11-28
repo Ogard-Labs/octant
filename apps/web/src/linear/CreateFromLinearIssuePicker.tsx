@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { LinearIssueContextRequest, ProjectLinearTarget } from "@octant/contracts";
+import type { IntegrationAccountEntry } from "@octant/contracts/integration";
 import type { LinearIssueListPage, LinearIssueRow } from "@octant/contracts/linear-issues";
 import { Check, Circle, CircleCheck, CircleDashed, CircleDot, Search } from "../ui/icons";
 import { peekList } from "../composer/createFromCache";
@@ -9,8 +10,10 @@ import {
   linearIssuesCacheKey,
   loadLinearIssues,
 } from "./linearIssuesReadAhead";
+import { linearAccountDisplayLabel, readyLinearAccounts } from "./linearIssuesReadAvailable";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import { PopupSkeletonRows } from "../ui/base/PopupSkeletonRows";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -51,24 +54,85 @@ type IssueListState =
 
 /**
  * Composer Linear tab for create-from-issue. Selecting a row attaches only the
- * opaque node id; the server re-reads and frames issue text.
+ * opaque node id (and optional account reference); the server re-reads and
+ * frames issue text.
  */
 export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerProps) {
   const { client, defaultLinearTarget, onSelect } = props;
   const listboxId = useId();
   const [query, setQuery] = useState("");
   const [scopeAll, setScopeAll] = useState(false);
+  const [readyAccounts, setReadyAccounts] = useState<ReadonlyArray<IntegrationAccountEntry>>([]);
+  const [selectedAccountRef, setSelectedAccountRef] = useState<string | undefined>(
+    defaultLinearTarget?.accountRef,
+  );
   const debouncedQuery = useDebouncedValue(query, 250);
-  const activeTarget = scopeAll ? undefined : defaultLinearTarget;
+
+  useEffect(() => {
+    let active = true;
+    const readAccounts = client.accountsSnapshot;
+    if (typeof readAccounts !== "function") return;
+    void readAccounts.call(client).then(
+      (snapshot) => {
+        if (!active) return;
+        const ready = readyLinearAccounts(snapshot.accounts);
+        setReadyAccounts(ready);
+        setSelectedAccountRef((previous) => {
+          if (previous !== undefined && ready.some((entry) => entry.accountRef === previous)) {
+            return previous;
+          }
+          if (defaultLinearTarget?.accountRef !== undefined) return defaultLinearTarget.accountRef;
+          return ready.find((entry) => entry.isLegacy === true)?.accountRef ?? ready[0]?.accountRef;
+        });
+      },
+      () => {
+        if (active) setReadyAccounts([]);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [client, defaultLinearTarget?.accountRef]);
+
+  const activeAccountRef = useMemo(() => {
+    if (readyAccounts.length > 1) {
+      return selectedAccountRef ?? readyAccounts[0]?.accountRef;
+    }
+    if (defaultLinearTarget?.accountRef !== undefined) {
+      return defaultLinearTarget.accountRef;
+    }
+    const soleReady = readyAccounts.length === 1 ? readyAccounts[0] : undefined;
+    if (soleReady !== undefined && soleReady.isLegacy !== true) {
+      return soleReady.accountRef;
+    }
+    return undefined;
+  }, [readyAccounts, selectedAccountRef, defaultLinearTarget?.accountRef]);
+
+  const targetMatchesAccount =
+    defaultLinearTarget !== undefined &&
+    (defaultLinearTarget.accountRef !== undefined
+      ? activeAccountRef === defaultLinearTarget.accountRef
+      : readyAccounts.length === 0 ||
+        (readyAccounts.length === 1 && readyAccounts[0]?.isLegacy === true) ||
+        activeAccountRef === readyAccounts.find((entry) => entry.isLegacy === true)?.accountRef);
+  const activeTarget = scopeAll || !targetMatchesAccount ? undefined : defaultLinearTarget;
+
   const [issues, setIssues] = useState<IssueListState>(() => {
-    const cached = peekList<LinearIssueListPage>(client, linearIssuesCacheKey(activeTarget));
+    const cached = peekList<LinearIssueListPage>(
+      client,
+      linearIssuesCacheKey(activeTarget, activeAccountRef),
+    );
     return cached === undefined ? { kind: "loading" } : linearStateFrom(cached.value);
   });
   const [loadingMore, setLoadingMore] = useState(false);
   const issuesGeneration = useRef(0);
 
   const loadIssues = useCallback(
-    async (search: string, target: ProjectLinearTarget | undefined) => {
+    async (
+      search: string,
+      target: ProjectLinearTarget | undefined,
+      accountRef: string | undefined,
+    ) => {
       const listIssues = client.listIssues;
       if (typeof listIssues !== "function") {
         setIssues({ kind: "unavailable", message: "Linear issues are unavailable." });
@@ -78,7 +142,7 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
       // The first page with no search is read ahead and kept: it shows at once
       // and is asked again behind the rows when it has grown old.
       const kept = search === "";
-      const cacheKey = linearIssuesCacheKey(target);
+      const cacheKey = linearIssuesCacheKey(target, accountRef);
       const cached = kept ? peekList<LinearIssueListPage>(client, cacheKey) : undefined;
       if (cached === undefined) setIssues({ kind: "loading" });
       else {
@@ -87,13 +151,16 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
       }
       try {
         const filter = linearFilterForTarget(target);
+        const request = {
+          search,
+          ...(filter === undefined ? {} : { filter }),
+          pageSize: 30 as never,
+        };
         const page: LinearIssueListPage = kept
-          ? await loadLinearIssues(client, target)
-          : await listIssues({
-              search,
-              ...(filter === undefined ? {} : { filter }),
-              pageSize: 30 as never,
-            });
+          ? await loadLinearIssues(client, target, accountRef)
+          : accountRef === undefined
+            ? await listIssues(request)
+            : await listIssues(request, accountRef);
         if (operation !== issuesGeneration.current) return;
         setIssues(linearStateFrom(page));
       } catch (error) {
@@ -109,8 +176,8 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
   );
 
   useEffect(() => {
-    void loadIssues(debouncedQuery.trim(), activeTarget);
-  }, [debouncedQuery, activeTarget, loadIssues]);
+    void loadIssues(debouncedQuery.trim(), activeTarget, activeAccountRef);
+  }, [debouncedQuery, activeTarget, activeAccountRef, loadIssues]);
 
   const loadMore = async () => {
     if (issues.kind !== "ready" || issues.endCursor === undefined) return;
@@ -122,12 +189,16 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
     const filter = linearFilterForTarget(activeTarget);
     setLoadingMore(true);
     try {
-      const page = await listIssues({
+      const request = {
         ...(search === "" ? {} : { search }),
         ...(filter === undefined ? {} : { filter }),
         pageSize: 30 as never,
         cursor: cursor as never,
-      });
+      };
+      const page =
+        activeAccountRef === undefined
+          ? await listIssues(request)
+          : await listIssues(request, activeAccountRef);
       if (operation !== issuesGeneration.current) return;
       if (debouncedQuery.trim() !== search) return;
       setIssues((current) => {
@@ -168,7 +239,25 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
           value={query}
         />
       </label>
-      {defaultLinearTarget === undefined ? null : (
+      {readyAccounts.length > 1 ? (
+        <div className="linear-settings__controls">
+          <OctantSelectField
+            aria-label="Linear workspace"
+            disabled={props.disabled === true}
+            onValueChange={(nextRef) => {
+              setSelectedAccountRef(nextRef);
+              setScopeAll(false);
+            }}
+            options={readyAccounts.map((entry) => ({
+              id: entry.accountRef,
+              label: linearAccountDisplayLabel(entry),
+            }))}
+            placeholder="Workspace"
+            value={activeAccountRef ?? ""}
+          />
+        </div>
+      ) : null}
+      {defaultLinearTarget === undefined || !targetMatchesAccount ? null : (
         <div className="linear-settings__controls">
           <OctantButton
             aria-pressed={!scopeAll}
@@ -206,7 +295,12 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
         ) : (
           <ul aria-label="Linear issues" className="create-from__list" id={listboxId}>
             {issues.rows.map((row) => {
-              const selected = props.selected !== undefined && props.selected.id === row.id;
+              const selected =
+                props.selected !== undefined &&
+                props.selected.id === row.id &&
+                (activeAccountRef === undefined ||
+                  props.selected.accountRef === undefined ||
+                  props.selected.accountRef === activeAccountRef);
               const State = linearStateGlyph(row.state.type);
               return (
                 <li key={row.id}>
@@ -215,7 +309,18 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
                     aria-pressed={selected}
                     className="octant-popover-option create-from__row"
                     disabled={props.disabled}
-                    onClick={() => onSelect({ id: row.id, identifier: row.identifier }, row.title)}
+                    onClick={() =>
+                      onSelect(
+                        {
+                          id: row.id,
+                          identifier: row.identifier,
+                          ...(activeAccountRef === undefined
+                            ? {}
+                            : { accountRef: activeAccountRef }),
+                        },
+                        row.title,
+                      )
+                    }
                     title={row.title}
                     type="button"
                     variant="bare"

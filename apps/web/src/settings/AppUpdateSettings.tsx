@@ -1,3 +1,8 @@
+import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
+import type { ProviderClient } from "@octant/client-runtime/provider-client";
+import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import type { ProviderInstanceId, ProviderRegistrySnapshot } from "@octant/contracts";
 import type { AppUpdateChannel } from "@octant/contracts/shell";
 import type {
   AppReleaseRing,
@@ -10,7 +15,7 @@ import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -20,10 +25,24 @@ import type {
   BundledWhatsNew,
   OctantHostBridge,
 } from "../shell/hostBridge";
+import { FleetUpdateDialog } from "./FleetUpdateDialog";
+import type { FleetUpdateSources } from "./fleetUpdateEngine";
 import { NightlyOctantImportRow } from "./NightlyOctantImportRow";
 import { SettingRow, SettingsDisclosure } from "./primitives";
 import { acknowledgeWhatsNewOnce } from "./whatsNewAcknowledgement";
 import { WhatsNewDialog } from "./WhatsNewDialog";
+
+export interface AppUpdateFleetProps {
+  readonly localDisplayName: string;
+  readonly localProviderClient?: Pick<ProviderClient, "bootstrap" | "execute"> | undefined;
+  readonly localProviderSnapshot?: ProviderRegistrySnapshot | undefined;
+  readonly localLatestVersions?: ReadonlyMap<ProviderInstanceId, string> | undefined;
+  readonly hostFederationLifecycle?: Pick<HostFederationLifecycle, "list"> | undefined;
+  readonly hostFederationTransports?:
+    | Pick<HostFederationTransports, "get" | "remoteTransportFor">
+    | undefined;
+  readonly shieldServersClient?: Pick<ShieldServersClient, "read" | "memberInstall"> | undefined;
+}
 
 export interface AppUpdateSettingsProps {
   readonly hostBridge?: OctantHostBridge;
@@ -38,6 +57,8 @@ export interface AppUpdateSettingsProps {
   readonly onUpdateChannelChange: (channel: AppUpdateChannel, ring: AppReleaseRing) => void;
   /** A deep link landed on the Updates group. */
   readonly focused?: boolean;
+  /** Connected computers and local providers for the unified fleet update confirmation. */
+  readonly fleetUpdate?: AppUpdateFleetProps | undefined;
 }
 
 /**
@@ -63,6 +84,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [whatsNew, setWhatsNew] = useState<BundledWhatsNew>();
   const [chosenChannel, setChosenChannel] = useState<AppUpdateChannel>();
+  const [fleetOpen, setFleetOpen] = useState(false);
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;
@@ -74,22 +96,64 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   // does not update.
   const check = bridge?.checkForAppUpdate;
   const download = bridge?.downloadAppUpdate;
+  const subscribeAppUpdateState = bridge?.subscribeAppUpdateState;
   const install = bridge?.installAppUpdate;
   const setAutomatic = bridge?.setAutomaticAppUpdateChecks;
   const setRing = bridge?.setAppUpdateRing;
   const readWhatsNew = bridge?.readBundledWhatsNew;
   const acknowledgeWhatsNew = bridge?.acknowledgeWhatsNew;
+  const fleet = props.fleetUpdate;
+  const fleetSources = useMemo<FleetUpdateSources | undefined>(
+    () =>
+      fleet === undefined
+        ? undefined
+        : {
+            localApp: {
+              displayName: fleet.localDisplayName,
+              state,
+              checkForAppUpdate: check,
+              downloadAppUpdate: download,
+              subscribeAppUpdateState,
+              installAppUpdate: install,
+            },
+            localProviderClient: fleet.localProviderClient,
+            localProviderSnapshot: fleet.localProviderSnapshot,
+            localLatestVersions: fleet.localLatestVersions,
+            hostFederationLifecycle: fleet.hostFederationLifecycle,
+            hostFederationTransports: fleet.hostFederationTransports,
+            shieldServersClient: fleet.shieldServersClient,
+          },
+    [fleet, state, check, download, subscribeAppUpdateState, install],
+  );
   if (check === undefined || download === undefined || install === undefined) {
     return (
-      <SettingRow
-        description="This is not the desktop app, so it does not update itself."
-        focused={props.focused ?? false}
-        label="Version"
-        scope="app"
-        settingId="app-updates"
-      >
-        {null}
-      </SettingRow>
+      <>
+        <SettingRow
+          description="This is not the desktop app, so it does not update itself."
+          focused={props.focused ?? false}
+          label="Version"
+          scope="app"
+          settingId="app-updates"
+        >
+          {fleetSources === undefined ? null : (
+            <OctantButton
+              onClick={() => setFleetOpen(true)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Update all computers…
+            </OctantButton>
+          )}
+        </SettingRow>
+        {fleetSources === undefined ? null : (
+          <FleetUpdateDialog
+            onClose={() => setFleetOpen(false)}
+            open={fleetOpen}
+            sources={fleetSources}
+          />
+        )}
+      </>
     );
   }
 
@@ -175,6 +239,17 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           >
             {status === "checking" ? "Checking…" : "Check for updates"}
           </OctantButton>
+          {fleetSources === undefined ? null : (
+            <OctantButton
+              disabled={busy}
+              onClick={() => setFleetOpen(true)}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Update all computers…
+            </OctantButton>
+          )}
           {status === "available" && state?.available !== undefined ? (
             <OctantButton
               disabled={busy}
@@ -327,6 +402,13 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         onClose={() => setWhatsNewOpen(false)}
         open={whatsNewOpen}
       />
+      {fleetSources === undefined ? null : (
+        <FleetUpdateDialog
+          onClose={() => setFleetOpen(false)}
+          open={fleetOpen}
+          sources={fleetSources}
+        />
+      )}
     </>
   );
 }

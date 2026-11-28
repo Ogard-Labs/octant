@@ -1066,6 +1066,7 @@ export interface CodeLinkedIssuesPort {
   resolveLinear(
     identifier: string,
     signal: AbortSignal,
+    accountRef?: string,
   ): Promise<
     | { readonly status: "found"; readonly issueId: string }
     | { readonly status: "not-found" | "unavailable" }
@@ -2026,7 +2027,12 @@ export class CodeService {
     if (parsed === undefined) return refused("invalid-reference");
     let issue: LinkedIssueRef;
     if (parsed.forge === "linear") {
-      const resolved = await links.resolveLinear(parsed.identifier, new AbortController().signal);
+      const project = this.#persistence.readProject?.(current.projectId);
+      const accountRef = project?.type === "code" ? project.linearTarget?.accountRef : undefined;
+      const resolved =
+        accountRef === undefined
+          ? await links.resolveLinear(parsed.identifier, new AbortController().signal)
+          : await links.resolveLinear(parsed.identifier, new AbortController().signal, accountRef);
       if (resolved.status !== "found") {
         return refused(resolved.status === "not-found" ? "not-found" : "linear-unavailable");
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { homeListMetaLine } from "./homeListModel";
-import { assignedGithubListRow, pullRequestListRow } from "./homeListRows";
+import { assignedGithubListRow, assignedLinearListRow, pullRequestListRow } from "./homeListRows";
 import type { PullRequestCardRow } from "./pullRequests";
 
 const NOW = Date.parse("2026-11-14T12:00:00Z");
@@ -78,5 +78,28 @@ describe("a row of the start screen's list", () => {
     expect(assigned.id).toBe(fromRead.id);
     expect(assigned.section).toBe("your-pull-requests");
     expect(homeListMetaLine(assigned.meta)).toBe("App · #12 · 5m");
+  });
+
+  it("scopes multi-account Linear rows by accountRef and labels the workspace", () => {
+    const base = {
+      id: "issue-1" as Parameters<typeof assignedLinearListRow>[0]["id"],
+      identifier: "ENG-42",
+      title: "Fix queue stall",
+      state: { id: "s1", name: "In Progress", type: "started" as const },
+      team: { id: "t1", key: "ENG", name: "Engineering" },
+      priority: 2,
+      url: "https://linear.app/acme/issue/ENG-42",
+    };
+    const acme = assignedLinearListRow(
+      { ...base, accountRef: "lin_acme", workspaceLabel: "Acme" },
+      undefined,
+    );
+    const beta = assignedLinearListRow(
+      { ...base, accountRef: "lin_beta", workspaceLabel: "Beta" },
+      undefined,
+    );
+    expect(acme.id).not.toBe(beta.id);
+    expect(homeListMetaLine(acme.meta)).toBe("Acme · ENG-42 · In Progress");
+    expect(homeListMetaLine(beta.meta)).toBe("Beta · ENG-42 · In Progress");
   });
 });

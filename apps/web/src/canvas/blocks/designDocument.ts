@@ -156,6 +156,7 @@ const PLACEHOLDER_LABEL: Record<DesignAssetPlaceholderReason, string> = {
   "too-large": "Image too large",
   "design-budget": "Design image budget spent",
   "not-an-image": "Not an image",
+  changed: "Image changed since this version",
 };
 
 /**

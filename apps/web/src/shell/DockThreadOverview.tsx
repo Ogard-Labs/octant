@@ -302,7 +302,7 @@ function BackgroundTasksCard(props: {
       {...(props.running.length === 0
         ? {}
         : { meta: `${props.running.length.toLocaleString("en")} running` })}
-      title="Subagents"
+      title="Agents"
     >
       {props.running.map((task) => (
         <TaskRow key={task.id} running task={task} />

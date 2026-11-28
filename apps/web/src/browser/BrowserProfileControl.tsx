@@ -144,7 +144,7 @@ export function BrowserProfileControl(props: BrowserProfileControlProps) {
               <>
                 {iconOf(props.profile)}
                 <span>
-                  {props.label === undefined ? "" : "Task default: "}
+                  {props.label === undefined ? "" : "Thread default: "}
                   {label(props.profile)}
                 </span>
               </>

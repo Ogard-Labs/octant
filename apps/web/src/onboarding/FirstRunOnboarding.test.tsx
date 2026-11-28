@@ -206,7 +206,7 @@ describe("FirstRunOnboarding", () => {
     expect(memory.read).not.toHaveBeenCalled();
     await openHandoff(user);
     expect(screen.getByLabelText("Explore capabilities")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
     expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
     await user.click(screen.getByRole("button", { name: "Person memory" }));
     await user.click(screen.getByRole("button", { name: "Review memory settings" }));
@@ -215,8 +215,8 @@ describe("FirstRunOnboarding", () => {
     expect(view.controller.complete).not.toHaveBeenCalled();
     expect(view.controller.skip).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Explore capabilities")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Your first task" })).toHaveFocus();
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
     await waitFor(() => expect(view.controller.complete).toHaveBeenCalledOnce());
     expect(helpers.update).not.toHaveBeenCalled();
     expect(memory.change).not.toHaveBeenCalled();
@@ -236,7 +236,7 @@ describe("FirstRunOnboarding", () => {
     expect(onSetUpdateChecks).toHaveBeenCalledExactlyOnceWith(true);
     expect(answer).toBeChecked();
 
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
     expect(view.controller.complete).not.toHaveBeenCalled();
     await act(async () => write.resolve(true));
     await waitFor(() => expect(view.controller.complete).toHaveBeenCalledOnce());
@@ -292,10 +292,10 @@ describe("FirstRunOnboarding", () => {
         onSettingsChange: vi.fn(async () => true),
       },
     });
-    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Set up Computer use" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Skip for now" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Start a task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
   });
 
   it("stays out of the way once the host has recorded an answer", () => {
@@ -333,7 +333,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByRole("heading", { name: "Mode" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -402,7 +402,7 @@ describe("FirstRunOnboarding", () => {
 
     expect(screen.getByRole("radio", { name: "site" })).toHaveAttribute("aria-checked", "true");
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     await waitFor(() =>
       expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: chosenId }),
@@ -467,7 +467,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     expect(props.controller.complete).not.toHaveBeenCalled();
 
@@ -494,7 +494,7 @@ describe("FirstRunOnboarding", () => {
     expect(onSetProviderEnabled).toHaveBeenCalledWith(instanceId, false);
 
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     expect(props.controller.complete).not.toHaveBeenCalled();
 
@@ -510,7 +510,7 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
     expect(props.controller.complete).not.toHaveBeenCalled();
@@ -568,11 +568,11 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
     expect(await screen.findByText(/did not keep one of your answers/)).toBeVisible();
     expect(props.controller.complete).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
@@ -598,7 +598,7 @@ describe("FirstRunOnboarding", () => {
 
     await user.click(screen.getByRole("switch", { name: /^Enable Ollama,/ }));
     await openHandoff(user);
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     // Only the footer is disabled while this settles, so the rail and the
     // picker still answer. A choice made here is written after the wait
@@ -615,12 +615,12 @@ describe("FirstRunOnboarding", () => {
     const user = userEvent.setup();
     const props = mount(readyHandoff());
 
-    expect(screen.queryByRole("button", { name: "Start a task" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start a thread" })).toBeNull();
 
     await openHandoff(user);
     expect(screen.getByText("octant")).toBeVisible();
     expect(screen.getByText("Llama Test on Ollama")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Start a task" }));
+    await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
     await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
     expect(props.onStartThread).toHaveBeenCalledWith({ mode: "code", projectId: codeProjectId });
@@ -695,13 +695,13 @@ describe("FirstRunOnboarding", () => {
     render(<Harness />);
 
     await openHandoff(user);
-    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No Code folder yet. A thread starts in a Project.")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Project" }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Close setup" }));
     expect(screen.getByRole("dialog", { name: "Welcome to Octant" })).toBeVisible();
-    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No Code folder yet. A thread starts in a Project.")).toBeVisible();
   });
 
   it("pre-selects Auto, marked Recommended, where the provider has a reviewer, and records it on Continue", async () => {
@@ -754,7 +754,7 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByText("Step 4 of 4")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(screen.getByRole("heading", { name: "Your first task" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Your first thread" })).toBeVisible();
     expect(screen.queryByText(/^Step \d of \d$/)).toBeNull();
   });
 
@@ -822,7 +822,7 @@ describe("FirstRunOnboarding", () => {
       const { recorded, onStartThread } = renderAgainstHost();
 
       await openHandoff(user);
-      await user.click(screen.getByRole("button", { name: "Start a task" }));
+      await user.click(screen.getByRole("button", { name: "Start a thread" }));
 
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       expect(recorded).toEqual(["completed"]);
@@ -934,7 +934,7 @@ describe("FirstRunOnboarding", () => {
     await openHandoff(user);
 
     expect(screen.getByText("No provider is ready yet")).toBeVisible();
-    expect(screen.getByText("No Code folder yet. A task starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No Code folder yet. A thread starts in a Project.")).toBeVisible();
     expect(screen.getByText("No model this host can use in Code yet.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Project" }));

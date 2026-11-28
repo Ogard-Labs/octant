@@ -125,6 +125,7 @@ import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-clie
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import {
@@ -372,6 +373,7 @@ export interface SettingsViewProps {
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  readonly hostFederationTransports?: HostFederationTransports;
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
   readonly linearProjects?: ReadonlyArray<import("@octant/contracts").ProjectSummary>;
@@ -1218,6 +1220,7 @@ function ActiveSectionContent({
               />
               <DesktopLeaseSettings
                 client={props.desktopPaneClient}
+                externalUrlHost={props.hostBridge}
                 focusedSetting={focusedSetting}
               />
             </>
@@ -2038,7 +2041,7 @@ function ActiveSectionContent({
           )}
           <SettingsSection
             title="Background Browser ownership"
-            description="Keep the host's native Browser running for newly reviewed task permissions after its windows close."
+            description="Keep the host's native Browser running for newly reviewed thread permissions after its windows close."
           >
             <div className="setgroup">
               <SettingRow
@@ -2047,7 +2050,7 @@ function ActiveSectionContent({
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
                 description="Keeps the agent's Browser running after the last window closes."
-                more="It starts no task, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
+                more="It starts no thread, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -2753,6 +2756,27 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <div className="setgroup">
           <AppUpdateSettings
             automaticChecks={props.settings.automaticUpdateChecks}
+            fleetUpdate={{
+              localDisplayName: thisComputerName(hostPlatform),
+              ...(props.providerController?.client === undefined
+                ? {}
+                : { localProviderClient: props.providerController.client }),
+              ...(props.providerController?.snapshot === undefined
+                ? {}
+                : { localProviderSnapshot: props.providerController.snapshot }),
+              ...(props.providerController?.latestVersions === undefined
+                ? {}
+                : { localLatestVersions: props.providerController.latestVersions }),
+              ...(props.hostFederationLifecycle === undefined
+                ? {}
+                : { hostFederationLifecycle: props.hostFederationLifecycle }),
+              ...(props.hostFederationTransports === undefined
+                ? {}
+                : { hostFederationTransports: props.hostFederationTransports }),
+              ...(props.shieldServersClient === undefined
+                ? {}
+                : { shieldServersClient: props.shieldServersClient }),
+            }}
             focused={focusedSetting === settingId("app-updates")}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             onAutomaticChecksChange={(enabled) =>
@@ -3670,7 +3694,7 @@ function UsageSettingsSection(props: {
           description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset."
           focused={props.focusedSetting === settingId("usage-limit-resume-by-default")}
           label="Resume at reset by default"
-          more="Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
+          more="Never for a billing problem, a turn an automation or an agent started, or a provider that refuses Octant's own continuations."
           scope="host"
           settingId="usage-limit-resume-by-default"
         >

@@ -103,8 +103,8 @@ describe("the active-work overview", () => {
       ),
     ).toBeVisible();
     const running = screen.getByRole("region", { name: "In progress (2)" });
-    expect(within(running).getByText("Subagent · For Draft the notes · mini")).toBeVisible();
-    expect(within(running).getByText("Routine run · mini")).toBeVisible();
+    expect(within(running).getByText("Agent · For Draft the notes · mini")).toBeVisible();
+    expect(within(running).getByText("Automation run · mini")).toBeVisible();
     const ready = screen.getByRole("region", { name: "Ready (1)" });
     expect(within(ready).getByText("Coordinator · studio")).toBeVisible();
   });
@@ -244,8 +244,8 @@ describe("the active-work overview", () => {
         }),
       ]),
     );
-    expect(await screen.findByText("Subagent")).toBeVisible();
-    expect(screen.getByText("Subagent · For Draft · studio")).toBeVisible();
+    expect(await screen.findByText("Agent")).toBeVisible();
+    expect(screen.getByText("Agent · For Draft · studio")).toBeVisible();
   });
 
   it("says when there is no active work and offers to start a thread", async () => {

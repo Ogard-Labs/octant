@@ -62,8 +62,8 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
-        Your first task starts in {MODE_COPY[props.handoff.mode]}, in a Project, with a provider and
-        a model that mode can actually use. Nothing here is assumed ready.
+        Your first thread starts in {MODE_COPY[props.handoff.mode]}, in a Project, with a provider
+        and a model that mode can actually use. Nothing here is assumed ready.
       </p>
 
       <section aria-label={heading} className="settings-card-section settings-card-section--open">

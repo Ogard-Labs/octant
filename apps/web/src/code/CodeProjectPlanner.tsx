@@ -10,7 +10,7 @@ import { readPlannerAttempt } from "./plannerProposalAttempt";
 import { PlannerProposalReviewDialog, usePlannerState } from "./plannerProposalReview";
 
 const PLANNER_RULE =
-  "One Code thread may survey this Project and propose tasks. Each proposal waits for your decision; designation grants no right to start work.";
+  "One Code thread may survey this Project and propose threads. Each proposal waits for your decision; designation grants no right to start work.";
 
 const NO_PROPOSALS_HINT = "Open the designated planner to ask it to survey this Project.";
 
@@ -63,7 +63,7 @@ export function CodeProjectPlanner(
       {/* The one-line help sits in the card; the full rule is its tooltip and
           its accessible description. */}
       <p className="oct-row-detail code-project-planner__help" title={PLANNER_RULE}>
-        One thread proposes tasks; you decide each.
+        One thread proposes threads; you decide each.
         <span className="sr-only"> {PLANNER_RULE}</span>
       </p>
       {!ready || failure !== undefined ? (
@@ -160,7 +160,7 @@ export function CodeProjectPlanner(
               {entry.proposal.status === "pending" && attempt.status !== "none" ? (
                 <p className="oct-row-detail" role="status">
                   {attempt.status === "blocked"
-                    ? "The submitted approval is unresolved. Inspect its task; another approval or decline stays blocked until the host records its outcome."
+                    ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until the host records its outcome."
                     : "This window cannot retain approval identity. Session storage is required before approving."}
                 </p>
               ) : null}
@@ -178,7 +178,7 @@ export function CodeProjectPlanner(
                   variant="ghost"
                   onClick={() => props.onOpenThread(attempt.threadId)}
                 >
-                  Inspect submitted task
+                  Inspect submitted thread
                 </OctantButton>
               ) : null}
               {entry.proposal.status === "confirmed" ? (
@@ -190,7 +190,7 @@ export function CodeProjectPlanner(
                       props.onOpenThread(entry.proposal.createdThreadId);
                   }}
                 >
-                  Open created task
+                  Open created thread
                 </OctantButton>
               ) : entry.proposal.status !== "pending" ? null : (
                 <div className="code-project-planner__controls">

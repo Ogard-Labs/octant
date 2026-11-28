@@ -53,6 +53,12 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
   requestBodyBytes: 8 * 1024 * 1024,
   responseBodyBytes: 16 * 1024 * 1024,
   timeoutMs: 30_000,
+  /**
+   * Provider CLI updates run up to 120 seconds on the remote host before the
+   * post-update probe runs, so `/api/providers/commands` needs room past the
+   * ordinary 30-second channel bound.
+   */
+  providerCommandTimeoutMs: 150_000,
   pathChars: 2_048,
 } as const;
 
@@ -76,6 +82,8 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   readonly requiredQuery?: Readonly<Record<string, string>>;
   /** Sent only to a member of this host's hub, never to a computer paired directly. */
   readonly hubMemberOnly?: true;
+  /** Longer bound when the host itself runs a bounded slow operation (such as a CLI update). */
+  readonly timeoutMs?: number;
 }> = [
   { method: "GET", path: "/api/remote/hello" },
   { method: "POST", path: "/api/remote/pairing" },
@@ -163,6 +171,13 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/projects/repository-bootstrap/land-files" },
   { method: "POST", path: "/api/projects/commands" },
   { method: "GET", path: "/api/providers/bootstrap" },
+  // Provider CLI updates and version checks on person-paired computers; the
+  // remote host refuses every restricted or hub-introduced device itself.
+  {
+    method: "POST",
+    path: "/api/providers/commands",
+    timeoutMs: PAIRED_COMPUTER_REQUEST_LIMITS.providerCommandTimeoutMs,
+  },
   { method: "GET", path: "/api/pending-requests" },
   // Listing and answering a thread's MCP tool approvals, which Needs you opens
   // there; the host answers only its own person's device.
@@ -249,7 +264,7 @@ export async function requestPairedComputer(input: {
 }): Promise<PairedComputerAnswer> {
   const decoded = decodeRequest(input.request, input.pins);
   if (decoded.status === "refused") return decoded;
-  const { origin, method, path, headers, body } = decoded;
+  const { origin, method, path, headers, body, timeoutMs } = decoded;
   const pairing = PAIRING_PATHS.has(new URL(path, origin).pathname);
   const pin = input.pins.reachPinFor(origin, pairing);
   if (pin === undefined) return { status: "refused", message: NOT_PAIRED };
@@ -328,7 +343,7 @@ export async function requestPairedComputer(input: {
             };
           },
         });
-  const signal = AbortSignal.timeout(PAIRED_COMPUTER_REQUEST_LIMITS.timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
   let response: Response;
   try {
     response = await transport(`${origin}${path}`, {
@@ -386,6 +401,7 @@ type DecodedRequest =
       readonly path: string;
       readonly headers: Readonly<Record<string, string>>;
       readonly body: Uint8Array<ArrayBuffer> | undefined;
+      readonly timeoutMs: number;
     }
   | { readonly status: "refused"; readonly message: string };
 
@@ -399,10 +415,11 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   if (typeof origin !== "string" || pins.reachPinFor(origin, true) === undefined) {
     return refuse(NOT_PAIRED);
   }
-  if (
-    typeof method !== "string" ||
-    !isAllowedRequest(origin, path, method, pins.isThroughHub(origin))
-  ) {
+  const allowed =
+    typeof method === "string"
+      ? matchAllowedRequest(origin, path, method, pins.isThroughHub(origin))
+      : undefined;
+  if (allowed === undefined) {
     return refuse("Octant doesn't send that request to another computer.");
   }
   const pathname = new URL(path as string, origin).pathname;
@@ -439,10 +456,11 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   return {
     status: "decoded",
     origin,
-    method,
+    method: method as string,
     path: path as string,
     headers: decodedHeaders,
     body: bytes,
+    timeoutMs: allowed.timeoutMs ?? PAIRED_COMPUTER_REQUEST_LIMITS.timeoutMs,
   };
 }
 
@@ -452,24 +470,24 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
  * list all see the same string. Dot segments, a second slash, a scheme or
  * authority, and control characters never pass.
  */
-function isAllowedRequest(
+function matchAllowedRequest(
   origin: string,
   path: unknown,
   method: string,
   hubMember: boolean,
-): boolean {
-  if (typeof path !== "string" || path.length === 0) return false;
-  if (path.length > PAIRED_COMPUTER_REQUEST_LIMITS.pathChars) return false;
-  if (!path.startsWith("/") || path.startsWith("//") || /[\\#]/.test(path)) return false;
-  if (hasControlOrSpace(path)) return false;
+): (typeof PAIRED_COMPUTER_ALLOWED_REQUESTS)[number] | undefined {
+  if (typeof path !== "string" || path.length === 0) return undefined;
+  if (path.length > PAIRED_COMPUTER_REQUEST_LIMITS.pathChars) return undefined;
+  if (!path.startsWith("/") || path.startsWith("//") || /[\\#]/.test(path)) return undefined;
+  if (hasControlOrSpace(path)) return undefined;
   let url: URL;
   try {
     url = new URL(path, origin);
   } catch {
-    return false;
+    return undefined;
   }
-  if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return false;
-  return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
+  if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return undefined;
+  return PAIRED_COMPUTER_ALLOWED_REQUESTS.find(
     (allowed) =>
       allowed.method === method &&
       (allowed.hubMemberOnly !== true || hubMember) &&

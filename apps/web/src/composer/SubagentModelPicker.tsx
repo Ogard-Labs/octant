@@ -106,7 +106,7 @@ export function resolveSubagentModelTag(
       reason:
         listed === undefined
           ? `${group.instance.displayName} no longer offers this model.`
-          : `${listed.model.displayName} cannot run Octant's tools, so it cannot take a subagent.`,
+          : `${listed.model.displayName} cannot run Octant's tools, so it cannot run an agent.`,
       group,
       ...(listed === undefined ? {} : { model: listed.model }),
     };
@@ -144,7 +144,7 @@ export function SubagentModelChip(props: {
   const problem = resolved.status === "unavailable" ? resolved.reason : undefined;
   return (
     <OctantButton
-      aria-label={`Subagent model: ${providerName}, ${modelName}, ${reasoning}${
+      aria-label={`Agent model: ${providerName}, ${modelName}, ${reasoning}${
         problem === undefined ? "" : `. Needs attention: ${problem}`
       }`}
       className="composer-chip__button"
@@ -263,9 +263,7 @@ export function SubagentModelPicker(props: {
   return (
     <div
       aria-label={
-        chosen === undefined
-          ? "Choose a subagent model"
-          : `Reasoning for ${chosen.model.displayName}`
+        chosen === undefined ? "Choose an agent model" : `Reasoning for ${chosen.model.displayName}`
       }
       className="chat-composer__command-typeahead subagent-model-picker"
       role="group"
@@ -299,7 +297,7 @@ export function SubagentModelPicker(props: {
       />
       <OctantListbox
         activeDescendantId={active < 0 ? undefined : optionId(active)}
-        aria-label={chosen === undefined ? "Subagent models" : "Reasoning"}
+        aria-label={chosen === undefined ? "Agent models" : "Reasoning"}
         as="ul"
         className="chat-composer__command-list"
         id={listId}

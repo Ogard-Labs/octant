@@ -99,11 +99,15 @@ const LINEAR_READ_HELP = [
 ].join(" ");
 
 export interface LinearReadToolReader {
-  readonly snapshot: (signal: AbortSignal) => Promise<IntegrationAuthenticationSnapshot>;
+  readonly snapshot: (
+    signal: AbortSignal,
+    accountRef?: string,
+  ) => Promise<IntegrationAuthenticationSnapshot>;
   readonly executeOperation: (
     operationId: string,
     input: unknown,
     signal: AbortSignal,
+    accountRef?: string,
   ) => Promise<IntegrationExecutionResult>;
 }
 
@@ -194,12 +198,16 @@ export class LinearReadToolService {
         if (update !== undefined && context.issueUpdates !== undefined) {
           // A write is authorized on every call as a read is: the thread must
           // be live and the Project still bound to an effective Linear.
+          const projectLinearTarget = context.readProjectLinearTarget();
           const writeDecision = decideLinearAgentRead({
             mode: "code",
             threadLifecycle: current?.lifecycle ?? "missing",
             threadAuthority: threadAuthority(context.thread, current),
-            projectLinearTarget: context.readProjectLinearTarget(),
-            snapshot: await this.#reader.snapshot(signal ?? new AbortController().signal),
+            projectLinearTarget,
+            snapshot: await this.#reader.snapshot(
+              signal ?? new AbortController().signal,
+              projectLinearTarget?.accountRef,
+            ),
             snapshotFreshness: "fresh",
             providerToolPolicy: "allowed",
           });
@@ -222,12 +230,13 @@ export class LinearReadToolService {
         const input = parseLinearReadInput(inputJson);
         if (input === undefined) return failure("invalid-linear-input");
         const activeSignal = signal ?? new AbortController().signal;
-        const snapshot = await this.#reader.snapshot(activeSignal);
+        const projectLinearTarget = context.readProjectLinearTarget();
+        const snapshot = await this.#reader.snapshot(activeSignal, projectLinearTarget?.accountRef);
         const decision = decideLinearAgentRead({
           mode: "code",
           threadLifecycle: current?.lifecycle ?? "missing",
           threadAuthority: threadAuthority(context.thread, current),
-          projectLinearTarget: context.readProjectLinearTarget(),
+          projectLinearTarget,
           snapshot,
           snapshotFreshness: "fresh",
           providerToolPolicy: "allowed",
@@ -267,11 +276,15 @@ export class LinearReadToolService {
         ? {}
         : { cursor: input.cursor as LinearIssueListInput["cursor"] }),
     };
-    const response = await this.#reader.executeOperation(
-      LINEAR_ISSUE_LIST_OPERATION,
-      request,
-      signal,
-    );
+    const response =
+      target.accountRef === undefined
+        ? await this.#reader.executeOperation(LINEAR_ISSUE_LIST_OPERATION, request, signal)
+        : await this.#reader.executeOperation(
+            LINEAR_ISSUE_LIST_OPERATION,
+            request,
+            signal,
+            target.accountRef,
+          );
     if (response.kind !== "ok") return failure(response.kind, response.reason);
     let page: LinearIssueListPage;
     try {
@@ -280,10 +293,11 @@ export class LinearReadToolService {
       return failure("tool-unavailable");
     }
     const sourceLabel = input.operation === "search" ? "linear-search" : "linear-issues";
+    const accountSegment = target.accountRef === undefined ? "" : `-${target.accountRef}`;
     const ingested = this.#recordIngestion(
       context.thread.id,
       sourceLabel,
-      `${sourceLabel}-${target.teamKey}${target.projectId === undefined ? "" : `-${target.projectId}`}`,
+      `${sourceLabel}${accountSegment}-${target.teamKey}${target.projectId === undefined ? "" : `-${target.projectId}`}`,
     );
     if (ingested.kind === "refused") return failure("tool-unavailable");
     return {
@@ -319,11 +333,21 @@ export class LinearReadToolService {
   ) {
     const normalizedIdentifier = identifier.trim().toUpperCase();
     const isPublicKey = IDENTIFIER_PATTERN.test(normalizedIdentifier);
-    const response = await this.#reader.executeOperation(
-      isPublicKey ? LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION : LINEAR_ISSUE_GET_OPERATION,
-      isPublicKey ? { identifier: normalizedIdentifier } : { id: identifier.trim() },
-      signal,
-    );
+    const operationId = isPublicKey
+      ? LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION
+      : LINEAR_ISSUE_GET_OPERATION;
+    const operationInput = isPublicKey
+      ? { identifier: normalizedIdentifier }
+      : { id: identifier.trim() };
+    const response =
+      target.accountRef === undefined
+        ? await this.#reader.executeOperation(operationId, operationInput, signal)
+        : await this.#reader.executeOperation(
+            operationId,
+            operationInput,
+            signal,
+            target.accountRef,
+          );
     if (response.kind === "refused") {
       return failure(
         "issue-not-found",
@@ -346,7 +370,9 @@ export class LinearReadToolService {
     const ingested = this.#recordIngestion(
       context.thread.id,
       "linear-issue",
-      `linear-issue-${detail.identifier}`,
+      target.accountRef === undefined
+        ? `linear-issue-${detail.identifier}`
+        : `linear-issue-${target.accountRef}-${detail.identifier}`,
     );
     if (ingested.kind === "refused") return failure("tool-unavailable");
     return {

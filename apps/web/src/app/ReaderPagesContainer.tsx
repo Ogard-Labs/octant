@@ -147,6 +147,7 @@ export interface ReaderPagesContainerProps {
   readonly environmentSelection: EnvironmentSelection;
   readonly onOpenPairedComputerThread: (hostId: string, threadId: string) => void;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
+  readonly linearAccounts?: WorkspaceRailLayersProps["linearAccounts"];
   readonly linearIssuesOpen: boolean;
   readonly linearIssuesRead: boolean;
   readonly loadAssignedGithubWork: NonNullable<WorkspaceRailLayersProps["loadAssignedGithubWork"]>;
@@ -217,6 +218,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     todosPage,
     isNarrow,
     linearClient,
+    linearAccounts,
     linearIssuesOpen,
     linearIssuesRead,
     loadAssignedGithubWork,
@@ -638,6 +640,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         renderProjectPullRequestDetail={renderProjectPullRequestDetail}
         linearIssuesOpen={linearIssuesOpen}
         linearClient={linearClient}
+        {...(linearAccounts === undefined ? {} : { linearAccounts })}
         onCloseLinearIssues={() => actions.setLinearIssuesOpen(false)}
         workBoardOpen={workBoardOpen}
         activeMode={activeMode}
@@ -788,7 +791,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
           actions.setWorkBoardOpen(false);
           void actions.openWorkThread(
             target.threadId,
-            thread?.title ?? "Task",
+            thread?.title ?? "Thread",
             undefined,
             target.projectId,
           );

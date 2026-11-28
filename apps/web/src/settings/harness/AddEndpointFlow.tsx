@@ -1779,13 +1779,11 @@ function AgentsStep(props: AgentsStepProps) {
           ...newlyEligible.map((modelId) => ({ providerInstanceId: instance.id, modelId })),
         ];
         if (next.length > 16) {
-          setProblem(
-            "Helper agents can use at most 16 models. Remove some from Model roles first.",
-          );
+          setProblem("Agents can use at most 16 models. Remove some from Model roles first.");
           return;
         }
         if (!(await props.onAgentEligibleModelsChange(next))) {
-          setProblem("Octant couldn't save which models helper agents use. Try again.");
+          setProblem("Octant couldn't save which models agents use. Try again.");
           return;
         }
       }
@@ -1857,7 +1855,7 @@ function AgentsStep(props: AgentsStepProps) {
         </p>
       ) : null}
       <fieldset className="endpoint-flow__group">
-        <legend>Helper agents</legend>
+        <legend>Agents</legend>
         <ul className="endpoint-pick">
           {props.chosen.map((modelId) => {
             const allowed = mayTakeAgentWork(props.checks[String(modelId)]);
@@ -1867,7 +1865,7 @@ function AgentsStep(props: AgentsStepProps) {
                 <label className="endpoint-flow__check">
                   <OctantCheckbox
                     {...(allowed ? {} : { "aria-describedby": `${ids}-chat-only` })}
-                    aria-label={`Helper agents can use ${nameOf(modelId)}`}
+                    aria-label={`Agents can use ${nameOf(modelId)}`}
                     checked={already || agentPicks.has(String(modelId))}
                     disabled={!allowed || already || saving}
                     onChange={(event) => {

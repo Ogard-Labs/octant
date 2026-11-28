@@ -34,7 +34,7 @@ export function RoutineCalendar(props: {
   );
 
   return (
-    <section aria-label="Routine calendar" className="routine-calendar">
+    <section aria-label="Automation calendar" className="routine-calendar">
       <header className="routine-calendar__header">
         <OctantIconButton
           label="Previous month"
@@ -59,7 +59,7 @@ export function RoutineCalendar(props: {
 
       {props.routines.some((routine) => routine.trigger.kind === "file-arrival") ? (
         <p>
-          File-arrival routines have no scheduled dates. Use List to inspect their input status.
+          File-arrival automations have no scheduled dates. Use List to inspect their input status.
         </p>
       ) : null}
       <div aria-hidden="true" className="routine-calendar__weekdays">
@@ -98,7 +98,7 @@ export function RoutineCalendar(props: {
 
       {month.truncated ? (
         <p className="routine-calendar__note" role="status">
-          Some routines run more often than this calendar can show. The list says how often.
+          Some automations run more often than this calendar can show. The list says how often.
         </p>
       ) : null}
     </section>

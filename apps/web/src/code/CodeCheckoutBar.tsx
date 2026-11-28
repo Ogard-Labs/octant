@@ -87,7 +87,7 @@ export function CodeCheckoutBar(props: {
           title={
             checkout.workingFolder.kind === "extra"
               ? "Shared folder outside the worktree. Git, Review and changed files cover the checkout only."
-              : "Task working folder"
+              : "Thread working folder"
           }
         >
           Working: {checkout.workingFolder.label}

@@ -865,8 +865,8 @@ describe("Add endpoint, step by step", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    const good = screen.getByRole("checkbox", { name: "Helper agents can use good-model" });
-    const chatty = screen.getByRole("checkbox", { name: "Helper agents can use chatty-model" });
+    const good = screen.getByRole("checkbox", { name: "Agents can use good-model" });
+    const chatty = screen.getByRole("checkbox", { name: "Agents can use chatty-model" });
     expect(good).toBeEnabled();
     expect(chatty).toBeDisabled();
     expect(chatty).toHaveAccessibleDescription(/Chat only models can't take agent work/);

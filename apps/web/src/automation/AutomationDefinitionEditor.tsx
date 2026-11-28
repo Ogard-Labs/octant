@@ -56,7 +56,7 @@ export interface AutomationDefinitionEditorProps {
 
 const FULL_ACCESS_NOTE = "Automations cannot use Full access. Pick a profile that asks first.";
 const SERVER_FILE_TRIGGER_NOTE =
-  "A file routine watches a folder on this computer, so a Project on a server offers no file trigger.";
+  "A file automation watches a folder on this computer, so a Project on a server offers no file trigger.";
 
 export { localInputFromUtcInstant, utcInstantFromLocalInput } from "./RoutineScheduleFields";
 
@@ -514,7 +514,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       {mode === "chat" ? (
         <p className="automation-editor__note">
-          A Chat routine keeps Chat&apos;s limits: its thread has no files, commands, or Git, so
+          A Chat automation keeps Chat&apos;s limits: its thread has no files, commands, or Git, so
           there is no mode to pick.
         </p>
       ) : (

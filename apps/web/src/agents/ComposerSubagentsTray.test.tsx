@@ -71,7 +71,7 @@ describe("SubagentsTray", () => {
       observationsTruncated: true,
       storage: memoryStorage(),
     });
-    const toggle = screen.getByRole("button", { name: /Subagents,/ });
+    const toggle = screen.getByRole("button", { name: /Agents,/ });
     expect(toggle).toHaveTextContent("1 failed · earlier ones not retained");
     expect(screen.getByText(/Earlier observed children/)).toBeVisible();
     await user.click(toggle);
@@ -87,11 +87,11 @@ describe("SubagentsTray", () => {
       observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
       stopClient: { stopObserved },
     });
-    await user.click(screen.getByRole("button", { name: /Stop subagent: Inspect parser/ }));
+    await user.click(screen.getByRole("button", { name: /Stop agent: Inspect parser/ }));
     expect(stopObserved).toHaveBeenCalledWith(
       expect.objectContaining({ observationId: observedChildFixture().observationId }),
     );
-    expect(screen.getByRole("button", { name: /Stop subagent/ })).toHaveTextContent("Stopping");
+    expect(screen.getByRole("button", { name: /Stop agent/ })).toHaveTextContent("Stopping");
     expect(screen.getByRole("button", { name: /Opens it in Agents/ })).toHaveTextContent("Working");
   });
 
@@ -110,7 +110,7 @@ describe("SubagentsTray", () => {
       stopClient: { backgroundObserved, messageObserved },
     });
     await user.click(
-      screen.getByRole("button", { name: /Send subagent to the background: Inspect parser/ }),
+      screen.getByRole("button", { name: /Send agent to the background: Inspect parser/ }),
     );
     expect(backgroundObserved).toHaveBeenCalledWith(
       expect.objectContaining({ observationId: observedChildFixture().observationId }),
@@ -175,7 +175,7 @@ describe("SubagentsTray", () => {
         stopObserved: async () => ({ status: "refused" as const, reason: "not-live" as const }),
       },
     });
-    await user.click(screen.getByRole("button", { name: /Stop subagent/ }));
+    await user.click(screen.getByRole("button", { name: /Stop agent/ }));
     expect(screen.getByRole("status")).toHaveTextContent("no longer running");
   });
 
@@ -207,12 +207,12 @@ describe("SubagentsTray", () => {
       entry("e", "completed", { required: true, acknowledged: true }),
     ]);
 
-    const tray = screen.getByRole("group", { name: "Subagents" });
+    const tray = screen.getByRole("group", { name: "Agents" });
     const rows = within(tray).getAllByRole("button", { name: /Opens it in Agents/ });
     expect(rows).toHaveLength(3);
-    const toggle = within(tray).getByRole("button", { name: /Subagents,/ });
+    const toggle = within(tray).getByRole("button", { name: /Agents,/ });
     expect(toggle).toHaveTextContent("1 failed · 1 waiting · 1 to review · 1 working · 1 done");
-    expect(screen.getByRole("button", { name: "View all 5 subagents in Agents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "View all 5 agents in Agents" })).toBeVisible();
     expect(within(tray).queryByText("Task e")).not.toBeInTheDocument();
   });
 
@@ -226,11 +226,11 @@ describe("SubagentsTray", () => {
       { storage: memoryStorage() },
     );
 
-    const toggle = screen.getByRole("button", { name: /Subagents,/ });
+    const toggle = screen.getByRole("button", { name: /Agents,/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(toggle).toHaveTextContent("1 to review · 1 done");
     expect(screen.queryByRole("button", { name: /Opens it in Agents/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "View all 2 subagents in Agents" }));
+    await user.click(screen.getByRole("button", { name: "View all 2 agents in Agents" }));
     expect(onOpenSubagent).toHaveBeenCalledWith();
   });
 
@@ -243,9 +243,7 @@ describe("SubagentsTray", () => {
       entry("b", "completed"),
     ]);
 
-    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent(
-      "1 failed · 1 done",
-    );
+    expect(screen.getByRole("button", { name: /Agents,/ })).toHaveTextContent("1 failed · 1 done");
     expect(screen.getByText("Claude authentication is required.")).toBeVisible();
     expect(screen.queryByText("Task b")).not.toBeInTheDocument();
   });
@@ -259,7 +257,7 @@ describe("SubagentsTray", () => {
       { storage: memoryStorage() },
     );
 
-    const toggle = screen.getByRole("button", { name: /Subagents,/ });
+    const toggle = screen.getByRole("button", { name: /Agents,/ });
     expect(toggle).toHaveTextContent("2 done");
     expect(toggle).not.toHaveTextContent(/review/);
   });
@@ -270,16 +268,16 @@ describe("SubagentsTray", () => {
       { storage: memoryStorage() },
     );
 
-    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent("1 to review");
+    expect(screen.getByRole("button", { name: /Agents,/ })).toHaveTextContent("1 to review");
   });
 
   it("dims and withholds Stop while the connection is lost, without saying so again", async () => {
     const user = userEvent.setup();
     const { onStop } = renderTray([entry("a", "running")], { reconnecting: true });
 
-    expect(screen.getByRole("group", { name: "Subagents" })).toHaveAttribute("data-stale", "true");
+    expect(screen.getByRole("group", { name: "Agents" })).toHaveAttribute("data-stale", "true");
     expect(screen.queryByText(/Reconnecting|last status/)).not.toBeInTheDocument();
-    const stop = screen.getByRole("button", { name: "Stop subagent: Task a" });
+    const stop = screen.getByRole("button", { name: "Stop agent: Task a" });
     expect(stop).toBeDisabled();
     await user.click(stop);
     expect(onStop).not.toHaveBeenCalled();
@@ -287,7 +285,7 @@ describe("SubagentsTray", () => {
 
   it("omits the tray when the host reports no children", () => {
     renderTray([]);
-    expect(screen.queryByRole("group", { name: "Subagents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Agents" })).not.toBeInTheDocument();
   });
 
   it("shows only recorded model, reason and how long the subagent ran, never an update age", () => {
@@ -364,7 +362,7 @@ describe("SubagentsTray", () => {
       { storage: memoryStorage() },
     );
 
-    const tray = screen.getByRole("group", { name: "Subagents" });
+    const tray = screen.getByRole("group", { name: "Agents" });
     expect(tray).toHaveTextContent("Waiting on Task first, Task middle and 1 other");
     expect(tray).not.toHaveTextContent("working");
     expect(within(tray).queryByText(/second line/)).not.toBeInTheDocument();
@@ -372,10 +370,10 @@ describe("SubagentsTray", () => {
 
   it("names one or two waiting children without a count", () => {
     renderTray([entry("a", "running")], { storage: memoryStorage() });
-    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent("Waiting on Task a");
+    expect(screen.getByRole("group", { name: "Agents" })).toHaveTextContent("Waiting on Task a");
     cleanup();
     renderTray([entry("a", "running"), entry("b", "queued")], { storage: memoryStorage() });
-    expect(screen.getByRole("group", { name: "Subagents" })).toHaveTextContent(
+    expect(screen.getByRole("group", { name: "Agents" })).toHaveTextContent(
       "Waiting on Task a and Task b",
     );
   });
@@ -391,22 +389,22 @@ describe("SubagentsTray", () => {
 
   it("keeps the counts while folded when a child failed or a result awaits review", () => {
     renderTray([entry("a", "running"), entry("b", "failed")], { storage: memoryStorage() });
-    let tray = screen.getByRole("group", { name: "Subagents" });
+    let tray = screen.getByRole("group", { name: "Agents" });
     expect(tray).toHaveTextContent("1 failed · 1 working");
     expect(tray).not.toHaveTextContent("Waiting on");
     cleanup();
     renderTray([entry("a", "running"), entry("b", "completed", { required: true })], {
       storage: memoryStorage(),
     });
-    tray = screen.getByRole("group", { name: "Subagents" });
+    tray = screen.getByRole("group", { name: "Agents" });
     expect(tray).toHaveTextContent("1 to review · 1 working");
     expect(tray).not.toHaveTextContent("Waiting on");
   });
 
   it("shows the counts, not the waiting line, once the card is open", () => {
     renderTray([entry("a", "running")]);
-    expect(screen.getByRole("group", { name: "Subagents" })).not.toHaveTextContent("Waiting on");
-    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent("1 working");
+    expect(screen.getByRole("group", { name: "Agents" })).not.toHaveTextContent("Waiting on");
+    expect(screen.getByRole("button", { name: /Agents,/ })).toHaveTextContent("1 working");
   });
 
   it("folds to its head and stays folded for this viewer", async () => {
@@ -414,13 +412,13 @@ describe("SubagentsTray", () => {
     const storage = memoryStorage({ "octant.composer-subagents.open": "true" });
     renderTray([entry("a", "running")], { storage });
 
-    await user.click(screen.getByRole("button", { name: /Subagents,.*Hide them/ }));
+    await user.click(screen.getByRole("button", { name: /Agents,.*Hide them/ }));
     expect(screen.queryByRole("button", { name: /Opens it in Agents/ })).not.toBeInTheDocument();
     expect(storage.setItem).toHaveBeenCalledWith("octant.composer-subagents.open", "false");
 
     cleanup();
     renderTray([entry("a", "running")], { storage });
-    const toggle = screen.getByRole("button", { name: /Subagents,.*Show them/ });
+    const toggle = screen.getByRole("button", { name: /Agents,.*Show them/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.tab();
     expect(toggle).toHaveFocus();
@@ -432,7 +430,7 @@ describe("SubagentsTray", () => {
     const user = userEvent.setup();
     const { onStop } = renderTray([entry("a", "running")]);
 
-    await user.click(screen.getByRole("button", { name: "Stop subagent: Task a" }));
+    await user.click(screen.getByRole("button", { name: "Stop agent: Task a" }));
     expect(onStop).toHaveBeenCalledWith("a");
   });
 
@@ -441,16 +439,16 @@ describe("SubagentsTray", () => {
     const { onStopAll } = renderTray([entry("a", "running"), entry("b", "waiting")]);
 
     await user.click(screen.getByRole("button", { name: "Stop all" }));
-    const confirm = screen.getByRole("group", { name: "Confirm stopping subagents" });
-    expect(confirm).toHaveTextContent("Stop all 2 managed subagents on this thread?");
-    expect(confirm).toHaveTextContent("Only this thread's helpers are affected.");
+    const confirm = screen.getByRole("group", { name: "Confirm stopping agents" });
+    expect(confirm).toHaveTextContent("Stop all 2 managed agents on this thread?");
+    expect(confirm).toHaveTextContent("Only this thread's agents are affected.");
     expect(onStopAll).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Keep running" }));
     expect(onStopAll).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Stop all" }));
-    await user.click(screen.getByRole("button", { name: "Stop 2 subagents" }));
+    await user.click(screen.getByRole("button", { name: "Stop 2 agents" }));
     expect(onStopAll).toHaveBeenCalledTimes(1);
   });
 
@@ -491,7 +489,7 @@ describe("SubagentsTray", () => {
       ]),
     });
     // A finished provider-started subagent counts like a finished managed one.
-    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /Agents,/ })).toHaveTextContent(
       "1 failed · 1 working · 1 done",
     );
     const rows = within(screen.getByRole("list")).getAllByRole("listitem");
@@ -504,7 +502,7 @@ describe("SubagentsTray", () => {
     expect(rows[0]?.querySelector('[data-driver-kind="codex"]')).not.toBeNull();
     // Only the run Octant started offers Stop.
     expect(within(rows[0] as HTMLElement).queryByRole("button", { name: /Stop/ })).toBeNull();
-    await user.click(within(rows[1] as HTMLElement).getByRole("button", { name: /Stop subagent/ }));
+    await user.click(within(rows[1] as HTMLElement).getByRole("button", { name: /Stop agent/ }));
   });
 
   it("shows a compare group as one line with its members counted by state", async () => {
@@ -517,7 +515,7 @@ describe("SubagentsTray", () => {
     const rows = within(screen.getByRole("list")).getAllByRole("listitem");
     expect(rows).toHaveLength(1);
     const group = within(rows[0] as HTMLElement).getByRole("button", { name: /^Compare plans\./ });
-    expect(group).toHaveTextContent("3 subagents · 2 working · 1 done");
+    expect(group).toHaveTextContent("3 agents · 2 working · 1 done");
     await user.click(group);
     expect(onOpenSubagent).toHaveBeenCalledWith();
   });
@@ -597,7 +595,7 @@ describe("ThreadSubagentsTray", () => {
       <ThreadSubagentsTray client={client} threadId={threadId} onOpenSubagent={onOpenSubagent} />,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: /Subagents,.*Show them/ }));
+    await userEvent.click(await screen.findByRole("button", { name: /Agents,.*Show them/ }));
 
     expect(
       await screen.findByRole("button", {
@@ -615,7 +613,7 @@ describe("ThreadSubagentsTray", () => {
     expect(onOpenSubagent).toHaveBeenLastCalledWith("observation:provider-child");
     expect(
       screen.queryByRole("button", {
-        name: "Stop subagent: Task 90000000-0000-4000-8000-000000000002",
+        name: "Stop agent: Task 90000000-0000-4000-8000-000000000002",
       }),
     ).not.toBeInTheDocument();
   });
@@ -638,12 +636,12 @@ describe("ObservedChildDetail", () => {
     );
     expect(screen.getByText("Usage: IN 900 · OUT 120")).toBeVisible();
     expect(screen.getByText("Parser handles nested quotes.")).not.toBeVisible();
-    await user.click(screen.getByText("Final summary from the subagent"));
+    await user.click(screen.getByText("Final summary from the agent"));
     expect(screen.getByText("Parser handles nested quotes.")).toBeVisible();
     cleanup();
 
     render(<ObservedChildDetail child={observedChildFixture()} onBack={vi.fn()} />);
     expect(screen.getByText("Usage not reported")).toBeVisible();
-    expect(screen.queryByText("Final summary from the subagent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Final summary from the agent")).not.toBeInTheDocument();
   });
 });

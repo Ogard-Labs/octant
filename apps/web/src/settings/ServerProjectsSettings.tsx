@@ -316,7 +316,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                       <div>
                         <h3>Developer tools</h3>
                         <p id={`${fieldId}-${project.id}-actions`}>
-                          Show saved actions and your Project terminal. Tasks keep their existing
+                          Show saved actions and your Project terminal. Threads keep their existing
                           access.
                         </p>
                       </div>

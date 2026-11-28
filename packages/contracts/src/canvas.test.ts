@@ -67,7 +67,9 @@ import {
   decodeCanvasBlock,
   decodeCanvasCreated,
   decodeCanvasDefinition,
+  decodeCanvasDesignAssetMarks,
   decodeCanvasDesignAssetsOutcome,
+  decodeCanvasVersionImagesRecorded,
   decodeCanvasDesignRunOutcome,
   decodeCanvasSourceManifestEntry,
   decodeCanvasVersion,
@@ -430,15 +432,80 @@ describe("Canvas contracts", () => {
       versionId: "33333333-3333-4333-8333-333333333333",
       blockId: "phone",
       assets: [
-        { assetId: "hero", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
-        { assetId: "shot", status: "unavailable", reason: "refused" },
+        {
+          assetId: "hero",
+          status: "resolved",
+          mediaType: "image/png",
+          data: "iVBORw0KGgo=",
+          mark: "unrecorded",
+        },
+        { assetId: "shot", status: "unavailable", reason: "changed" },
       ],
     };
     expect(decodeCanvasDesignAssetsOutcome(outcome)).toEqual(outcome);
+    expect(decodeCanvasDesignAssetMarks("labelled")).toBe("labelled");
+    expect(decodeCanvasDesignAssetMarks("recorded")).toBe("recorded");
+    expect(() => decodeCanvasDesignAssetMarks("other")).toThrow();
     expect(() =>
       decodeCanvasDesignAssetsOutcome({
         ...outcome,
         assets: [{ assetId: "hero", status: "resolved", mediaType: "image/svg+xml", data: "" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDesignAssetsOutcome({
+        ...outcome,
+        assets: [
+          {
+            assetId: "hero",
+            status: "resolved",
+            mediaType: "image/png",
+            data: "iVBORw0KGgo=",
+            mark: "other",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a version image digest record with hashes or unavailable entries and refuses image bytes", () => {
+    const record = {
+      canvasId: "22222222-2222-4222-8222-222222222222",
+      versionId: "33333333-3333-4333-8333-333333333333",
+      images: [
+        {
+          blockId: "phone",
+          assetId: "shot",
+          status: "recorded",
+          sha256: "a".repeat(64),
+        },
+        {
+          blockId: "phone",
+          assetId: "missing",
+          status: "unavailable",
+        },
+      ],
+    };
+    expect(decodeCanvasVersionImagesRecorded(record)).toEqual(record);
+    expect(() => decodeCanvasVersionImagesRecorded({ ...record, images: [] })).toThrow();
+    expect(() =>
+      decodeCanvasVersionImagesRecorded({
+        ...record,
+        images: [{ blockId: "phone", assetId: "shot", status: "recorded", sha256: "not-hex" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasVersionImagesRecorded({
+        ...record,
+        images: [
+          {
+            blockId: "phone",
+            assetId: "shot",
+            status: "recorded",
+            sha256: "a".repeat(64),
+            data: "iVBORw0KGgo=",
+          },
+        ],
       }),
     ).toThrow();
   });

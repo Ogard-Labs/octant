@@ -80,11 +80,11 @@ export function RemoteSetupGuide(props: {
                     Keep Octant running on that computer and turn on its private HTTPS listener.
                   </li>
                   <li>Pair this device and confirm the request on the host.</li>
-                  <li>Open a thread and read its latest message before sending a first task.</li>
+                  <li>Open a thread and read its latest message before sending a first message.</li>
                 </ol>
                 <p>
                   An unavailable computer cannot take work. Check its network and that it is awake;
-                  reconnecting never repeats an uncertain task. Scheduled work needs its executing
+                  reconnecting never repeats an uncertain turn. Scheduled work needs its executing
                   host awake, or separately configured wake support.
                 </p>
               </>
@@ -107,18 +107,18 @@ export function RemoteSetupGuide(props: {
                   </li>
                   <li>
                     Have your SSH agent available on the Octant host. A missing agent or an
-                    unavailable key needs fixing there; never paste a private key into a task.
+                    unavailable key needs fixing there; never paste a private key into a thread.
                   </li>
                   {intent === "server-command" ? (
                     <li>
-                      Ask a Work or Code task to run a read-only check such as <code>pwd</code> on
+                      Ask a Work or Code thread to run a read-only check such as <code>pwd</code> on
                       the registered server, then inspect the host and result.
                     </li>
                   ) : (
                     <li>
                       Bind an absolute server folder below the registry. The host checks that folder
                       over SSH; a missing folder must be corrected there. Open the Project and use
-                      Octant Harness for a first read-only task that lists its files.
+                      Octant Harness for a first read-only thread that lists its files.
                     </li>
                   )}
                 </ol>
@@ -127,7 +127,7 @@ export function RemoteSetupGuide(props: {
                     Saved actions, extra folders, Project-level guardrail/reviewer settings and some
                     Work panes are unavailable for server Projects. Thread and account levels still
                     apply. Other provider runtimes act on this host and cannot run a server
-                    Project's task.
+                    Project's thread.
                   </p>
                 )}
                 <p>

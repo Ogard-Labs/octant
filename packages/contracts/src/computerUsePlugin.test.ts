@@ -3,7 +3,11 @@ import {
   decodeComputerControlCommand,
   decodeComputerControlResult,
   decodeComputerExtendDesktopCommand,
+  decodeComputerHostTypeSecretRequest,
+  decodeComputerSecretTargetInspection,
+  decodeComputerSecretTargetRequest,
   decodeComputerSendFileCommand,
+  decodeComputerTypeSecretCommand,
   decodeComputerUseOwner,
   decodeComputerUseSettings,
   decodeComputerUseStatus,
@@ -114,6 +118,63 @@ describe("Computer use plugin commands", () => {
     expect(
       decodeComputerControlResult({ kind: "extended", expiresAt: "2026-10-26T13:00:00.000Z" }),
     ).toEqual({ kind: "extended", expiresAt: "2026-10-26T13:00:00.000Z" });
+  });
+
+  it("carries a secret typing request as a handle only, never as a driver command", () => {
+    const observationId = "11111111-1111-4111-8111-111111111111";
+    const handle = "22222222-2222-4222-8222-222222222222";
+    expect(
+      decodeComputerTypeSecretCommand({
+        operation: "type-secret",
+        handle,
+        observationId,
+        elementIndex: 4,
+      }),
+    ).toEqual({
+      operation: "type-secret",
+      handle,
+      observationId,
+      elementIndex: 4,
+    });
+    expect(() =>
+      decodeComputerTypeSecretCommand({
+        operation: "type-secret",
+        handle,
+        observationId,
+        elementIndex: 4,
+        text: "secret",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeComputerControlCommand({
+        operation: "type-secret",
+        handle,
+        observationId,
+        elementIndex: 4,
+      }),
+    ).toThrow();
+    expect(decodeComputerSecretTargetRequest({ observationId, elementIndex: 4 })).toEqual({
+      observationId,
+      elementIndex: 4,
+    });
+    expect(
+      decodeComputerHostTypeSecretRequest({ observationId, elementIndex: 4, text: "pw" }),
+    ).toEqual({ observationId, elementIndex: 4, text: "pw" });
+    expect(
+      decodeComputerSecretTargetInspection({
+        kind: "secure-target",
+        appId: "com.example.Auth",
+        windowId: 7,
+        windowTitle: "Unlock",
+      }),
+    ).toEqual({
+      kind: "secure-target",
+      appId: "com.example.Auth",
+      windowId: 7,
+      windowTitle: "Unlock",
+    });
+    expect(decodeComputerControlResult({ kind: "typed" })).toEqual({ kind: "typed" });
+    expect(decodeComputerControlResult({ kind: "cancelled" })).toEqual({ kind: "cancelled" });
   });
 });
 

@@ -170,8 +170,8 @@ export function ServerConnections(props: ServerConnectionsProps) {
           </OctantAlert>
         )}
         <p className="connectors__detail">
-          Reconnect drops a failed connection. The next task that uses the server connects again; a
-          call that failed is not sent again.
+          Reconnect drops a failed connection. The next thread that uses the server connects again;
+          a call that failed is not sent again.
         </p>
       </div>
     </SettingsSection>

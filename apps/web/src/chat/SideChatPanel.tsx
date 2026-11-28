@@ -128,13 +128,13 @@ export function SideChatPanel(props: SideChatPanelProps) {
 function sideChatNotice(sourceMode: SideChatSidecar["sourceMode"]): string {
   const limits = "It can read them but can\u2019t change, steer, or approve anything.";
   if (sourceMode === "code") {
-    return `Ask about this thread: its conversation, changes, files, and subagent results. ${limits}`;
+    return `Ask about this thread: its conversation, changes, files, and agent results. ${limits}`;
   }
   if (sourceMode === "work") {
-    return `Ask about this thread: its conversation, folder, files, and subagent results. ${limits}`;
+    return `Ask about this thread: its conversation, folder, files, and agent results. ${limits}`;
   }
   if (sourceMode === "chat") {
-    return `Ask about this thread: its conversation and subagent results. ${limits}`;
+    return `Ask about this thread: its conversation and agent results. ${limits}`;
   }
   return `Ask about this thread. ${limits}`;
 }

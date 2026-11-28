@@ -107,7 +107,7 @@ function BoundTurnReview(props: Props) {
       } catch {
         if (!signal.aborted && request === generation.current)
           setNotice(
-            "This captured version could not be read. The displayed version was kept; retry or reopen its original task. No current checkout diff was substituted.",
+            "This captured version could not be read. The displayed version was kept; retry or reopen its original thread. No current checkout diff was substituted.",
           );
       } finally {
         if (!signal.aborted && request === generation.current) setLoading(false);

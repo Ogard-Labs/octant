@@ -86,7 +86,7 @@ const OPTIONS: ReadonlyArray<{
   {
     id: "on",
     label: "On",
-    detail: "Loads the provider’s own subagents, web tools, skills, and tool servers here.",
+    detail: "Loads the provider’s own agents, web tools, skills, and tool servers here.",
   },
   {
     id: "off",

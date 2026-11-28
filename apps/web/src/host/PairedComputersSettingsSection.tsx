@@ -23,10 +23,13 @@ import { useHostFederationStack } from "./useHostFederationLifecycle";
 export function PairedComputersSettingsSection({
   bridge,
   pairingClient,
+  pairingTargetName,
 }: {
   readonly bridge: PairedComputersBridge;
   /** Replaces the transport-backed pairing client; only tests do. */
   readonly pairingClient?: RemotePairingClient;
+  /** Computer chosen from the connections map to pair directly with. */
+  readonly pairingTargetName?: string;
 }) {
   const federation = useHostFederationStack();
   const codeId = useId();
@@ -178,9 +181,17 @@ export function PairedComputersSettingsSection({
     <SettingsSection title="Other computers">
       <div className="setgroup">
         <SettingRow
-          description="Paste the whole pairing code made on the other computer, in Settings → Remote access or with octant pair."
+          description={
+            pairingTargetName === undefined
+              ? "Paste the whole pairing code made on the other computer, in Settings → Remote access or with octant pair."
+              : `Paste the whole pairing code made on ${pairingTargetName}, in Settings → Remote access or with octant pair.`
+          }
           more="Octant checks that computer's own certificate key against the code before it sends anything."
-          label="Pair with another computer"
+          label={
+            pairingTargetName === undefined
+              ? "Pair with another computer"
+              : `Pair with ${pairingTargetName}`
+          }
           scope="app"
           settingId="paired-computers-code"
         >

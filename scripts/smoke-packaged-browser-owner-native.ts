@@ -26,6 +26,76 @@ const endpointContinueReady = (snapshot: string): boolean => {
   const rows = snapshot.split("\n").filter((row) => row.startsWith("AXButton | Continue |"));
   return rows.length === 1 && rows[0]?.endsWith(" | readiness:true") === true;
 };
+// Settings lists a Work section of its own and stays in the tree for a moment
+// after Close Settings is pressed. Revealing that row as it was torn down read
+// -25202 (seen 2026-11-24), so the app's entry counts only once Settings is gone.
+export const workModeEntryReady = (snapshot: string): boolean =>
+  snapshot.includes(" | Work |") &&
+  !snapshot.includes("| Close Settings |") &&
+  !snapshot.includes("Back to app");
+
+export type FixedFolderStageMode =
+  | "picker-fill-owned-location"
+  | "picker-go-owned-location"
+  | "picker-choose-owned-folder"
+  | "picker-create-owned-project";
+
+export const assertFixedFolderStageReceipt = (
+  mode: FixedFolderStageMode,
+  pid: number,
+  raw: string,
+): void => {
+  const parsed: unknown = JSON.parse(raw);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("capturedIdentityMatched" in parsed) ||
+    parsed.capturedIdentityMatched !== true ||
+    !("capturedPid" in parsed) ||
+    parsed.capturedPid !== pid ||
+    !("directoryLabelsRead" in parsed) ||
+    parsed.directoryLabelsRead !== false
+  )
+    throw Error("Owned-folder command lost its captured process; no replay.");
+  let result: unknown = parsed;
+  if (mode !== "picker-create-owned-project") {
+    if (!("fixedFolder" in parsed)) throw Error("Missing fixed-folder command receipt.");
+    result = parsed.fixedFolder;
+  }
+  const expected =
+    mode === "picker-fill-owned-location" || mode === "picker-go-owned-location"
+      ? "completed"
+      : "dispatched";
+  if (
+    typeof result !== "object" ||
+    result === null ||
+    !("status" in result) ||
+    result.status !== expected ||
+    !("fixtureIdentityMatched" in result) ||
+    result.fixtureIdentityMatched !== true ||
+    !("rawValueCaptured" in result) ||
+    result.rawValueCaptured !== false
+  )
+    throw Error("Owned-folder command refused or remained uncertain; no replay.");
+  if (
+    mode === "picker-go-owned-location" &&
+    (!("postGoOriginalChooserObserved" in result) || result.postGoOriginalChooserObserved !== true)
+  )
+    throw Error("Post-Return poll did not observe the original chooser sheet; no replay.");
+  if (
+    mode !== "picker-create-owned-project" &&
+    (!("codeSigningVerified" in result) || result.codeSigningVerified !== true)
+  )
+    throw Error("Fixed picker command did not retain signature verification.");
+  if (
+    (mode === "picker-fill-owned-location" || mode === "picker-go-owned-location") &&
+    (!("fixedOwnedFieldValueCompared" in result) ||
+      result.fixedOwnedFieldValueCompared !== true ||
+      !("fixedOwnedFieldValueMatched" in result) ||
+      result.fixedOwnedFieldValueMatched !== true)
+  )
+    throw Error("Exact derived owned path was not proven in the location field.");
+};
 const ax = String.raw`on run argv
 tell application "System Events"
 set candidate to first application process whose unix id is (item 1 of argv as integer)
@@ -960,7 +1030,7 @@ end run`;
               await native("reveal", "Back to app");
               await native("click", "Back to app");
             }
-            await wait("work-mode-entry", (s) => s.includes(" | Work |"));
+            await wait("work-mode-entry", workModeEntryReady);
             await native("reveal", "Work");
             await native("click", "Work");
             await wait("folder-thread-kind", (s) => s.includes("AXCheckBox | In a folder |"));
@@ -1193,13 +1263,7 @@ end run`;
             ]
               .map((entry) => entry.toString(10))
               .join(":");
-            const fixedStage = async (
-              mode:
-                | "picker-fill-owned-location"
-                | "picker-go-owned-location"
-                | "picker-choose-owned-folder"
-                | "picker-create-owned-project",
-            ) => {
+            const fixedStage = async (mode: FixedFolderStageMode) => {
               if (controller.signal.aborted)
                 throw Error("Owned-folder action cancelled before validation; no dispatch.");
               await assertOwnedDirectories();
@@ -1211,52 +1275,7 @@ end run`;
                 throw Error(
                   "Owned-folder action cancelled; actual receipt retained and no next effect.",
                 );
-              const parsed: unknown = JSON.parse(raw);
-              if (
-                typeof parsed !== "object" ||
-                parsed === null ||
-                !("capturedIdentityMatched" in parsed) ||
-                parsed.capturedIdentityMatched !== true ||
-                !("capturedPid" in parsed) ||
-                parsed.capturedPid !== pid ||
-                !("directoryLabelsRead" in parsed) ||
-                parsed.directoryLabelsRead !== false
-              )
-                throw Error("Owned-folder command lost its captured process; no replay.");
-              let result: unknown = parsed;
-              if (mode !== "picker-create-owned-project") {
-                if (!("fixedFolder" in parsed))
-                  throw Error("Missing fixed-folder command receipt.");
-                result = parsed.fixedFolder;
-              }
-              const expected =
-                mode === "picker-fill-owned-location" || mode === "picker-go-owned-location"
-                  ? "completed"
-                  : "dispatched";
-              if (
-                typeof result !== "object" ||
-                result === null ||
-                !("status" in result) ||
-                result.status !== expected ||
-                !("fixtureIdentityMatched" in result) ||
-                result.fixtureIdentityMatched !== true ||
-                !("rawValueCaptured" in result) ||
-                result.rawValueCaptured !== false
-              )
-                throw Error("Owned-folder command refused or remained uncertain; no replay.");
-              if (
-                mode !== "picker-create-owned-project" &&
-                (!("codeSigningVerified" in result) || result.codeSigningVerified !== true)
-              )
-                throw Error("Fixed picker command did not retain signature verification.");
-              if (
-                (mode === "picker-fill-owned-location" || mode === "picker-go-owned-location") &&
-                (!("fixedOwnedFieldValueCompared" in result) ||
-                  result.fixedOwnedFieldValueCompared !== true ||
-                  !("fixedOwnedFieldValueMatched" in result) ||
-                  result.fixedOwnedFieldValueMatched !== true)
-              )
-                throw Error("Exact derived owned path was not proven in the location field.");
+              assertFixedFolderStageReceipt(mode, pid, raw);
             };
             await fixedStage("picker-fill-owned-location");
             await fixedStage("picker-go-owned-location");
@@ -1593,7 +1612,9 @@ end run`;
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "Native Browser owner smoke failed.");
-  process.exitCode = 1;
-});
+if (import.meta.main) {
+  void main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "Native Browser owner smoke failed.");
+    process.exitCode = 1;
+  });
+}

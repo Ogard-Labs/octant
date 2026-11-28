@@ -109,7 +109,7 @@ export function browserApprovalDetail(approval: {
       : key;
     const label =
       approval.profileLabel === undefined ? fallback : `${approval.profileLabel} (${identity})`;
-    return `Profile: ${label}. This script can read and change the page using its signed-in account authority, even in Private. This permission covers this exact source once in this task and profile. Shell and file access stay unchanged.`;
+    return `Profile: ${label}. This script can read and change the page using its signed-in account authority, even in Private. This permission covers this exact source once in this thread and profile. Shell and file access stay unchanged.`;
   }
   if (approval.download !== undefined) {
     return "The file comes from the page and is checked here first. This answer covers this file once";

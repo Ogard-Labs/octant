@@ -1564,7 +1564,7 @@ describe("CodeComposerAdapter interactions", () => {
 
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(container.textContent).toContain(
-      "Choose a Project first. A Code task works in a folder.",
+      "Choose a Project first. A Code thread works in a folder.",
     );
     root.unmount();
     container.remove();

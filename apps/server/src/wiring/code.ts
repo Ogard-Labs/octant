@@ -1436,7 +1436,8 @@ export function wireCode(deps: CodeDependencies) {
             link: (threadId, issue, source, actor) =>
               linkedIssues.store.link(threadId, issue, source, actor),
             unlink: (threadId, issue, actor) => linkedIssues.store.unlink(threadId, issue, actor),
-            resolveLinear: (identifier, signal) => linkedIssues.resolveLinear(identifier, signal),
+            resolveLinear: (identifier, signal, accountRef) =>
+              linkedIssues.resolveLinear(identifier, signal, accountRef),
           },
         });
       // Revocation is wired at construction, before any window can hold a watch.

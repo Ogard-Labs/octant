@@ -59,7 +59,7 @@ describe("a saved action beside its task", () => {
     );
     expect(await screen.findByText("deploy@web-1")).toBeVisible();
     expect(screen.getByText(/No OS confinement on the server/)).toBeVisible();
-    expect(screen.getByText(/Task policy approval-gated/)).toBeVisible();
+    expect(screen.getByText(/Thread policy approval-gated/)).toBeVisible();
     expect(execute.mock.calls.filter(([c]) => c.kind === "start-action")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Run action" }));
     expect(await screen.findByText(/Lost the server connection/)).toBeVisible();

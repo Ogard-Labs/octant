@@ -201,6 +201,10 @@ export interface WorkspaceRailLayersProps {
   readonly projectRepository?: { readonly owner: string; readonly name: string };
   /** The current Project's bound Linear team/project, which Linear browser opens on. */
   readonly projectLinearTarget?: import("@octant/contracts").ProjectLinearTarget;
+  /** Connected Linear accounts on this host, for the Linear browser workspace picker. */
+  readonly linearAccounts?: ReadonlyArray<
+    import("@octant/contracts/integration").IntegrationAccountEntry
+  >;
 }
 
 export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
@@ -277,11 +281,12 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
         <div className="code-board-layer">
           <LazyRailSurface label="Linear">
             <LinearIssueBrowser
-              getIssue={(input) => props.linearClient.getIssue(input)}
+              getIssue={(input, accountRef) => props.linearClient.getIssue(input, accountRef)}
               isNarrow={props.isNarrow}
-              listIssueFilters={() => props.linearClient.listIssueFilters()}
-              listIssues={(input) => props.linearClient.listIssues(input)}
+              listIssueFilters={(accountRef) => props.linearClient.listIssueFilters(accountRef)}
+              listIssues={(input, accountRef) => props.linearClient.listIssues(input, accountRef)}
               onClose={props.onCloseLinearIssues}
+              {...(props.linearAccounts === undefined ? {} : { accounts: props.linearAccounts })}
               {...(props.projectLinearTarget === undefined
                 ? {}
                 : { defaultLinearTarget: props.projectLinearTarget })}

@@ -280,4 +280,56 @@ describe("first-action approval policy", () => {
       canRememberForProject: false,
     });
   });
+
+  it("asks once per secret typing below Full access and under Strict, and skips approval at Full access outside Strict", () => {
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        secretInput: true,
+        hasThreadGrant: true,
+        hasProjectGrant: true,
+      }),
+    ).toEqual({
+      kind: "required",
+      scope: "one-time",
+      canRememberForProject: false,
+    });
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        secretInput: true,
+        fullAccess: true,
+        strict: true,
+        hasThreadGrant: true,
+        hasProjectGrant: true,
+      }),
+    ).toEqual({
+      kind: "required",
+      scope: "one-time",
+      canRememberForProject: false,
+    });
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        secretInput: true,
+        fullAccess: true,
+        strict: false,
+      }),
+    ).toEqual({
+      kind: "not-required",
+      reason: "full-access",
+    });
+    expect(
+      decideComputerUseApproval({
+        ...base,
+        secretInput: true,
+        plan: true,
+        fullAccess: true,
+        strict: false,
+      }),
+    ).toEqual({
+      kind: "refused",
+      reason: "plan-read-only",
+    });
+  });
 });

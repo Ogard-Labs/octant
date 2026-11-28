@@ -34,6 +34,7 @@ import type { ServerProjectsClient } from "@octant/client-runtime/server-project
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { BenchmarksClient, ChatClient } from "@octant/client-runtime";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
@@ -132,6 +133,7 @@ export interface ShellSettingsSurfaceProps {
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  readonly hostFederationTransports?: HostFederationTransports;
   readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
   readonly integrationClient?: IntegrationClient;
@@ -301,6 +303,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.hostFederationLifecycle === undefined
               ? {}
               : { hostFederationLifecycle: props.hostFederationLifecycle })}
+            {...(props.hostFederationTransports === undefined
+              ? {}
+              : { hostFederationTransports: props.hostFederationTransports })}
             githubClient={props.githubClient}
             {...(props.integrationClient === undefined
               ? {}
