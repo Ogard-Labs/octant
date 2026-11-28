@@ -236,21 +236,24 @@ do {
     expect(pauses == 2, "must not pause after deadline expires")
 }
 
-// 5. Poll stops immediately when process or fixture identity drifts.
+// 5. Poll stops immediately when process or fixture identity drifts, even if a later check would pass.
 do {
-    var valid = true
+    var identityChecks = 0
     var pauses = 0
     let outcome = pollPostGoObservation(
         hasTimeRemaining: { true },
-        identitiesValid: { valid },
+        identitiesValid: {
+            identityChecks += 1
+            return identityChecks != 2
+        },
         readStep: {
-            valid = false
             return .transientInvalidElement
         },
         pause: { pauses += 1 }
     )
-    expect(outcome == PostGoPollOutcome(completed: false, attempts: 1, transientInvalidElementCount: 1, stoppedOnNonTransientError: false), "expected identity loss to stop poll immediately")
+    expect(outcome == PostGoPollOutcome(completed: false, attempts: 1, transientInvalidElementCount: 1, stoppedOnNonTransientError: false), "expected identity loss to stop poll immediately without re-polling")
     expect(pauses == 0, "must not pause after identity loss")
+    expect(identityChecks == 2, "must not re-check identity after a post-read failure")
 }
 
 print("ok")

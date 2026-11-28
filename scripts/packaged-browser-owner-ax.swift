@@ -54,14 +54,26 @@ func pollPostGoObservation(
                 stoppedOnNonTransientError: false
             )
         case .pending:
-            if hasTimeRemaining(), identitiesValid() {
-                pause()
+            guard hasTimeRemaining(), identitiesValid() else {
+                return PostGoPollOutcome(
+                    completed: false,
+                    attempts: attempts,
+                    transientInvalidElementCount: transientInvalidElementCount,
+                    stoppedOnNonTransientError: false
+                )
             }
+            pause()
         case .transientInvalidElement:
             transientInvalidElementCount += 1
-            if hasTimeRemaining(), identitiesValid() {
-                pause()
+            guard hasTimeRemaining(), identitiesValid() else {
+                return PostGoPollOutcome(
+                    completed: false,
+                    attempts: attempts,
+                    transientInvalidElementCount: transientInvalidElementCount,
+                    stoppedOnNonTransientError: false
+                )
             }
+            pause()
         case .failed:
             return PostGoPollOutcome(
                 completed: false,
