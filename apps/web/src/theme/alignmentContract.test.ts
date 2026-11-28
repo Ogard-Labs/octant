@@ -297,7 +297,7 @@ describe("the shell's edges and gaps", () => {
     expect(body).toContain("line-height: var(--oct-line-detail)");
   });
 
-  it("draws the title band's mark, the thread's disclosures, the rail's badge and the thinking rule in the one hairline", () => {
+  it("draws the title band's mark, the thread's disclosures and the thinking rule in the one hairline", () => {
     expect(rule(root, ".environment-mark")).toMatch(/border:\s*1px solid var\(--oct-hairline\)/);
     expect(rule(components, ".turn-activity__disclosure + .turn-activity__disclosure")).toContain(
       "1px solid var(--oct-hairline)",
@@ -305,10 +305,15 @@ describe("the shell's edges and gaps", () => {
     expect(
       rule(components, ".turn-activity__toolchain > .turn-activity__disclosure:first-child"),
     ).toContain("1px solid var(--oct-hairline)");
-    expect(rule(shell, ".sidebar-rail__badge")).toMatch(
-      /border:\s*1px solid var\(--oct-hairline\)/,
-    );
     expect(rule(shell, ".sidebar-rail__divider")).toMatch(/background:\s*var\(--oct-hairline\)/);
+  });
+
+  it("writes a rail count as a plain numeral beside its icon, with no pill, edge or fill", () => {
+    const badge = rule(shell, ".sidebar-rail__badge");
+    expect(badge).not.toMatch(/border|background|radius|padding/);
+    expect(badge).toContain("color: var(--oct-fg-2);");
+    expect(badge).toContain("font-size: var(--oct-text-xs);");
+    expect(badge).toContain("font-variant-numeric: tabular-nums;");
   });
 
   it("draws the rule beside reasoning at 1px in the strong border, which reads where the hairline did not", () => {

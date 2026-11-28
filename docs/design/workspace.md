@@ -3412,9 +3412,9 @@ own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
-carries the places only: Home, the Inbox as an icon with its count badge (under
+carries the places only: Home, the Inbox as an icon with its count (under
 Colour the icon takes the Inbox tile's blue; the hover and current fills and
-the badge stay neutral, and under Mono and increased contrast the icon stays
+the count stay neutral, and under Mono and increased contrast the icon stays
 grey), the Board, which stands for Running, To review and Done today (three
 look-alike count icons made the rail the busiest column in the window; they
 stay as tiles in a sidebar with no rail beside it, maintainer request,
@@ -3432,7 +3432,10 @@ maintainer request, 2026-11-25). The sidebar keeps its header (modes, search, ne
 hide), the Project list with its view, filter, and Activity controls, and the
 threads; its profile row is not drawn beside the rail, whose account face is
 the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
-face's fill and the primary ink; every rail control names itself in its accessible name and in a
+face's fill and the primary ink; a count is a plain numeral at the icon's upper
+trailing shoulder (`--oct-text-xs`, `--oct-fg-2`, tabular figures, 99+ past 99)
+with no pill, edge or fill, because a bordered pill read as a web badge beside
+the native glyphs (maintainer decision, 2026-11-28); every rail control names itself in its accessible name and in a
 label that opens beside the rail on hover or keyboard focus. Destinations
 have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,

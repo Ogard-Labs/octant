@@ -508,22 +508,16 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   color: var(--oct-fg);
 }
 
+/* A count is a plain numeral at the icon's shoulder, as a Mac sidebar writes
+   one: a bordered pill read as a web badge beside the native glyphs. */
 .sidebar-rail__badge {
   position: absolute;
   top: 2px;
-  inset-inline-end: 2px;
-  min-width: 16px;
-  height: 16px;
-  box-sizing: border-box;
-  padding: 0 var(--oct-space-1);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-pill);
-  background: var(--octant-sidebar-opaque);
-  color: var(--oct-fg);
+  inset-inline-end: 4px;
+  color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 14px;
-  text-align: center;
 }
 
 /* A round face for the round picture it holds: the hover and held fills draw
