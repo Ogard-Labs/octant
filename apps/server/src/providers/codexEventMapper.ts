@@ -8,7 +8,11 @@ import type {
   UtcTimestamp,
 } from "@octant/contracts";
 import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
+import {
+  MAX_QUESTION_OPTIONS,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+  decodeProviderModelId,
+} from "@octant/contracts";
 import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
@@ -25,6 +29,7 @@ import {
   type UnmodeledThreadItem,
 } from "./codexProtocol";
 import { outsideContentTarget } from "./outsideContentRead";
+import { providerQuestionnaire, type ProviderQuestionnaire } from "./providerQuestionnaire";
 import { proposedPlanText } from "./proposedPlan";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 import { asksForSecret, SECRET_QUESTION_REFUSAL } from "./secretQuestion";
@@ -132,6 +137,11 @@ export interface CodexPendingQuestion {
   readonly questionIds: ReadonlyArray<string>;
   readonly requestIds: ReadonlyArray<string>;
   readonly events: ReadonlyArray<ProviderRuntimeEvent>;
+  /**
+   * The whole set as one questionnaire, when it can be one: then there is one
+   * request identity and its one answer carries every question's answer.
+   */
+  readonly questionnaire?: ProviderQuestionnaire;
 }
 
 /** What Codex reads when Octant answers a question set without the person. */
@@ -900,12 +910,15 @@ type CodexApprovalRequest = Exclude<
 >;
 
 /**
- * Codex's question set as the thread's questionnaire: one request per
- * question, each with its choices. Codex adds a free answer to every question
- * itself (`isOther`), so a typed answer is passed through as written. A set
- * with a secret question (Codex's `isSecret`, or wording that asks for a
- * password or key) is refused unseen unless the session asks secret
- * questions, and then that question alone is marked `secret`.
+ * Codex's question set as the thread's questionnaire: the whole set as one
+ * card answered once, with each question's header, choices and descriptions.
+ * Codex adds a free answer to every question itself (`isOther`), so a typed
+ * answer is passed through as written. A set with a secret question (Codex's
+ * `isSecret`, or wording that asks for a password or key) is refused unseen
+ * unless the session asks secret questions; then, as for a set a
+ * questionnaire cannot hold (a question with no choices, or more than four
+ * questions), each question is its own request, so the secret one alone is
+ * typed into a masked field and kept out of every record.
  */
 function userInputRequest(
   context: CodexEventContext,
@@ -953,8 +966,51 @@ function userInputRequest(
     });
     return [{ prompt, options, secret: secret(question) }];
   });
-  if (prompts.length !== questions.length || prompts.some((prompt) => prompt.options.length > 20)) {
+  if (
+    prompts.length !== questions.length ||
+    prompts.some((prompt) => prompt.options.length > MAX_QUESTION_OPTIONS)
+  ) {
     return protocolFailure("Provider question set was malformed.");
+  }
+  const asSet = questions.some(secret)
+    ? undefined
+    : providerQuestionnaire(
+        questions.map((question) => ({
+          header: question.header,
+          prompt: question.question,
+          options: (question.options ?? []).map((option) => ({
+            label: option.label,
+            description: option.description,
+          })),
+          multiple: false,
+          allowCustom: true,
+        })),
+      );
+  if (asSet !== undefined) {
+    const requestId = context.makeRequestId();
+    context.requestIds.set(message.id, requestId);
+    return [
+      {
+        kind: "question",
+        question: {
+          providerRequestId: message.id,
+          threadId: message.params.threadId,
+          turnId: message.params.turnId,
+          questionIds: questions.map((question) => question.id),
+          requestIds: [requestId],
+          events: [
+            mappedEvent(context, {
+              kind: "user-input-request",
+              requestId,
+              prompt: asSet.prompt,
+              options: [],
+              questionnaire: asSet.questionnaire,
+            }),
+          ],
+          questionnaire: asSet,
+        },
+      },
+    ];
   }
   const count = prompts.length;
   const asked = prompts.map(({ prompt, options, secret }, index) => {

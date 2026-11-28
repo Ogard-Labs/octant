@@ -86,6 +86,16 @@ import type {
 import { launchOwnChannels } from "./providerOwnChannels";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 import { asksForSecret, SECRET_QUESTION_REFUSAL } from "./secretQuestion";
+import { answerProviderQuestionnaire, type ProviderQuestionnaire } from "./providerQuestionnaire";
+
+/** A question set put to the person as one questionnaire, and how each field takes its answer. */
+interface ProviderQuestionnaireAsked extends Pick<
+  ProviderQuestionnaire,
+  "questionnaire" | "providerValues"
+> {
+  /** By question position: the form field takes a list of answers. */
+  readonly multiple: ReadonlyArray<boolean>;
+}
 
 export interface OpenCodeSessionRecord {
   readonly id: string;
@@ -200,7 +210,7 @@ export interface OpenCodeClientPort {
   readonly replyQuestion: (
     sessionId: string,
     requestId: string,
-    answers: ReadonlyArray<string>,
+    answers: ReadonlyArray<string | ReadonlyArray<string>>,
   ) => Promise<void>;
   /**
    * Sets a session's own permission rules, which OpenCode applies after its
@@ -357,6 +367,8 @@ interface SessionState {
       readonly providerRequestId: string;
       readonly index: number;
       readonly count: number;
+      /** The whole set as one questionnaire, answered in one form reply. */
+      readonly questionnaire?: ProviderQuestionnaireAsked;
     }
   >;
   readonly questionAnswers: Map<string, Map<number, string>>;
@@ -3913,13 +3925,31 @@ function makeConnection(
                       return Effect.fail(
                         fail("protocol", "Provider question was already answered."),
                       );
-                    answers.set(question.index, input.answer);
-                    state.questionAnswers.set(question.providerRequestId, answers);
-                    if (answers.size < question.count) return Effect.void;
-                    const ordered = Array.from(
-                      { length: question.count },
-                      (_, index) => answers.get(index + 1) ?? "",
-                    );
+                    const asked = question.questionnaire;
+                    let ordered: ReadonlyArray<string | ReadonlyArray<string>>;
+                    if (asked === undefined) {
+                      answers.set(question.index, input.answer);
+                      state.questionAnswers.set(question.providerRequestId, answers);
+                      if (answers.size < question.count) return Effect.void;
+                      ordered = Array.from(
+                        { length: question.count },
+                        (_, index) => answers.get(index + 1) ?? "",
+                      );
+                    } else {
+                      // The one questionnaire answers every field of the form
+                      // at once: a list for a multiselect field, one value
+                      // for any other.
+                      const answered = answerProviderQuestionnaire(asked, input.answer);
+                      if (answered.status === "invalid")
+                        return Effect.fail(
+                          fail("invalid-configuration", "Provider question answer is invalid."),
+                        );
+                      answers.set(question.index, input.answer);
+                      state.questionAnswers.set(question.providerRequestId, answers);
+                      ordered = answered.answers.map((values, position) =>
+                        asked.multiple[position] === true ? values : (values[0] ?? ""),
+                      );
+                    }
                     const reply = request(() =>
                       activeClient.replyQuestion(
                         state.requestSources.get(question.providerRequestId) ?? source,
@@ -4431,7 +4461,29 @@ function mapAndOffer(
       );
       const requestId = existing?.[0] ?? (count === 1 ? providerRequestId : crypto.randomUUID());
       if (state.questionAnswers.get(providerRequestId)?.has(index)) continue;
-      state.questions.set(requestId, { providerRequestId, index, count });
+      state.questions.set(requestId, {
+        providerRequestId,
+        index,
+        count,
+        ...(normalized.questionnaire === undefined
+          ? {}
+          : {
+              questionnaire: {
+                questionnaire: normalized.questionnaire,
+                // OpenCode's own option words, "(Recommended)" and all, which
+                // its form takes back as the answer.
+                providerValues:
+                  source.type === "question.v2.asked"
+                    ? source.properties.questions.map((question) =>
+                        question.options.map((option) => option.label),
+                      )
+                    : [],
+                multiple: normalized.questionnaire.questions.map(
+                  (question) => question.selection === "multiple",
+                ),
+              },
+            }),
+      });
       normalized = { ...normalized, requestId };
     }
     // Where the turn ends in OpenCode's own session, for a later fork or rewind.
@@ -4988,6 +5040,7 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
       readonly title?: unknown;
       readonly description?: unknown;
       readonly options?: unknown;
+      readonly custom?: unknown;
     };
     if (
       field.key !== `q${index}` ||
@@ -5012,6 +5065,9 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
       header: typeof field.title === "string" ? field.title : "",
       options,
       ...(field.type === "multiselect" ? { multiple: true } : {}),
+      // A field that refuses a written answer says so; one that is silent
+      // takes one, as the question tool's own default does.
+      ...(field.custom === false ? { custom: false } : {}),
     });
   }
   return { id, type: "question.v2.asked", properties: { id, sessionID, questions } };

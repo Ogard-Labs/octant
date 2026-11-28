@@ -79,6 +79,7 @@ import {
   type CodexPendingApproval,
   type CodexPendingQuestion,
 } from "./codexEventMapper";
+import { answerProviderQuestionnaire } from "./providerQuestionnaire";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { launchOwnChannels } from "./providerOwnChannels";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -4553,15 +4554,33 @@ function makeConnection(
                 failure("protocol", "Codex question request is not pending for this turn."),
               );
             }
-            pending.answers.set(index, input.answer);
-            if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
+            const asked = pending.question.questionnaire;
+            let answers: Record<string, { readonly answers: ReadonlyArray<string> }>;
+            if (asked === undefined) {
+              pending.answers.set(index, input.answer);
+              if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
+              answers = Object.fromEntries(
+                pending.question.questionIds.map((questionId, position) => [
+                  questionId,
+                  { answers: [pending.answers.get(position) ?? ""] },
+                ]),
+              );
+            } else {
+              // The one questionnaire answers the whole set in one reply.
+              const answered = answerProviderQuestionnaire(asked, input.answer);
+              if (answered.status === "invalid") {
+                return Effect.fail(
+                  failure("invalid-configuration", "Codex question set answer is invalid."),
+                );
+              }
+              answers = Object.fromEntries(
+                pending.question.questionIds.map((questionId, position) => [
+                  questionId,
+                  { answers: answered.answers[position] ?? [] },
+                ]),
+              );
+            }
             state.pendingQuestion = undefined;
-            const answers = Object.fromEntries(
-              pending.question.questionIds.map((questionId, position) => [
-                questionId,
-                { answers: [pending.answers.get(position) ?? ""] },
-              ]),
-            );
             // The JSON-RPC reply to Codex's question request, sent the way
             // an approval's reply is.
             return request(() =>

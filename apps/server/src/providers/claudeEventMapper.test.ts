@@ -3696,7 +3696,7 @@ describe("mapClaudeToolRequest", () => {
     expect(description?.endsWith("…")).toBe(true);
   });
 
-  it("maps one AskUserQuestion callback to a sanitized user-input request", () => {
+  it("maps one AskUserQuestion callback to a sanitized one-question questionnaire", () => {
     const result = mapClaudeToolRequest(
       context(),
       toolRequest({
@@ -3731,10 +3731,23 @@ describe("mapClaudeToolRequest", () => {
             kind: "user-input-request",
             requestId: "request-1",
             prompt: "Which safe option?",
-            options: [
-              { label: "One", description: "Use the first safe option" },
-              { label: "Two", description: "Use the second safe option" },
-            ],
+            options: [],
+            questionnaire: {
+              allowComment: false,
+              questions: [
+                {
+                  id: "q0",
+                  header: "Choice",
+                  prompt: "Which safe option?",
+                  selection: "single",
+                  options: [
+                    { id: "o0", label: "One", description: "Use the first safe option" },
+                    { id: "o1", label: "Two", description: "Use the second safe option" },
+                  ],
+                  allowCustom: true,
+                },
+              ],
+            },
           },
         ],
       },
@@ -3742,7 +3755,7 @@ describe("mapClaudeToolRequest", () => {
     expect(JSON.stringify(result)).not.toMatch(/raw question input|must-not-cross/);
   });
 
-  it("maps a multi-question AskUserQuestion into one event per question under one request", () => {
+  it("maps a three-question AskUserQuestion with a multi-select question into one questionnaire", () => {
     const result = mapClaudeToolRequest(
       context(),
       toolRequest({
@@ -3751,13 +3764,26 @@ describe("mapClaudeToolRequest", () => {
         input: {
           questions: [
             {
-              header: "First",
+              header: "Layout",
               question: "How should I proceed?",
-              options: [{ label: "Yes", description: "Go ahead" }],
+              options: [
+                { label: "Plan first (Recommended)", description: "Write the plan, then build" },
+                { label: "Build now", description: "Skip the plan" },
+              ],
               multiSelect: false,
             },
             {
-              header: "Second",
+              header: "Checks",
+              question: "Which checks should run?",
+              options: [
+                { label: "Unit", description: "Fast tests" },
+                { label: "Visual", description: "Rendered screenshots" },
+                { label: "Smoke", description: "A real provider turn" },
+              ],
+              multiSelect: true,
+            },
+            {
+              header: "Approval",
               question: "Mark it resolved?",
               options: [{ label: "Resolve" }, { label: "Leave open" }],
               multiSelect: false,
@@ -3767,28 +3793,32 @@ describe("mapClaudeToolRequest", () => {
       }),
     );
 
-    expect(result).toMatchObject({
-      kind: "question",
-      request: {
-        requestId: "request-1",
-        events: [
-          {
-            kind: "user-input-request",
-            requestId: "request-1",
-            prompt: "How should I proceed?",
-            questionIndex: 1,
-            questionCount: 2,
-          },
-          {
-            kind: "user-input-request",
-            requestId: "request-1",
-            prompt: "Mark it resolved?",
-            questionIndex: 2,
-            questionCount: 2,
-          },
-        ],
-      },
+    if (result.kind !== "question") throw new Error("expected a question");
+    expect(result.request.events).toHaveLength(1);
+    const [event] = result.request.events;
+    expect(event).toMatchObject({
+      kind: "user-input-request",
+      requestId: "request-1",
+      prompt: "Layout · Checks · Approval",
     });
+    expect(event).not.toHaveProperty("questionIndex");
+    const questions = event?.kind === "user-input-request" ? event.questionnaire?.questions : [];
+    expect(questions?.map((question) => [question.header, question.selection])).toEqual([
+      ["Layout", "single"],
+      ["Checks", "multiple"],
+      ["Approval", "single"],
+    ]);
+    expect(questions?.[0]?.options[0]).toEqual({
+      id: "o0",
+      label: "Plan first",
+      description: "Write the plan, then build",
+      recommended: true,
+    });
+    expect(questions?.[1]?.options.map((option) => option.description)).toEqual([
+      "Fast tests",
+      "Rendered screenshots",
+      "A real provider turn",
+    ]);
   });
 
   it("reuses one public request ID for an identical callback correlation tuple", () => {

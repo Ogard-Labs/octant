@@ -1115,7 +1115,7 @@ describe("OpenCode driver", () => {
   });
 
   it.each(["complete", "interrupt"] as const)(
-    "keeps question answers distinct when a set must %s",
+    "answers a question set once, as one questionnaire, when the turn must %s",
     async (outcome) => {
       const fixture = driverFixture({
         events: [
@@ -1161,7 +1161,7 @@ describe("OpenCode driver", () => {
                     new Promise<void>((resolve, reject) => {
                       const started = Date.now();
                       const poll = () => {
-                        if (questions.length === 2) {
+                        if (questions.length === 1) {
                           resolve();
                           return;
                         }
@@ -1174,36 +1174,38 @@ describe("OpenCode driver", () => {
                       poll();
                     }),
                 );
-                const first = questions[0];
-                const second = questions[1];
-                if (first === undefined || second === undefined)
-                  throw new Error("Missing questions");
-                expect(first.requestId).not.toBe(second.requestId);
-                expect(second.sequence).toBe(first.sequence + 1);
-                // Answers can arrive from different surfaces in either order.
-                yield* connection.answerUserInput({
-                  sessionId,
-                  requestId: second.requestId,
-                  answer: "Resolve",
-                });
+                const asked = questions[0];
+                if (asked === undefined) throw new Error("Missing questionnaire");
+                expect(asked.questionnaire?.questions).toHaveLength(2);
+                const partial = yield* Effect.exit(
+                  connection.answerUserInput({
+                    sessionId,
+                    requestId: asked.requestId,
+                    answer: JSON.stringify({
+                      version: 1,
+                      answers: [{ questionId: "q1", selectedOptionIds: ["o0"] }],
+                    }),
+                  }),
+                );
+                // An answer that leaves a question out answers nothing.
+                expect(partial._tag).toBe("Failure");
                 expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
                   [],
                 );
-                const duplicate = yield* Effect.exit(
-                  connection.answerUserInput({
-                    sessionId,
-                    requestId: second.requestId,
-                    answer: "Leave open",
-                  }),
-                );
-                expect(duplicate._tag).toBe("Failure");
+                const whole = JSON.stringify({
+                  version: 1,
+                  answers: [
+                    { questionId: "q0", selectedOptionIds: ["o0"] },
+                    { questionId: "q1", selectedOptionIds: ["o0"] },
+                  ],
+                });
                 if (outcome === "interrupt") {
                   yield* connection.interrupt(sessionId);
                   const late = yield* Effect.exit(
                     connection.answerUserInput({
                       sessionId,
-                      requestId: first.requestId,
-                      answer: "Late",
+                      requestId: asked.requestId,
+                      answer: whole,
                     }),
                   );
                   expect(late._tag).toBe("Failure");
@@ -1212,9 +1214,17 @@ describe("OpenCode driver", () => {
                 }
                 yield* connection.answerUserInput({
                   sessionId,
-                  requestId: first.requestId,
-                  answer: "Dequeue, push, re-queue",
+                  requestId: asked.requestId,
+                  answer: whole,
                 });
+                const duplicate = yield* Effect.exit(
+                  connection.answerUserInput({
+                    sessionId,
+                    requestId: asked.requestId,
+                    answer: whole,
+                  }),
+                );
+                expect(duplicate._tag).toBe("Failure");
                 yield* Fiber.interrupt(subscriber);
               }),
             ),
@@ -3951,13 +3961,114 @@ describe("OpenCode driver", () => {
     expect(events.some((event) => event.kind === "failed")).toBe(false);
     expect(events.find((event) => event.kind === "user-input-request")).toMatchObject({
       prompt: "Continue with the migration?",
-      options: [
-        { label: "Yes", description: "Run it now" },
-        { label: "No", description: "Stop here" },
-      ],
+      questionnaire: {
+        questions: [
+          {
+            header: "Continue",
+            options: [
+              { id: "o0", label: "Yes", description: "Run it now" },
+              { id: "o1", label: "No", description: "Stop here" },
+            ],
+          },
+        ],
+      },
     });
     expect(answer?._tag).toBe("Success");
     expect(fixture.calls).toContain("question.reply:Yes");
+  });
+
+  it("asks a 2.x question form with several fields as one questionnaire and answers every field in one reply", async () => {
+    const fixture = launchDriver({
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_set",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Migration",
+                  description: "Continue with the migration?",
+                  type: "string",
+                  options: [
+                    { value: "Yes (Recommended)", label: "Yes (Recommended)" },
+                    { value: "No", label: "No" },
+                  ],
+                  custom: true,
+                },
+                {
+                  key: "q1",
+                  title: "Checks",
+                  description: "Which checks should run?",
+                  type: "multiselect",
+                  options: [
+                    { value: "Unit", label: "Unit", description: "Fast" },
+                    { value: "Visual", label: "Visual" },
+                    { value: "Smoke", label: "Smoke" },
+                  ],
+                  custom: false,
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const { events, answer } = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["user-input-request", "completed", "failed"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              const events = Array.from(yield* Fiber.join(collector));
+              const question = events.find((event) => event.kind === "user-input-request");
+              if (question?.kind !== "user-input-request") return { events, answer: undefined };
+              const answer = yield* Effect.exit(
+                connection.answerUserInput({
+                  sessionId,
+                  requestId: question.requestId,
+                  answer: JSON.stringify({
+                    version: 1,
+                    answers: [
+                      { questionId: "q0", selectedOptionIds: ["o0"] },
+                      { questionId: "q1", selectedOptionIds: ["o0", "o2"] },
+                    ],
+                  }),
+                }),
+              );
+              return { events, answer };
+            }),
+          ),
+        ),
+      ),
+    );
+    const asked = events.filter((event) => event.kind === "user-input-request");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      prompt: "Migration · Checks",
+      questionnaire: {
+        questions: [
+          { selection: "single", options: [{ label: "Yes", recommended: true }, { label: "No" }] },
+          { selection: "multiple", allowCustom: false },
+        ],
+      },
+    });
+    expect(answer?._tag).toBe("Success");
+    expect(fixture.questionReplyAnswers).toEqual([["Yes (Recommended)", ["Unit", "Smoke"]]]);
   });
 
   it("asks a 2.x subagent's question form and answers it in the subagent's own session", async () => {
@@ -5391,6 +5502,7 @@ function driverFixture(
   const mcpBridges: Array<{ readonly url: string; readonly session: string | null }> = [];
   const permissionReplies: string[] = [];
   const questionReplies: string[] = [];
+  const questionReplyAnswers: Array<ReadonlyArray<string | ReadonlyArray<string>>> = [];
   const abortedSessions: string[] = [];
   const registry = new ProviderRuntimeRegistry();
   const processPort = {
@@ -5512,6 +5624,7 @@ function driverFixture(
     },
     replyQuestion: async (replySession, id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
+      questionReplyAnswers.push(answers);
       questionReplies.push(`${replySession}:${id}`);
     },
     setSessionPermissions: async (permissionSession, rules) => {
@@ -5561,6 +5674,7 @@ function driverFixture(
     sessionPermissions,
     permissionReplies,
     questionReplies,
+    questionReplyAnswers,
     abortedSessions,
     /** Streams more events to a fixture started with `eventsOnReply`. */
     push: (events: ReadonlyArray<Event>) => late.push(events),

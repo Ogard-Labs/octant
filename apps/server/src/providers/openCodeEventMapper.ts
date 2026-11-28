@@ -12,6 +12,7 @@ import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
 import { providerApprovalCall } from "./providerApprovalCall";
+import { providerQuestionnaire } from "./providerQuestionnaire";
 
 export interface OpenCodeEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -174,6 +175,33 @@ function mapQuestion(
   }>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (questions.length === 0) return [];
+  const normalizedRequestId = normalizeText(requestId);
+  if (normalizedRequestId === undefined) return [];
+  // The whole set as one questionnaire answered once, when it can be one;
+  // OpenCode takes every question's answer, several for a multi-select
+  // question, in one form reply.
+  const asSet = questions.some((question) => normalizeText(question.question) === undefined)
+    ? undefined
+    : providerQuestionnaire(
+        questions.map((question) => ({
+          header: question.header,
+          prompt: question.question,
+          options: question.options,
+          multiple: question.multiple === true,
+          allowCustom: question.custom !== false,
+        })),
+      );
+  if (asSet !== undefined) {
+    return [
+      mappedEvent(context, {
+        kind: "user-input-request",
+        requestId: normalizedRequestId,
+        prompt: asSet.prompt,
+        options: [],
+        questionnaire: asSet.questionnaire,
+      }),
+    ];
+  }
   if (
     questions.some(
       (question) => question.multiple === true || normalizeText(question.question) === undefined,
@@ -185,13 +213,11 @@ function mapQuestion(
         failure: {
           category: "unsupported",
           message:
-            "This provider question format is not supported. Ask one single-select question at a time.",
+            "This provider question set is too large to show. Ask at most four questions with up to twenty choices each.",
         },
       }),
     ];
   }
-  const normalizedRequestId = normalizeText(requestId);
-  if (normalizedRequestId === undefined) return [];
   const count = questions.length;
   return questions.flatMap((question, index) => {
     const prompt = normalizeText(question.question);

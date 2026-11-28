@@ -3866,10 +3866,17 @@ describe("Claude execution policy", () => {
       kind: "user-input-request",
       requestId: "request-1",
       prompt: "Choose a safe option",
-      options: [
-        { label: "One", description: "Use the first option" },
-        { label: "Two", description: "Use the second option" },
-      ],
+      questionnaire: {
+        questions: [
+          {
+            prompt: "Choose a safe option",
+            options: [
+              { id: "o0", label: "One", description: "Use the first option" },
+              { id: "o1", label: "Two", description: "Use the second option" },
+            ],
+          },
+        ],
+      },
     });
 
     const crossSession = await Effect.runPromise(
@@ -3970,7 +3977,7 @@ describe("Claude execution policy", () => {
   });
 
   it.each(["complete", "cancel"] as const)(
-    "keeps question answers distinct when a set must %s",
+    "puts a whole question set to the person as one questionnaire that must %s in one answer",
     async (outcome) => {
       const f = harness();
       const acquired = await acquire(f.driver);
@@ -3984,16 +3991,26 @@ describe("Claude execution policy", () => {
         const signal = controller.signal;
         const input = {
           questions: [
-            { question: "First?", options: [{ label: "One" }] },
-            { question: "Second?", options: [{ label: "Two" }] },
+            {
+              header: "Layout",
+              question: "First?",
+              options: [{ label: "One (Recommended)" }, { label: "Other" }],
+            },
+            {
+              header: "Checks",
+              question: "Second?",
+              options: [{ label: "Unit" }, { label: "Visual" }, { label: "Smoke" }],
+              multiSelect: true,
+            },
+            { header: "Notes", question: "Third?", options: [{ label: "Yes" }, { label: "No" }] },
           ],
         };
-        const collected = Effect.runPromise(
-          Stream.runCollect(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
-              Stream.filter((event) => event.kind === "user-input-request"),
-              Stream.take(2),
-            ),
+        const observed: ProviderRuntimeEvent[] = [];
+        const subscriber = Effect.runFork(
+          Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+            Effect.sync(() => {
+              observed.push(event);
+            }),
           ),
         );
         await open.preToolUse({
@@ -4010,32 +4027,31 @@ describe("Claude execution policy", () => {
           toolUseId: "question-set",
           signal,
         });
-        const [first, second] = Array.from(await collected);
-        if (first?.kind !== "user-input-request" || second?.kind !== "user-input-request")
-          throw new Error("Missing questions");
-        expect(first.requestId).not.toBe(second.requestId);
-        let settled = false;
-        void callback.then(() => {
-          settled = true;
-        });
-        await Effect.runPromise(
-          acquired.connection.answerUserInput({
-            sessionId,
-            requestId: second.requestId,
-            answer: "Two",
-          }),
+        await vi.waitFor(() =>
+          expect(observed.filter((event) => event.kind === "user-input-request")).toHaveLength(1),
         );
-        expect(settled).toBe(false);
-        const duplicate = await Effect.runPromise(
+        const asked = observed.find((event) => event.kind === "user-input-request");
+        if (asked?.kind !== "user-input-request" || asked.questionnaire === undefined)
+          throw new Error("Missing questionnaire");
+        expect(asked.questionnaire.questions.map((question) => question.selection)).toEqual([
+          "single",
+          "multiple",
+          "single",
+        ]);
+        const partial = await Effect.runPromise(
           Effect.exit(
             acquired.connection.answerUserInput({
               sessionId,
-              requestId: second.requestId,
-              answer: "Wrong",
+              requestId: asked.requestId,
+              answer: JSON.stringify({
+                version: 1,
+                answers: [{ questionId: "q0", selectedOptionIds: ["o0"] }],
+              }),
             }),
           ),
         );
-        expect(duplicate._tag).toBe("Failure");
+        // An answer that leaves a question out answers nothing.
+        expect(String(partial)).toContain("invalid-configuration");
         if (outcome === "cancel") {
           controller.abort();
           await expect(callback).resolves.toMatchObject({ behavior: "deny" });
@@ -4043,25 +4059,51 @@ describe("Claude execution policy", () => {
             Effect.exit(
               acquired.connection.answerUserInput({
                 sessionId,
-                requestId: first.requestId,
+                requestId: asked.requestId,
                 answer: "One",
               }),
             ),
           );
           expect(late._tag).toBe("Failure");
+          await Effect.runPromise(Fiber.interrupt(subscriber));
           return;
         }
         await Effect.runPromise(
           acquired.connection.answerUserInput({
             sessionId,
-            requestId: first.requestId,
-            answer: "One",
+            requestId: asked.requestId,
+            answer: JSON.stringify({
+              version: 1,
+              answers: [
+                { questionId: "q0", selectedOptionIds: ["o0"] },
+                { questionId: "q1", selectedOptionIds: ["o0", "o2"] },
+                { questionId: "q2", selectedOptionIds: [], customAnswer: "Only after review" },
+              ],
+            }),
           }),
         );
         await expect(callback).resolves.toEqual({
           behavior: "allow",
-          updatedInput: { ...input, answers: { "First?": "One", "Second?": "Two" } },
+          updatedInput: {
+            ...input,
+            answers: {
+              "First?": "One (Recommended)",
+              "Second?": "Unit, Smoke",
+              "Third?": "Only after review",
+            },
+          },
         });
+        const again = await Effect.runPromise(
+          Effect.exit(
+            acquired.connection.answerUserInput({
+              sessionId,
+              requestId: asked.requestId,
+              answer: "One",
+            }),
+          ),
+        );
+        expect(again._tag).toBe("Failure");
+        await Effect.runPromise(Fiber.interrupt(subscriber));
       } finally {
         await acquired.close();
       }

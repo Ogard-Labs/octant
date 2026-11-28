@@ -235,7 +235,20 @@ describe("mapOpenCodeEvent", () => {
         kind: "user-input-request",
         requestId: "question-2",
         prompt: "Continue?",
-        options: [{ label: "Yes", description: "Go ahead now" }],
+        options: [],
+        questionnaire: {
+          allowComment: false,
+          questions: [
+            {
+              id: "q0",
+              header: "Choose",
+              prompt: "Continue?",
+              selection: "single",
+              options: [{ id: "o0", label: "Yes", description: "Go ahead now" }],
+              allowCustom: true,
+            },
+          ],
+        },
       },
     },
     {
@@ -350,44 +363,7 @@ describe("mapOpenCodeEvent", () => {
     ]);
   });
 
-  it.each([
-    {
-      name: "a multi-select question",
-      event: official({
-        id: "event-question-multiple",
-        type: "question.v2.asked",
-        properties: {
-          id: "question-multiple",
-          sessionID: "provider-session",
-          questions: [
-            {
-              header: "Choose",
-              question: "Raw multi-select question must-not-cross?",
-              options: [{ label: "Raw option must-not-cross", description: "private" }],
-              multiple: true,
-            },
-          ],
-        },
-      }),
-    },
-  ])("fails closed for $name without truncating provider data", ({ event }) => {
-    const results = mapped(event);
-
-    expect(results).toMatchObject([
-      {
-        kind: "failed",
-        failure: {
-          category: "unsupported",
-          message:
-            "This provider question format is not supported. Ask one single-select question at a time.",
-        },
-      },
-    ]);
-    expect(results).not.toContainEqual(expect.objectContaining({ kind: "user-input-request" }));
-    expect(JSON.stringify(results)).not.toMatch(/must-not-cross|metadata|providerID/i);
-  });
-
-  it("maps a multi-question set into one event per question, each with its place", () => {
+  it("maps a three-question set with a multi-select question into one questionnaire", () => {
     const results = mapped(
       official({
         id: "event-question-groups",
@@ -397,51 +373,66 @@ describe("mapOpenCodeEvent", () => {
           sessionID: "provider-session",
           questions: [
             {
-              header: "First",
+              header: "Queue",
               question: "How should I proceed?",
               options: [
                 {
-                  label: "Dequeue, push, re-queue",
+                  label: "Dequeue, push, re-queue (Recommended)",
                   description: "Leave the queue, push the fix, re-enter it.",
                 },
                 { label: "Let it merge", description: "Keep the fix as a follow-up." },
               ],
             },
             {
-              header: "Second",
+              header: "Checks",
+              question: "Which checks?",
+              options: [
+                { label: "Unit", description: "Fast" },
+                { label: "Smoke", description: "Real provider" },
+              ],
+              multiple: true,
+            },
+            {
+              header: "Threads",
               question: "Mark the review threads resolved?",
               options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
+              custom: false,
             },
           ],
         },
       }),
     );
 
-    expect(results).toMatchObject([
-      {
-        kind: "user-input-request",
-        requestId: "question-groups",
-        prompt: "How should I proceed?",
-        options: [
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      kind: "user-input-request",
+      requestId: "question-groups",
+      prompt: "Queue · Checks · Threads",
+      options: [],
+      questionnaire: {
+        allowComment: false,
+        questions: [
           {
-            label: "Dequeue, push, re-queue",
-            description: "Leave the queue, push the fix, re-enter it.",
+            id: "q0",
+            header: "Queue",
+            selection: "single",
+            options: [
+              {
+                id: "o0",
+                label: "Dequeue, push, re-queue",
+                description: "Leave the queue, push the fix, re-enter it.",
+                recommended: true,
+              },
+              { id: "o1", label: "Let it merge", description: "Keep the fix as a follow-up." },
+            ],
+            allowCustom: true,
           },
-          { label: "Let it merge", description: "Keep the fix as a follow-up." },
+          { id: "q1", header: "Checks", selection: "multiple", allowCustom: true },
+          { id: "q2", header: "Threads", selection: "single", allowCustom: false },
         ],
-        questionIndex: 1,
-        questionCount: 2,
       },
-      {
-        kind: "user-input-request",
-        requestId: "question-groups",
-        prompt: "Mark the review threads resolved?",
-        options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
-        questionIndex: 2,
-        questionCount: 2,
-      },
-    ]);
-    expect(results).toHaveLength(2);
+    });
+    expect(results[0]).not.toHaveProperty("questionIndex");
   });
 
   it("refuses a question set with an unanswerable blank item", () => {
