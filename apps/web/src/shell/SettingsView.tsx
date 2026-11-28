@@ -125,6 +125,7 @@ import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-clie
 import type { SafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { SafeNetworksSettings } from "../settings/SafeNetworksSettings";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
+import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import {
@@ -372,6 +373,7 @@ export interface SettingsViewProps {
   readonly folderBrowseClient?: Pick<FolderBrowseClient, "browse">;
   readonly workThreads?: ReadonlyArray<{ readonly id: string; readonly title: string }>;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  readonly hostFederationTransports?: HostFederationTransports;
   readonly githubClient?: GithubClient;
   readonly integrationClient?: IntegrationClient;
   readonly linearProjects?: ReadonlyArray<import("@octant/contracts").ProjectSummary>;
@@ -2754,6 +2756,27 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         <div className="setgroup">
           <AppUpdateSettings
             automaticChecks={props.settings.automaticUpdateChecks}
+            fleetUpdate={{
+              localDisplayName: thisComputerName(hostPlatform),
+              ...(props.providerController?.client === undefined
+                ? {}
+                : { localProviderClient: props.providerController.client }),
+              ...(props.providerController?.snapshot === undefined
+                ? {}
+                : { localProviderSnapshot: props.providerController.snapshot }),
+              ...(props.providerController?.latestVersions === undefined
+                ? {}
+                : { localLatestVersions: props.providerController.latestVersions }),
+              ...(props.hostFederationLifecycle === undefined
+                ? {}
+                : { hostFederationLifecycle: props.hostFederationLifecycle }),
+              ...(props.hostFederationTransports === undefined
+                ? {}
+                : { hostFederationTransports: props.hostFederationTransports }),
+              ...(props.shieldServersClient === undefined
+                ? {}
+                : { shieldServersClient: props.shieldServersClient }),
+            }}
             focused={focusedSetting === settingId("app-updates")}
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             onAutomaticChecksChange={(enabled) =>

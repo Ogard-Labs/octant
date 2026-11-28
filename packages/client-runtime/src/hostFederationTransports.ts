@@ -40,6 +40,7 @@ export interface FederatedHostTransportSlot {
   readonly kind: ClientHostKind;
   readonly displayName: string;
   readonly origin?: string;
+  readonly serverBuildVersion?: string;
   readonly state: FederatedTransportState;
   readonly bridge?: RemoteSessionBridge;
   readonly connection?: RemoteConnection;
@@ -126,11 +127,13 @@ function remoteSlot(
 ): FederatedHostTransportSlot {
   const state = bridge.getState();
   const connection = bridge.connection();
+  const serverBuildVersion = bridge.serverBuildVersion?.();
   return {
     hostId: registration.hostId,
     kind: "remote",
     displayName: registration.displayName,
     ...(registration.origin !== undefined ? { origin: registration.origin } : {}),
+    ...(serverBuildVersion !== undefined ? { serverBuildVersion } : {}),
     state,
     bridge,
     ...(connection !== undefined ? { connection } : {}),

@@ -22388,6 +22388,31 @@ approval-gated` command that undoes it. The terminal shows no one-time
   build must then hash to its digest and pass its own release signature
   check before it is kept. The listing's signature, not the host, is the
   trust root, so this adds no host and no key beyond the updater's.
+- **Fleet updates across connected computers** (maintainer decision,
+  2026-11-28; partly built). From one confirmation in Settings › Updates
+  (**Update all computers…**), a person sees every connected computer's Octant
+  and provider CLI versions — desktop apps and headless servers alike — or a
+  concrete skip reason. Headless is never a skip reason; valid reasons are
+  offline, connecting, incompatible, already updating, no permission,
+  hub-introduced (**Pair this computer to update it.**), a release ring that
+  publishes no headless build, a remote desktop app until remote desktop
+  updates land (**Update on that machine.**), or a host that needs a one-time
+  manual update (**Update this computer once by hand, then it can update from
+  here.**). One drain choice (**Wait up to N minutes for running work** or
+  **Stop now**) governs remote server updates in the run. Execution runs in
+  strict order: outdated provider CLIs first via each host's existing
+  `update-provider-cli` command (never arbitrary shell commands; the desktop
+  paired-computer channel allows `POST /api/providers/commands` with a
+  150-second timeout for person-paired hosts, and a channel timeout re-reads
+  observed provider state rather than re-posting), then remote Octant servers,
+  then this local desktop app last (with **Later** deferring only this local
+  app). One host's failure never stops another, and a failed remote server
+  holds automatic local relaunch so the person can review and retry the failed
+  host. Servers this hub installed over SSH update through the existing
+  `/api/shield/servers/member-install` path with no new authority. Not built
+  yet: standalone headless remote update via `/api/host-control/update` with
+  offline store backup restore, detached runner, and `host-update.*` journal
+  events, and remote desktop app updates.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude
