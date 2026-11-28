@@ -37,6 +37,11 @@ import {
 } from "@octant/provider-sdk/child-observations";
 import { outsideContentTarget } from "./outsideContentRead";
 import { proposedPlanText } from "./proposedPlan";
+import {
+  providerQuestionnaire,
+  type ProviderQuestion,
+  type ProviderQuestionnaire,
+} from "./providerQuestionnaire";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -264,11 +269,13 @@ export interface ClaudePendingApproval extends ClaudePendingRequestBase {
 export interface ClaudePendingQuestion extends ClaudePendingRequestBase {
   readonly kind: "question";
   /**
-   * One event per question the tool call asked, in its order, under this one
-   * request identity. Each parks the turn in turn; the answers ride back to
-   * the provider as one callback decision carrying every answer.
+   * The one questionnaire event for the whole set the tool call asked, under
+   * this request identity. Its one answer rides back to the provider as one
+   * callback decision carrying every question's answer.
    */
   readonly events: ReadonlyArray<ProviderRuntimeEvent>;
+  /** The set as asked, so the answer maps back to Claude's own option labels. */
+  readonly questionnaire: ProviderQuestionnaire;
 }
 
 export type ClaudeMappedMessage =
@@ -1900,47 +1907,34 @@ function mapQuestion(
   if (!Array.isArray(questions) || questions.length === 0 || questions.length > MAX_QUESTIONS) {
     return failure("Claude returned an unsupported user question.", "unsupported");
   }
-  const mapped = questions.flatMap((value) => {
+  const read = questions.flatMap((value): ReadonlyArray<ProviderQuestion> => {
     const question = record(value);
-    const prompt =
-      typeof question?.question === "string"
-        ? normalized(question.question, SUMMARY_MAX_CHARACTERS)
-        : undefined;
     const rawOptions = question?.options;
-    const options = Array.isArray(rawOptions)
-      ? rawOptions.flatMap((optionValue) => {
-          const option = record(optionValue);
-          const label =
-            typeof option?.label === "string"
-              ? normalized(option.label, LABEL_MAX_CHARACTERS)
-              : undefined;
-          if (label === undefined) return [];
-          const rawDescription = option?.description;
-          const description =
-            typeof rawDescription === "string"
-              ? normalized(rawDescription, SUMMARY_MAX_CHARACTERS)
-              : undefined;
-          return [
-            {
-              label,
-              ...(description === undefined ? {} : { description }),
-            },
-          ];
-        })
-      : [];
-    if (
-      prompt === undefined ||
-      question?.multiSelect === true ||
-      !Array.isArray(rawOptions) ||
-      options.length !== rawOptions.length ||
-      options.length === 0 ||
-      options.length > 20
-    ) {
-      return [];
-    }
-    return [{ prompt, options }];
+    if (typeof question?.question !== "string" || !Array.isArray(rawOptions)) return [];
+    const options = rawOptions.flatMap((optionValue) => {
+      const option = record(optionValue);
+      if (typeof option?.label !== "string") return [];
+      return [
+        {
+          label: option.label,
+          ...(typeof option.description === "string" ? { description: option.description } : {}),
+        },
+      ];
+    });
+    if (options.length !== rawOptions.length) return [];
+    return [
+      {
+        ...(typeof question.header === "string" ? { header: question.header } : {}),
+        prompt: question.question,
+        options,
+        multiple: question.multiSelect === true,
+        // Claude Code offers a written answer beside every question's choices.
+        allowCustom: true,
+      },
+    ];
   });
-  if (mapped.length !== questions.length) {
+  const asked = read.length === questions.length ? providerQuestionnaire(read) : undefined;
+  if (asked === undefined) {
     return failure("Claude returned an unsupported user question.", "unsupported");
   }
   const correlated = correlatedRequestId(context, {
@@ -1952,17 +1946,17 @@ function mapQuestion(
   });
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
-  const events = mapped.map((question, index) =>
+  // The whole set is one questionnaire under the callback's own request
+  // identity, answered once: Claude takes every answer in one decision.
+  const events = [
     mappedEvent(context, {
       kind: "user-input-request",
       requestId: normalizedRequestId,
-      prompt: question.prompt,
-      options: question.options,
-      // Keep the private callback correlation here; the connection assigns
-      // each question its own answer identity before publishing it.
-      ...(mapped.length > 1 ? { questionIndex: index + 1, questionCount: mapped.length } : {}),
+      prompt: asked.prompt,
+      options: [],
+      questionnaire: asked.questionnaire,
     }),
-  );
+  ];
   return {
     kind: "question",
     request: {
@@ -1972,6 +1966,7 @@ function mapQuestion(
       providerToolUseId: request.toolUseId,
       inputDigest: digest,
       events,
+      questionnaire: asked,
     },
   };
 }

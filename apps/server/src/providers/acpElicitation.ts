@@ -1,13 +1,22 @@
 import { Schema } from "effect";
-import { Questionnaire, type QuestionnaireResponse } from "@octant/contracts";
+import {
+  MAX_QUESTION_HEADER_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  Questionnaire,
+  type QuestionnaireResponse,
+} from "@octant/contracts";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Choice = Schema.Struct({
   const: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
 }).annotations(strict);
-const Choices = Schema.Array(Choice).pipe(Schema.minItems(2), Schema.maxItems(8));
+const Choices = Schema.Array(Choice).pipe(
+  Schema.minItems(2),
+  Schema.maxItems(MAX_QUESTION_OPTIONS),
+);
 const Header = {
   title: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
@@ -66,6 +75,11 @@ export function normalizeAcpElicitation(
         new Set(choices.map((choice) => choice.const)).size !== choices.length
       )
         throw new Error("duplicate choice");
+      const title = field.title?.trim();
+      const header =
+        title !== undefined && title.length > 0 && title.length <= MAX_QUESTION_HEADER_LENGTH
+          ? title
+          : undefined;
       return {
         key,
         questionId: `q${index}`,
@@ -73,11 +87,17 @@ export function normalizeAcpElicitation(
         multiple: field.type === "array",
         question: {
           id: `q${index}`,
-          prompt: [field.title, field.description].filter(Boolean).join("\n"),
+          // A short title is the question's header; a long one stays part of
+          // what the question says.
+          ...(header === undefined ? {} : { header }),
+          prompt: [header === undefined ? field.title : undefined, field.description]
+            .filter(Boolean)
+            .join("\n"),
           selection: field.type === "array" ? ("multiple" as const) : ("single" as const),
           options: choices.map((choice, choiceIndex) => ({
             id: `o${choiceIndex}`,
             label: choice.const,
+            ...(choice.description === undefined ? {} : { description: choice.description }),
           })),
           allowCustom: true,
         },

@@ -143,6 +143,7 @@ describe("listAllHostsMobileInbox", () => {
     const browserThreadId = "00000000-0000-4000-8000-000000000004";
     const routineThreadId = "00000000-0000-4000-8000-000000000005";
     const leadThreadId = "00000000-0000-4000-8000-000000000006";
+    const questionThreadId = "00000000-0000-4000-8000-0000000000dd";
     const futureThreadId = "00000000-0000-4000-8000-000000000007";
     const projectId = "00000000-0000-4000-8000-0000000000aa";
     const host = transportFor({
@@ -192,6 +193,15 @@ describe("listAllHostsMobileInbox", () => {
                       threadTitle: "Lead run",
                       requestedAt: now,
                       text: "Run the build",
+                    },
+                    {
+                      mode: "work",
+                      kind: "lead-question",
+                      projectId,
+                      threadId: questionThreadId,
+                      threadTitle: "Lead asks",
+                      requestedAt: now,
+                      text: "Which layout?",
                     },
                     {
                       mode: "work",
@@ -253,12 +263,17 @@ describe("listAllHostsMobileInbox", () => {
     expect(opened("work", leadThreadId)).toMatchObject({
       waitingAsk: { label: "Approval", text: "Run the build" },
     });
+    expect(opened("work", leadThreadId)?.waitingAsk).not.toHaveProperty("question");
+    // A question is typed as one, so a row can say Input whatever its label.
+    expect(opened("work", questionThreadId)).toMatchObject({
+      waitingAsk: { label: "Question", text: "Which layout?", question: true },
+    });
     expect(opened("work", futureThreadId)).toMatchObject({
       title: "Newer ask",
       live: "needs-input",
       waitingAsk: { label: "Waiting on you" },
     });
-    expect(result.rows).toHaveLength(7);
+    expect(result.rows).toHaveLength(8);
   });
 
   it("merges rows from healthy hosts and sorts by freshness", async () => {

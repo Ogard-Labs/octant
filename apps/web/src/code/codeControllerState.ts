@@ -28,6 +28,7 @@ import {
   type CodeTurnChangedFiles,
   type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
+  type Questionnaire,
   type StrictKeptProtections,
   type TurnLoopNotice,
   type TurnStallNotice,
@@ -61,6 +62,11 @@ export type CodeProviderRequest =
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /**
+       * The whole set, when the agent asked several things at once; one card
+       * answers it with one JSON response.
+       */
+      readonly questionnaire?: Questionnaire;
       /** The provider asks for a secret: answered masked, never put as evidence. */
       readonly secret?: true;
     };
@@ -160,14 +166,19 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
     };
   }
-  // App questionnaires follow the session read so answers from another window
-  // withdraw the card here too; provider-native questions keep their event path.
-  if (event.kind === "input-requested" && event.questionnaire === undefined) {
+  // Octant's own harness questionnaire follows the session read, so answers
+  // from another window withdraw the card here too; a provider's questions,
+  // a whole set included, keep this event path.
+  if (
+    event.kind === "input-requested" &&
+    !(event.harness === true && event.questionnaire !== undefined)
+  ) {
     return {
       kind: "input",
       requestId: event.requestId,
       prompt: event.prompt,
       options: event.options,
+      ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       ...(event.secret === true ? { secret: true } : {}),
     };
   }
@@ -346,28 +357,24 @@ export type ProviderAnswerOutcome =
  * asked has ended (its session died with a restart, or it was already
  * stopped). Neither leaves a turn waiting on this answer, so a surface that
  * called it answered would hold a busy row for a request the provider will
- * never act on. A bare `interrupted` is the third denial in one turn: the
- * provider received that Deny and the host stopped the turn, so it is answered.
+ * never act on. A turn still running or waiting refuses with its reason too
+ * (a harness question already settled, an invalid set, a secret mismatch);
+ * an answer the turn took carries no failure. A bare `interrupted` is the
+ * third denial in one turn: the provider received that Deny and the host
+ * stopped the turn, so it is answered.
  */
 export function providerAnswerOutcome(result: CodeOperationResult): ProviderAnswerOutcome {
   if (result.kind === "operation-failed") {
     return { status: "refused", message: result.failure.message };
   }
-  if (result.kind === "provider-turn-state" && result.state === "failed") {
-    return {
-      status: "refused",
-      message:
-        result.failure?.message ?? "The answer was not delivered. The turn changed since it asked.",
-    };
-  }
-  if (
-    result.kind === "provider-turn-state" &&
-    result.state === "interrupted" &&
-    result.failure !== undefined
-  ) {
-    return { status: "refused", message: result.failure.message };
-  }
-  return { status: "answered" };
+  if (result.kind !== "provider-turn-state") return { status: "answered" };
+  if (result.failure !== undefined) return { status: "refused", message: result.failure.message };
+  return result.state === "failed"
+    ? {
+        status: "refused",
+        message: "The answer was not delivered. The turn changed since it asked.",
+      }
+    : { status: "answered" };
 }
 
 export function replaceById<T extends { readonly id: unknown }>(

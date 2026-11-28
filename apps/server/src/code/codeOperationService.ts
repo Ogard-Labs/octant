@@ -114,6 +114,7 @@ import {
   type UtcTimestamp,
   type WindowId,
   type CodeMergeStandingSource,
+  type Questionnaire,
 } from "@octant/contracts";
 import type { FramedExternalContent } from "../context/externalContentFraming";
 import {
@@ -1337,6 +1338,8 @@ export type CodeTurnPendingRequest = {
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /** The whole set, when the agent asked several things at once. */
+      readonly questionnaire?: Questionnaire;
       /** Answered only in its thread, masked; see `input-requested`'s `secret`. */
       readonly secret?: true;
     }
@@ -3285,6 +3288,9 @@ export class CodeOperationService {
               kind: "question",
               text: request.prompt,
               options: request.options.map((label) => ({ label })),
+              ...(request.questionnaire === undefined
+                ? {}
+                : { questionnaire: request.questionnaire }),
               ...(request.secret === true ? { secret: true } : {}),
               answer: {
                 threadId: scope.thread.id,

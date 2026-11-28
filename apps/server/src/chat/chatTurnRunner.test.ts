@@ -2436,7 +2436,7 @@ describe("ChatTurnRunner", () => {
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
   });
 
-  it("parks a turn on a provider question, delivers the answer, and finishes the reply", async () => {
+  it("parks a turn once on a provider's whole question set, with every choice past eight, and finishes the reply", async () => {
     const updates: ChatAttempt[] = [];
     const answered: Array<{ readonly requestId: string; readonly answer: string }> = [];
     const queue = Effect.runSync(Queue.unbounded<never>());
@@ -2471,11 +2471,17 @@ describe("ChatTurnRunner", () => {
                   id: "q0",
                   prompt: "Proceed?",
                   selection: "single",
-                  options: [{ id: "yes", label: "Yes" }],
+                  options: [
+                    { id: "yes", label: "Yes" },
+                    ...Array.from({ length: 11 }, (_, i) => ({
+                      id: `o${i}`,
+                      label: `Choice ${i}`,
+                    })),
+                  ],
                 },
               ],
             },
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: Array.from({ length: 12 }, (_, i) => ({ label: `Choice ${i}` })),
           } as never);
         }),
       answerUserInput: (input: { readonly requestId: string; readonly answer: string }) =>
@@ -2564,6 +2570,10 @@ describe("ChatTurnRunner", () => {
             updates.find((entry) => entry.pendingQuestion?.requestId === "q1")?.pendingQuestion
               ?.questionnaire,
           ).toMatchObject({ allowComment: false, questions: [{ id: "q0" }] });
+          const parked = updates.find((entry) => entry.pendingQuestion?.requestId === "q1");
+          // Nothing is cut at eight: all twelve choices reach the person.
+          expect(parked?.pendingQuestion?.questionnaire?.questions[0]?.options).toHaveLength(12);
+          expect(parked?.pendingQuestion?.options).toHaveLength(12);
           expect(answeredAttempt.outcome).toBe("streaming");
           expect(answeredAttempt.pendingQuestion).toBeUndefined();
           expect(answeredAttempt.answeredQuestions?.[0]).toMatchObject({

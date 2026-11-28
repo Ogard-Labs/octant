@@ -5000,7 +5000,11 @@ describe("CodeOperationRuntime", () => {
     await offer("long", [{ label: "y".repeat(1_024 * 2) }]);
     await offer("free-text", []);
 
-    let questions: ReadonlyArray<{ readonly requestId: string; readonly options: unknown }> = [];
+    let questions: ReadonlyArray<{
+      readonly requestId: string;
+      readonly prompt: string;
+      readonly options: unknown;
+    }> = [];
     await vi.waitFor(async () => {
       const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
       questions = frames.flatMap((frame) =>
@@ -5014,7 +5018,14 @@ describe("CodeOperationRuntime", () => {
         | undefined;
 
     expect(optionsOf("choices")).toEqual(["src/a.ts", "src/b.ts"]);
-    expect(optionsOf("crowded")).toHaveLength(32);
+    // Every question path shares one ceiling of twenty, and says what it hides.
+    expect(optionsOf("crowded")).toHaveLength(20);
+    expect(questions.find((question) => question.requestId === "crowded")?.prompt).toBe(
+      "Which one? (20 more choices are not shown; write your answer instead.)",
+    );
+    expect(questions.find((question) => question.requestId === "choices")?.prompt).toBe(
+      "Which one?",
+    );
     expect(optionsOf("long")?.[0]?.length).toBeLessThanOrEqual(1_024);
     expect(optionsOf("free-text")).toEqual([]);
     await fixture.runtime.close();
@@ -5896,8 +5907,10 @@ describe("CodeOperationRuntime", () => {
       }),
     ).toBe(true);
     const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+    // Marked as the harness's own, so a thread draws it from the session read.
     expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
       questionnaire,
+      harness: true,
     });
     const result = await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",

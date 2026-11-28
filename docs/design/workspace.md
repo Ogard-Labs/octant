@@ -2972,7 +2972,11 @@ kinds, labelling the leftover; it adds no authority of its own.
 
 An agent can ask for related decisions through the app-owned `ask-user` tool
 in Chat, Work, and Code. A questionnaire belongs in its originating thread,
-with one compact card containing up to four questions.
+with one compact card containing up to four questions. A provider's own
+question set (Claude, Codex, OpenCode, an ACP session form) arrives as the same
+one card answered once, in every app: the desktop and remote browser thread,
+and the phone (maintainer decision, 2026-11-28; the per-provider mapping is in
+[Provider question sets](provider-runtimes.md#provider-question-sets)).
 
 A pending question or approval, the `ask-user` card or a provider's own, is
 docked directly above the composer in Chat, Work and Code, outside the
@@ -2987,9 +2991,17 @@ the question that has focus. A key never sends, and digits typed into a text
 field stay text. It creates no Canvas.
 More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
 which has no question limit; the tool's description tells agents so.
-Each question offers one choice or several choices, optional descriptions,
-and an optional written alternative. Recommendations are labelled and never
-preselected. A person can add a comment alongside their choices by default.
+The card names what it needs ("Your input", with the count of questions when
+there are several), then its title. Each question shows its short header above
+its prompt, and its choices as cards, each with its description; a chosen card
+takes the accent. Each question offers one choice or several choices, and an
+always-visible field for a written answer where the question takes one;
+writing there stands in for the question's choices, and choosing a card
+clears what was written. Recommendations are a quiet Recommended pill and
+never preselected. A person can add a comment alongside their choices by
+default. The questions scroll inside the card, so its Send stays in view. No
+question path cuts choices: every one shares a ceiling of twenty, and a
+provider that offers more is refused.
 A provider-native form can explicitly omit this field when its protocol cannot
 return a comment; the host refuses a supplied comment for that exact ask.
 
@@ -3052,8 +3064,18 @@ The existing answer channel carries a versioned JSON response with question
 IDs, selected option IDs, optional written alternatives, and a comment. The
 tool returns the decoded response to the model. This keeps the existing
 authenticated, thread-scoped answer routes and one-use request identity.
-Provider-native question formats keep their existing adapter contracts; the
-questionnaire capability uses the provider-neutral app tool boundary.
+A provider's own question form is mapped to this questionnaire by its adapter,
+and its one answer goes back in the provider's own shape; the questionnaire
+capability uses the provider-neutral app tool boundary.
+
+A waiting questionnaire is found from everywhere a person looks for what waits
+on them. A Needs you, Inbox or Home row says how many questions wait, with
+their headers, and offers only **Open**, so the set is answered whole on its
+own card; a Work agent's own set and a subagent's set are counted the same way. A sidebar row whose thread waits on a question says **Input**, and an
+approval keeps **Needs you**. The phone shows the same one card in Work,
+native-harness, Chat and Code threads, keeps its unsent draft in memory per
+request while the person leaves the thread and comes back, and its rows say
+**Input** for a waiting question.
 
 A Code task's **Worktrees** control (an entry of Environment's Branch row, and
 an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside

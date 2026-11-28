@@ -7,7 +7,7 @@ import {
   type PendingRequest,
   type ProjectId,
 } from "@octant/contracts";
-import { modeText } from "../agentRun/childPendingRequests";
+import { modeQuestionnaire, modeText } from "../agentRun/childPendingRequests";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -264,6 +264,7 @@ export async function listLeadQuestionRequests(
     if (thread === undefined) continue;
     const text = modeText("work", "question", lead.question.prompt);
     if (text === undefined) continue;
+    const questionnaire = modeQuestionnaire("work", lead.question.questionnaire);
     try {
       requests.push(
         decodePendingRequest({
@@ -273,6 +274,7 @@ export async function listLeadQuestionRequests(
           threadId: lead.threadId,
           threadTitle: thread.title,
           text,
+          ...(questionnaire === undefined ? {} : { questionnaire }),
           requestedAt: lead.question.askedAt,
         }),
       );

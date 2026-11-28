@@ -5292,7 +5292,106 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it("asks Codex's question set through the questionnaire in Plan and answers Codex by question id", async () => {
+  it("asks Codex's whole question set as one questionnaire and answers every question in one reply", async () => {
+    const f = fixture();
+    let request = 0;
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+    );
+    await startSession(acquired.connection, sessionId, "plan");
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+    );
+    const asked = takeEvents(acquired.connection, 1);
+    f.emit({
+      kind: "request",
+      id: "ask-set",
+      method: "item/tool/requestUserInput",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-ask-set",
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "Which module first?",
+            isOther: true,
+            options: [
+              { label: "Parser (Recommended)", description: "Start with parsing" },
+              { label: "Writer", description: "Start with output" },
+            ],
+          },
+          {
+            id: "tests",
+            header: "Tests",
+            question: "Which tests?",
+            options: [
+              { label: "Unit", description: "Fast" },
+              { label: "Smoke", description: "Real provider" },
+            ],
+          },
+          {
+            id: "docs",
+            header: "Docs",
+            question: "Update the guide?",
+            options: [
+              { label: "Yes", description: "In the same change" },
+              { label: "No", description: "Not needed" },
+            ],
+          },
+        ],
+      },
+    } as CodexServerMessage);
+    const [event] = await asked;
+    if (event?.kind !== "user-input-request" || event.questionnaire === undefined)
+      throw new Error("Codex asked one questionnaire.");
+    expect(event).not.toHaveProperty("questionIndex");
+    expect(event.prompt).toBe("Scope · Tests · Docs");
+    expect(event.questionnaire.questions.map((question) => question.header)).toEqual([
+      "Scope",
+      "Tests",
+      "Docs",
+    ]);
+    expect(event.questionnaire.questions[0]?.options[0]).toEqual({
+      id: "o0",
+      label: "Parser",
+      description: "Start with parsing",
+      recommended: true,
+    });
+    await Effect.runPromise(
+      acquired.connection.answerUserInput({
+        sessionId,
+        requestId: event.requestId,
+        answer: JSON.stringify({
+          version: 1,
+          answers: [
+            { questionId: "q0", selectedOptionIds: ["o0"] },
+            { questionId: "q1", selectedOptionIds: [], customAnswer: "Both, unit first" },
+            { questionId: "q2", selectedOptionIds: ["o1"] },
+          ],
+        }),
+      }),
+    );
+    expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+      {
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-set",
+          result: {
+            answers: {
+              scope: { answers: ["Parser (Recommended)"] },
+              tests: { answers: ["Both, unit first"] },
+              docs: { answers: ["No"] },
+            },
+          },
+        },
+      },
+    ]);
+    await acquired.close();
+  });
+
+  it("asks a Codex set with a question that offers no choices one question at a time and answers Codex by question id", async () => {
     const f = fixture();
     let request = 0;
     const acquired = await acquireConnection(

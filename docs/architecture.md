@@ -491,7 +491,7 @@ kind's payload schema loads with its card, which lowered the gzip budget by the
 phone's React Native needs and the workspace shares, raised it by its own size
 (maintainer decision, 2026-11-25), and the
 Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
-gzipped (maintainer decision, 2026-11-24). On 2026-11-26 the gzip budget had 57 B left while several features waited to land, each already loading its own views on first use, and further cuts meant moving existing menus off the first load; the maintainer raised it once by 2,048 B so those features stop competing for the same few bytes. The budgets are exact bytes with no margin for measurement noise, because the same
+gzipped (maintainer decision, 2026-11-24). On 2026-11-26 the gzip budget had 57 B left while several features waited to land, each already loading its own views on first use, and further cuts meant moving existing menus off the first load; the maintainer raised it once by 2,048 B so those features stop competing for the same few bytes. On 2026-11-28 the maintainer set it to the measured need of the pull requests then in flight, each measured on main when it lands: one questionnaire card for an agent's question set needed 460 B on main 9fe249043. The budgets are exact bytes with no margin for measurement noise, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
@@ -18131,7 +18131,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
   answer, oldest waiting first,
-  at most 128 with a `truncated` flag. It adds no authority: each mode lists
+  at most 128 with a `truncated` flag. `?threadId=` alone narrows the list to
+  one thread before that cap, so an open thread reads its own requests however
+  many wait elsewhere. The remote listener forwards the query and the route
+  refuses any other, before the caller is authenticated. It adds no authority: each mode lists
   only what its existing answer command would admit for that window. Work uses
   the Work request service's Project check (an active Work Project) and lists a
   request only on a thread the window's Work thread list holds; Code passes each

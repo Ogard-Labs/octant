@@ -12,6 +12,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 
 import {
+  MAX_QUESTIONNAIRE_ANSWER_LENGTH,
   DEFAULT_RUNTIME_TURNS_PER_TURN,
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -36,6 +37,7 @@ import {
   type ProviderContextBlock,
   type ProviderTurnInput,
 } from "@octant/contracts";
+import { answerProviderQuestionnaire } from "./providerQuestionnaire";
 import type {
   ProviderAcquireInput,
   ProviderCompactionPoint,
@@ -459,7 +461,7 @@ const PRE_TOOL_GRANT_TTL_MS = 30_000;
 const USER_ANSWER_MAX_CHARACTERS = 4_096;
 const USER_QUESTION_MAX_CHARACTERS = 1_024;
 // Claude's AskUserQuestion schema carries at most this many questions in one
-// tool call; a set is answered one question at a time and replied once.
+// tool call; the person answers the set once, as one questionnaire.
 const MAX_CLAUDE_QUESTIONS = 4;
 
 export interface ClaudeExecutionOptions {
@@ -1716,8 +1718,6 @@ interface ClaudePendingApprovalState extends ClaudePendingApproval {
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
   readonly answer: DeferredValue<Record<string, string> | undefined>;
-  /** Answers keyed by question position, never by arrival order. */
-  readonly received: Map<number, string>;
   /** The raw question texts, so the callback's answer map keys them verbatim. */
   readonly providerPrompts: ReadonlyArray<string>;
 }
@@ -4648,12 +4648,6 @@ function makeConnection(
             const pending: ClaudePendingQuestionState = {
               ...mapped.request,
               answer: deferred<Record<string, string> | undefined>(),
-              events: mapped.request.events.map((event) =>
-                event.kind === "user-input-request" && mapped.request.events.length > 1
-                  ? { ...event, requestId: randomUUID() }
-                  : event,
-              ),
-              received: new Map(),
               providerPrompts,
             };
             activeState.pendingQuestions.set(pending.requestId, pending);
@@ -6288,42 +6282,37 @@ function makeConnection(
                 event.kind === "user-input-request" && event.requestId === answer.requestId,
             ),
           );
-          const index =
-            pending?.events.findIndex(
-              (event) =>
-                event.kind === "user-input-request" && event.requestId === answer.requestId,
-            ) ?? -1;
           if (
             state === undefined ||
             state.terminal ||
             state.releasing ||
             state.released ||
-            pending === undefined ||
-            index < 0 ||
-            pending.received.has(index)
+            pending === undefined
           ) {
             return Effect.fail(failure("protocol", "Claude user question is not active."));
           }
-          if (answer.answer.length > USER_ANSWER_MAX_CHARACTERS * 2) {
+          if (answer.answer.length > MAX_QUESTIONNAIRE_ANSWER_LENGTH) {
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
-          const normalizedAnswer = answer.answer.trim();
+          const answered = answerProviderQuestionnaire(pending.questionnaire, answer.answer);
           if (
-            normalizedAnswer.length === 0 ||
-            exceedsCodePointLimit(normalizedAnswer, USER_ANSWER_MAX_CHARACTERS)
+            answered.status === "invalid" ||
+            answered.answers.some((values) =>
+              exceedsCodePointLimit(values.join(", "), USER_ANSWER_MAX_CHARACTERS),
+            )
           ) {
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
           return Effect.sync(() => {
-            pending.received.set(index, normalizedAnswer);
-            if (pending.received.size < pending.events.length) return;
             state.pendingQuestions.delete(pending.requestId);
             freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
+            // Claude Code reads every question's answer by its question text,
+            // and several chosen options as one comma-separated answer.
             const answers = Object.fromEntries(
               pending.providerPrompts.map((prompt, position) => [
                 prompt,
-                pending.received.get(position) ?? "",
+                (answered.answers[position] ?? []).join(", "),
               ]),
             );
             pending.answer.resolve(answers);

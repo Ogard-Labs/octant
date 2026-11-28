@@ -1030,7 +1030,7 @@ folder to bind.
 A `choice` block asks the person to decide from inside the Canvas. It holds a
 prompt (at most 1,024 characters) and one or more questions in the inline
 questionnaire's per-question shape (`CanvasChoiceQuestions`: a distinct id, a
-prompt, `single` or `multiple` selection, one to eight options with a label,
+prompt, `single` or `multiple` selection, one to twenty options with a label,
 an optional description and recommended flag, optional `minSelections` and
 `maxSelections`, and `allowCustom: false` to withhold a written answer; see
 [Workspace: inline questionnaires](workspace.md#inline-questionnaires)). The

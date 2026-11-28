@@ -79,7 +79,7 @@ describe("session forms", () => {
           native_single: {
             type: "string",
             description: "Choose",
-            oneOf: Array.from({ length: 9 }, (_, i) => ({ const: String(i) })),
+            oneOf: Array.from({ length: 21 }, (_, i) => ({ const: String(i) })),
           },
         },
         required: ["native_single"],
@@ -92,5 +92,36 @@ describe("session forms", () => {
         required: ["native_single"],
       }),
     ).toBeUndefined();
+  });
+
+  it("keeps each choice's description and a field's title as its question's header", () => {
+    const form = normalizeAcpElicitation("User input required", {
+      type: "object",
+      required: ["scope"],
+      properties: {
+        scope: {
+          type: "string",
+          title: "Scope",
+          description: "Which module first?",
+          oneOf: [
+            { const: "Parser", title: "Parser", description: "Start with parsing" },
+            { const: "Writer", description: "Start with output" },
+          ],
+        },
+      },
+    });
+    expect(form?.questionnaire.questions).toEqual([
+      {
+        id: "q0",
+        header: "Scope",
+        prompt: "Which module first?",
+        selection: "single",
+        options: [
+          { id: "o0", label: "Parser", description: "Start with parsing" },
+          { id: "o1", label: "Writer", description: "Start with output" },
+        ],
+        allowCustom: true,
+      },
+    ]);
   });
 });

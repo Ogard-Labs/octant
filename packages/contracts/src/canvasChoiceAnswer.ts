@@ -1,7 +1,11 @@
 import { Schema } from "effect";
 import { CanvasActor, CanvasBlockId, CanvasId } from "./canvasIdentity";
 import { UtcTimestamp } from "./events";
-import { MAX_CANVAS_CHOICE_NOTE_LENGTH, QuestionnaireAnswerText } from "./questionnaire";
+import {
+  MAX_CANVAS_CHOICE_NOTE_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  QuestionnaireAnswerText,
+} from "./questionnaire";
 
 // ── Saved answers to a Canvas decision form ──────────────────────────────────
 //
@@ -26,7 +30,7 @@ const answerFields = {
   questionId: QuestionId,
   questionFingerprint: CanvasChoiceQuestionFingerprint,
   /** Empty when the answer is written. */
-  selectedOptionIds: Schema.Array(OptionId).pipe(Schema.maxItems(8)),
+  selectedOptionIds: Schema.Array(OptionId).pipe(Schema.maxItems(MAX_QUESTION_OPTIONS)),
   customAnswer: Schema.optional(QuestionnaireAnswerText.pipe(Schema.maxLength(2_000))),
   note: Schema.optional(
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CANVAS_CHOICE_NOTE_LENGTH)),
@@ -44,7 +48,9 @@ export const CanvasChoiceAnswer = Schema.Struct({
    * agent later rewords never puts new words in the person's mouth.
    */
   selectedLabels: Schema.optional(
-    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(Schema.maxItems(8)),
+    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
+      Schema.maxItems(MAX_QUESTION_OPTIONS),
+    ),
   ),
   author: CanvasActor,
   answeredAt: UtcTimestamp,

@@ -416,6 +416,20 @@ describe("terminal Work requests", () => {
       expect(await readWorkRequests(session, threadId)).toMatchObject({ kind: "refused" });
     });
 
+    it("chooses an option by its label, and keeps a label as written text where one choice is too few", () => {
+      expect(stepWorkQuestionnaire(questionnaire, [], "markdown")).toMatchObject({
+        kind: "asking",
+        answers: [{ questionId: "format", selectedOptionIds: ["md"] }],
+      });
+      const [, extras] = questionnaire.questions;
+      if (extras === undefined) throw new Error("Missing the extras question");
+      const atLeastTwo = { questions: [{ ...extras, minSelections: 2, maxSelections: 3 }] };
+      expect(stepWorkQuestionnaire(atLeastTwo, [], "Index")).toMatchObject({
+        kind: "asking",
+        answers: [{ questionId: "extras", selectedOptionIds: [], customAnswer: "Index" }],
+      });
+    });
+
     it("asks each question in turn and submits the whole response once", async () => {
       expect(workQuestionnaireText(questionnaire, [])).toBe(
         [

@@ -19,12 +19,18 @@ import {
   CodeThreadView,
   ProjectBootstrap,
   type PermissionMode,
+  type Questionnaire,
   WorkThreadBootstrap,
   WorkThreadCommandResult,
   WorkThreadTranscript,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { fullAccessSandboxSupported, threadAccessOf, workThreadAccessOfMode } from "@octant/domain";
+import {
+  fullAccessSandboxSupported,
+  threadAccessOf,
+  validateQuestionnaireAnswer,
+  workThreadAccessOfMode,
+} from "@octant/domain";
 import {
   answerAgentTurnQuestion,
   changeAgentModel,
@@ -37,6 +43,7 @@ import {
 } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
 import { openAgentWindow } from "./agentWindow";
+import { stepWorkQuestionnaire } from "./agentWorkRequests";
 
 /**
  * One thread as the terminal shows it, whatever mode it lives in. Chat,
@@ -74,6 +81,12 @@ export interface AgentPendingQuestion {
   readonly options: ReadonlyArray<string>;
   /** What choosing each option means, by index; present only when the provider gave any. */
   readonly descriptions?: ReadonlyArray<string | undefined>;
+  /**
+   * The provider's question set, when it asked one. The host takes only one
+   * structured response for it, so a typed answer is turned into that
+   * response before it is sent (`questionnaireAnswerText`).
+   */
+  readonly questionnaire?: Questionnaire;
 }
 
 export interface AgentThreadSnapshot {
@@ -138,13 +151,53 @@ export function pendingQuestionOf(view: ChatThreadView): AgentPendingQuestion | 
   const attempt = view.turns.at(-1)?.attempts.at(-1);
   const question = attempt?.outcome === "waiting" ? attempt.pendingQuestion : undefined;
   if (question === undefined) return undefined;
-  const hasMeanings = question.options.some((option) => option.description !== undefined);
+  // A provider's single question arrives as a one-question questionnaire with
+  // no plain options, so its choices are read from there to be shown.
+  const only =
+    question.questionnaire?.questions.length === 1
+      ? question.questionnaire.questions[0]
+      : undefined;
+  const options =
+    question.options.length === 0 && only !== undefined
+      ? only.options.map((option) => ({ label: option.label, description: option.description }))
+      : question.options;
+  const hasMeanings = options.some((option) => option.description !== undefined);
   return {
     id: String(question.requestId),
     prompt: question.prompt,
-    options: question.options.map((option) => option.label),
-    ...(hasMeanings ? { descriptions: question.options.map((option) => option.description) } : {}),
+    options: options.map((option) => option.label),
+    ...(hasMeanings ? { descriptions: options.map((option) => option.description) } : {}),
+    ...(question.questionnaire === undefined ? {} : { questionnaire: question.questionnaire }),
   };
+}
+
+/**
+ * The answer text the host takes for a question set: a complete response
+ * passes as it is, and one typed line answers a one-question set (a number,
+ * an option's label, or a written answer where the question allows one). A
+ * set of several questions is answered one question at a time by the
+ * terminal, or whole as one response, so a lone line is refused, not guessed.
+ */
+export function questionnaireAnswerText(
+  questionnaire: Questionnaire,
+  text: string,
+): HostRefusal | { readonly kind: "answer"; readonly text: string } {
+  if (validateQuestionnaireAnswer(questionnaire, text).status === "valid")
+    return { kind: "answer", text };
+  if (questionnaire.questions.length !== 1)
+    return {
+      kind: "refused",
+      message: `This asks ${String(questionnaire.questions.length)} questions at once. Answer them together as one response ({"version":1,"answers":[…]}), or in Octant.`,
+    };
+  const first = stepWorkQuestionnaire(questionnaire, [], text, "chat");
+  // The optional comment comes after the last question; one line sends none.
+  const step =
+    first.kind === "asking" && first.note === undefined
+      ? stepWorkQuestionnaire(questionnaire, first.answers, "", "chat")
+      : first;
+  return step.kind === "complete"
+    ? { kind: "answer", text: JSON.stringify(step.response) }
+    : { kind: "refused", message: step.note ?? "That answer does not fit the question." };
 }
 
 export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {
@@ -239,11 +292,17 @@ function chatThreadPort(session: OpenedLocalControlSession, threadId: string): A
       ) {
         return { kind: "refused", message: "That question is no longer open." };
       }
+      const questionnaire = pendingQuestionOf(current)?.questionnaire;
+      const delivered =
+        questionnaire === undefined
+          ? { kind: "answer" as const, text: answer }
+          : questionnaireAnswerText(questionnaire, answer);
+      if (delivered.kind === "refused") return delivered;
       return answerAgentTurnQuestion(session, current, {
         turnId: String(turn.id),
         attemptId: String(attempt.id),
         requestId: question.id,
-        answer,
+        answer: delivered.text,
       });
     },
   };

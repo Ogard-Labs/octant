@@ -684,7 +684,7 @@ describe("chat contracts", () => {
         pendingQuestion: {
           requestId: "q-1",
           prompt: "Which file?",
-          options: Array.from({ length: 9 }, (_, i) => ({ label: `o${String(i)}` })),
+          options: Array.from({ length: 21 }, (_, i) => ({ label: `o${String(i)}` })),
         },
       }),
     ).toThrow();

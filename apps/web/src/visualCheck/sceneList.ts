@@ -97,6 +97,7 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "ground-none-subtle-tint-floor", tolerance: GROUND_TOLERANCE },
   { id: "ground-reduced-transparency", tolerance: GROUND_TOLERANCE },
   { id: "ground-increased-contrast", tolerance: GROUND_TOLERANCE },
+  { id: "questionnaire-card", narrow: true },
 ];
 
 /** The two window sizes a scene is drawn at. */

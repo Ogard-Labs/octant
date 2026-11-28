@@ -4,7 +4,7 @@ import { ProjectId } from "./projects";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { MAX_PROVIDER_PLAN_CHARACTERS, ProviderInstanceId, ProviderSessionId } from "./providers";
 import { WorkAccess, WorkThreadId } from "./workThreads";
-import { Questionnaire, QuestionnaireResponse } from "./questionnaire";
+import { MAX_QUESTION_OPTIONS, Questionnaire, QuestionnaireResponse } from "./questionnaire";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -62,7 +62,7 @@ const WorkRequestProviderOptionValue = Schema.String.pipe(
   Schema.maxLength(16_384),
 );
 const WorkRequestProviderOptionValues = Schema.Array(WorkRequestProviderOptionValue).pipe(
-  Schema.maxItems(8),
+  Schema.maxItems(MAX_QUESTION_OPTIONS),
 );
 export type WorkRequestProviderOptionValues = typeof WorkRequestProviderOptionValues.Type;
 
@@ -88,7 +88,7 @@ export const WorkRequestStatus = Schema.Literal(
 );
 export type WorkRequestStatus = typeof WorkRequestStatus.Type;
 
-export const MAX_WORK_REQUEST_OPTIONS = 8;
+export const MAX_WORK_REQUEST_OPTIONS = MAX_QUESTION_OPTIONS;
 
 const safeQuestionId = (id: string) => /^[A-Za-z0-9_-]{1,64}$/.test(id);
 const safeRequestText = Schema.is(WorkRequestSanitizedText);
@@ -98,6 +98,7 @@ export const WorkQuestionnaire = Questionnaire.pipe(
       (question) =>
         safeQuestionId(question.id) &&
         safeRequestText(question.prompt) &&
+        (question.header === undefined || safeRequestText(question.header)) &&
         question.options.every(
           (option) =>
             safeQuestionId(option.id) &&

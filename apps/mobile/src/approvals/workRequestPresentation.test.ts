@@ -1,14 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decodeWorkRequest, type Questionnaire } from "@octant/contracts";
-import {
-  chooseQuestionnaireOption,
-  emptyQuestionnaireDraft,
-  pendingWorkRequestsInOrder,
-  questionnaireResponseOf,
-  toggleQuestionnaireCustom,
-  workRequestCard,
-  writeQuestionnaireCustom,
-} from "./workRequestPresentation";
+import { decodeWorkRequest } from "@octant/contracts";
+import { pendingWorkRequestsInOrder, workRequestCard } from "./workRequestPresentation";
 
 const base = {
   projectId: "20000000-0000-4000-8000-000000000001",
@@ -82,65 +74,5 @@ describe("which card a Work request draws on the phone", () => {
       earlier.requestId,
       later.requestId,
     ]);
-  });
-});
-
-const questionnaire: Questionnaire = {
-  questions: [
-    {
-      id: "venue",
-      prompt: "Which venue?",
-      selection: "single",
-      options: [
-        { id: "a", label: "Hall A" },
-        { id: "b", label: "Hall B" },
-      ],
-    },
-    {
-      id: "extras",
-      prompt: "Which extras?",
-      selection: "multiple",
-      maxSelections: 2,
-      options: [
-        { id: "x", label: "Coffee" },
-        { id: "y", label: "Lunch" },
-        { id: "z", label: "Dinner" },
-      ],
-    },
-  ],
-};
-const [venue, extras] = questionnaire.questions;
-if (venue === undefined || extras === undefined) throw new Error("fixture");
-
-describe("a questionnaire answered on the phone", () => {
-  it("offers to send only once every question meets its limits", () => {
-    let draft = emptyQuestionnaireDraft(questionnaire);
-    expect(questionnaireResponseOf(questionnaire, draft)).toBeUndefined();
-    draft = chooseQuestionnaireOption(draft, venue, "a");
-    draft = chooseQuestionnaireOption(draft, venue, "b");
-    draft = chooseQuestionnaireOption(draft, extras, "x");
-    draft = chooseQuestionnaireOption(draft, extras, "y");
-    // A third extra is past the question's limit and is not taken.
-    draft = chooseQuestionnaireOption(draft, extras, "z");
-    expect(questionnaireResponseOf(questionnaire, { ...draft, comment: "  Thanks " })).toEqual({
-      version: 1,
-      answers: [
-        { questionId: "venue", selectedOptionIds: ["b"] },
-        { questionId: "extras", selectedOptionIds: ["x", "y"] },
-      ],
-      comment: "Thanks",
-    });
-  });
-
-  it("holds a written answer back until the person has written it", () => {
-    let draft = chooseQuestionnaireOption(emptyQuestionnaireDraft(questionnaire), extras, "x");
-    draft = toggleQuestionnaireCustom(draft, venue);
-    expect(questionnaireResponseOf(questionnaire, draft)).toBeUndefined();
-    draft = writeQuestionnaireCustom(draft, venue, "The rooftop");
-    expect(questionnaireResponseOf(questionnaire, draft)?.answers[0]).toEqual({
-      questionId: "venue",
-      selectedOptionIds: [],
-      customAnswer: "The rooftop",
-    });
   });
 });

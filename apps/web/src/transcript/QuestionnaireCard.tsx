@@ -3,6 +3,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { useId, useRef, useState } from "react";
 import type { Questionnaire, QuestionnaireResponse } from "@octant/contracts";
 import { validateQuestionnaireAnswer } from "@octant/domain";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
@@ -12,8 +13,6 @@ import { OptionKey } from "./OptionKey";
 import { QuestionnaireSummary, type QuestionnaireAnswerRule } from "./QuestionnaireSummary";
 
 export { QuestionnaireSummary, type QuestionnaireAnswerRule };
-
-const CUSTOM_RADIO_VALUE = "\0octant-questionnaire-custom";
 
 export interface QuestionnaireCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -52,12 +51,10 @@ export function QuestionnaireCard(props: QuestionnaireCardProps) {
 function QuestionnaireEditor(props: QuestionnaireCardProps) {
   const id = useId();
   const draft = useQuestionnaireDraft(props.draftIdentity, props.prompt, props.questionnaire);
-  const { answers, customIds, comment } = draft;
+  const { answers, comment } = draft;
   const setAnswers = (
     update: (current: ReadonlyArray<DraftAnswer>) => ReadonlyArray<DraftAnswer>,
   ) => draft.setDraft((current) => ({ ...current, answers: update(current.answers) }));
-  const setCustomIds = (update: (current: ReadonlyArray<string>) => ReadonlyArray<string>) =>
-    draft.setDraft((current) => ({ ...current, customIds: update(current.customIds) }));
   const setComment = (comment: string) => draft.setDraft((current) => ({ ...current, comment }));
   const [notice, setNotice] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -78,11 +75,7 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
   const encoded = JSON.stringify(response);
   const valid =
     (props.validateAnswer ?? validateQuestionnaireAnswer)(props.questionnaire, encoded).status ===
-      "valid" &&
-    customIds.every(
-      (questionId) =>
-        answers.find((answer) => answer.questionId === questionId)?.customAnswer !== undefined,
-    );
+    "valid";
   const update = (answer: DraftAnswer) =>
     setAnswers((current) =>
       current.map((entry) => (entry.questionId === answer.questionId ? answer : entry)),
@@ -121,6 +114,10 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
         validateAnswer={props.validateAnswer}
       />
     );
+  const questions = props.questionnaire.questions;
+  // A lone question that is its own title is said once: the legend stays for
+  // assistive technology, the eye reads the title.
+  const titleIsQuestion = questions.length === 1 && questions[0]?.prompt === props.prompt;
   return (
     <form
       aria-label="Questionnaire"
@@ -131,46 +128,76 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
         void send();
       }}
     >
-      <p className="provider-question-card__prompt">{props.prompt}</p>
-      {props.questionnaire.questions.map((question, index) => {
-        const answer = answers.find((entry) => entry.questionId === question.id);
-        const selected = answer?.selectedOptionIds ?? [];
-        const custom = customIds.includes(question.id);
-        const max = question.maxSelections ?? question.options.length;
-        return (
-          <fieldset className="questionnaire__question" disabled={busy} key={question.id}>
-            <legend>{question.prompt}</legend>
-            <p className="provider-question-card__progress" id={`${id}-${index}-help`}>
-              {question.selection === "single"
-                ? "Choose one"
-                : `Select ${question.minSelections ?? 1}–${max} options`}
-            </p>
-            {question.selection === "single" ? (
-              <OctantRadioGroup
-                aria-describedby={`${id}-${index}-help`}
-                aria-label={question.prompt}
-                className="provider-question-card__choices"
-                disabled={busy}
-                numberShortcuts
-                onValueChange={(next) => {
-                  if (next === CUSTOM_RADIO_VALUE) {
-                    setCustomIds((current) =>
-                      current.includes(question.id) ? current : [...current, question.id],
-                    );
-                    update({ questionId: question.id, selectedOptionIds: [] });
-                    return;
-                  }
-                  setCustomIds((current) => current.filter((value) => value !== question.id));
-                  update({ questionId: question.id, selectedOptionIds: [next] });
-                }}
-                value={custom ? CUSTOM_RADIO_VALUE : (selected[0] ?? "")}
-              >
-                {question.options.map((option, optionIndex) => {
-                  const checked = !custom && selected.includes(option.id);
-                  return (
+      <header className="questionnaire__heading">
+        <p className="questionnaire__eyebrow">
+          {questions.length === 1 ? "Your input" : `Your input · ${questions.length} questions`}
+        </p>
+        {titleIsQuestion && questions[0]?.header !== undefined ? (
+          <span aria-hidden="true" className="questionnaire__header">
+            {questions[0].header}
+          </span>
+        ) : null}
+        <p className="provider-question-card__prompt questionnaire__title">{props.prompt}</p>
+      </header>
+      {/* The questions scroll inside the card, so its Send stays in view. */}
+      <div className="questionnaire__body">
+        {questions.map((question, index) => {
+          const answer = answers.find((entry) => entry.questionId === question.id);
+          const written = answer?.customAnswer ?? "";
+          // A written answer that says something is the question's answer; the
+          // validator refuses one sent beside chosen options.
+          const writing = written.trim() !== "";
+          const selected = writing ? [] : (answer?.selectedOptionIds ?? []);
+          const max = question.maxSelections ?? question.options.length;
+          const choose = (selectedOptionIds: ReadonlyArray<string>) =>
+            update({ questionId: question.id, selectedOptionIds });
+          const optionLabel = (option: (typeof question.options)[number], optionIndex: number) => (
+            <>
+              <span className="questionnaire__option-line">
+                <span className="provider-question-card__option-label">{option.label}</span>
+                {/* The space keeps the pill a separate word in the option's name; flex draws none. */}
+                {option.recommended === true ? " " : null}
+                {option.recommended === true ? (
+                  <OctantBadge className="questionnaire__recommended" variant="secondary">
+                    Recommended
+                  </OctantBadge>
+                ) : null}
+                <OptionKey index={optionIndex} />
+              </span>
+              {option.description === undefined ? null : (
+                <span className="provider-question-card__option-description">
+                  {option.description}
+                </span>
+              )}
+            </>
+          );
+          return (
+            <fieldset className="questionnaire__question" disabled={busy} key={question.id}>
+              <legend className={titleIsQuestion ? "visually-hidden" : undefined}>
+                {question.header === undefined ? null : (
+                  <span className="questionnaire__header">{question.header}</span>
+                )}{" "}
+                <span className="questionnaire__prompt">{question.prompt}</span>
+              </legend>
+              <p className="provider-question-card__progress" id={`${id}-${index}-help`}>
+                {question.selection === "single"
+                  ? "Choose one"
+                  : `Select ${question.minSelections ?? 1}–${max} options`}
+              </p>
+              {question.selection === "single" ? (
+                <OctantRadioGroup
+                  aria-describedby={`${id}-${index}-help`}
+                  aria-label={question.prompt}
+                  className="provider-question-card__choices"
+                  disabled={busy}
+                  numberShortcuts
+                  onValueChange={(next) => choose([next])}
+                  value={selected[0] ?? ""}
+                >
+                  {question.options.map((option, optionIndex) => (
                     <div
                       className="provider-question-card__choice"
-                      data-checked={checked ? "" : undefined}
+                      data-checked={selected.includes(option.id) ? "" : undefined}
                       key={option.id}
                     >
                       <OctantRadioGroupItem
@@ -179,180 +206,87 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                         value={option.id}
                         variant="ghost"
                       >
-                        <span className="provider-question-card__option-label">
-                          {option.label}
-                          {option.recommended === true ? " (Recommended)" : ""}
-                          <OptionKey index={optionIndex} />
-                        </span>
-                        {option.description === undefined ? null : (
-                          <span className="provider-question-card__option-description">
-                            {option.description}
-                          </span>
-                        )}
+                        {optionLabel(option, optionIndex)}
                       </OctantRadioGroupItem>
                     </div>
-                  );
-                })}
-                {question.allowCustom === false ? null : (
-                  <div
-                    className="provider-question-card__choice"
-                    data-checked={custom ? "" : undefined}
-                  >
-                    <OctantRadioGroupItem
-                      className="provider-question-card__option"
-                      onClick={() => {
-                        if (!custom) return;
-                        setCustomIds((current) => current.filter((value) => value !== question.id));
-                        update({ questionId: question.id, selectedOptionIds: [] });
-                      }}
-                      size={null}
-                      value={CUSTOM_RADIO_VALUE}
-                      variant="ghost"
-                    >
-                      <span className="provider-question-card__option-label">
-                        Write another answer
-                        <OptionKey index={question.options.length} />
-                      </span>
-                    </OctantRadioGroupItem>
-                    {custom ? (
-                      <label className="questionnaire__written">
-                        Your answer
-                        <OctantTextarea
-                          maxLength={2_000}
-                          rows={2}
-                          value={answer?.customAnswer ?? ""}
-                          onChange={(event) =>
-                            update({
-                              questionId: question.id,
-                              selectedOptionIds: [],
-                              ...(event.target.value.trim() === ""
-                                ? {}
-                                : { customAnswer: event.target.value }),
-                            })
-                          }
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                )}
-              </OctantRadioGroup>
-            ) : (
-              <div
-                className="provider-question-card__choices"
-                role="group"
-                aria-label={question.prompt}
-                aria-describedby={`${id}-${index}-help`}
-                onKeyDown={chooseByNumber}
-              >
-                {question.options.map((option, optionIndex) => {
-                  const checked = !custom && selected.includes(option.id);
-                  const label = (
-                    <>
-                      <span className="provider-question-card__option-label">
-                        {option.label}
-                        {option.recommended === true ? " (Recommended)" : ""}
-                        <OptionKey index={optionIndex} />
-                      </span>
-                      {option.description === undefined ? null : (
-                        <span className="provider-question-card__option-description">
-                          {option.description}
-                        </span>
-                      )}
-                    </>
-                  );
-                  const choose = () => {
-                    setCustomIds((current) => current.filter((value) => value !== question.id));
-                    update({
-                      questionId: question.id,
-                      selectedOptionIds: checked
-                        ? selected.filter((value) => value !== option.id)
-                        : [...(custom ? [] : selected), option.id],
-                    });
-                  };
-                  return (
-                    <div
-                      className="provider-question-card__choice"
-                      data-checked={checked ? "" : undefined}
-                      key={option.id}
-                    >
-                      <label className="questionnaire__checkbox">
-                        <OctantCheckbox
-                          checked={checked}
-                          onChange={choose}
-                          disabled={!checked && !custom && selected.length >= max}
-                        />
-                        <span>{label}</span>
-                      </label>
-                    </div>
-                  );
-                })}
-                {question.allowCustom === false ? null : (
-                  <div
-                    className="provider-question-card__choice"
-                    data-checked={custom ? "" : undefined}
-                  >
-                    <OctantButton
-                      aria-checked={custom}
-                      className="provider-question-card__option"
-                      size={null}
-                      role="checkbox"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        setCustomIds((current) =>
-                          custom
-                            ? current.filter((value) => value !== question.id)
-                            : [...current, question.id],
-                        );
-                        update({ questionId: question.id, selectedOptionIds: [] });
-                      }}
-                    >
-                      <span className="provider-question-card__option-label">
-                        Write another answer
-                        <OptionKey index={question.options.length} />
-                      </span>
-                    </OctantButton>
-                    {custom ? (
-                      <label className="questionnaire__written">
-                        Your answer
-                        <OctantTextarea
-                          maxLength={2_000}
-                          rows={2}
-                          value={answer?.customAnswer ?? ""}
-                          onChange={(event) =>
-                            update({
-                              questionId: question.id,
-                              selectedOptionIds: [],
-                              ...(event.target.value.trim() === ""
-                                ? {}
-                                : { customAnswer: event.target.value }),
-                            })
-                          }
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-            )}
-          </fieldset>
-        );
-      })}
-      {props.questionnaire.allowComment === false ? null : (
-        <label className="questionnaire__written">
-          Anything to add?{" "}
-          <span className="provider-question-card__option-description">Optional</span>
-          <OctantTextarea
-            disabled={busy}
-            maxLength={2_000}
-            rows={2}
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-          />
-        </label>
-      )}
+                  ))}
+                </OctantRadioGroup>
+              ) : (
+                <div
+                  className="provider-question-card__choices"
+                  role="group"
+                  aria-label={question.prompt}
+                  aria-describedby={`${id}-${index}-help`}
+                  onKeyDown={chooseByNumber}
+                >
+                  {question.options.map((option, optionIndex) => {
+                    const checked = selected.includes(option.id);
+                    return (
+                      <div
+                        className="provider-question-card__choice"
+                        data-checked={checked ? "" : undefined}
+                        key={option.id}
+                      >
+                        <label className="questionnaire__checkbox">
+                          <OctantCheckbox
+                            checked={checked}
+                            onChange={() =>
+                              choose(
+                                checked
+                                  ? selected.filter((value) => value !== option.id)
+                                  : [...selected, option.id],
+                              )
+                            }
+                            disabled={!checked && selected.length >= max}
+                          />
+                          <span>{optionLabel(option, optionIndex)}</span>
+                        </label>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {question.allowCustom === false ? null : (
+                <label className="questionnaire__written">
+                  <span className="provider-question-card__option-description">
+                    Your own answer
+                  </span>
+                  <OctantTextarea
+                    maxLength={2_000}
+                    placeholder="Write an answer no option covers"
+                    rows={1}
+                    value={written}
+                    onChange={(event) => {
+                      const text = event.target.value;
+                      update({
+                        questionId: question.id,
+                        selectedOptionIds:
+                          text.trim() === "" ? (answer?.selectedOptionIds ?? []) : [],
+                        ...(text === "" ? {} : { customAnswer: text }),
+                      });
+                    }}
+                  />
+                </label>
+              )}
+            </fieldset>
+          );
+        })}
+        {props.questionnaire.allowComment === false ? null : (
+          <label className="questionnaire__written">
+            Anything to add?{" "}
+            <span className="provider-question-card__option-description">Optional</span>
+            <OctantTextarea
+              disabled={busy}
+              maxLength={2_000}
+              rows={2}
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+            />
+          </label>
+        )}
+      </div>
       {notice === undefined ? null : <OctantAlert tone="warning">{notice}</OctantAlert>}
-      <footer className="provider-question-card__actions">
+      <footer className="provider-question-card__actions questionnaire__actions">
         {props.onDismiss === undefined ? (
           <span />
         ) : (

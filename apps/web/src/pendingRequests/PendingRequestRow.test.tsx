@@ -351,6 +351,94 @@ describe("a waiting subagent row", () => {
   });
 });
 
+describe("a row for several questions asked at once", () => {
+  it("counts the questions with their headers and offers only Open, never a quick reply", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = decodePendingRequest({
+      ...codeQuestion(),
+      text: "Before I start",
+      options: [],
+      questionnaire: {
+        allowComment: false,
+        questions: [
+          {
+            id: "q0",
+            header: "Layout",
+            prompt: "Which layout?",
+            selection: "single",
+            options: [{ id: "o0", label: "Grid" }],
+          },
+          {
+            id: "q1",
+            header: "Checks",
+            prompt: "Which checks?",
+            selection: "multiple",
+            options: [{ id: "o0", label: "Lint" }],
+          },
+        ],
+      },
+    });
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const row = screen.getByRole("group", { name: "Fix the parser is waiting for you" });
+    expect(within(row).getByText("2 questions · Layout, Checks")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Reply…" })).not.toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Open" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    await user.keyboard("1");
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  const twoQuestions = {
+    questions: [
+      {
+        id: "q0",
+        header: "Quarter",
+        prompt: "Which quarter?",
+        selection: "single",
+        options: [{ id: "o0", label: "Q3" }],
+      },
+      {
+        id: "q1",
+        header: "Format",
+        prompt: "Which format?",
+        selection: "single",
+        options: [{ id: "o0", label: "PDF" }],
+      },
+    ],
+  };
+
+  it.each([
+    ["a Work agent's", () => workLeadQuestion(), "Quarterly report is waiting for your answer"],
+    ["an agent's", () => codeChildQuestion(), "Fix the parser has an agent waiting for you"],
+  ] as const)("counts %s question set too, and offers Open", async (_who, row, name) => {
+    const user = userEvent.setup();
+    const onOpenThread = vi.fn();
+    const request = decodePendingRequest({ ...row(), questionnaire: twoQuestions });
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const group = screen.getByRole("group", { name });
+    expect(within(group).getByText("2 questions · Quarter, Format")).toBeInTheDocument();
+    expect(within(group).queryByRole("button", { name: "Review request" })).toBeNull();
+    await user.click(within(group).getByRole("button", { name: "Open" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+  });
+});
+
 describe("an agent approval row", () => {
   it("says the agent needs approval and offers only Review request, never Approve or Deny", async () => {
     const user = userEvent.setup();

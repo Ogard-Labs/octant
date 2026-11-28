@@ -399,15 +399,20 @@ Not built yet:
 
 Status: Partly built. Since: 2026-11-14. Detail: [Provider runtimes: Plan mode as level changes](provider-runtimes.md#plan-mode-as-level-changes) and [Native plan capture](provider-runtimes.md#native-plan-capture).
 
-### Codex and OpenCode question forms
+### Provider question sets
 
-Codex's and OpenCode's question forms reach the person through Octant's questionnaire (maintainer decision, 2026-11-14).
+An agent's several questions reach the person as one questionnaire answered once, whichever provider asked (Claude, Codex, OpenCode, an ACP session form, Octant's harness) and in Chat, Work and Code (maintainer decision, 2026-11-28; it replaces the per-question cards the 2026-11-14 entry for Codex and OpenCode described).
 
+- Each question keeps its header, its choices with descriptions, a recommendation (a provider's "(Recommended)" label mark), single or multiple choice, and a written answer where the provider takes one. The provider gets one reply in its own answer shape and its own labels.
+- No question path cuts choices: every one shares a ceiling of twenty, a provider offering more is refused, and a Work, Chat or Code prompt says how many choices it could not show.
+- A set a questionnaire cannot hold (more than four questions, a Codex question with no choices, or a secret question outside Strict) keeps one request per question.
 - Under Strict, a question asking for a secret is refused with a message to the model and never shown.
 - Outside Strict, a Codex secret question is shown, answered in a masked field, and the answer goes to the Codex process in memory only; the journal records only that one was given (maintainer decisions, 2026-11-21).
-- Only the person answers, never an agent acting for them. A subagent takes its parent's Strict value.
+- Only the person answers, never an agent acting for them. A subagent takes its parent's Strict value, and its set is asked on the parent's thread as the same one questionnaire.
+- Rows in Needs you, Inbox and Home say how many questions wait and open the thread; a sidebar or phone row waiting on a question says Input.
+- One real-provider smoke per provider (Claude, Codex, OpenCode, an ACP agent with form questions) and a phone simulator check are maintainer live checks still owed.
 
-Status: Built. Since: 2026-11-14. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex) and [Provider runtimes: OpenCode](provider-runtimes.md#opencode).
+Status: Built. Since: 2026-11-28. Detail: [Provider runtimes: Provider question sets](provider-runtimes.md#provider-question-sets) and [Workspace: Inline questionnaires](workspace.md#inline-questionnaires).
 
 ### Codex runs as itself
 

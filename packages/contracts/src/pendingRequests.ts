@@ -14,7 +14,13 @@ import {
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
-import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } from "./workRequests";
+import { Questionnaire } from "./questionnaire";
+import {
+  MAX_WORK_REQUEST_OPTIONS,
+  WorkQuestionnaire,
+  WorkRequestId,
+  WorkRequestSanitizedText,
+} from "./workRequests";
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
 
@@ -243,6 +249,7 @@ const ChildPendingRequestFields = {
 } as const;
 
 const isWorkRequestText = Schema.is(WorkRequestSanitizedText);
+const isWorkQuestionnaire = Schema.is(WorkQuestionnaire);
 const isCodeApprovalText = Schema.is(CodeApprovalSummaryText);
 const isCodeQuestionText = Schema.is(CodeQuestionPromptText);
 
@@ -325,6 +332,8 @@ const LeadQuestionFields = {
   projectId: ProjectId,
   threadId: WorkThreadId,
   text: WorkRequestSanitizedText,
+  /** The whole set when the lead asked several things at once, so the row can count them. */
+  questionnaire: Schema.optional(WorkQuestionnaire),
 } as const;
 
 export const PendingRequest = Schema.Union(
@@ -337,6 +346,12 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: WorkRequestSanitizedText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    /**
+     * The whole set when the agent asked several things at once, so a row can
+     * say how many questions wait and the thread's card answers them in one
+     * reply.
+     */
+    questionnaire: Schema.optional(WorkQuestionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
@@ -361,6 +376,8 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    /** The whole set, when the agent asked several things at once. */
+    questionnaire: Schema.optional(Questionnaire),
     /**
      * The question asks for a secret. The row finds it and leaves the answer
      * to the thread's masked field, so no list answers it as evidence.
@@ -408,9 +425,23 @@ export const PendingRequest = Schema.Union(
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-question"),
+    /**
+     * The whole set when the subagent asked several things at once, so the
+     * row can count them; a Work subagent's is Work's redacted questionnaire.
+     */
+    questionnaire: Schema.optional(Questionnaire),
   })
     .annotations(strict)
-    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
+    .pipe(
+      Schema.filter(
+        (request) =>
+          childTextKeepsModeBounds(request) &&
+          (request.mode !== "work" ||
+            request.questionnaire === undefined ||
+            isWorkQuestionnaire(request.questionnaire)),
+        { jsonSchema: {} },
+      ),
+    ),
   Schema.Struct(LeadApprovalFields)
     .annotations(strict)
     .pipe(Schema.filter(leadTextKeepsModeBounds, { jsonSchema: {} })),
@@ -424,6 +455,8 @@ export const PendingRequest = Schema.Union(
     threadId: ChatThreadId,
     text: ChatAttemptQuestion.from.fields.prompt,
     options: ChatAttemptQuestion.from.fields.options,
+    /** The whole set, when the agent asked several things at once. */
+    questionnaire: Schema.optional(Questionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
     answer: ChatPendingQuestionAnswer,

@@ -16,11 +16,13 @@ import {
   workRequestId,
   type AgentQuestionnaireAnswer,
   type AgentWorkRequest,
+  type QuestionnaireHost,
 } from "./agentWorkRequests";
 import type {
   NativeHarnessApproval,
   NativeHarnessSessionView,
   OctantMode,
+  Questionnaire,
 } from "@octant/contracts";
 import {
   childDetailLines,
@@ -221,7 +223,7 @@ class AgentScreen {
     | undefined;
   #codeRequest: AgentCodeRequest | undefined;
   #workRequest: AgentWorkRequest | undefined;
-  /** The answers given so far to the waiting Work questionnaire, bound to its request. */
+  /** The answers given so far to the waiting Work or Chat questionnaire, bound to its request. */
   #questionnaireAnswers:
     | { readonly requestId: string; readonly answers: ReadonlyArray<AgentQuestionnaireAnswer> }
     | undefined;
@@ -637,25 +639,48 @@ class AgentScreen {
     await this.refresh();
   }
 
+  /**
+   * The question set answered here one question at a time: a Work request's,
+   * or the one a Chat turn is parked on, whose host takes only the whole
+   * structured response.
+   */
+  #openQuestionnaire():
+    | {
+        readonly id: string;
+        readonly questionnaire: Questionnaire;
+        readonly host: QuestionnaireHost;
+      }
+    | undefined {
+    const request = this.#workRequest;
+    if (request !== undefined)
+      return request.kind === "question" &&
+        request.secret !== true &&
+        request.questionnaire !== undefined
+        ? { id: workRequestId(request), questionnaire: request.questionnaire, host: "work" }
+        : undefined;
+    const asked = this.#thread?.pendingQuestion;
+    return asked?.questionnaire !== undefined &&
+      this.#codeRequest === undefined &&
+      !this.#session?.questions.some((question) => question.status === "pending")
+      ? { id: asked.id, questionnaire: asked.questionnaire, host: "chat" }
+      : undefined;
+  }
+
   /** A bare "?" is a questionnaire answer or comment here, not the key list (Work accepts it). */
   #answersWorkQuestionnaire(): boolean {
-    const request = this.#workRequest;
-    return (
-      request?.kind === "question" && request.secret !== true && request.questionnaire !== undefined
-    );
+    return this.#openQuestionnaire() !== undefined;
   }
 
   #awaitsQuestionnaireComment(): boolean {
-    const request = this.#workRequest;
+    const open = this.#openQuestionnaire();
     return (
-      request?.kind === "question" &&
-      request.questionnaire !== undefined &&
-      workQuestionnaireAwaitsComment(request.questionnaire, this.#answersTo(request))
+      open !== undefined &&
+      workQuestionnaireAwaitsComment(open.questionnaire, this.#answersTo(open.id))
     );
   }
 
-  #answersTo(request: AgentWorkRequest): ReadonlyArray<AgentQuestionnaireAnswer> {
-    return this.#questionnaireAnswers?.requestId === workRequestId(request)
+  #answersTo(requestId: string): ReadonlyArray<AgentQuestionnaireAnswer> {
+    return this.#questionnaireAnswers?.requestId === requestId
       ? this.#questionnaireAnswers.answers
       : [];
   }
@@ -732,8 +757,7 @@ class AgentScreen {
       this.#workRequest = workRequests.kind === "ready" ? workRequests.requests[0] : undefined;
       if (
         this.#questionnaireAnswers !== undefined &&
-        (this.#workRequest === undefined ||
-          workRequestId(this.#workRequest) !== this.#questionnaireAnswers.requestId)
+        this.#openQuestionnaire()?.id !== this.#questionnaireAnswers.requestId
       )
         this.#questionnaireAnswers = undefined;
       if (
@@ -1283,7 +1307,10 @@ class AgentScreen {
                 ? ""
                 : `\n${String(this.#secret.value.length)} characters typed.`)
             : request.questionnaire !== undefined
-              ? workQuestionnaireText(request.questionnaire, this.#answersTo(request))
+              ? workQuestionnaireText(
+                  request.questionnaire,
+                  this.#answersTo(workRequestId(request)),
+                )
               : request.options
                   .map((option, index) => String(index + 1) + ". " + option.label)
                   .join("\n") + "\nType an answer, then Enter.");
@@ -1429,7 +1456,11 @@ class AgentScreen {
         const meaning = meanings?.[index];
         return `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}`;
       });
-      this.#panelText.content = t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
+      const open = this.#openQuestionnaire();
+      this.#panelText.content =
+        open?.host === "chat" && open.id === String(pending.id)
+          ? t`${fg(p.text)(pending.prompt)}\n${fg(p.textSecondary)(workQuestionnaireText(open.questionnaire, this.#answersTo(open.id)))}`
+          : t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
       this.#panel.visible = true;
     } else if (this.#steeringFollowUps.has(this.#threadId)) {
       const retained = this.#steeringFollowUps.get(this.#threadId);
@@ -2159,7 +2190,7 @@ class AgentScreen {
       const request = questionnaireRequest;
       const step = stepWorkQuestionnaire(
         questionnaireRequest.questionnaire,
-        this.#answersTo(request),
+        this.#answersTo(workRequestId(request)),
         text,
       );
       if (step.kind === "asking") {
@@ -2258,6 +2289,30 @@ class AgentScreen {
     const threadQuestion = this.#thread?.pendingQuestion;
     const question = this.#session?.questions.find((entry) => entry.status === "pending");
     if (question === undefined && threadQuestion !== undefined && this.#port.answerQuestion) {
+      const open = this.#openQuestionnaire();
+      if (open?.host === "chat" && open.id === threadQuestion.id) {
+        const step = stepWorkQuestionnaire(
+          open.questionnaire,
+          this.#answersTo(open.id),
+          text,
+          "chat",
+        );
+        if (step.kind === "asking") {
+          this.#questionnaireAnswers = { requestId: open.id, answers: step.answers };
+          this.#note = step.note ?? "";
+          this.#draw();
+          return;
+        }
+        const result = await this.#port.answerQuestion(
+          threadQuestion,
+          JSON.stringify(step.response),
+        );
+        // A refused answer starts the questionnaire again, as a Work one does.
+        this.#questionnaireAnswers = undefined;
+        if (result.kind === "refused") this.#note = result.message;
+        await this.refresh();
+        return;
+      }
       const picked = /^\d+$/.test(text) ? threadQuestion.options[Number(text) - 1] : undefined;
       const result = await this.#port.answerQuestion(threadQuestion, picked ?? text);
       if (result.kind === "refused") this.#note = result.message;

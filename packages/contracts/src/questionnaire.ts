@@ -3,7 +3,16 @@ import { personDecides } from "./hostAnswer";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
-const ChoiceCount = Schema.Int.pipe(Schema.between(0, 8));
+/**
+ * The most choices one question offers, on every question path: a provider's
+ * own form, the `ask-user` tool and a Canvas form. A provider that offers
+ * more is refused whole rather than cut, so a person never answers a list
+ * with choices silently missing.
+ */
+export const MAX_QUESTION_OPTIONS = 20;
+/** A question's short header, such as "Layout", shown above its prompt. */
+export const MAX_QUESTION_HEADER_LENGTH = 64;
+const ChoiceCount = Schema.Int.pipe(Schema.between(0, MAX_QUESTION_OPTIONS));
 export const MAX_QUESTIONNAIRE_ANSWER_LENGTH = 16_384;
 export const QuestionnaireAnswerText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_QUESTIONNAIRE_ANSWER_LENGTH),
@@ -23,9 +32,13 @@ const Option = Schema.Struct({
 }).annotations(strict);
 const questionFields = {
   id: Id,
+  /** A short label for what the question decides, shown above its prompt. */
+  header: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_QUESTION_HEADER_LENGTH)),
+  ),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
   selection: Schema.Literal("single", "multiple"),
-  options: Schema.Array(Option).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  options: Schema.Array(Option).pipe(Schema.minItems(1), Schema.maxItems(MAX_QUESTION_OPTIONS)),
   minSelections: Schema.optional(ChoiceCount),
   maxSelections: Schema.optional(ChoiceCount),
   allowCustom: Schema.optional(Schema.Boolean),
@@ -106,7 +119,7 @@ export type Questionnaire = typeof Questionnaire.Type;
 
 const QuestionnaireAnswer = Schema.Struct({
   questionId: Id,
-  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(8)),
+  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(MAX_QUESTION_OPTIONS)),
   customAnswer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
 }).annotations(strict);
 

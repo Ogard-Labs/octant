@@ -1721,6 +1721,7 @@ function ActivityThreadButton(props: {
         followUp: props.thread.followUp,
         startedAt: props.thread.turnStartedAt,
         waitingSince: props.thread.waitingSince,
+        awaitingKind: props.thread.awaitingKind,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
         now,

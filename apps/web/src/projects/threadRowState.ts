@@ -11,7 +11,7 @@ import {
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
-import { CircleAlert, Clock, ClockFading, LoaderCircle } from "../ui/icons";
+import { CircleAlert, CircleHelp, Clock, ClockFading, LoaderCircle } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import type { SidebarThreadRowState } from "./SidebarThreadRowContent";
 import { threadRowShortAge } from "./threadRowShortAge";
@@ -75,6 +75,11 @@ export function threadRowState(props: {
   readonly now?: number | undefined;
   /** When the thread began waiting between turns; absent when it is not. */
   readonly waitingSince?: string | undefined;
+  /**
+   * What the waiting thread asks of the person, when the host said: a
+   * question reads "Input", so it is not mistaken for an approval.
+   */
+  readonly awaitingKind?: "approval" | "user-input" | undefined;
 }): ThreadRowStateReading {
   const now = props.now ?? Date.now();
   const facts = sidebarThreadStatusInput({ ...props, now });
@@ -99,6 +104,8 @@ export function threadRowState(props: {
         : status === "limited"
           ? limitedText(props.limited?.resetsAt, now)
           : "Snooze ended";
+  if (status === "attention" && props.awaitingKind === "user-input")
+    return { state: { status, text: "Input", icon: CircleHelp }, unread: false, label };
   return {
     state: { status, text, icon: sidebarThreadStatusIcon(status) },
     unread: false,

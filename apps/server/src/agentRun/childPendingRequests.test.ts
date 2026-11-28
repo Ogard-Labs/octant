@@ -13,6 +13,7 @@ import {
   EventActor,
   type AgentRun,
   type NativeHarnessInteractionSource,
+  type Questionnaire,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
@@ -180,13 +181,14 @@ function fixture() {
       summary: input.summary ?? "shell: bun run test",
       approvalClass: "child-provider-action",
     });
-  const askQuestion = (prompt = "Which fixture should I use?") =>
+  const askQuestion = (prompt = "Which fixture should I use?", questionnaire?: Questionnaire) =>
     questions.ask({
       threadId: parentThread,
       mode: "work",
       lead,
       source,
       prompt,
+      ...(questionnaire === undefined ? {} : { questionnaire }),
       options: ["a", "b"],
     });
   const list = (
@@ -385,6 +387,47 @@ describe("subagent pending requests", () => {
     const emojiTask = emoji?.kind === "child-approval" ? emoji.child.task : "";
     expect(emojiTask).toBe("\u{1F600}".repeat(100));
     expect(emojiTask.isWellFormed()).toBe(true);
+  });
+
+  it("carries a subagent's question set so the row can count it, redacted for Work and as asked for Code", async () => {
+    const { askQuestion, list } = fixture();
+    const set: Questionnaire = {
+      questions: [
+        {
+          id: "fixture",
+          header: "Fixture",
+          prompt: "Which fixture under /srv/fixtures?",
+          selection: "single",
+          options: [
+            { id: "a", label: "A" },
+            { id: "b", label: "B" },
+          ],
+        },
+        {
+          id: "seed",
+          header: "Seed",
+          prompt: "Which seed?",
+          selection: "single",
+          options: [
+            { id: "one", label: "1" },
+            { id: "two", label: "2" },
+          ],
+        },
+      ],
+    };
+    void askQuestion("Fixture · Seed", set);
+    const [work] = await list();
+    expect(work).toMatchObject({
+      kind: "child-question",
+      questionnaire: {
+        questions: [
+          { id: "fixture", prompt: "Which fixture under [redacted path]" },
+          { id: "seed" },
+        ],
+      },
+    });
+    const [code] = await list({ run: agentRun({ mode: "code" }) });
+    expect(code).toMatchObject({ kind: "child-question", questionnaire: set });
   });
 
   it("keeps a Code subagent's question within a Code question's byte bound", async () => {

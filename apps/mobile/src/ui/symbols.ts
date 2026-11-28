@@ -16,6 +16,7 @@ export const SYSTEM_SYMBOLS: Readonly<Partial<Record<MobileIconName, SystemSymbo
   "bulb-outline": "lightbulb",
   "calendar-outline": "calendar",
   "camera-outline": "camera",
+  "chatbubble-ellipses-outline": "ellipsis.bubble",
   "chatbubble-outline": "bubble.left",
   chatbubbles: "bubble.left.and.bubble.right.fill",
   "chatbubbles-outline": "bubble.left.and.bubble.right",

@@ -106,6 +106,7 @@ import {
   type LinkedIssueRef,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
+  MAX_QUESTION_OPTIONS,
 } from "@octant/contracts";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
 import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
@@ -5262,6 +5263,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,
+        harness: true,
       } as never,
     });
     active.cursor = frame.cursor;
@@ -5464,6 +5466,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
             ...(event.secret === true ? { secret: true } : {}),
           });
         }
@@ -8595,16 +8598,24 @@ function normalizedOperationEvent(
     if (event.secret === true) active.secretQuestions.add(event.requestId);
     if (event.questionnaire !== undefined)
       active.providerQuestionnaires.set(event.requestId, event.questionnaire);
+    const offered = boundProviderInputOptions(event.options ?? []);
+    const hidden = offered.length - MAX_QUESTION_OPTIONS;
+    // Said after the bounded text, so a long prompt never cuts the note away.
+    const note =
+      hidden > 0
+        ? ` (${String(hidden)} more choices are not shown; write your answer instead.)`
+        : "";
+    const prompt =
+      boundProviderText(
+        event.text ?? "Provider input requested.",
+        MAX_PROVIDER_INPUT_PROMPT_BYTES - new TextEncoder().encode(note).byteLength,
+        "",
+      ) ?? "Provider input requested.";
     return {
       kind: "input-requested",
       requestId: event.requestId,
-      prompt:
-        boundProviderText(
-          event.text ?? "Provider input requested.",
-          MAX_PROVIDER_INPUT_PROMPT_BYTES,
-          "",
-        ) ?? "Provider input requested.",
-      options: boundProviderInputOptions(event.options ?? []),
+      prompt: `${prompt}${note}`,
+      options: offered.slice(0, MAX_QUESTION_OPTIONS),
       ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       ...(event.secret === true ? { secret: true } : {}),
     };
@@ -8837,9 +8848,9 @@ function withLostTextNote(active: ActiveTurn, reason: string | undefined): strin
 const FAILURE_MESSAGE_SUFFIX = "\n[Provider failure message truncated.]";
 const SUMMARY_SUFFIX = " [truncated]";
 const MAX_PROVIDER_INPUT_PROMPT_BYTES = 8 * 1024;
-// `CodeOperationEvent`'s `input-requested` accepts at most this many choices of
-// at most this many bytes each; a provider that offers more keeps its first.
-const MAX_PROVIDER_INPUT_OPTIONS = 32;
+// `CodeOperationEvent`'s `input-requested` accepts choices of at most this many
+// bytes each. The person is shown the first `MAX_QUESTION_OPTIONS`, the ceiling
+// every question path shares, and the prompt says how many more there were.
 const MAX_PROVIDER_INPUT_OPTION_BYTES = 1_024;
 
 /**
@@ -8848,9 +8859,9 @@ const MAX_PROVIDER_INPUT_OPTION_BYTES = 1_024;
  * none stays a free-text question.
  */
 function boundProviderInputOptions(options: ReadonlyArray<string>): ReadonlyArray<string> {
-  return options
-    .flatMap((label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? [])
-    .slice(0, MAX_PROVIDER_INPUT_OPTIONS);
+  return options.flatMap(
+    (label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? [],
+  );
 }
 
 /**

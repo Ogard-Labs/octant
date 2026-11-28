@@ -67,6 +67,24 @@ export interface PendingRequestRowProps {
   readonly onOpenThread: (request: PendingRequest) => void;
 }
 
+/**
+ * "3 questions · Layout, Checks, Approval": how many questions wait, and their
+ * headers when the row's text does not already name them.
+ */
+function questionnaireWords(
+  questionnaire: { readonly questions: ReadonlyArray<{ readonly header?: string | undefined }> },
+  text: string,
+): string {
+  const count = questionnaire.questions.length;
+  const counted = `${String(count)} ${count === 1 ? "question" : "questions"}`;
+  const headers = questionnaire.questions.flatMap((question) =>
+    question.header === undefined ? [] : [question.header],
+  );
+  return headers.length === 0 || headers.join(" · ") === text
+    ? counted
+    : `${counted} · ${headers.join(", ")}`;
+}
+
 /** Why no second opinion came, in words a tooltip can carry. */
 const NO_REVIEW_REASON = {
   failed: "The reviewer's answer could not be read",
@@ -85,6 +103,8 @@ const NO_REVIEW_REASON = {
  * words as the thread's next turn. A waiting subagent's request, and the
  * agent's own approval or Work question, are only found here: each has one
  * action, Review request, and no answer; the thread's own cards decide them.
+ * A question set, whoever asked it, says how many questions wait and offers
+ * only Open.
  * The row owns only its own busy state and its refusal line; it carries no
  * authority and knows nothing about the card or board that lists it.
  */
@@ -114,7 +134,17 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       mounted.current = false;
     };
   }, []);
-  const choices = pendingRequestChoices(request);
+  // A set of questions is answered whole in its thread's card; one choice
+  // from a row would answer only its first question. The agent's and a
+  // subagent's own sets are counted the same way.
+  const questionnaire =
+    (request.kind === "question" ||
+      request.kind === "lead-question" ||
+      request.kind === "child-question") &&
+    "questionnaire" in request
+      ? request.questionnaire
+      : undefined;
+  const choices = questionnaire === undefined ? pendingRequestChoices(request) : [];
   const open = props.settled !== true && props.outcome === undefined;
 
   async function answer(response: PendingRequestResponse) {
@@ -271,6 +301,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           {request.text}
         </p>
       )}
+      {deferred || questionnaire === undefined ? null : (
+        <p className="oct-meta pending-request__questions">
+          {questionnaireWords(questionnaire, request.text)}
+        </p>
+      )}
       {deferred || decision?.why === undefined ? null : (
         <p className="oct-meta pending-request__why" title={decision.why}>
           {decision.why}
@@ -324,7 +359,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       ) : null}
       {open && !deferred ? (
         <div className="pending-request__actions">
-          {isFindOnlyPendingRequest(request) ? (
+          {isFindOnlyPendingRequest(request) && questionnaire === undefined ? (
             <OctantButton
               onClick={() => props.onOpenThread(request)}
               size="sm"
@@ -332,6 +367,16 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
               variant="outline"
             >
               Review request
+            </OctantButton>
+          ) : questionnaire !== undefined ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => props.onOpenThread(request)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Open
             </OctantButton>
           ) : request.kind === "approval" ? (
             <>

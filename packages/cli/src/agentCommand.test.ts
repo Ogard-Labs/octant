@@ -1391,7 +1391,7 @@ describe("octant agent Chat lead question", () => {
   const now = "2026-10-16T09:00:00.000Z";
 
   /** The Chat thread as the host reads it: parked on a question, then finished. */
-  function chatView(state: "parked" | "answered") {
+  function chatView(state: "parked" | "answered", asked?: Record<string, unknown>) {
     const digest = "a".repeat(64);
     const base = chatThreadOpening(threadId, { path: `/api/chat/threads/${threadId}` } as never);
     const thread = (base!.body as { thread: Record<string, unknown> }).thread;
@@ -1422,7 +1422,7 @@ describe("octant agent Chat lead question", () => {
               citationIds: [],
               ...(state === "parked"
                 ? {
-                    pendingQuestion: {
+                    pendingQuestion: asked ?? {
                       requestId: "call_1",
                       prompt: "Which database?",
                       options: [
@@ -1457,7 +1457,11 @@ describe("octant agent Chat lead question", () => {
     };
   }
 
-  async function run(options: { readonly json: boolean; readonly typed: string }) {
+  async function run(options: {
+    readonly json: boolean;
+    readonly typed: string;
+    readonly asked?: Record<string, unknown>;
+  }) {
     const stdout = sink();
     const stderr = sink();
     const posted: Array<{ readonly kind?: string; readonly [key: string]: unknown }> = [];
@@ -1476,7 +1480,7 @@ describe("octant agent Chat lead question", () => {
       },
       session: session((request) => {
         if (request.path === `/api/chat/threads/${threadId}` && sent) {
-          return { status: 200, body: chatView(answered ? "answered" : "parked") };
+          return { status: 200, body: chatView(answered ? "answered" : "parked", options.asked) };
         }
         const opened = chatThreadOpening(threadId, request);
         if (opened !== undefined) return opened;
@@ -1534,6 +1538,53 @@ describe("octant agent Chat lead question", () => {
     expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toMatchObject(
       [{ answer: "postgres" }],
     );
+  });
+
+  it("asks a provider's question set one question at a time and sends one response", async () => {
+    const result = await run({
+      json: false,
+      // A refused line asks the same question again; the empty line skips the comment.
+      typed: "7\n2\n\n1\n\n",
+      asked: {
+        requestId: "call_1",
+        prompt: "Layout",
+        options: [],
+        questionnaire: {
+          questions: [
+            {
+              id: "layout",
+              prompt: "Grid or list?",
+              selection: "single",
+              options: [
+                { id: "grid", label: "Grid" },
+                { id: "list", label: "List" },
+              ],
+            },
+            {
+              id: "density",
+              prompt: "How dense?",
+              selection: "single",
+              options: [
+                { id: "roomy", label: "Roomy" },
+                { id: "compact", label: "Compact" },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(result.stdout).toContain("Question 1 of 2: Grid or list?");
+    expect(result.stdout).toContain("Choose one option by number");
+    expect(result.stdout).toContain("Question 2 of 2: How dense?");
+    const answers = result.posted.filter((body) => body.kind === "answer-chat-turn-question");
+    expect(answers).toHaveLength(1);
+    expect(JSON.parse(String(answers[0]?.answer))).toEqual({
+      version: 1,
+      answers: [
+        { questionId: "layout", selectedOptionIds: ["list"] },
+        { questionId: "density", selectedOptionIds: ["roomy"] },
+      ],
+    });
   });
 
   it("emits the question as a JSON line and reads the answer from stdin", async () => {

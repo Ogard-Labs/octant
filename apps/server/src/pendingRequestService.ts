@@ -118,6 +118,7 @@ export class PendingRequestService {
     readerKind: PendingRequestReader["kind"] = "local-window",
     principal?: ClientPrincipal,
     imageOffersOnly = false,
+    threadId?: string,
   ): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
     const reader: PendingRequestReader = {
@@ -131,8 +132,12 @@ export class PendingRequestService {
       this.#sources.children(reader),
       this.#sources.asks?.(reader, imageOffersOnly) ?? [],
     ]);
+    // One thread's read is narrowed before the cap, so a thread open on a
+    // phone sees its own requests however many wait across the host.
+    const inThread = (request: { readonly threadId: unknown }) =>
+      threadId === undefined || String(request.threadId) === threadId;
     const asks = waiting
-      .filter((ask) => modes.includes(ask.mode))
+      .filter((ask) => modes.includes(ask.mode) && inThread(ask))
       .toSorted(
         (left, right) =>
           left.requestedAt.localeCompare(right.requestedAt) ||
@@ -144,11 +149,13 @@ export class PendingRequestService {
       ...code,
       ...chat,
       ...children.filter((request) => modes.includes(request.mode)),
-    ].sort(
-      (left, right) =>
-        left.requestedAt.localeCompare(right.requestedAt) ||
-        requestKey(left).localeCompare(requestKey(right)),
-    );
+    ]
+      .filter(inThread)
+      .sort(
+        (left, right) =>
+          left.requestedAt.localeCompare(right.requestedAt) ||
+          requestKey(left).localeCompare(requestKey(right)),
+      );
     return decodePendingRequestList({
       requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS).map((request) => {
         const review =

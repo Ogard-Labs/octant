@@ -245,6 +245,42 @@ describe("WorkRequestApplicationService.listPendingForWindow", () => {
     ]);
   });
 
+  it("carries an agent's whole question set on its row, so the row can say how many questions wait", async () => {
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Scope",
+          prompt: "Which module first?",
+          selection: "single" as const,
+          options: [{ id: "o0", label: "Parser" }],
+        },
+        {
+          id: "q1",
+          header: "Tests",
+          prompt: "Which tests?",
+          selection: "multiple" as const,
+          options: [
+            { id: "o0", label: "Unit" },
+            { id: "o1", label: "Smoke" },
+          ],
+        },
+      ],
+    };
+    const set = decodeWorkRequest({
+      ...pendingRequest,
+      detail: { kind: "user-input", prompt: "Scope · Tests", options: [], questionnaire },
+    });
+    const { service } = fixture({
+      threads: [{ id: threadId, projectId, title: "Report" }],
+      requestsOverride: { listPending: vi.fn(() => [set]) },
+    });
+    expect(await service.listPendingForWindow(windowId)).toMatchObject([
+      { mode: "work", kind: "question", text: "Scope · Tests", questionnaire },
+    ]);
+  });
+
   it("omits a Project the window cannot access and one that is not a Work Project", async () => {
     const { service, requests } = fixture({
       activeProjects: [{ id: otherProjectId, type: "chat" }],

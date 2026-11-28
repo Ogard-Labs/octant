@@ -339,13 +339,22 @@ export const MOBILE_COPY = {
   approvalShowAll: "Show all",
   approvalShowLess: "Show less",
   workApprovalApprove: "Approve",
-  workQuestionOwnAnswer: "Type your own answer",
-  workQuestionYourAnswer: "Your answer",
-  workQuestionYourAnswerPlaceholder: "Type your answer…",
-  workQuestionSubmit: "Submit",
   workQuestionChooseOne: "Choose one",
-  workQuestionChooseSeveral: (min: number, max: number) => `Select ${min}–${max} options`,
-  workQuestionWriteAnother: "Write another answer",
+  workQuestionChooseSeveral: (min: number, max: number) =>
+    min === max ? `Choose ${max}` : min === 0 ? `Choose up to ${max}` : `Choose ${min}–${max}`,
+  /** Above a question card: what the agent is held on. */
+  questionCardEyebrow: (questions: number) =>
+    questions === 1 ? "Waiting for your answer" : `Waiting for ${questions} answers`,
+  questionWrittenLabel: (question: string | undefined) =>
+    question === undefined ? "Your own answer" : `Your own answer for ${question}`,
+  questionWrittenPlaceholder: "Write your own answer…",
+  questionWrittenHint: "Writing an answer clears the options chosen for this question.",
+  questionRecommended: "Recommended",
+  questionRecommendedOption: (label: string) => `${label}, recommended`,
+  questionSendAnswer: "Send answer",
+  /** A thread row whose agent waits on a question. */
+  rowWaitingInput: "Input",
+  rowWaitingInputSpoken: "Waiting for your input",
   workQuestionComment: "Anything to add?",
   workQuestionSendAnswers: "Send answers",
   workQuestionSending: "Sending answers…",

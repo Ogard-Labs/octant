@@ -23,6 +23,7 @@ import {
 } from "./threadRowState";
 
 const STATE_ICON: Readonly<Record<ThreadRowKind, MobileIconName | undefined>> = {
+  input: "chatbubble-ellipses-outline",
   waiting: "alert-circle-outline",
   failed: "close-circle-outline",
   finished: "checkmark-circle-outline",
@@ -34,6 +35,7 @@ const STATE_ICON: Readonly<Record<ThreadRowKind, MobileIconName | undefined>> = 
 
 function stateInk(kind: ThreadRowKind, colors: ThemeColors): string {
   switch (kind) {
+    case "input":
     case "waiting":
       return colors.warning;
     case "failed":

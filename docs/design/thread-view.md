@@ -1475,12 +1475,20 @@ other Code approvals.
 
 Every other request a Work agent waits on draws on the same screen, oldest
 first, with the desktop's words: a tool call as **Provider approval** (the
-action and what it does, **Approve** and **Deny**), a question as its prompt,
-each offered answer and **Type your own answer** with **Submit**, and a
-questionnaire as each question with its limits (**Choose one**, **Select
-1–n options**, a **(Recommended)** option, **Write another answer**), the
-optional **Anything to add?**, **Send answers** and **Dismiss**, which ends
-the question unanswered as the desktop's does. Each sends the answer and the
+action and what it does, **Approve** and **Deny**), and a question or a whole
+question set on one question card shared with native-harness, Chat and Code
+threads: each question's header and prompt with its limits (**Choose one**,
+**Select 1–n options**), each choice as a card with its description and a
+quiet **Recommended** pill, an always-visible written-answer field, the
+optional **Anything to add?**, one **Send answers** (**Send answer** for a
+single question) and, in Work, **Dismiss**, which ends the question unanswered
+as the desktop's does. Its unsent draft is kept in memory per request, so it
+survives leaving the thread. In Chat and Code the card reads the thread's own
+waiting requests, narrowed by the host before its cap, so many requests on
+other threads never hide them (a host from before that read is asked for its
+whole list); a draft is dropped only when a whole list shows
+its request no longer waits. A refusal from a turn still running keeps the
+draft as well. Each sends the answer and the
 version it read through the same request route a window uses, and the host
 journals it as the device. Approving a tool call lets the agent act, so it
 asks for the phone's own confirmation first; denying, answering a question

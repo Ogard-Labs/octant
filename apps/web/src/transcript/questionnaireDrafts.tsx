@@ -16,7 +16,6 @@ export interface QuestionnaireDraftIdentity {
 
 interface QuestionnaireDraft {
   readonly answers: QuestionnaireResponse["answers"];
-  readonly customIds: ReadonlyArray<string>;
   readonly comment: string;
 }
 
@@ -107,7 +106,6 @@ export function useQuestionnaireDraft(
       questionId: question.id,
       selectedOptionIds: [],
     })),
-    customIds: [],
     comment: "",
   }));
   const stored = useSyncExternalStore(

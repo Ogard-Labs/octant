@@ -31,6 +31,11 @@ export interface LocalWindowReadRouteOptions<T> {
   ) => Promise<T>;
   /** Who may make the read, when it is more than the host's own person. */
   readonly admits?: (principal: ClientPrincipal) => boolean;
+  /**
+   * The one query this read takes, when it narrows its own answer; any other
+   * query is refused before the caller is authenticated.
+   */
+  readonly acceptsQuery?: (query: URLSearchParams) => boolean;
   readonly decodeFailure: (failure: LocalWindowReadFailure) => unknown;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
@@ -72,7 +77,7 @@ export function createLocalWindowReadRoute<T>(options: LocalWindowReadRouteOptio
         origin,
       );
     }
-    if (url.search !== "") {
+    if (url.search !== "" && options.acceptsQuery?.(url.searchParams) !== true) {
       return fail(
         { code: "invalid", message: `${options.noun} reads take no parameters.` },
         400,

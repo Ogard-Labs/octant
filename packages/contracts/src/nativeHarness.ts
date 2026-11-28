@@ -15,7 +15,12 @@
  * pointer at durable evidence.
  */
 
-import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
+import {
+  MAX_QUESTION_HEADER_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  Questionnaire,
+  QuestionnaireAnswerText,
+} from "./questionnaire";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
@@ -302,7 +307,7 @@ export const NativeHarnessJournalLookupArguments = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessJournalLookupArguments = typeof NativeHarnessJournalLookupArguments.Type;
 
-export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
+export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = MAX_QUESTION_OPTIONS;
 
 /**
  * A question for the person. The turn blocks until it is answered, expires,
@@ -621,12 +626,17 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
                 required: ["id", "prompt", "selection", "options"],
                 properties: {
                   id: { type: "string", minLength: 1, maxLength: 64 },
+                  header: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: MAX_QUESTION_HEADER_LENGTH,
+                  },
                   prompt: { type: "string", minLength: 1, maxLength: 1024 },
                   selection: { type: "string", enum: ["single", "multiple"] },
                   options: {
                     type: "array",
                     minItems: 1,
-                    maxItems: 8,
+                    maxItems: MAX_QUESTION_OPTIONS,
                     items: {
                       type: "object",
                       additionalProperties: false,
@@ -639,8 +649,8 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
                       },
                     },
                   },
-                  minSelections: { type: "integer", minimum: 0, maximum: 8 },
-                  maxSelections: { type: "integer", minimum: 0, maximum: 8 },
+                  minSelections: { type: "integer", minimum: 0, maximum: MAX_QUESTION_OPTIONS },
+                  maxSelections: { type: "integer", minimum: 0, maximum: MAX_QUESTION_OPTIONS },
                   allowCustom: { type: "boolean" },
                 },
               },
