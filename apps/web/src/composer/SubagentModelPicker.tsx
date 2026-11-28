@@ -1,9 +1,14 @@
 import type { ProviderModel } from "@octant/contracts";
 import { subagentReasoningValues, type PickerGroup, type SubagentModelTag } from "@octant/domain";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { hasProviderLogo, ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import "./composer-chip.css";
 import "./subagent-model.css";
 
@@ -215,7 +220,6 @@ export function SubagentModelPicker(props: {
   const reasoningRows: ReadonlyArray<string | undefined> =
     chosen === undefined ? [] : [undefined, ...chosen.reasoningValues];
   const rowCount = chosen === undefined ? visible.length : reasoningRows.length;
-  const active = rowCount === 0 ? 0 : Math.min(activeIndex, rowCount - 1);
 
   const finish = (route: SubagentModelRoute, reasoning: string | undefined) => {
     props.onChoose({
@@ -238,37 +242,22 @@ export function SubagentModelPicker(props: {
     setQuery("");
     setActiveIndex(current === undefined ? 0 : route.reasoningValues.indexOf(current) + 1);
   };
-  const pickActive = () => {
-    if (chosen === undefined) {
-      const route = visible[active];
-      if (route !== undefined) pickRoute(route);
-      return;
-    }
-    if (active < reasoningRows.length) finish(chosen, reasoningRows[active]);
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.nativeEvent.isComposing) return;
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        if (rowCount > 0) setActiveIndex((active + 1) % rowCount);
+  const listbox = useOctantListbox({
+    activeIndex,
+    count: rowCount,
+    onActivate: (index) => {
+      if (chosen === undefined) {
+        const route = visible[index];
+        if (route !== undefined) pickRoute(route);
         return;
-      case "ArrowUp":
-        event.preventDefault();
-        if (rowCount > 0) setActiveIndex((active - 1 + rowCount) % rowCount);
-        return;
-      case "Enter":
-        event.preventDefault();
-        pickActive();
-        return;
-      case "Escape":
-        event.preventDefault();
-        event.stopPropagation();
-        props.onDismiss();
-        return;
-      default:
-    }
-  };
+      }
+      if (index < reasoningRows.length) finish(chosen, reasoningRows[index]);
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: props.onDismiss,
+    stopEscapePropagation: true,
+  });
+  const active = listbox.activeIndex;
   const optionId = (index: number) => `${listId}-${index}`;
 
   return (
@@ -281,13 +270,13 @@ export function SubagentModelPicker(props: {
       className="chat-composer__command-typeahead subagent-model-picker"
       role="group"
     >
-      <OctantInput
-        aria-activedescendant={rowCount === 0 ? undefined : optionId(active)}
+      <OctantListboxInput
+        activeDescendantId={active < 0 ? undefined : optionId(active)}
         aria-autocomplete="list"
-        aria-controls={listId}
-        aria-expanded="true"
         aria-label={chosen === undefined ? "Search models" : "Choose reasoning"}
         className="subagent-model-picker__search"
+        controlsId={listId}
+        expanded
         readOnly={chosen !== undefined}
         onBlur={(event) => {
           if (
@@ -300,18 +289,20 @@ export function SubagentModelPicker(props: {
           setQuery(event.target.value);
           setActiveIndex(0);
         }}
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => {
+          listbox.handleKeyDown(event);
+        }}
         placeholder={chosen === undefined ? "Search models" : chosen.model.displayName}
         ref={searchRef}
-        role="combobox"
         unstyled
         value={query}
       />
-      <ul
+      <OctantListbox
+        activeDescendantId={active < 0 ? undefined : optionId(active)}
         aria-label={chosen === undefined ? "Subagent models" : "Reasoning"}
+        as="ul"
         className="chat-composer__command-list"
         id={listId}
-        role="listbox"
       >
         {chosen === undefined
           ? visible.map((route, index) => (
@@ -320,15 +311,13 @@ export function SubagentModelPicker(props: {
                 key={`${String(route.group.instance.id)}/${String(route.model.id)}`}
                 role="presentation"
               >
-                <OctantButton
-                  aria-selected={index === active}
+                <OctantListboxOption
                   id={optionId(index)}
                   onClick={() => pickRoute(route)}
                   onMouseDown={(event) => event.preventDefault()}
                   onMouseEnter={() => setActiveIndex(index)}
-                  role="option"
+                  selected={index === active}
                   size="sm"
-                  type="button"
                   variant={index === active ? "secondary" : "ghost"}
                 >
                   <ProviderGlyph
@@ -340,7 +329,7 @@ export function SubagentModelPicker(props: {
                   <span className="chat-composer__command-meta">
                     {route.group.instance.displayName}
                   </span>
-                </OctantButton>
+                </OctantListboxOption>
               </li>
             ))
           : reasoningRows.map((value, index) => (
@@ -349,19 +338,17 @@ export function SubagentModelPicker(props: {
                 key={value ?? PROVIDER_DEFAULT}
                 role="presentation"
               >
-                <OctantButton
-                  aria-selected={index === active}
+                <OctantListboxOption
                   id={optionId(index)}
                   onClick={() => finish(chosen, value)}
                   onMouseDown={(event) => event.preventDefault()}
                   onMouseEnter={() => setActiveIndex(index)}
-                  role="option"
+                  selected={index === active}
                   size="sm"
-                  type="button"
                   variant={index === active ? "secondary" : "ghost"}
                 >
                   <span>{value ?? PROVIDER_DEFAULT}</span>
-                </OctantButton>
+                </OctantListboxOption>
               </li>
             ))}
         {rowCount === 0 ? (
@@ -369,7 +356,7 @@ export function SubagentModelPicker(props: {
             <span className="chat-composer__command-meta">No models match.</span>
           </li>
         ) : null}
-      </ul>
+      </OctantListbox>
     </div>
   );
 }

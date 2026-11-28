@@ -345,6 +345,74 @@ export function findWrongAdapterBoundaryViolations(
   return violations;
 }
 
+const RAW_INTERACTIVE_COLLECTION_ROLE =
+  /\brole\s*=\s*(?:["'](radiogroup|listbox|combobox|option)["']|\{\s*[^}\n]*["'](radiogroup|listbox|combobox|option)["'][^}\n]*\})/g;
+
+const RAW_INTERACTIVE_COLLECTION_PROP_ROLE =
+  /(?:["']role["']|\brole)\s*:\s*["'](radiogroup|listbox|combobox|option)["']/g;
+
+/**
+ * Radio groups, listboxes, comboboxes, and options must come from shared
+ * adapters under apps/web/src/ui/base so every surface shares one keyboard and
+ * roving-tabindex model.
+ */
+export function findRawInteractiveCollectionViolations(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<string> {
+  const violations: string[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    if (
+      !normalized.startsWith(`${WEB_SOURCE}/`) ||
+      normalized.startsWith(`${WEB_SOURCE}/ui/`) ||
+      normalized.includes(".test.") ||
+      normalized.includes(".test-support.")
+    ) {
+      continue;
+    }
+    const searchable = maskComments(source);
+    RAW_INTERACTIVE_COLLECTION_ROLE.lastIndex = 0;
+    for (const match of searchable.matchAll(RAW_INTERACTIVE_COLLECTION_ROLE)) {
+      const index = match.index ?? 0;
+      if (index > 0 && searchable[index - 1] === "[") continue;
+      if (isInsideJsString(searchable, index)) continue;
+      const role = match[1] ?? match[2];
+      if (role === undefined) continue;
+      const located = jsxTagAt(searchable, index);
+      if (located === undefined) continue;
+      const opening = jsxOpeningTag(searchable, located.start, located.tag);
+      if (opening === undefined || index >= located.start + opening.length) continue;
+      const tag = located.tag;
+      const line = source.slice(0, index).split("\n").length;
+      const replacement =
+        role === "radiogroup"
+          ? "OctantRadioGroup"
+          : "OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox";
+      violations.push(
+        `${normalized}:${String(line)} renders raw role="${role}" on <${tag}>; use ${replacement}.`,
+      );
+    }
+    RAW_INTERACTIVE_COLLECTION_PROP_ROLE.lastIndex = 0;
+    for (const match of searchable.matchAll(RAW_INTERACTIVE_COLLECTION_PROP_ROLE)) {
+      const index = match.index ?? 0;
+      if (isInsideJsString(searchable, index)) continue;
+      const role = match[1];
+      if (role === undefined) continue;
+      const line = source.slice(0, index).split("\n").length;
+      const replacement =
+        role === "radiogroup"
+          ? "OctantRadioGroup"
+          : "OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox";
+      violations.push(
+        `${normalized}:${String(line)} passes raw role: "${role}"; use ${replacement}.`,
+      );
+    }
+  }
+  return violations;
+}
+
 async function sourceFiles(root: string): Promise<Readonly<Record<string, string>>> {
   const files: Record<string, string> = {};
   const visit = async (directory: string): Promise<void> => {
@@ -376,6 +444,7 @@ async function main(): Promise<void> {
   const liveExceptions = liveRegions.filter(
     (finding) => finding.category !== "ordinary" && finding.category !== "recipe",
   );
+  const collectionViolations = findRawInteractiveCollectionViolations(files);
   const violations = [
     ...importViolations,
     ...ordinary.map(
@@ -388,6 +457,7 @@ async function main(): Promise<void> {
       (finding) =>
         `${finding.file}:${String(finding.line)} renders raw role="${finding.role}" on <${finding.tag}>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.`,
     ),
+    ...collectionViolations,
   ];
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);

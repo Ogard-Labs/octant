@@ -1,5 +1,5 @@
 import { Bell, Check, Plus, Settings, Trash2 } from "../ui/icons";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantKbd } from "../ui/base/OctantKbd";
@@ -14,7 +14,14 @@ import {
   OctantComboboxTrigger,
 } from "../ui/base/OctantCombobox";
 import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantSeparator, OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -637,7 +644,102 @@ function Labels() {
           </OctantToggleGroupItem>
         </OctantToggleGroup>
       </Specimen>
+      <Specimen
+        adapters={["OctantRadioGroup", "OctantRadioGroupItem"]}
+        props={`appearance="segmented"; value="light"; one item disabled`}
+      >
+        <OctantRadioGroup appearance="segmented" aria-label="Theme" defaultValue="light">
+          <OctantRadioGroupItem appearance="segmented" value="system">
+            System
+          </OctantRadioGroupItem>
+          <OctantRadioGroupItem appearance="segmented" value="light">
+            Light
+          </OctantRadioGroupItem>
+          <OctantRadioGroupItem appearance="segmented" disabled value="dark">
+            Dark
+          </OctantRadioGroupItem>
+        </OctantRadioGroup>
+      </Specimen>
+      <Specimen
+        adapters={["OctantListbox", "OctantListboxInput", "OctantListboxOption"]}
+        props="searchable combobox input paired with a shared listbox"
+      >
+        <GalleryListboxSpecimen />
+      </Specimen>
     </>
+  );
+}
+
+const GALLERY_LISTBOX_CHOICES = [
+  { id: "first", label: "First choice" },
+  { id: "second", label: "Second choice" },
+  { id: "third", label: "Third choice" },
+] as const;
+
+export function GalleryListboxSpecimen() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string>("first");
+  const visible = GALLERY_LISTBOX_CHOICES.filter((choice) =>
+    choice.label.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const controller = useOctantListbox({
+    allowHomeEnd: false,
+    count: visible.length,
+    onActivate: (index) => {
+      const choice = visible[index];
+      if (choice !== undefined) setSelectedId(choice.id);
+    },
+    onDismiss: () => setQuery(""),
+  });
+  const activeChoice = controller.activeIndex >= 0 ? visible[controller.activeIndex] : undefined;
+  const activeOptionId =
+    activeChoice === undefined ? undefined : `gallery-listbox-sample-${activeChoice.id}`;
+
+  return (
+    <div className="gallery-field-width">
+      <OctantListboxInput
+        activeDescendantId={activeOptionId}
+        aria-label="Filter choices"
+        controlsId="gallery-listbox-sample"
+        expanded={visible.length > 0}
+        onChange={(event) => {
+          setQuery(event.currentTarget.value);
+          controller.setActiveIndex(0);
+        }}
+        onKeyDown={(event) => {
+          controller.handleKeyDown(event);
+        }}
+        placeholder="Filter choices"
+        ref={inputRef}
+        value={query}
+      />
+      <OctantListbox
+        aria-label="Choices"
+        id="gallery-listbox-sample"
+        onKeyDown={(event) => {
+          controller.handleKeyDown(event);
+        }}
+      >
+        {visible.map((choice, index) => (
+          <OctantListboxOption
+            active={index === controller.activeIndex}
+            id={`gallery-listbox-sample-${choice.id}`}
+            key={choice.id}
+            onClick={() => {
+              setSelectedId(choice.id);
+              controller.setActiveIndex(index);
+              inputRef.current?.focus();
+            }}
+            selected={selectedId === choice.id}
+            size="sm"
+            variant={index === controller.activeIndex ? "secondary" : "ghost"}
+          >
+            {choice.label}
+          </OctantListboxOption>
+        ))}
+      </OctantListbox>
+    </div>
   );
 }
 

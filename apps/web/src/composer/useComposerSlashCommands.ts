@@ -9,7 +9,7 @@ import {
   type OctantCommand,
 } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import type { ComposerInputElement } from "./ComposerInput";
 
 /** The provider's own slash commands a composer lists beside Octant's. */
@@ -79,8 +79,6 @@ export function useComposerSlashCommands(input: {
   const tokenIsCurrent =
     token !== undefined && input.draft.slice(token.start, token.end) === `/${token.query}`;
   const open = tokenIsCurrent && commands.length > 0;
-  const active = open ? matches[activeIndex] : undefined;
-
   const sync = (draft: string, caret: number | null) => {
     setToken(parseSlashCommandToken(draft, caret));
     setActiveIndex(0);
@@ -104,35 +102,25 @@ export function useComposerSlashCommands(input: {
     });
     if (command.action.kind === "run") command.action.run();
   };
-  const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean => {
-    if (event.nativeEvent.isComposing) return false;
-    if (open && matches.length > 0) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveIndex((current) => (current + 1) % matches.length);
-        return true;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex((current) => (current - 1 + matches.length) % matches.length);
-        return true;
-      }
-      if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey && active) {
-        event.preventDefault();
-        choose(active);
-        return true;
-      }
-    }
-    if (event.key === "Escape" && open) {
-      event.preventDefault();
-      setToken(undefined);
-      return true;
-    }
-    return false;
-  };
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowHomeEnd: false,
+    allowTabActivate: true,
+    count: open ? matches.length : 0,
+    disabled: !open,
+    onActivate: (index) => {
+      const command = matches[index];
+      if (command !== undefined) choose(command);
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: open ? () => setToken(undefined) : undefined,
+  });
+  const active = open && listbox.activeIndex >= 0 ? matches[listbox.activeIndex] : undefined;
+  const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean =>
+    listbox.handleKeyDown(event);
   return {
     active,
-    activeIndex,
+    activeIndex: listbox.activeIndex,
     commandIds: commands.map((command) => command.id),
     choose,
     handleKeyDown,
@@ -148,6 +136,8 @@ export function ComposerSlashTypeahead(props: {
 }) {
   const { controller } = props;
   if (!controller.open) return null;
+  const activeOptionId =
+    controller.active === undefined ? undefined : `${controller.listId}-${controller.active.id}`;
   const content =
     controller.matches.length === 0
       ? createElement(
@@ -156,26 +146,26 @@ export function ComposerSlashTypeahead(props: {
           "No matching command. Leaving this as ordinary text.",
         )
       : createElement(
-          "ul",
+          OctantListbox,
           {
+            activeDescendantId: activeOptionId,
             "aria-label": "Commands you can run",
+            as: "ul",
             className: "chat-composer__command-list",
             id: controller.listId,
-            role: "listbox",
           },
           ...controller.matches.map((command, index) =>
             createElement(
               "li",
               { className: "chat-composer__command-option", key: command.id, role: "presentation" },
               createElement(
-                OctantButton,
+                OctantListboxOption,
                 {
-                  "aria-selected": index === controller.activeIndex,
+                  active: index === controller.activeIndex,
                   id: `${controller.listId}-${command.id}`,
                   onClick: () => controller.choose(command),
-                  role: "option",
+                  selected: index === controller.activeIndex,
                   size: "sm",
-                  type: "button",
                   variant: index === controller.activeIndex ? "secondary" : "ghost",
                 },
                 createElement(Slash, { "aria-hidden": true, size: 12 }),

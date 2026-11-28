@@ -3,6 +3,7 @@ import {
   findFormValidationOwnerViolations,
   findRawControlBoundaryViolations,
   findRawControlInventory,
+  findRawInteractiveCollectionViolations,
   findRawLiveRegionViolations,
   findUiComponentBoundaryViolations,
   findWrongAdapterBoundaryViolations,
@@ -265,6 +266,40 @@ describe("UI component boundary check", () => {
       }),
     ).toEqual([
       'apps/web/src/zen/ZenThreadPicker.tsx:1 renders raw role="dialog" on <OctantCard>; use OctantAlert, OctantToast, OctantDialog, or OctantConfirmDialog, or record an exception.',
+    ]);
+  });
+
+  it("rejects raw radiogroup, listbox, combobox, and option roles outside apps/web/src/ui", () => {
+    expect(
+      findRawInteractiveCollectionViolations({
+        "apps/web/src/palette/CustomPicker.tsx": [
+          "export function CustomPicker() {",
+          '  return <div role="radiogroup"><input role="combobox" /><ul role="listbox"><li role="option" /></ul></div>;',
+          "}",
+        ].join("\n"),
+        "apps/web/src/composer/SlashMenu.ts": [
+          "export function menu() {",
+          '  return createElement("ul", { role: "listbox" }, createElement("button", { "role": "option" }));',
+          "}",
+        ].join("\n"),
+        "apps/web/src/ui/base/OctantListbox.tsx":
+          '<div role="listbox"><button role="option" /></div>',
+        "apps/web/src/composer/ThreadInfo.tsx":
+          'const ROW_POPUP = \'[role="dialog"], [role="listbox"]\';',
+        "apps/web/src/credentials/Card.tsx": [
+          "export function Card() {",
+          "  const onClick = (e: MouseEvent<HTMLFormElement>) => e.target.closest(\"[role='combobox'], [role='option']\");",
+          "  return <p>Octant's card</p>;",
+          "}",
+        ].join("\n"),
+      }),
+    ).toEqual([
+      'apps/web/src/composer/SlashMenu.ts:2 passes raw role: "listbox"; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
+      'apps/web/src/composer/SlashMenu.ts:2 passes raw role: "option"; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
+      'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="radiogroup" on <div>; use OctantRadioGroup.',
+      'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="combobox" on <input>; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
+      'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="listbox" on <ul>; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
+      'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="option" on <li>; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
     ]);
   });
 });

@@ -9,7 +9,7 @@ import {
   type ThreadMentionToken,
 } from "@octant/domain";
 import { useState, type KeyboardEvent } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import type { ComposerInlineChips, ComposerInputElement } from "../composer/ComposerInput";
 import { lazyOr } from "../lib/lazyOr";
 import type { ThreadMentionChipProps } from "./ThreadMentionInlineChip";
@@ -166,36 +166,32 @@ export function useThreadMentionTypeahead(input: {
     });
   }
 
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowHomeEnd: false,
+    allowTabActivate: true,
+    count: open ? rows : 0,
+    disabled: !open,
+    onActivate: (index) => {
+      const candidate = candidates[index];
+      if (candidate !== undefined) {
+        choose(candidate);
+        return;
+      }
+      const tracker = trackers[index - candidates.length];
+      if (tracker !== undefined) chooseTracker(tracker);
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: open
+      ? () => {
+          setToken(undefined);
+          mentions?.onQueryChange(undefined);
+        }
+      : undefined,
+  });
+
   function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
-    if (open && rows > 0) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveIndex((current) => (current + 1) % rows);
-        return true;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex((current) => (current - 1 + rows) % rows);
-        return true;
-      }
-      if (
-        (event.key === "Enter" || event.key === "Tab") &&
-        !event.shiftKey &&
-        activeOptionId !== undefined
-      ) {
-        event.preventDefault();
-        if (activeCandidate !== undefined) choose(activeCandidate);
-        else if (activeTracker !== undefined) chooseTracker(activeTracker);
-        return true;
-      }
-    }
-    if (event.key === "Escape" && open) {
-      event.preventDefault();
-      setToken(undefined);
-      mentions?.onQueryChange(undefined);
-      return true;
-    }
-    return false;
+    return listbox.handleKeyDown(event);
   }
 
   const inlineChips: ComposerInlineChips | undefined =
@@ -288,15 +284,15 @@ export function ThreadMentionTypeahead(props: {
             : "No thread you can open matches. Kept as plain text."}
         </p>
       ) : (
-        <ul
+        <OctantListbox
           aria-label={
             trackers.length === 0
               ? "Threads you can mention"
               : "Threads, pull requests and issues you can mention"
           }
+          as="ul"
           className="thread-mention__list"
           id={props.listId}
-          role="listbox"
         >
           {props.candidates.map((candidate, index) => (
             <li
@@ -304,18 +300,16 @@ export function ThreadMentionTypeahead(props: {
               key={String(candidate.threadId)}
               role="presentation"
             >
-              <OctantButton
-                aria-selected={index === props.activeIndex}
+              <OctantListboxOption
                 id={`${props.listId}-${String(candidate.threadId)}`}
                 onClick={() => props.onChoose(candidate)}
                 onMouseEnter={() => props.onHover(index)}
-                role="option"
+                selected={index === props.activeIndex}
                 size="sm"
-                type="button"
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
                 <LazyThreadMentionOption candidate={candidate} />
-              </OctantButton>
+              </OctantListboxOption>
             </li>
           ))}
           {trackers.length === 0 ? null : (
@@ -327,7 +321,7 @@ export function ThreadMentionTypeahead(props: {
               onHover={(index) => props.onHover(props.candidates.length + index)}
             />
           )}
-        </ul>
+        </OctantListbox>
       )}
     </div>
   );

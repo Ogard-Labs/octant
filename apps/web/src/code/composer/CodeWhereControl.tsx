@@ -5,7 +5,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantPopover } from "../../ui/base/OctantPopover";
-import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 
 export interface CodeWhereControlProps {
   /** Opens the menu on first draw — the Environment's branch-switching entry. */
@@ -116,39 +116,31 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
         <p className="code-where__caption" id={headingId}>
           Where this thread works
         </p>
-        <div
+        <OctantRadioGroup
           aria-labelledby={headingId}
           className="code-where__choices"
-          onKeyDown={moveWithinRadioGroup}
-          role="radiogroup"
+          onValueChange={props.onWorkspaceChange}
+          value={props.workspace}
         >
-          {CHOICES.map((candidate) => {
-            const selected = candidate.id === props.workspace;
-            return (
-              <OctantButton
-                aria-checked={selected}
-                className="code-where__row code-where__row--radio"
-                key={candidate.id}
-                onClick={() => props.onWorkspaceChange(candidate.id)}
-                role="radio"
-                tabIndex={selected ? 0 : -1}
-                {...(candidate.id === "current-checkout" && props.projectRoot !== undefined
-                  ? { title: props.projectRoot }
-                  : {})}
-                type="button"
-                variant="bare"
-              >
-                <span className="code-where__row-name">
-                  <span aria-hidden="true" className="code-where__dot" />
-                  {candidate.label}
-                </span>
-                <span className="code-where__row-value">
-                  {candidate.id === "current-checkout" ? `on ${props.branch}` : "own branch"}
-                </span>
-              </OctantButton>
-            );
-          })}
-        </div>
+          {CHOICES.map((candidate) => (
+            <OctantRadioGroupItem
+              className="code-where__row code-where__row--radio"
+              key={candidate.id}
+              {...(candidate.id === "current-checkout" && props.projectRoot !== undefined
+                ? { title: props.projectRoot }
+                : {})}
+              value={candidate.id}
+            >
+              <span className="code-where__row-name">
+                <span aria-hidden="true" className="code-where__dot" />
+                {candidate.label}
+              </span>
+              <span className="code-where__row-value">
+                {candidate.id === "current-checkout" ? `on ${props.branch}` : "own branch"}
+              </span>
+            </OctantRadioGroupItem>
+          ))}
+        </OctantRadioGroup>
         <div aria-hidden="true" className="code-where__separator" />
         {/* The branch row is the same row in both states: a new worktree
             chooses where it starts, this checkout says the branch it is on,

@@ -11,7 +11,7 @@ import type { ChatClient } from "@octant/client-runtime";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
-import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { SurfaceSection } from "../../surface/SurfaceHeader";
 import { turnReplyText } from "../../chat/chatReply";
@@ -323,23 +323,19 @@ function StarControl(props: {
 
   return (
     <div className="benchmark-stars">
-      <div
+      <OctantRadioGroup
         aria-label="Your rating"
         className="benchmark-stars__group"
-        onKeyDown={moveWithinRadioGroup}
-        role="radiogroup"
+        onValueChange={(next) => setStars(Number(next))}
+        value={stars === undefined ? "" : String(stars)}
       >
         {[1, 2, 3, 4, 5].map((value) => (
-          <OctantButton
-            aria-checked={stars === value}
+          <OctantRadioGroupItem
             aria-label={`${value} of 5 stars`}
             className="benchmark-stars__star"
             key={value}
-            onClick={() => setStars(value)}
-            role="radio"
             size="icon-sm"
-            tabIndex={stars === value || (stars === undefined && value === 1) ? 0 : -1}
-            type="button"
+            value={String(value)}
             variant="ghost"
           >
             <Star
@@ -347,9 +343,9 @@ function StarControl(props: {
               fill={stars !== undefined && value <= stars ? "currentColor" : "none"}
               size={16}
             />
-          </OctantButton>
+          </OctantRadioGroupItem>
         ))}
-      </div>
+      </OctantRadioGroup>
       <OctantInput
         aria-label="Note on this answer"
         maxLength={512}

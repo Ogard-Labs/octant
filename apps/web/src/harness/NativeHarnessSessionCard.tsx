@@ -1,6 +1,9 @@
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
-import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
-import { QuestionnaireCard, QuestionnaireSummary } from "../transcript/QuestionnaireCard";
+import {
+  LazyProviderQuestionCard as ProviderQuestionCard,
+  LazyQuestionnaireCard as QuestionnaireCard,
+} from "../transcript/LazyProviderQuestionCard";
+import { QuestionnaireSummary } from "../transcript/QuestionnaireSummary";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { NativeHarnessRouteDecision, NativeHarnessSessionView } from "@octant/contracts";
 import {

@@ -6,10 +6,11 @@ import type {
   PickerModel,
   PickerSection,
 } from "@octant/domain";
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useId, useMemo, useState } from "react";
 import { filterModelPickerGroups } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ModelPickerProps {
@@ -33,47 +34,45 @@ interface FlatOption {
 }
 
 export function ModelPicker(props: ModelPickerProps) {
+  const listId = useId();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
-  const listboxRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(
     () => filterModelPickerGroups(props.groups, query),
     [props.groups, query],
   );
   const flatOptions = useMemo(() => flattenOptions(filtered), [filtered]);
-  const effectiveActive =
-    activeIndex < 0 || flatOptions.length === 0
-      ? -1
-      : Math.min(activeIndex, flatOptions.length - 1);
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (props.disabled) return;
-    if (flatOptions.length === 0) return;
-    // The readiness reason's Provider settings button sits inside the listbox;
-    // its own Enter/Space must open settings, not pick the active model.
-    if (event.target instanceof Element && event.target.closest(".model-picker__group-reason"))
-      return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((current) => {
-        const next = current + 1;
-        return next >= flatOptions.length ? 0 : next;
-      });
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((current) => {
-        const next = current - 1;
-        return next < 0 ? flatOptions.length - 1 : next;
-      });
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      const option = flatOptions[effectiveActive];
+  const optionIdByKey = useMemo(() => {
+    const ids = new Map<string, string>();
+    flatOptions.forEach((option, index) => {
+      ids.set(
+        modelOptionKey(option.providerInstanceId, option.modelId),
+        `${listId}-option-${String(index)}`,
+      );
+    });
+    return ids;
+  }, [flatOptions, listId]);
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowSpaceActivate: true,
+    count: flatOptions.length,
+    disabled: props.disabled === true,
+    getOptionLabel: (index) => flatOptions[index]?.label ?? "",
+    onActivate: (index) => {
+      const option = flatOptions[index];
       if (option !== undefined) {
         props.onSelect({ providerInstanceId: option.providerInstanceId, modelId: option.modelId });
       }
-    }
-  }
+    },
+    onActiveIndexChange: setActiveIndex,
+  });
+  const effectiveActive = listbox.activeIndex;
+  const activeOption = effectiveActive >= 0 ? flatOptions[effectiveActive] : undefined;
+  const activeOptionId =
+    activeOption === undefined
+      ? undefined
+      : optionIdByKey.get(modelOptionKey(activeOption.providerInstanceId, activeOption.modelId));
 
   const empty = filtered.length === 0;
   return (
@@ -98,12 +97,20 @@ export function ModelPicker(props: ModelPickerProps) {
             : "No providers or models match your search."}
         </p>
       ) : (
-        <div
+        <OctantListbox
+          activeDescendantId={activeOptionId}
           aria-label={props.ariaLabel ?? "Model picker"}
           className={`model-picker__listbox${props.narrow === true ? " model-picker--narrow" : ""}`}
-          onKeyDown={handleKeyDown}
-          ref={listboxRef}
-          role="listbox"
+          onKeyDown={(event) => {
+            // The readiness reason's Provider settings button sits inside the listbox;
+            // its own Enter/Space must open settings, not pick the active model.
+            if (
+              event.target instanceof Element &&
+              event.target.closest(".model-picker__group-reason")
+            )
+              return;
+            listbox.handleKeyDown(event);
+          }}
           tabIndex={props.disabled ? -1 : 0}
         >
           {umbrellaBlocks(filtered).map((block) =>
@@ -121,6 +128,7 @@ export function ModelPicker(props: ModelPickerProps) {
                     group={group}
                     key={String(group.instance.id)}
                     nested
+                    optionIdByKey={optionIdByKey}
                     selectedProviderInstanceId={props.selectedProviderInstanceId}
                     selectedModelId={props.selectedModelId}
                     activeProviderInstanceId={
@@ -143,6 +151,7 @@ export function ModelPicker(props: ModelPickerProps) {
               <ProviderGroupView
                 group={block.group}
                 key={String(block.group.instance.id)}
+                optionIdByKey={optionIdByKey}
                 selectedProviderInstanceId={props.selectedProviderInstanceId}
                 selectedModelId={props.selectedModelId}
                 activeProviderInstanceId={
@@ -161,7 +170,7 @@ export function ModelPicker(props: ModelPickerProps) {
               />
             ),
           )}
-        </div>
+        </OctantListbox>
       )}
     </div>
   );
@@ -195,6 +204,7 @@ function umbrellaBlocks(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<Umbre
 function ProviderGroupView(props: {
   readonly group: PickerGroup;
   readonly nested?: boolean;
+  readonly optionIdByKey: ReadonlyMap<string, string>;
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly activeProviderInstanceId?: ProviderInstanceId | undefined;
@@ -253,6 +263,7 @@ function ProviderGroupView(props: {
       {group.sections.map((section) => (
         <SectionView
           key={section.id}
+          optionIdByKey={props.optionIdByKey}
           section={section}
           providerInstanceId={group.instance.id}
           selectedModelId={
@@ -274,6 +285,7 @@ function ProviderGroupView(props: {
 function SectionView(props: {
   readonly section: PickerSection;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly optionIdByKey: ReadonlyMap<string, string>;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly activeModelId?: ProviderModelId | undefined;
   readonly disabled: boolean;
@@ -287,6 +299,9 @@ function SectionView(props: {
       <ul className="model-picker__options">
         {props.section.models.map((picker) => {
           const modelId = picker.model.id;
+          const optionId = props.optionIdByKey.get(
+            modelOptionKey(props.providerInstanceId, modelId),
+          );
           const capabilities = picker.badges.filter((badge) => !shared.has(badge.kind));
           const unavailable = picker.unavailableReason !== undefined;
           const selected =
@@ -296,17 +311,15 @@ function SectionView(props: {
             props.activeModelId !== undefined && String(props.activeModelId) === String(modelId);
           return (
             <li key={String(modelId)}>
-              <OctantButton
+              <OctantListboxOption
                 aria-disabled={unavailable}
-                aria-selected={selected}
                 className={`model-picker__option${active ? " model-picker__option--active" : ""}`}
                 disabled={props.disabled || unavailable}
+                id={optionId}
                 onClick={() =>
                   props.onSelect({ providerInstanceId: props.providerInstanceId, modelId })
                 }
-                role="option"
-                type="button"
-                variant="bare"
+                selected={selected}
               >
                 <span className="model-picker__option-name">{picker.model.displayName}</span>
                 <span className="model-picker__option-id">{String(modelId)}</span>
@@ -318,7 +331,7 @@ function SectionView(props: {
                 {picker.unavailableReason !== undefined ? (
                   <span className="model-picker__option-reason">{picker.unavailableReason}</span>
                 ) : null}
-              </OctantButton>
+              </OctantListboxOption>
             </li>
           );
         })}
@@ -371,6 +384,10 @@ function sharedBadgeKinds(models: ReadonlyArray<PickerModel>): ReadonlySet<Model
     }
   }
   return shared;
+}
+
+function modelOptionKey(providerInstanceId: ProviderInstanceId, modelId: ProviderModelId): string {
+  return `${String(providerInstanceId)}\0${String(modelId)}`;
 }
 
 function flattenOptions(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<FlatOption> {

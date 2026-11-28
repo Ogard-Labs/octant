@@ -12,7 +12,7 @@ import { reconcileFileMentionPaths } from "@octant/domain";
 import { File, Folder } from "../ui/icons";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import {
   applyPathMention,
   rankPathMentionCandidates,
@@ -194,30 +194,22 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
     });
   }
 
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowHomeEnd: false,
+    allowTabActivate: true,
+    count: open ? candidates.length : 0,
+    disabled: !open,
+    onActivate: (index) => {
+      const candidate = candidates[index];
+      if (candidate !== undefined) choose(candidate);
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: open ? () => setMention(undefined) : undefined,
+  });
+
   function handleKeyDown(event: KeyboardEvent<ComposerInputElement>): boolean {
-    if (open && candidates.length > 0) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveIndex((current) => (current + 1) % candidates.length);
-        return true;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex((current) => (current - 1 + candidates.length) % candidates.length);
-        return true;
-      }
-      if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey && activeCandidate) {
-        event.preventDefault();
-        choose(activeCandidate);
-        return true;
-      }
-    }
-    if (event.key === "Escape" && open) {
-      event.preventDefault();
-      setMention(undefined);
-      return true;
-    }
-    return false;
+    return listbox.handleKeyDown(event);
   }
 
   return {
@@ -261,22 +253,20 @@ export function PathMentionTypeahead(props: {
             : "No matching file in this checkout. Leaving this as ordinary text."}
         </p>
       ) : (
-        <ul
+        <OctantListbox
           aria-label="Files you can mention"
+          as="ul"
           className="thread-mention__list"
           id={props.listId}
-          role="listbox"
         >
           {props.candidates.map((candidate, index) => (
             <li className="thread-mention__option" key={candidate.path} role="presentation">
-              <OctantButton
-                aria-selected={index === props.activeIndex}
+              <OctantListboxOption
                 id={`${props.listId}-${candidate.path}`}
                 onClick={() => props.onChoose(candidate)}
                 onMouseEnter={() => props.onHover(index)}
-                role="option"
+                selected={index === props.activeIndex}
                 size="sm"
-                type="button"
                 variant={index === props.activeIndex ? "secondary" : "ghost"}
               >
                 {candidate.kind === "directory" ? (
@@ -288,10 +278,10 @@ export function PathMentionTypeahead(props: {
                 <span className="thread-mention__meta">
                   {candidate.kind === "directory" ? "Folder" : "File"}
                 </span>
-              </OctantButton>
+              </OctantListboxOption>
             </li>
           ))}
-        </ul>
+        </OctantListbox>
       )}
     </div>
   );

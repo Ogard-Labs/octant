@@ -6,7 +6,8 @@ import { useState } from "react";
 import { Eye, EyeOff } from "../ui/icons";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { chooseByNumber, moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
+import { chooseByNumber } from "../ui/base/radioGroupKeys";
 import { OptionKey } from "./OptionKey";
 
 export interface ProviderQuestionCardProps {
@@ -81,10 +82,10 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
       {count > 1 ? (
         <p className="provider-question-card__progress">{`Question ${String(index)} of ${String(count)}`}</p>
       ) : null}
-      <div
+      <OctantRadioGroup
         className="provider-question-card__choices"
-        onKeyDown={moveWithinRadioGroup}
-        role="radiogroup"
+        onValueChange={setSelected}
+        value={selected ?? ""}
       >
         {props.options.map((option, index) => (
           <div
@@ -92,13 +93,10 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
             {...(selected === option.label ? { "data-checked": "" } : {})}
             key={option.label}
           >
-            <OctantButton
-              aria-checked={selected === option.label}
+            <OctantRadioGroupItem
               className="provider-question-card__option"
-              onClick={() => setSelected(option.label)}
               size={null}
-              role="radio"
-              type="button"
+              value={option.label}
               variant="ghost"
             >
               <span className="provider-question-card__option-label">
@@ -110,24 +108,21 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
                   {option.description}
                 </span>
               )}
-            </OctantButton>
+            </OctantRadioGroupItem>
           </div>
         ))}
         <div className="provider-question-card__choice" {...(custom ? { "data-checked": "" } : {})}>
-          <OctantButton
-            aria-checked={custom}
+          <OctantRadioGroupItem
             className="provider-question-card__option"
-            onClick={() => setSelected(CUSTOM)}
             size={null}
-            role="radio"
-            type="button"
+            value={CUSTOM}
             variant="ghost"
           >
             <span className="provider-question-card__option-label">
               Type your own answer
               <OptionKey index={props.options.length} />
             </span>
-          </OctantButton>
+          </OctantRadioGroupItem>
           {custom && !secret ? (
             <OctantInput
               aria-label="Your answer"
@@ -162,7 +157,7 @@ function SingleQuestionCard(props: ProviderQuestionCardProps) {
             </div>
           ) : null}
         </div>
-      </div>
+      </OctantRadioGroup>
       {secret ? (
         <p className="provider-question-card__progress">
           Sent only to the agent. Octant does not save it or add it to the thread.

@@ -14,6 +14,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantListbox, OctantListboxOption } from "../ui/base/OctantListbox";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface FolderPickerProps {
@@ -250,7 +251,12 @@ export function FolderPicker(props: FolderPickerProps) {
           })}
         </nav>
       ) : null}
-      <div className="folder-picker__list" role="listbox" aria-label="Folders">
+      <OctantListbox
+        aria-label="Folders"
+        className="folder-picker__list"
+        itemSelector=".folder-picker__item-nav"
+        navigation="roving"
+      >
         {status === "loading" || searching ? (
           <p className="folder-picker__status" role="status">
             Loading…
@@ -273,12 +279,12 @@ export function FolderPicker(props: FolderPickerProps) {
           <p className="folder-picker__status">No folders found.</p>
         ) : result !== null ? (
           result.candidates.map((candidate) => (
-            <div
+            <OctantListboxOption
               aria-disabled={false}
-              aria-selected={false}
+              as="div"
               className={`folder-picker__item${candidate.isSelectable ? "" : " folder-picker__item--disabled"}`}
               key={candidate.candidateId}
-              role="option"
+              selected={false}
               title={candidate.unselectableReason}
             >
               <OctantButton
@@ -319,10 +325,10 @@ export function FolderPicker(props: FolderPickerProps) {
                   Open
                 </OctantButton>
               )}
-            </div>
+            </OctantListboxOption>
           ))
         ) : null}
-      </div>
+      </OctantListbox>
       {errorMessage === undefined || status === "error" ? null : (
         <OctantAlert className="folder-picker__error" tone="danger">
           {errorMessage}

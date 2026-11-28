@@ -99,4 +99,34 @@ describe("CodeBranchSelector", () => {
       await screen.findByRole("switch", { name: "Start from origin in selector" }),
     ).toHaveAttribute("data-disabled");
   });
+
+  it("resets virtual focus when reopened after a keyboard pick from filtered results", async () => {
+    const user = userEvent.setup();
+    const onSelectRef = vi.fn();
+    render(
+      <CodeBranchSelector
+        branch="development"
+        onSelectRef={onSelectRef}
+        refs={refs}
+        remoteName="origin"
+        startFromOrigin={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Base branch" }));
+    const menu = await screen.findByRole("dialog", { name: "Choose base branch" });
+    const search = within(menu).getByRole("searchbox", { name: "Search refs" });
+    await user.type(search, "main");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onSelectRef).toHaveBeenCalledTimes(1);
+    expect(onSelectRef).toHaveBeenLastCalledWith(refs[3]);
+
+    await user.click(screen.getByRole("button", { name: "Base branch" }));
+    const reopened = await screen.findByRole("dialog", { name: "Choose base branch" });
+    const reopenedSearch = within(reopened).getByRole("searchbox", { name: "Search refs" });
+    await waitFor(() => expect(reopenedSearch).toHaveFocus());
+    expect(reopenedSearch).not.toHaveAttribute("aria-activedescendant");
+    await user.keyboard("{Enter}");
+    expect(onSelectRef).toHaveBeenCalledTimes(1);
+  });
 });

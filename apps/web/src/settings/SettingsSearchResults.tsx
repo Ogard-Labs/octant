@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SettingsDeepLink, SettingsSectionId } from "@octant/contracts";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import { settingsQueryWords, type SettingsSearchResult } from "./registry";
 import { scopeLabel } from "./primitives";
 
@@ -30,7 +31,6 @@ export function SettingsSearchResults({
   // top result. When the result set changes (e.g. the user keeps typing), the
   // top result is pre-selected so Enter immediately opens it.
   const [activeIndex, setActiveIndex] = useState(-1);
-  const listboxRef = useRef<HTMLUListElement>(null);
   const hasMounted = useRef(false);
 
   // Reset to the top result whenever the result set changes, but not on the
@@ -43,60 +43,21 @@ export function SettingsSearchResults({
     setActiveIndex(results.length === 0 ? -1 : 0);
   }, [results]);
 
-  // Keep the active option scrolled into view during keyboard navigation.
-  useEffect(() => {
-    if (listboxRef.current === null) return;
-    const active = listboxRef.current.querySelector<HTMLElement>('[aria-selected="true"]');
-    active?.scrollIntoView?.({ block: "nearest" });
-  }, [activeIndex]);
-
-  const move = (delta: number) => {
-    if (results.length === 0) return;
-    setActiveIndex((current) => {
-      if (current < 0) return delta > 0 ? 0 : results.length - 1;
-      return (current + delta + results.length) % results.length;
-    });
-  };
-
-  const selectActive = () => {
-    if (activeIndex < 0) return;
-    const result = results[activeIndex];
-    if (result === undefined) return;
-    onSelect(searchResultLink(result));
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        move(1);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        move(-1);
-        break;
-      case "Enter":
-        event.preventDefault();
-        selectActive();
-        break;
-      case "Home":
-        event.preventDefault();
-        setActiveIndex(results.length === 0 ? -1 : 0);
-        break;
-      case "End":
-        event.preventDefault();
-        setActiveIndex(results.length === 0 ? -1 : results.length - 1);
-        break;
-      case "Escape":
-        if (onEscape === undefined) break;
-        // Escape clears the search; it must not also reach the Settings sheet,
-        // which closes on Escape.
-        event.preventDefault();
-        event.stopPropagation();
-        onEscape();
-        break;
-    }
-  };
+  const listbox = useOctantListbox({
+    activeIndex,
+    count: results.length,
+    getOptionLabel: (index) => {
+      const result = results[index];
+      return result === undefined ? "" : resultLabel(result);
+    },
+    onActivate: (index) => {
+      const result = results[index];
+      if (result !== undefined) onSelect(searchResultLink(result));
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: onEscape,
+    stopEscapePropagation: true,
+  });
 
   const queryWords = settingsQueryWords(query);
   const isEmpty = query.trim() !== "" && results.length === 0;
@@ -110,23 +71,24 @@ export function SettingsSearchResults({
   }
 
   return (
-    <ul
+    <OctantListbox
+      activeDescendantId={listbox.activeIndex < 0 ? undefined : optionId(listbox.activeIndex)}
       aria-label="Settings search results"
-      aria-activedescendant={activeIndex < 0 ? undefined : optionId(activeIndex)}
+      as="ul"
       className="settings-search-results"
-      onKeyDown={handleKeyDown}
-      ref={listboxRef}
-      role="listbox"
+      onKeyDown={(event) => {
+        listbox.handleKeyDown(event);
+      }}
       tabIndex={0}
     >
       {results.map((result, index) => (
-        <li
-          aria-selected={index === activeIndex}
+        <OctantListboxOption
+          as="li"
           className="settings-search-results__option"
           id={optionId(index)}
           key={resultKey(result)}
           onClick={() => onSelect(searchResultLink(result))}
-          role="option"
+          selected={index === listbox.activeIndex}
         >
           <span className="settings-search-results__label">
             <MatchedLabel label={resultLabel(result)} words={queryWords} />
@@ -135,9 +97,9 @@ export function SettingsSearchResults({
             in {sectionLabels[result.sectionId] ?? result.sectionId}
           </span>
           <span className="settings-search-results__scope">{scopeLabel(result.scope)}</span>
-        </li>
+        </OctantListboxOption>
       ))}
-    </ul>
+    </OctantListbox>
   );
 }
 

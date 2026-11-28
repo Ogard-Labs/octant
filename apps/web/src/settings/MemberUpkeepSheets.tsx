@@ -24,7 +24,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { MemberBuildDownloadStatus } from "./MemberBuildDownloadStatus";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 
 export const MEMBER_UPDATE_ACTION = "Update";
 export const MEMBER_REMOVAL_ACTION = "Remove Octant";
@@ -326,28 +326,24 @@ export function MemberUpdateSheet(props: MemberSheetProps) {
             </dd>
             <dt>Running turns</dt>
             <dd>
-              <div
+              <OctantRadioGroup
                 aria-label="Before the swap"
                 className="member-update__drains"
-                onKeyDown={moveWithinRadioGroup}
-                role="radiogroup"
+                onValueChange={setDrainKind}
+                value={drainKind}
               >
                 {state.plan.drains.map((kind) => (
-                  <OctantButton
-                    aria-checked={drainKind === kind}
+                  <OctantRadioGroupItem
                     key={kind}
-                    onClick={() => setDrainKind(kind)}
-                    role="radio"
-                    tabIndex={drainKind === kind ? 0 : -1}
-                    type="button"
+                    value={kind}
                     variant={drainKind === kind ? "secondary" : "ghost"}
                   >
                     {kind === "wait"
                       ? `Wait up to ${minutesText(waitMinutes)} for running work`
                       : "Stop now"}
-                  </OctantButton>
+                  </OctantRadioGroupItem>
                 ))}
-              </div>
+              </OctantRadioGroup>
               {drainKind === "wait" ? (
                 <>
                   <OctantNumberStepper

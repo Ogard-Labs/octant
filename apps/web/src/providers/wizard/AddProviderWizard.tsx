@@ -10,7 +10,7 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantInput } from "../../ui/base/OctantInput";
-import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 import { normalizeClaudeGatewayBaseUrl } from "@octant/domain";
 import {
   ClaudeAccountAccentPicker,
@@ -295,33 +295,31 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
       <div className="add-provider-wizard__body">
         <section hidden={!onCard}>
           <p className="add-provider-wizard__lead">Choose what to add an account for.</p>
-          <div
+          <OctantRadioGroup
             aria-label="Provider"
             className="add-provider-wizard__cards"
-            onKeyDown={moveWithinRadioGroup}
-            role="radiogroup"
+            onValueChange={(next) => {
+              const card = cards.find((candidate) => candidate.type === next);
+              if (card === undefined) return;
+              // The key field outlives Back and Next, so a key typed for
+              // one provider would otherwise be stored against the next
+              // one chosen and handed to its runtime (review finding,
+              // 2026-11-17).
+              if (card.type !== type && credentialInput.current !== null) {
+                credentialInput.current.value = "";
+              }
+              setType(card.type);
+              setProblem(undefined);
+            }}
+            value={type}
           >
             {cards.map((card) => (
-              <OctantButton
-                aria-checked={type === card.type}
+              <OctantRadioGroupItem
                 aria-describedby={`wizard-card-${card.type}-detail`}
                 className="add-provider-wizard__card"
                 data-unavailable={card.unavailable === undefined ? undefined : "true"}
                 key={card.type}
-                onClick={() => {
-                  // The key field outlives Back and Next, so a key typed for
-                  // one provider would otherwise be stored against the next
-                  // one chosen and handed to its runtime (review finding,
-                  // 2026-11-17).
-                  if (card.type !== type && credentialInput.current !== null) {
-                    credentialInput.current.value = "";
-                  }
-                  setType(card.type);
-                  setProblem(undefined);
-                }}
-                role="radio"
-                type="button"
-                variant="bare"
+                value={card.type}
               >
                 <ProviderGlyph driverKind={card.type} displayName={card.name} size={20} />
                 <span className="add-provider-wizard__card-text">
@@ -334,44 +332,42 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
                       `${card.description} ${card.found ? "Found on this computer." : "Not found on this computer yet."}`}
                   </span>
                 </span>
-              </OctantButton>
+              </OctantRadioGroupItem>
             ))}
-          </div>
+          </OctantRadioGroup>
         </section>
         <section hidden={step !== "sign-in"}>
           <p className="add-provider-wizard__lead">How should {providerName} sign in?</p>
-          <div
+          <OctantRadioGroup
             aria-label="Sign-in"
             className="add-provider-wizard__cards"
-            onKeyDown={moveWithinRadioGroup}
-            role="radiogroup"
+            onValueChange={(next) => {
+              const candidate = choices.find((item) => item.id === next);
+              if (candidate === undefined) return;
+              setChoiceByType((current) => ({ ...current, [type]: candidate.id }));
+              // A secret typed for one sign-in is never kept for another:
+              // an Anthropic API key must not be saved as a gateway's
+              // token and sent to that gateway (review finding, 2026-11-18).
+              if (candidate.id !== choice?.id && credentialInput.current !== null) {
+                credentialInput.current.value = "";
+              }
+              setProblem(undefined);
+            }}
+            value={choice?.id ?? ""}
           >
             {choices.map((candidate) => (
-              <OctantButton
-                aria-checked={choice?.id === candidate.id}
+              <OctantRadioGroupItem
                 className="add-provider-wizard__card"
                 key={candidate.id}
-                onClick={() => {
-                  setChoiceByType((current) => ({ ...current, [type]: candidate.id }));
-                  // A secret typed for one sign-in is never kept for another:
-                  // an Anthropic API key must not be saved as a gateway's
-                  // token and sent to that gateway (review finding, 2026-11-18).
-                  if (candidate.id !== choice?.id && credentialInput.current !== null) {
-                    credentialInput.current.value = "";
-                  }
-                  setProblem(undefined);
-                }}
-                role="radio"
-                type="button"
-                variant="bare"
+                value={candidate.id}
               >
                 <span className="add-provider-wizard__card-text">
                   <span className="add-provider-wizard__card-name">{candidate.label}</span>
                   <span className="add-provider-wizard__card-detail">{candidate.detail}</span>
                 </span>
-              </OctantButton>
+              </OctantRadioGroupItem>
             ))}
-          </div>
+          </OctantRadioGroup>
           {gateway ? (
             <div className="add-provider-wizard__field">
               <ClaudeGatewayAddressField

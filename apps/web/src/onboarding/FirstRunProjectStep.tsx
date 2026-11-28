@@ -14,9 +14,8 @@ import { FolderPlus } from "../ui/icons";
 import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FirstRunHandoffProject, FirstRunTaskMode } from "./firstRunHandoffModel";
 
 export interface FirstRunProviderFolderScan {
@@ -70,17 +69,6 @@ type ScanState =
       readonly result: Extract<ProviderFolderScanResult, { readonly status: "ready" }>;
     }
   | { readonly status: "failed" };
-
-/**
- * These toggle groups present as radio groups, and the toggle group's own
- * arrows only move focus: the choice stayed where it was until Space. Radio
- * arrows choose, so this takes the keys first and keeps the toggle group's
- * handler from moving focus a second time.
- */
-function chooseWithArrows(event: KeyboardEvent<HTMLElement>): void {
-  moveWithinRadioGroup(event);
-  if (event.defaultPrevented) event.stopPropagation();
-}
 
 function formatProviders(providers: ReadonlyArray<DiscoveredFolderProvider>): string {
   return providers.map((provider) => PROVIDER_LABELS[provider] ?? provider).join(", ");
@@ -400,29 +388,22 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                 scope="app"
                 settingId="first-run-task-mode"
               >
-                <OctantToggleGroup<FirstRunTaskMode>
+                <OctantRadioGroup
+                  appearance="segmented"
                   aria-label="First task mode"
                   disabled={importing}
-                  onValueChange={(value) => {
+                  onValueChange={(next) => {
                     if (importing) return;
-                    const selected = value[0];
-                    if (selected !== undefined) props.onSelectMode(selected);
+                    if (next === "work" || next === "code") props.onSelectMode(next);
                   }}
-                  onKeyDownCapture={chooseWithArrows}
-                  role="radiogroup"
-                  value={[props.mode]}
+                  value={props.mode}
                 >
                   {modes.map((mode) => (
-                    <OctantToggleGroupItem
-                      aria-checked={props.mode === mode}
-                      key={mode}
-                      role="radio"
-                      value={mode}
-                    >
+                    <OctantRadioGroupItem appearance="segmented" key={mode} value={mode}>
                       {MODE_COPY[mode].label}
-                    </OctantToggleGroupItem>
+                    </OctantRadioGroupItem>
                   ))}
-                </OctantToggleGroup>
+                </OctantRadioGroup>
               </SettingRow>
             ) : null}
             {hasProjects ? (
@@ -432,31 +413,27 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                 scope="app"
                 settingId="first-run-task-project"
               >
-                <OctantToggleGroup<string>
+                <OctantRadioGroup
+                  appearance="segmented"
                   aria-label="First task folder"
-                  onValueChange={(value) => {
-                    const selected = props.projects.find(
-                      (project) => String(project.id) === value[0],
-                    );
+                  onValueChange={(next) => {
+                    const selected = props.projects.find((project) => String(project.id) === next);
                     if (selected !== undefined) props.onSelectProject(selected.id);
                   }}
-                  onKeyDownCapture={chooseWithArrows}
-                  role="radiogroup"
                   value={
-                    props.selectedProjectId === undefined ? [] : [String(props.selectedProjectId)]
+                    props.selectedProjectId === undefined ? "" : String(props.selectedProjectId)
                   }
                 >
                   {props.projects.map((project) => (
-                    <OctantToggleGroupItem
-                      aria-checked={String(project.id) === String(props.selectedProjectId)}
+                    <OctantRadioGroupItem
+                      appearance="segmented"
                       key={String(project.id)}
-                      role="radio"
                       value={String(project.id)}
                     >
                       {project.name}
-                    </OctantToggleGroupItem>
+                    </OctantRadioGroupItem>
                   ))}
-                </OctantToggleGroup>
+                </OctantRadioGroup>
               </SettingRow>
             ) : null}
           </div>

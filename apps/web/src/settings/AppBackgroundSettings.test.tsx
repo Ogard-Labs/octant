@@ -647,6 +647,50 @@ describe("AppBackgroundSettings", () => {
     expect(screen.getByText("Photo removed.")).toBeInTheDocument();
   });
 
+  it("keeps the remaining selected photo tabbable after deleting an earlier photo", async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn(async () => undefined);
+    render(
+      <AppBackgroundSettings
+        background={{
+          ...DEFAULT_APP_BACKGROUND,
+          kind: "photo",
+          backgroundId: UPLOADED_ID as never,
+        }}
+        library={library({
+          list: vi.fn(async () => [
+            photo(PHOTO_ID, "harbour.png"),
+            photo(UPLOADED_ID, "sunrise.png"),
+          ]),
+          remove,
+        })}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const sunriseBefore = await screen.findByRole("radio", { name: "sunrise.png" });
+    expect(sunriseBefore).toHaveAttribute("aria-checked", "true");
+    expect(sunriseBefore).toHaveAttribute("tabindex", "0");
+
+    await user.click(screen.getByRole("button", { name: "Remove harbour.png" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Remove harbour.png?" })).getByRole("button", {
+        name: "Remove",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByRole("radio", { name: "harbour.png" })).not.toBeInTheDocument(),
+    );
+    const sunriseAfter = screen.getByRole("radio", { name: "sunrise.png" });
+    expect(sunriseAfter).toHaveAttribute("tabindex", "0");
+
+    const uploadButton = screen.getByRole("button", { name: "Replace photo" });
+    uploadButton.focus();
+    await user.tab();
+    expect(sunriseAfter).toHaveFocus();
+  });
+
   it("keeps a photo the host refuses to remove and says why", async () => {
     const user = userEvent.setup();
     render(

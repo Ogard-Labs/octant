@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type KeyboardEvent } from "react";
+import { useId, useState } from "react";
 import { InfoTip, PaneBar } from "../shell/PaneBar";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import type { DeviceChoice } from "./deviceModel";
 import { deviceStateWord } from "./DeviceToolbar";
 
@@ -25,18 +26,7 @@ export function DevicePicker(props: {
       choosable.find((device) => device.state === "booted")?.id ??
       choosable[0]?.id,
   );
-  const rows = useRef<Array<HTMLButtonElement | null>>([]);
   const chosen = choosable.find((device) => device.id === chosenId);
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
-    if (!["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
-    event.preventDefault();
-    const at = choosable.findIndex((device) => device.id === chosenId);
-    const next = choosable[(at + step + choosable.length) % choosable.length];
-    if (next === undefined) return;
-    setChosenId(next.id);
-    rows.current[choosable.indexOf(next)]?.focus();
-  };
   return (
     <section aria-labelledby={headingId} className="device-card">
       <PaneBar title={<span id={headingId}>{props.title}</span>}>
@@ -45,42 +35,27 @@ export function DevicePicker(props: {
       {choosable.length === 0 ? (
         <p className="device-card__lede">No device is available to start.</p>
       ) : (
-        <div
+        <OctantRadioGroup
           aria-labelledby={headingId}
           className="device-picks"
-          onKeyDown={onKeyDown}
-          role="radiogroup"
+          onValueChange={setChosenId}
+          value={chosenId ?? ""}
         >
-          {choosable.map((device, index) => {
-            const checked = device.id === chosenId;
-            return (
-              <OctantButton
-                aria-checked={checked}
-                className="device-pick"
-                key={device.id}
-                onClick={() => setChosenId(device.id)}
-                ref={(element) => {
-                  rows.current[index] = element;
-                }}
-                role="radio"
-                tabIndex={checked ? 0 : -1}
-                type="button"
-                variant="bare"
-              >
-                <span aria-hidden="true" className="device-pick__radio" />
-                <span className="device-pick__name">{device.name}</span>
-                <span className="device-pick__meta">
-                  {[
-                    device.os,
-                    device.state === "shutdown" ? undefined : deviceStateWord(device.state),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </OctantButton>
-            );
-          })}
-        </div>
+          {choosable.map((device) => (
+            <OctantRadioGroupItem className="device-pick" key={device.id} value={device.id}>
+              <span aria-hidden="true" className="device-pick__radio" />
+              <span className="device-pick__name">{device.name}</span>
+              <span className="device-pick__meta">
+                {[
+                  device.os,
+                  device.state === "shutdown" ? undefined : deviceStateWord(device.state),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </OctantRadioGroupItem>
+          ))}
+        </OctantRadioGroup>
       )}
       <div className="device-card__actions">
         {props.onCancel === undefined ? null : (

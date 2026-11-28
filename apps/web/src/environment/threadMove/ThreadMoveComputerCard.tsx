@@ -27,6 +27,7 @@ import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { EnvironmentCard, EnvironmentTile } from "../EnvironmentGroup";
@@ -450,26 +451,27 @@ function DestinationPicker(props: {
       <p className="environment-move__label" id={labelId}>
         Move to
       </p>
-      <div aria-labelledby={labelId} className="environment-move__members" role="radiogroup">
+      <OctantRadioGroup
+        aria-labelledby={labelId}
+        className="environment-move__members"
+        onValueChange={props.onChooseMember}
+        value={props.chosenMember ?? ""}
+      >
         {props.destinations.map((entry) => {
           const chosen = String(entry.memberId) === props.chosenMember;
           return (
             <div key={String(entry.memberId)}>
-              <OctantButton
-                aria-checked={chosen}
+              <OctantRadioGroupItem
                 className="environment-move__member window-no-drag"
                 disabled={!eligible(entry)}
-                onClick={() => props.onChooseMember(String(entry.memberId))}
-                role="radio"
-                type="button"
-                variant="bare"
+                value={String(entry.memberId)}
               >
                 <EnvironmentTile icon={entry.role === "hub" ? Server : Laptop} />
                 <span className="environment-move__name">{entry.name}</span>
                 <OctantBadge variant={eligible(entry) ? "success" : "secondary"}>
                   {memberPill(entry, props.mode)}
                 </OctantBadge>
-              </OctantButton>
+              </OctantRadioGroupItem>
               {chosen && props.projectChoices.length > 1 ? (
                 <OctantSelectField
                   aria-label={`Project on ${entry.name}`}
@@ -489,7 +491,7 @@ function DestinationPicker(props: {
             </div>
           );
         })}
-      </div>
+      </OctantRadioGroup>
       <OctantButton
         className="environment-move__review"
         disabled={!props.ready}
@@ -859,27 +861,31 @@ function ThreadMoveSheet(props: {
             : ""}
       </p>
       {props.busy ? (
-        <div aria-label="When to move" className="thread-move-sheet__timing" role="radiogroup">
+        <OctantRadioGroup
+          aria-label="When to move"
+          className="thread-move-sheet__timing"
+          onValueChange={(next) => {
+            if (next === "after-turn" || next === "stop-and-move") setWhenBusy(next);
+          }}
+          value={whenBusy}
+        >
           {(
             [
               ["after-turn", "Move after this turn"],
               ["stop-and-move", "Stop and move"],
             ] as const
           ).map(([value, label]) => (
-            <OctantButton
-              aria-checked={whenBusy === value}
+            <OctantRadioGroupItem
               className="thread-move-sheet__timing-choice window-no-drag"
               key={value}
-              onClick={() => setWhenBusy(value)}
-              role="radio"
               size="sm"
-              type="button"
+              value={value}
               variant={whenBusy === value ? "secondary" : "outline"}
             >
               {label}
-            </OctantButton>
+            </OctantRadioGroupItem>
           ))}
-        </div>
+        </OctantRadioGroup>
       ) : null}
       {problem === undefined ? null : (
         <OctantAlert title="This thread can't move" tone="warning">

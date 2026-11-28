@@ -21,6 +21,7 @@ import { ChatOnlyVerify } from "./ChatOnlyVerify";
 import { readableModelId } from "./providerModelLabel";
 import { OctantKbd } from "../ui/base/OctantKbd";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantListbox, OctantListboxOption } from "../ui/base/OctantListbox";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
@@ -610,11 +611,10 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       (unavailable || selected || verifyNote !== undefined);
     return (
       <div className="composer-model-picker__row" key={rowKeyOf(row)}>
-        <OctantButton
+        <OctantListboxOption
           aria-label={presentedModelName(picker.model)}
           aria-description={detail === "" ? undefined : detail}
           aria-keyshortcuts={shortcutIndex < 0 ? undefined : `Meta+${shortcutIndex + 1}`}
-          aria-selected={selected}
           className={`composer-model-picker__model${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
           disabled={unavailable || controlsDisabled}
           onClick={(event) => {
@@ -641,9 +641,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             event.preventDefault();
             addTo({ providerInstanceId: group.instance.id, modelId });
           }}
-          role="option"
+          selected={selected}
           title={picker.unavailableReason}
-          type="button"
           variant="ghost"
         >
           {/* Every row leads with its provider's mark, as the tab it came from
@@ -685,7 +684,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               {`⌘${shortcutIndex + 1}`}
             </OctantKbd>
           )}
-        </OctantButton>
+        </OctantListboxOption>
         {offersToolVerification ? (
           <div className="composer-model-picker__verify">
             {verifyNote === "Tools verified." ? (
@@ -754,18 +753,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             : `${group.instance.displayName}: ${usageStatus}`
         }
       >
-        <OctantButton
+        <OctantListboxOption
           aria-label={group.instance.displayName}
-          aria-selected={active}
           className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
           onClick={() => {
             setQuery("");
             setCatalogFilter(undefined);
             setActiveRailId(group.instance.id);
           }}
-          role="option"
-          type="button"
-          variant="bare"
+          selected={active}
         >
           <ProviderGlyph
             displayName={group.instance.displayName}
@@ -788,7 +784,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               <span className="sr-only">{status}</span>
             </span>
           )}
-        </OctantButton>
+        </OctantListboxOption>
       </OctantTooltip>
     );
   }
@@ -798,18 +794,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     const worst = harnessGroups.map((group) => readinessStatus(group.readiness)).find(Boolean);
     return (
       <OctantTooltip key={OCTANT_RAIL_ID} label="Octant — native harness">
-        <OctantButton
+        <OctantListboxOption
           aria-label="Octant"
-          aria-selected={active}
           className={`composer-model-picker__rail-item composer-model-picker__rail-item--octant${active ? " composer-model-picker__rail-item--active" : ""}`}
           onClick={() => {
             setQuery("");
             setCatalogFilter(undefined);
             setActiveRailId(OCTANT_RAIL_ID);
           }}
-          role="option"
-          type="button"
-          variant="bare"
+          selected={active}
         >
           <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={20} />
           <span className="composer-model-picker__rail-label">Octant</span>
@@ -821,7 +814,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               <span className="sr-only">{worst}</span>
             </span>
           )}
-        </OctantButton>
+        </OctantListboxOption>
       </OctantTooltip>
     );
   }
@@ -880,47 +873,41 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             onSelect={chooseModel}
           />
         )}
-        <div
+        <OctantListbox
           aria-label="Providers"
-          aria-orientation="horizontal"
           className="composer-model-picker__rail"
-          role="listbox"
+          navigation="roving"
+          orientation="horizontal"
         >
           <OctantTooltip label="Favorites">
-            <OctantButton
+            <OctantListboxOption
               aria-label="Favorites"
-              aria-selected={favoritesActive}
               className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
               onClick={() => {
                 setQuery("");
                 setCatalogFilter(undefined);
                 setActiveRailId(FAVORITES_RAIL_ID);
               }}
-              role="option"
-              type="button"
-              variant="bare"
+              selected={favoritesActive}
             >
               <Star aria-hidden="true" fill="currentColor" size={20} />
               <span className="composer-model-picker__rail-label">Favorites</span>
-            </OctantButton>
+            </OctantListboxOption>
           </OctantTooltip>
           <OctantTooltip label="Recent">
-            <OctantButton
+            <OctantListboxOption
               aria-label="Recent"
-              aria-selected={recentActive}
               className={`composer-model-picker__rail-item${recentActive ? " composer-model-picker__rail-item--active" : ""}`}
               onClick={() => {
                 setQuery("");
                 setCatalogFilter(undefined);
                 setActiveRailId(RECENT_RAIL_ID);
               }}
-              role="option"
-              type="button"
-              variant="bare"
+              selected={recentActive}
             >
               <Target aria-hidden="true" size={20} />
               <span className="composer-model-picker__rail-label">Recent</span>
-            </OctantButton>
+            </OctantListboxOption>
           </OctantTooltip>
           {railGroups.flatMap((group, index) => {
             const entries = [];
@@ -949,7 +936,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               </OctantButton>
             </OctantTooltip>
           )}
-        </div>
+        </OctantListbox>
         <div className="composer-model-picker__pane">
           <label className="octant-popover-search composer-model-picker__search">
             <Search aria-hidden="true" size={14} />
@@ -1029,39 +1016,15 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               ))}
             </div>
           ) : null}
-          <div
+          <OctantListbox
             aria-label="Models"
             {...(props.onShiftSelect === undefined ? {} : { "aria-multiselectable": true })}
             className="composer-model-picker__models"
-            role="listbox"
+            itemSelector={NAV_SELECTOR}
+            loop={false}
+            navigation="roving"
+            onMoveBeforeFirst={() => searchElement.current?.focus()}
             ref={modelsElement}
-            onKeyDown={(event) => {
-              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-              const options = Array.from(
-                event.currentTarget.querySelectorAll<HTMLElement>(NAV_SELECTOR),
-              );
-              const current = options.findIndex((option) => option === event.target);
-              if (current < 0) return;
-              event.preventDefault();
-              // Up from the first row returns to the search field.
-              if (current === 0 && event.key === "ArrowUp") {
-                searchElement.current?.focus();
-                return;
-              }
-              const next =
-                event.key === "Home"
-                  ? 0
-                  : event.key === "End"
-                    ? options.length - 1
-                    : Math.max(
-                        0,
-                        Math.min(
-                          options.length - 1,
-                          current + (event.key === "ArrowDown" ? 1 : -1),
-                        ),
-                      );
-              options[next]?.focus();
-            }}
           >
             {models.length === 0 ? (
               <p className="composer-model-picker__models-empty" role="status">
@@ -1105,7 +1068,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                 Show more
               </OctantButton>
             )}
-          </div>
+          </OctantListbox>
         </div>
         <p className="sr-only">↓ Browse · Enter select · Esc close</p>
         {configuration === undefined && props.onModelOptionChange === undefined ? null : (

@@ -14,9 +14,11 @@ import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantBadge } from "../../ui/base/OctantBadge";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
-import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
 import type { CanvasChoiceSaveResult } from "./useCanvasChoiceAnswers";
+
+const CUSTOM_RADIO_VALUE = "\0octant-decision-custom";
 
 type Question = CanvasChoiceBlock["questions"][number];
 
@@ -434,67 +436,130 @@ function DecisionQuestion(props: {
           ? "Choose one"
           : `Select ${String(question.minSelections ?? 1)}–${String(max)} options`}
       </p>
-      <div
-        className="provider-question-card__choices"
-        role={question.selection === "single" ? "radiogroup" : "group"}
-        aria-label={question.prompt}
-        aria-describedby={`${id}-help`}
-        onKeyDown={question.selection === "single" ? moveWithinRadioGroup : undefined}
-      >
-        {question.options.map((option) => {
-          const checked = !draft.custom && draft.selected.includes(option.id);
-          const label = (
-            <>
-              <span className="provider-question-card__option-label">
-                {option.label}
-                {option.recommended === true ? (
-                  <>
-                    {" "}
-                    <OctantBadge variant="outline">Recommended</OctantBadge>
-                  </>
-                ) : null}
-              </span>
-              {option.description === undefined ? null : (
-                <span className="provider-question-card__option-description">
-                  {option.description}
-                </span>
-              )}
-            </>
-          );
-          const choose = () =>
-            props.onEdit(
-              {
-                ...draft,
-                custom: false,
-                text: "",
-                selected:
-                  question.selection === "single"
-                    ? [option.id]
-                    : checked
-                      ? draft.selected.filter((value) => value !== option.id)
-                      : [...(draft.custom ? [] : draft.selected), option.id],
-              },
-              false,
-            );
-          return (
-            <div
-              className="provider-question-card__choice"
-              data-checked={checked ? "" : undefined}
-              key={option.id}
-            >
-              {question.selection === "single" ? (
-                <OctantButton
-                  aria-checked={checked}
+      {question.selection === "single" ? (
+        <OctantRadioGroup
+          aria-describedby={`${id}-help`}
+          aria-label={question.prompt}
+          className="provider-question-card__choices"
+          disabled={!editable}
+          onValueChange={(next) => {
+            if (next === CUSTOM_RADIO_VALUE) {
+              props.onEdit({ ...draft, custom: true, selected: [] }, true);
+              return;
+            }
+            props.onEdit({ ...draft, custom: false, text: "", selected: [next] }, false);
+          }}
+          value={draft.custom ? CUSTOM_RADIO_VALUE : (draft.selected[0] ?? "")}
+        >
+          {question.options.map((option) => {
+            const checked = !draft.custom && draft.selected.includes(option.id);
+            return (
+              <div
+                className="provider-question-card__choice"
+                data-checked={checked ? "" : undefined}
+                key={option.id}
+              >
+                <OctantRadioGroupItem
                   className="provider-question-card__option"
                   size={null}
-                  role="radio"
-                  type="button"
+                  value={option.id}
                   variant="ghost"
-                  onClick={choose}
                 >
-                  {label}
-                </OctantButton>
-              ) : (
+                  <span className="provider-question-card__option-label">
+                    {option.label}
+                    {option.recommended === true ? (
+                      <>
+                        {" "}
+                        <OctantBadge variant="outline">Recommended</OctantBadge>
+                      </>
+                    ) : null}
+                  </span>
+                  {option.description === undefined ? null : (
+                    <span className="provider-question-card__option-description">
+                      {option.description}
+                    </span>
+                  )}
+                </OctantRadioGroupItem>
+              </div>
+            );
+          })}
+          {question.allowCustom === false ? null : (
+            <div
+              className="provider-question-card__choice"
+              data-checked={draft.custom ? "" : undefined}
+            >
+              <OctantRadioGroupItem
+                className="provider-question-card__option"
+                onClick={() => {
+                  if (!draft.custom) return;
+                  props.onEdit({ ...draft, custom: false, text: "" }, false);
+                }}
+                size={null}
+                value={CUSTOM_RADIO_VALUE}
+                variant="ghost"
+              >
+                Write another answer
+              </OctantRadioGroupItem>
+              {draft.custom ? (
+                <label className="questionnaire__written">
+                  Your answer
+                  <OctantTextarea
+                    maxLength={2_000}
+                    rows={2}
+                    value={draft.text}
+                    onChange={(event) => props.onEdit({ ...draft, text: event.target.value }, true)}
+                    onBlur={props.onFlush}
+                  />
+                </label>
+              ) : null}
+            </div>
+          )}
+        </OctantRadioGroup>
+      ) : (
+        <div
+          className="provider-question-card__choices"
+          role="group"
+          aria-label={question.prompt}
+          aria-describedby={`${id}-help`}
+        >
+          {question.options.map((option) => {
+            const checked = !draft.custom && draft.selected.includes(option.id);
+            const label = (
+              <>
+                <span className="provider-question-card__option-label">
+                  {option.label}
+                  {option.recommended === true ? (
+                    <>
+                      {" "}
+                      <OctantBadge variant="outline">Recommended</OctantBadge>
+                    </>
+                  ) : null}
+                </span>
+                {option.description === undefined ? null : (
+                  <span className="provider-question-card__option-description">
+                    {option.description}
+                  </span>
+                )}
+              </>
+            );
+            const choose = () =>
+              props.onEdit(
+                {
+                  ...draft,
+                  custom: false,
+                  text: "",
+                  selected: checked
+                    ? draft.selected.filter((value) => value !== option.id)
+                    : [...(draft.custom ? [] : draft.selected), option.id],
+                },
+                false,
+              );
+            return (
+              <div
+                className="provider-question-card__choice"
+                data-checked={checked ? "" : undefined}
+                key={option.id}
+              >
                 <label className="questionnaire__checkbox">
                   <OctantCheckbox
                     checked={checked}
@@ -503,48 +568,48 @@ function DecisionQuestion(props: {
                   />
                   <span>{label}</span>
                 </label>
-              )}
-            </div>
-          );
-        })}
-        {question.allowCustom === false ? null : (
-          <div
-            className="provider-question-card__choice"
-            data-checked={draft.custom ? "" : undefined}
-          >
-            <OctantButton
-              aria-checked={draft.custom}
-              className="provider-question-card__option"
-              size={null}
-              role={question.selection === "single" ? "radio" : "checkbox"}
-              type="button"
-              variant="ghost"
-              onClick={() =>
-                props.onEdit(
-                  draft.custom
-                    ? { ...draft, custom: false, text: "" }
-                    : { ...draft, custom: true, selected: [] },
-                  draft.custom ? false : true,
-                )
-              }
+              </div>
+            );
+          })}
+          {question.allowCustom === false ? null : (
+            <div
+              className="provider-question-card__choice"
+              data-checked={draft.custom ? "" : undefined}
             >
-              Write another answer
-            </OctantButton>
-            {draft.custom ? (
-              <label className="questionnaire__written">
-                Your answer
-                <OctantTextarea
-                  maxLength={2_000}
-                  rows={2}
-                  value={draft.text}
-                  onChange={(event) => props.onEdit({ ...draft, text: event.target.value }, true)}
-                  onBlur={props.onFlush}
-                />
-              </label>
-            ) : null}
-          </div>
-        )}
-      </div>
+              <OctantButton
+                aria-checked={draft.custom}
+                className="provider-question-card__option"
+                size={null}
+                role="checkbox"
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  props.onEdit(
+                    draft.custom
+                      ? { ...draft, custom: false, text: "" }
+                      : { ...draft, custom: true, selected: [] },
+                    draft.custom ? false : true,
+                  )
+                }
+              >
+                Write another answer
+              </OctantButton>
+              {draft.custom ? (
+                <label className="questionnaire__written">
+                  Your answer
+                  <OctantTextarea
+                    maxLength={2_000}
+                    rows={2}
+                    value={draft.text}
+                    onChange={(event) => props.onEdit({ ...draft, text: event.target.value }, true)}
+                    onBlur={props.onFlush}
+                  />
+                </label>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
       {question.allowNote === false ? null : (
         <label className="questionnaire__written">
           Note <span className="provider-question-card__option-description">Optional</span>

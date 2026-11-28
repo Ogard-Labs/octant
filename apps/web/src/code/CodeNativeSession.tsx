@@ -1,7 +1,7 @@
 import { History } from "../ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import type { ThreadSessionClient } from "./codeSessionClient";
 import "./code-native-session.css";
 
@@ -198,11 +198,11 @@ export function CodeNativeSession<Id extends string>(props: {
           <p className="code-native-session__legend" id={`native-session-${String(threadId)}`}>
             Continue a session in this thread
           </p>
-          <div
+          <OctantRadioGroup
             aria-labelledby={`native-session-${String(threadId)}`}
             className="code-native-session__options"
-            role="radiogroup"
-            onKeyDown={moveWithinRadioGroup}
+            onValueChange={setChosen}
+            value={chosen ?? ""}
           >
             {listed.sessions.map((session) => (
               <div
@@ -210,14 +210,11 @@ export function CodeNativeSession<Id extends string>(props: {
                 className="code-native-session__choice"
                 data-checked={chosen === session.nativeSessionId ? "" : undefined}
               >
-                <OctantButton
-                  aria-checked={chosen === session.nativeSessionId}
+                <OctantRadioGroupItem
                   className="code-native-session__option"
-                  role="radio"
                   size={null}
-                  type="button"
+                  value={session.nativeSessionId}
                   variant="ghost"
-                  onClick={() => setChosen(session.nativeSessionId)}
                 >
                   <span className="code-native-session__title">
                     {session.title ?? session.nativeSessionId}
@@ -226,10 +223,10 @@ export function CodeNativeSession<Id extends string>(props: {
                     {session.gitBranch === undefined ? "" : `${session.gitBranch} · `}
                     {lastWritten(session.lastModified)}
                   </span>
-                </OctantButton>
+                </OctantRadioGroupItem>
               </div>
             ))}
-          </div>
+          </OctantRadioGroup>
           <div className="code-native-session__actions">
             <OctantButton
               type="button"

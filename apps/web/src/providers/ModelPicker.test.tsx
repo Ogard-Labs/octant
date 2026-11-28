@@ -205,7 +205,11 @@ describe("ModelPicker", () => {
 
     const listbox = screen.getByRole("listbox");
     listbox.focus();
-    await user.keyboard("{ArrowDown}{Enter}");
+    await user.keyboard("{ArrowDown}");
+    const toolOption = screen.getByRole("option", { name: /Tool/ });
+    expect(toolOption.id).not.toBe("");
+    expect(listbox).toHaveAttribute("aria-activedescendant", toolOption.id);
+    await user.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith({
       providerInstanceId: a.id,
       modelId: "tool" as ProviderModelId,

@@ -11,7 +11,7 @@ import { useId, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { Folder } from "../ui/icons";
 import { ProjectIcon } from "./ProjectIcon";
 
@@ -208,11 +208,11 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
         pending === undefined ? (
           <fieldset className="move-thread__when" disabled={busy}>
             <legend id={whenId}>This {kind.noun} is still working</legend>
-            <div
+            <OctantRadioGroup<"after-turn" | "stop-now">
               aria-labelledby={whenId}
               className="move-thread__when-choices"
-              onKeyDown={moveWithinRadioGroup}
-              role="radiogroup"
+              onValueChange={setWhen}
+              value={when}
             >
               {(
                 [
@@ -220,21 +220,16 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
                   { id: "stop-now", label: "Stop and move now" },
                 ] as const
               ).map((choice) => (
-                <OctantButton
-                  aria-checked={when === choice.id}
+                <OctantRadioGroupItem<"after-turn" | "stop-now">
                   className="move-thread__when-choice"
                   key={choice.id}
-                  onClick={() => setWhen(choice.id)}
-                  role="radio"
-                  tabIndex={when === choice.id ? 0 : -1}
-                  type="button"
-                  variant="bare"
+                  value={choice.id}
                 >
                   <span aria-hidden="true" className="code-where__dot" />
                   {choice.label}
-                </OctantButton>
+                </OctantRadioGroupItem>
               ))}
-            </div>
+            </OctantRadioGroup>
           </fieldset>
         ) : (
           <p>The move is queued for when this turn finishes.</p>

@@ -24,7 +24,7 @@ import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { usePluginGrounds } from "../theme/pluginGrounds";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 
 /** The host's shared background image library, read through the window's authority. */
@@ -196,6 +196,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
+  const [galleryResetKey, setGalleryResetKey] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
@@ -380,6 +381,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     try {
       await library.remove(String(photo.id));
       setPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
+      // Base UI's RadioGroup composite tracks its roving tab stop by numeric
+      // index and does not revalidate when an earlier item unmounts; remounting
+      // the group on removal re-derives the tab stop from the surviving checked
+      // (or first) photo.
+      setGalleryResetKey((current) => current + 1);
       setStatus(PHOTO_REMOVED);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The photo could not be removed.");
@@ -490,21 +496,21 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             return (
               <div className="settings-app-background__group" key={group}>
                 <h3 className="settings-app-background__group-title">{GROUP_TITLES[group]}</h3>
-                <div
+                <OctantRadioGroup
                   aria-label={`${GROUP_TITLES[group]} built-in backgrounds`}
                   className="settings-app-background__preset-grid"
-                  onKeyDown={moveWithinRadioGroup}
-                  role="radiogroup"
+                  onValueChange={(next) => {
+                    const preset = presets.find((candidate) => candidate.id === next);
+                    if (preset !== undefined) pickBuiltin(preset.id);
+                  }}
+                  value={selectedPresetId ?? ""}
                 >
                   {presets.map((preset) => (
-                    <OctantButton
-                      aria-checked={selectedPresetId === preset.id}
+                    <OctantRadioGroupItem
                       aria-label={preset.title}
                       className="settings-app-background__preset"
                       key={preset.id}
-                      onClick={() => pickBuiltin(preset.id)}
-                      role="radio"
-                      type="button"
+                      value={preset.id}
                       variant="ghost"
                     >
                       <img
@@ -526,9 +532,9 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                           <Check size={12} strokeWidth={MARK_TICK_STROKE_WIDTH} />
                         </span>
                       ) : null}
-                    </OctantButton>
+                    </OctantRadioGroupItem>
                   ))}
-                </div>
+                </OctantRadioGroup>
               </div>
             );
           })}
@@ -580,11 +586,15 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   {status ?? ""}
                 </span>
               </div>
-              <div
+              <OctantRadioGroup
                 aria-label="Photos on this host"
                 className="settings-app-background__gallery-row"
-                onKeyDown={moveWithinRadioGroup}
-                role="radiogroup"
+                key={galleryResetKey}
+                onValueChange={(next) => {
+                  const photo = photos.find((candidate) => String(candidate.id) === next);
+                  if (photo !== undefined) pick(photo);
+                }}
+                value={selectedId ?? ""}
               >
                 {photos.map((photo) => (
                   <PhotoTile
@@ -595,7 +605,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     library={library}
                     onAskRemove={() => setConfirmingRemoval(String(photo.id))}
                     onCancelRemove={() => setConfirmingRemoval(null)}
-                    onPick={() => pick(photo)}
                     onRemove={() => void removePhoto(photo)}
                     photo={photo}
                   />
@@ -605,7 +614,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                     Photos you add appear here.
                   </p>
                 ) : null}
-              </div>
+              </OctantRadioGroup>
             </div>
           )}
           {background.kind === "photo" ? (
@@ -1015,7 +1024,6 @@ function PhotoTile(props: {
   readonly library: BackgroundImageLibrary | undefined;
   readonly onAskRemove: () => void;
   readonly onCancelRemove: () => void;
-  readonly onPick: () => void;
   readonly onRemove: () => void;
   readonly photo: SidebarBackgroundMetadata;
 }) {
@@ -1023,18 +1031,14 @@ function PhotoTile(props: {
   const canRemove = props.library?.remove !== undefined && !props.checked;
   return (
     <div className="settings-app-background__tile" data-confirming={props.confirming}>
-      <OctantButton
-        aria-checked={props.checked}
+      <OctantRadioGroupItem
         aria-label={props.photo.displayName}
         className="settings-app-background__tile-pick"
-        onClick={props.onPick}
-        role="radio"
         title={props.photo.displayName}
-        type="button"
-        variant="bare"
+        value={String(props.photo.id)}
       >
         {url === null ? null : <img alt="" src={url} />}
-      </OctantButton>
+      </OctantRadioGroupItem>
       {canRemove && !props.confirming ? (
         <OctantIconButton
           className="settings-app-background__tile-remove"

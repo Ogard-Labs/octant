@@ -18,7 +18,7 @@ import {
   importAvatarFromGravatar,
   type AvatarImageEnvironment,
 } from "./avatarImage";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import "./profile.css";
 
 export interface ProfileEditorProps {
@@ -343,20 +343,17 @@ export function ProfileEditor(props: ProfileEditorProps) {
           disabled={props.disabled === true}
         >
           <legend className="profile-editor__label">Avatar colour</legend>
-          <div
+          <OctantRadioGroup
             className="profile-editor__accents"
-            onKeyDown={moveWithinRadioGroup}
-            role="radiogroup"
+            onValueChange={(accent) => apply({ ...props.profile, accent }, true)}
+            value={props.profile.accent}
           >
             {AVATAR_ACCENTS.map((accent) => (
-              <OctantButton
-                aria-checked={props.profile.accent === accent}
+              <OctantRadioGroupItem
                 aria-label={ACCENT_NAMES[accent]}
                 className="profile-editor__accent rounded-full"
                 key={accent}
-                onClick={() => apply({ ...props.profile, accent }, true)}
-                role="radio"
-                type="button"
+                value={accent}
                 variant="ghost"
               >
                 <span
@@ -364,9 +361,9 @@ export function ProfileEditor(props: ProfileEditorProps) {
                   className="profile-editor__swatch user-avatar"
                   data-accent={accent}
                 />
-              </OctantButton>
+              </OctantRadioGroupItem>
             ))}
-          </div>
+          </OctantRadioGroup>
         </fieldset>
       )}
     </div>

@@ -1,5 +1,5 @@
 import "../styles/thread-search.css";
-import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   FolderPlus,
@@ -12,7 +12,12 @@ import {
 import { WorkerMark } from "../projects/coordinatorMarks";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { SidebarActivityMode } from "./activityViewModel";
 import {
@@ -105,7 +110,6 @@ function optionId(index: number): string {
 export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(props.initialQuery ?? "");
-  const [activeIndex, setActiveIndex] = useState(0);
 
   const listing = props.listing ?? "ready";
   const archivedListing = props.archivedListing ?? "ready";
@@ -124,7 +128,22 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     ...(props.contentTruncated === undefined ? {} : { contentTruncated: props.contentTruncated }),
   });
   const hits = flattenThreadSearchHits(results);
-  const active = hits.length === 0 ? -1 : Math.min(activeIndex, hits.length - 1);
+  function open(hit: ThreadSearchHit | undefined): void {
+    if (hit === undefined) return;
+    props.onOpenThread(hit);
+  }
+
+  function runQuickAction(action: (() => void) | undefined): void {
+    if (action === undefined) return;
+    props.onClose();
+    action();
+  }
+
+  const listbox = useOctantListbox({
+    count: hits.length,
+    onActivate: (index) => open(hits[index]),
+  });
+  const active = listbox.activeIndex;
   const hasQuery = query.trim() !== "";
   // A pending or refused archived/content listing must never read as "no matches":
   // that would claim the incomplete half of Search is empty.
@@ -153,45 +172,6 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         }`;
   const placeholder = "Search titles, messages, Canvas, and tool output";
 
-  function open(hit: ThreadSearchHit | undefined): void {
-    if (hit === undefined) return;
-    props.onOpenThread(hit);
-  }
-
-  function runQuickAction(action: (() => void) | undefined): void {
-    if (action === undefined) return;
-    props.onClose();
-    action();
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (hits.length === 0) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex(active + 1 >= hits.length ? 0 : active + 1);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex(active <= 0 ? hits.length - 1 : active - 1);
-      return;
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setActiveIndex(0);
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setActiveIndex(hits.length - 1);
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      open(hits[active]);
-    }
-  }
-
   let flatIndex = -1;
   return (
     <OctantDialog
@@ -204,21 +184,22 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     >
       <div className="thread-search__field">
         <Search aria-hidden="true" size={14} />
-        <OctantInput
-          {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
-          aria-controls={RESULTS_ID}
-          aria-expanded={hits.length > 0}
+        <OctantListboxInput
+          activeDescendantId={active >= 0 ? optionId(active) : undefined}
           aria-label={scope === "all" ? "Search threads" : `Search ${modeLabel} threads`}
           autoComplete="off"
+          controlsId={RESULTS_ID}
+          expanded={hits.length > 0}
           onChange={(event) => {
             setQuery(event.target.value);
-            setActiveIndex(0);
+            listbox.setActiveIndex(0);
             props.onQueryChange?.(event.target.value);
           }}
-          onKeyDown={handleKeyDown}
+          onKeyDown={(event) => {
+            listbox.handleKeyDown(event);
+          }}
           placeholder={placeholder}
           ref={inputRef}
-          role="combobox"
           value={query}
         />
       </div>
@@ -229,7 +210,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           onValueChange={(value) => {
             const next = value[0];
             if (next === undefined) return;
-            setActiveIndex(0);
+            listbox.setActiveIndex(0);
             props.onScopeChange?.(next);
           }}
           value={[scope]}
@@ -267,11 +248,11 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       >
         {statusMessage}
       </p>
-      <div
+      <OctantListbox
+        activeDescendantId={active >= 0 ? optionId(active) : undefined}
         aria-label={scope === "all" ? "Thread results" : `${modeLabel} thread results`}
         className="thread-search__results"
         id={RESULTS_ID}
-        role="listbox"
       >
         {results.groups.map((group) => (
           <div
@@ -287,8 +268,8 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
               flatIndex += 1;
               const index = flatIndex;
               return (
-                <div
-                  aria-selected={index === active}
+                <OctantListboxOption
+                  as="div"
                   className="thread-search__result"
                   data-active={index === active}
                   data-archived={hit.archived}
@@ -296,8 +277,8 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   id={optionId(index)}
                   key={`${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
                   onClick={() => open(hit)}
-                  onMouseMove={() => setActiveIndex(index)}
-                  role="option"
+                  onMouseMove={() => listbox.setActiveIndex(index)}
+                  selected={index === active}
                 >
                   {hit.archived ? (
                     <Archive aria-hidden="true" size={14} />
@@ -329,12 +310,12 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   {hit.archived ? (
                     <span className="thread-search__result-state">Archived</span>
                   ) : null}
-                </div>
+                </OctantListboxOption>
               );
             })}
           </div>
         ))}
-      </div>
+      </OctantListbox>
       {props.onNewThread === undefined &&
       props.onNewProject === undefined &&
       props.onOpenSettings === undefined ? null : (

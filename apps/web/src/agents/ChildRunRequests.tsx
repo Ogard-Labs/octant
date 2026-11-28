@@ -3,7 +3,7 @@ import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { HarnessApprovalPanel } from "../harness/HarnessApprovalPanel";
-import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { LazyProviderQuestionCard as ProviderQuestionCard } from "../transcript/LazyProviderQuestionCard";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
