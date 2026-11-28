@@ -111,7 +111,7 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
     >
       <div className="setgroup">
         <SettingRow
-          description="Send automation status notifications from this host."
+          description="Send automation status notifications from this computer."
           focused={props.focused === true}
           label="Notifications"
           scope="host"
@@ -143,8 +143,8 @@ export function AutomationNotificationSettings(props: AutomationNotificationSett
       )}
       {status.providerDelivery === "unavailable" ? (
         <p className="settings-section-line">
-          Push notifications are not set up on this host. Your choice is saved, but notifications
-          cannot be delivered yet.
+          Push notifications are not set up on this computer. Your choice is saved, but
+          notifications cannot be delivered yet.
         </p>
       ) : null}
     </SettingsSection>

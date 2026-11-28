@@ -37,7 +37,10 @@ export function CodeProjectPlanner(
   const designation = (command: CodePlannerCommand) =>
     mutate(async () => {
       if (client.executePlanner === undefined)
-        return { status: "refused", message: "Planner designation is unavailable on this host." };
+        return {
+          status: "refused",
+          message: "Planner designation is unavailable on this computer.",
+        };
       return client.executePlanner(command);
     });
   if (!plannerState.supported) return null;
@@ -69,7 +72,7 @@ export function CodeProjectPlanner(
       {!ready || failure !== undefined ? (
         <OctantAlert tone="warning">
           {!ready
-            ? "Planner decisions need a connected host. Reconnect and refresh before continuing."
+            ? "Planner decisions need a connection to this computer. Reconnect and refresh before continuing."
             : failure}
         </OctantAlert>
       ) : null}
@@ -160,7 +163,7 @@ export function CodeProjectPlanner(
               {entry.proposal.status === "pending" && attempt.status !== "none" ? (
                 <p className="oct-row-detail" role="status">
                   {attempt.status === "blocked"
-                    ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until the host records its outcome."
+                    ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until this computer records its outcome."
                     : "This window cannot retain approval identity. Session storage is required before approving."}
                 </p>
               ) : null}
@@ -168,7 +171,8 @@ export function CodeProjectPlanner(
               entry.proposal.creationAttempt?.status === "failed" ? (
                 <p className="oct-row-detail">
                   Creation did not start:{" "}
-                  {entry.proposal.creationAttempt.message ?? "The host refused before creation."}{" "}
+                  {entry.proposal.creationAttempt.message ??
+                    "This computer refused before creation."}{" "}
                   Review the current settings before explicitly approving again.
                 </p>
               ) : null}

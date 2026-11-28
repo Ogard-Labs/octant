@@ -2501,7 +2501,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         >
           {snapshot?.observation?.screenshotDataUrl === undefined ? (
             <div className="browser-workspace__remote-empty">
-              <p>Waiting for the host to capture this page.</p>
+              <p>Waiting for this computer to capture this page.</p>
               <OctantButton
                 onClick={() => void act("screenshot")}
                 type="button"
@@ -2673,7 +2673,10 @@ function browserRefreshDelay(unchangedCount: number): number {
 }
 
 function makeAction(scope: BrowserThreadScope): ToolActionRequest {
-  return makeBrowserToolAction(scope, "Open and operate one host-owned isolated browser context.");
+  return makeBrowserToolAction(
+    scope,
+    "Open and operate one isolated browser context on this computer.",
+  );
 }
 
 function statusLabel(status: BrowserWorkspaceStatus): string {
@@ -2686,10 +2689,10 @@ function captureNotKeptNotice(
 ): string {
   const why: Record<BrowserCaptureNotKeptReason, string> = {
     "too-large": "the picture is too large",
-    "not-an-image": "the host did not recognise it as an image",
+    "not-an-image": "this computer did not recognise it as an image",
     "no-page-origin": "the page has no web address",
     "no-picture": "the Browser gave no picture of this page",
-    unavailable: "the host could not store it",
+    unavailable: "this computer could not store it",
   };
   if (purpose === "drawing") {
     // Draw on page keeps a screenshot to draw on, so the words say what is missing.

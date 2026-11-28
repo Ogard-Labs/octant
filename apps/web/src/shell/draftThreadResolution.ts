@@ -147,6 +147,6 @@ export function codeUnavailableMessage(input: {
   readonly errorMessage?: string;
 }): string {
   return input.status === "loading" || input.status === "conflict-reload"
-    ? "Code is still loading on this host. Try again in a moment."
-    : (input.errorMessage ?? "Code is unavailable on this host. Reconnect and try again.");
+    ? "Code is still loading on this computer. Try again in a moment."
+    : (input.errorMessage ?? "Code is unavailable on this computer. Reconnect and try again.");
 }

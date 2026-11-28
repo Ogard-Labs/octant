@@ -99,11 +99,11 @@ export function agentRunRecoveryLabel(recoveryReason: string | undefined): strin
   if (recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON) {
     return "Starts when the runs it comes after finish.";
   }
-  if (recoveryReason === "host-restart") return "Recovered after host restart";
+  if (recoveryReason === "host-restart") return "Recovered after Octant restarted";
   if (recoveryReason === "journal-replay") return "Recovered from saved history";
   if (recoveryReason === "provider-reconnect") return "Waiting after provider reconnect";
   if (recoveryReason === "restart-without-resumable-execution") {
-    return "Stopped by a host restart. Retry to run it again.";
+    return "Stopped when Octant restarted. Retry to run it again.";
   }
   return recoveryReason;
 }
@@ -127,7 +127,7 @@ export function agentRunCommandFailureMessage(input: {
 }): string {
   if (input.message !== undefined && input.message.length > 0) return input.message;
   if (input.reason === "stale-version") {
-    return "This run changed on the server. Refresh and retry against the latest version.";
+    return "This run changed on this computer. Refresh and retry against the latest version.";
   }
   if (input.reason === "unsupported-transition") {
     return "That control action is not supported for this run in its current state.";

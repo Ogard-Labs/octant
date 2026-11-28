@@ -124,7 +124,7 @@ export function DesktopPane(props: {
         setFailure(startRefusalMessage(answer.reason));
       }
     } catch {
-      if (mounted.current) setFailure("The host could not be reached.");
+      if (mounted.current) setFailure("This computer could not be reached.");
     }
   }, [ask, threadId]);
 
@@ -196,7 +196,7 @@ export function DesktopPane(props: {
       setNotice(
         answer?.status === "refused"
           ? startRefusalMessage(answer.reason)
-          : "The host could not be reached.",
+          : "This computer could not be reached.",
       );
       void refresh();
     },
@@ -211,7 +211,7 @@ export function DesktopPane(props: {
         if (answer.status === "refused") setNotice(startRefusalMessage(answer.reason));
         return answer;
       } catch {
-        setNotice("The host could not be reached.");
+        setNotice("This computer could not be reached.");
         return undefined;
       } finally {
         if (mounted.current) setPending(undefined);
@@ -846,7 +846,7 @@ function DesktopScreen(props: {
         try {
           answer = await client.frame({ threadId, ...view }, controller.signal);
         } catch {
-          if (!stopped) onLostRef.current("The host could not be reached.");
+          if (!stopped) onLostRef.current("This computer could not be reached.");
           return;
         }
         if (stopped) return;
@@ -911,7 +911,7 @@ function DesktopScreen(props: {
         const answer = await client
           .request(decodeDesktopPaneRequest({ kind: "input", threadId, ...view, event: outgoing }))
           .catch(() => undefined);
-        if (answer === undefined) onLostRef.current("The host could not be reached.");
+        if (answer === undefined) onLostRef.current("This computer could not be reached.");
         else if (answer.status === "refused" && answer.reason === "session-readable") {
           onReadableRef.current();
         } else if (answer.status === "refused") {
@@ -1098,7 +1098,7 @@ function DesktopScreen(props: {
             {isApple() ? "⌘" : "Ctrl"}+Esc to leave.
           </>
         ) : (
-          "Live through this host. Click the screen to use it."
+          "Live through this computer. Click the screen to use it."
         )}
       </p>
     </div>

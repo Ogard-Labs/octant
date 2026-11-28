@@ -235,7 +235,7 @@ describe("ProviderApiKeyEditor", () => {
         instanceId={instanceId}
       />,
     );
-    expect(screen.getByText(/Manage API keys in the Octant host app/)).toBeInTheDocument();
+    expect(screen.getByText(/Manage API keys in the Octant desktop app/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add key" })).not.toBeInTheDocument();
   });
 });

@@ -745,7 +745,7 @@ describe("ExtensionsSettingsView", () => {
 
     const toggle = await screen.findByRole("switch", { name: "Enable Review helper" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText(/Host prohibited/)).toBeVisible();
+    expect(screen.getByText(/Blocked on this computer/)).toBeVisible();
   });
 
   it("shows an honest blocked state and reason when a component is not effective", async () => {

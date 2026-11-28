@@ -1426,7 +1426,7 @@ describe("CodeTerminalPane Browser switch", () => {
   it.each([
     [
       "not-local-window",
-      "Only the person at a window on the host can let a terminal use the Browser.",
+      "Only the person at a window on this computer can let a terminal use the Browser.",
     ],
     [
       "thread-not-active",

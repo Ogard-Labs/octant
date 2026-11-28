@@ -119,7 +119,7 @@ export function ProjectPullRequestStack(props: ProjectPullRequestStackProps) {
     } catch {
       // The request may have reached the host, so it is not said that nothing merged.
       result = {
-        text: "The host did not answer. Check each layer before merging again.",
+        text: "This computer did not answer. Check each layer before merging again.",
         merged: false,
       };
     }

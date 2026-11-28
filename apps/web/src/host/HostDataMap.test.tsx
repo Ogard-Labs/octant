@@ -189,10 +189,10 @@ describe("HostDataMapView", () => {
     };
     render(<HostDataMapView report={headless} />);
 
-    expect(screen.getByText("Headless host")).toBeInTheDocument();
+    expect(screen.getByText("Headless computer")).toBeInTheDocument();
     expect(screen.getByText(localHostDisplayName())).toBeInTheDocument();
-    expect(screen.getByText(/Does not leave this machine/)).toBeInTheDocument();
-    expect(screen.getByText("No Projects on this host.")).toBeInTheDocument();
+    expect(screen.getByText(/Does not leave this computer/)).toBeInTheDocument();
+    expect(screen.getByText("No Projects on this computer.")).toBeInTheDocument();
     expect(screen.queryByText("Keychain")).not.toBeInTheDocument();
   });
 });

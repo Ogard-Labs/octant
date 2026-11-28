@@ -100,8 +100,8 @@ export function ProviderApiKeyEditor(props: ProviderApiKeyEditorProps) {
         className="provider-details__section"
       >
         <p className="provider-card__guidance">
-          Manage API keys in the Octant host app. Adding, renaming, and removing keys is unavailable
-          in this browser.
+          Manage API keys in the Octant desktop app. Adding, renaming, and removing keys is
+          unavailable in this browser.
         </p>
       </section>
     );

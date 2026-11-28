@@ -54,7 +54,7 @@ export function ClaudeCreateAuthenticationFields(props: {
               Add this profile without a key.{" "}
               {hostPlatform === "darwin" ? null : (
                 <>
-                  On the Linux host, run{" "}
+                  On the Linux computer, run{" "}
                   <code>octant provider key set &quot;Profile name&quot;</code> using its exact
                   name, then check the connection.{" "}
                 </>

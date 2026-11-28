@@ -146,13 +146,13 @@ const CERTIFICATE_OPTIONS = [
 ] as const;
 
 const SOURCE_CLASS_LABELS: Readonly<Record<RemotePairingTicketSourceClass, string>> = {
-  loopback: "This machine only",
+  loopback: "This computer only",
   "lan-private": "Private LAN",
   tailscale: "Tailscale",
 };
 
 const LISTENER_FAILURE_COPY: Readonly<Record<string, string>> = {
-  "local-confirmation-required": "Enabling needs confirmation on this host.",
+  "local-confirmation-required": "Enabling needs confirmation on this computer.",
   "invalid-bind": "Octant refuses to bind that address. Use a private LAN or Tailscale address.",
   "invalid-origin": "The origin must be HTTPS and match the address and port.",
   "invalid-tls": "The certificate or private key could not be read.",
@@ -765,7 +765,7 @@ export function RemoteAccessSettingsSection({
               restoreFocus={listenerOpener}
               title={status?.enabled === true ? "Move remote listener?" : "Enable remote listener?"}
             >
-              Other devices on this network will be able to reach this host. Pairing still needs
+              Other devices on this network will be able to reach this computer. Pairing still needs
               your approval here for every device.
             </OctantConfirmDialog>
           )}
@@ -1025,7 +1025,7 @@ export function RemoteAccessSettingsSection({
             </SettingRow>
           )}
           {activeDevices.length === 0 ? (
-            <SettingsState kind="empty">No devices are paired with this host.</SettingsState>
+            <SettingsState kind="empty">No devices are paired with this computer.</SettingsState>
           ) : (
             <ul aria-label="Paired devices" className="settings-panel__stack">
               {activeDevices.map((device) => (
@@ -1126,8 +1126,8 @@ export function RemoteAccessSettingsSection({
                 restoreFocus={revokeAllOpener}
                 title="Revoke every paired device?"
               >
-                Every paired device will lose access to this host. You will need to pair each device
-                again.
+                Every paired device will lose access to this computer. You will need to pair each
+                device again.
               </OctantConfirmDialog>
             ) : null}
           </OctantDialogPresence>

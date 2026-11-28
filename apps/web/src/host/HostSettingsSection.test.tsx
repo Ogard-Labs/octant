@@ -160,7 +160,7 @@ describe("HostSettingsSection", () => {
       },
     };
     render(<HostSettingsSection client={makeClient({ status: async () => withMemory })} />);
-    expect(await screen.findByText("Low, host using 2300 MB")).toBeTruthy();
+    expect(await screen.findByText("Low, Octant using 2300 MB")).toBeTruthy();
     expect(
       screen.getByText(
         /stopped 1 idle provider process, released 0 paused sessions, 2 running turns kept going/,
@@ -230,10 +230,10 @@ describe("HostSettingsSection", () => {
       .mockResolvedValueOnce(serviceStatus)
       .mockReturnValueOnce(pending.promise);
     render(<HostSettingsSection client={makeClient({ status })} />);
-    const stop = await screen.findByRole("button", { name: "Stop host" });
+    const stop = await screen.findByRole("button", { name: "Stop service" });
     fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
     await act(async () => pending.reject(new Error("Host status could not be refreshed.")));
-    expect(screen.getByRole("button", { name: "Stop host" })).toBe(stop);
+    expect(screen.getByRole("button", { name: "Stop service" })).toBe(stop);
     expect(screen.getByText("host-1")).toBeInTheDocument();
     expect(await screen.findByText("Host status could not be refreshed.")).toBeVisible();
   });
@@ -260,7 +260,7 @@ describe("HostSettingsSection", () => {
         maintenance={<button type="button">Reset active mode layout</button>}
       />,
     );
-    expect(screen.getByText("Loading host status…")).toBeVisible();
+    expect(screen.getByText("Loading status…")).toBeVisible();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeVisible();
   });
 
@@ -379,7 +379,7 @@ describe("HostSettingsSection", () => {
     render(<HostSettingsSection client={makeClient({ status: async () => foregroundStatus })} />);
 
     await screen.findByText("host-1");
-    expect(screen.getByRole("button", { name: "Restart host" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Restart service" })).toBeDisabled();
     expect(
       screen.getByText(
         "No service manager restarts this foreground run; stop it and start it again.",
@@ -394,10 +394,10 @@ describe("HostSettingsSection", () => {
     await screen.findByText("Thread retention");
 
     const scope = screen.getByLabelText("Scope");
-    expect(scope).toHaveTextContent("This host");
+    expect(scope).toHaveTextContent("This computer");
     await user.click(scope);
     expect(await screen.findAllByRole("option")).toHaveLength(3);
-    expect(screen.getByRole("option", { name: "This host" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "This computer" })).toBeVisible();
     expect(screen.getByRole("option", { name: "One Project" })).toBeVisible();
     expect(screen.getByRole("option", { name: "One thread" })).toBeVisible();
     await user.click(screen.getByRole("option", { name: "One thread" }));
@@ -429,7 +429,7 @@ describe("HostSettingsSection", () => {
     render(<HostSettingsSection client={makeClient({ lifecycle })} />);
 
     await screen.findByText("host-1");
-    fireEvent.click(screen.getByRole("button", { name: "Stop host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop service" }));
 
     expect(await screen.findByText("The host is draining and will stop.")).toBeInTheDocument();
     expect(lifecycle).toHaveBeenCalledWith("stop");
@@ -447,7 +447,7 @@ describe("HostSettingsSection", () => {
     render(<HostSettingsSection client={makeClient({ lifecycle })} />);
 
     await screen.findByText("host-1");
-    fireEvent.click(screen.getByRole("button", { name: "Restart host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restart service" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Run octant server restart from a terminal on this host.",
@@ -537,7 +537,7 @@ describe("HostSettingsSection", () => {
       await screen.findByLabelText("Backup label");
 
       fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
-      fireEvent.click(screen.getByRole("button", { name: "Restart host" }));
+      fireEvent.click(screen.getByRole("button", { name: "Restart service" }));
       await screen.findByText("Accepted.");
       fireEvent.click(screen.getByRole("button", { name: "Create backup" }));
       await screen.findByText(/Backup manual created/);
@@ -559,7 +559,7 @@ describe("HostSettingsSection", () => {
     refresh.focus();
     expect(refresh).toHaveFocus();
 
-    const expectedTabStops = ["Disable automatic startup", "Stop host", "Restart host"];
+    const expectedTabStops = ["Disable automatic startup", "Stop service", "Restart service"];
     for (const name of expectedTabStops) {
       await user.tab();
       expect(screen.getByRole("button", { name })).toHaveFocus();
@@ -590,8 +590,8 @@ describe("HostSettingsSection", () => {
 
     for (const name of [
       "Refresh status",
-      "Stop host",
-      "Restart host",
+      "Stop service",
+      "Restart service",
       "Disable automatic startup",
       "Create backup",
       "Restore from backup",
@@ -704,7 +704,7 @@ describe("HostSettingsSection", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Export my data" }));
     expect(
-      await screen.findByText("Only the person at this computer can export this host's data."),
+      await screen.findByText("Only the person at this computer can export its data."),
     ).toBeInTheDocument();
     await user.click(screen.getByLabelText("Scope"));
     await user.click(await screen.findByRole("option", { name: "One thread" }));

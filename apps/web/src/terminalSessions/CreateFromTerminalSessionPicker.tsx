@@ -20,7 +20,7 @@ import {
 export { loadTerminalSessions, TERMINAL_SESSION_TOOL_NAMES } from "./terminalSessionsReadAhead";
 
 const HANDOFF_NOTE =
-  "Sessions from Claude Code and Codex in this Project's folders. Choose a text handoff to start a new session with read-only visible conversation. Native adoption is unavailable because this host cannot verify the source account and exclusive session ownership. Original inputs, tool activity and hidden reasoning are omitted.";
+  "Sessions from Claude Code and Codex in this Project's folders. Choose a text handoff to start a new session with read-only visible conversation. Native adoption is unavailable because this computer cannot verify the source account and exclusive session ownership. Original inputs, tool activity and hidden reasoning are omitted.";
 
 type Listing =
   | { readonly kind: "loading" }

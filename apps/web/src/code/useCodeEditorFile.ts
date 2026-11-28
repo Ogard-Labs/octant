@@ -162,9 +162,9 @@ function editorFileFailureText(code: string): string {
     case "eof":
       return "The file changed while it was being opened. Try again.";
     case "malformed":
-      return "The host's answer could not be read. Reconnect and retry.";
+      return "This computer's answer could not be read. Reconnect and retry.";
     case "oversized":
-      return "The host's answer was too large to read. Reconnect and retry.";
+      return "This computer's answer was too large to read. Reconnect and retry.";
     default:
       return code.startsWith("content-")
         ? "The file's content is unavailable. Reconnect and retry."

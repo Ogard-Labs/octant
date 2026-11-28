@@ -87,7 +87,7 @@ describe("choosing a scaffold to start a project from", () => {
     picker({ runnable: new Map() });
 
     expect(screen.getByRole("button", { name: "Start from a template" })).toHaveTextContent(
-      "None can run on this machine yet. Open to see what each needs.",
+      "None can run on this computer yet. Open to see what each needs.",
     );
     const menu = await openTemplates(user);
     expect(within(menu).getByRole("menuitem", { name: "Web app" })).toHaveAttribute(
@@ -120,7 +120,7 @@ describe("choosing a scaffold to start a project from", () => {
     // The reason is the row's quiet second line, not a warning: the row is
     // already disabled, and nothing here is the person's to fix.
     expect(native).toHaveAttribute("aria-disabled", "true");
-    expect(native).toHaveAccessibleDescription("Needs swift, which is not on this machine.");
+    expect(native).toHaveAccessibleDescription("Needs swift, which is not on this computer.");
     expect(native).not.toHaveTextContent("A Swift package the Apple toolchain builds directly");
   });
 

@@ -109,7 +109,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
         setView(read);
         setDraft(read.settings);
       },
-      () => live && setLoadError("Web search settings could not be read from this host."),
+      () => live && setLoadError("Web search settings could not be read from this computer."),
     );
     return () => {
       live = false;
@@ -120,7 +120,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
     return (
       <SettingsSection title="Web search">
         <SettingsState kind="empty">
-          Web search is set on the host this window runs on.
+          Web search is set on the computer this window runs on.
         </SettingsState>
       </SettingsSection>
     );

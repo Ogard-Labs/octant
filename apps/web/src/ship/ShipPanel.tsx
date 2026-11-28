@@ -129,7 +129,7 @@ export function ShipPanel(props: ShipPanelProps) {
           </p>
           <p className="ship-panel__plan-line ship-panel__plan-digest">{plan.artifactDigest}</p>
           <p className="ship-panel__note">
-            This makes the change visible to people outside this machine, and no checkpoint here
+            This makes the change visible to people outside this computer, and no checkpoint here
             undoes that.
           </p>
           <OctantButton

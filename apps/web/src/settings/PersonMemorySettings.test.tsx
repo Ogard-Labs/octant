@@ -100,6 +100,6 @@ describe("PersonMemorySettings", () => {
 
   it("says memory lives on the host where no client reaches it", () => {
     render(<PersonMemorySettings client={undefined} projectNames={projectNames} />);
-    expect(screen.getByText("Memory is shown on the host machine only.")).toBeVisible();
+    expect(screen.getByText("Memory is shown on the computer running Octant only.")).toBeVisible();
   });
 });

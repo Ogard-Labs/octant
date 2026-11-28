@@ -154,7 +154,7 @@ describe("useLaunchSession", () => {
     const renew = result.current.renew;
     if (renew === undefined) throw new Error("Expected session renewal.");
 
-    await expect(renew()).rejects.toThrow("Local Machine response is invalid.");
+    await expect(renew()).rejects.toThrow("Response from this computer is invalid.");
   });
 
   it("keeps the same client context when the current host validates it", async () => {

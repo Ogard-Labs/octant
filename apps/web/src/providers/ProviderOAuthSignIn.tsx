@@ -370,7 +370,7 @@ export function ProviderOAuthSignInPanel(props: {
           setState({
             kind: "awaiting-consent",
             detail:
-              "Couldn't check sign-in. Try checking again, or return here when the host is available.",
+              "Couldn't check sign-in. Try checking again, or return here when this computer is available.",
           });
       })
       .finally(() => {

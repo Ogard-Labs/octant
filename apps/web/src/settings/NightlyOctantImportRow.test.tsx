@@ -92,7 +92,7 @@ describe("Import from Octant", () => {
       [{ kind: "refused", reason: "octant-newer" }, /newer than this Octant Nightly/],
       [{ kind: "refused", reason: "busy" }, /changing, or another import is running/],
       [{ kind: "failed", stage: "merge" }, /Nothing was changed/],
-      [{ kind: "failed", stage: "start-host" }, /host did not start again/],
+      [{ kind: "failed", stage: "start-host" }, /background service did not start again/],
     ];
     for (const [outcome, message] of cases) {
       show({ outcome });

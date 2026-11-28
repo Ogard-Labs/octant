@@ -106,7 +106,7 @@ export function MemberBuildDownloadStatus(props: {
                 (error.status === 401 || error.status === 403)
               ) {
                 setStopped(
-                  "The host no longer accepts this window, so the download cannot be read here.",
+                  "This computer no longer accepts this window, so the download cannot be read here.",
                 );
               } else {
                 poll();

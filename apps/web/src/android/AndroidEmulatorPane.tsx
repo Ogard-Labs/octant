@@ -445,7 +445,7 @@ function androidDeviceView(input: {
               id: "sdk",
               label: "Android SDK",
               state: "missing",
-              detail: "The SDK wasn't found on this host.",
+              detail: "The SDK wasn't found on this computer.",
               fix: "Install platform-tools and the emulator with the Android SDK Manager.",
             }
           : { id: "sdk", label: "Android SDK", state: "waiting", detail: "Not checked yet" },
@@ -695,9 +695,9 @@ function localUserActor(): { readonly kind: "local-user"; readonly actorId: neve
 function transportLabel(transport: AndroidScreenTransport): string {
   if (transport.kind === "stream") return "Live stream";
   const reasons: Record<AndroidScreenFallbackReason, string> = {
-    "no-desktop": "this host is not running in the Octant desktop app.",
+    "no-desktop": "this computer is not running in the Octant desktop app.",
     "not-emulator": "only emulators stream.",
-    "tool-missing": "serve-avd is unavailable on this host.",
+    "tool-missing": "serve-avd is unavailable on this computer.",
     "tool-exited": "serve-avd stopped before it attached.",
     "timed-out": "serve-avd did not attach in time.",
     "desktop-unreachable": "the desktop app did not answer.",

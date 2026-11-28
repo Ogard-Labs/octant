@@ -415,7 +415,7 @@ function usageResumeFact(usageResume: NonNullable<AgentHierarchyRow["usageResume
   if (usageResume.status === "invalidated") {
     return `Scheduled resume did not run: ${usageResume.detail ?? "the run's stop changed."}`;
   }
-  return `Scheduled resume failed: ${usageResume.detail ?? "the host could not restart the run."}`;
+  return `Scheduled resume failed: ${usageResume.detail ?? "this computer could not restart the run."}`;
 }
 
 function ReplyNotes(props: { readonly notes: ReadonlyArray<string> }) {

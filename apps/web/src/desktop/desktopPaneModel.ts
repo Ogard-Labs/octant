@@ -144,7 +144,7 @@ export function isCuaDaemonMissing(provider: LeasableDesktopProvider): boolean {
 export function setupMessage(reason: DesktopProviderSetupReason, providerName: string): string {
   switch (reason) {
     case "no-credential-store":
-      return `${providerName} needs this host to keep your API key, and it has no credential store Octant can reach. Set one up on the computer Octant runs on, then open these settings again.`;
+      return `${providerName} needs this computer to keep your API key, and it has no credential store Octant can reach. Set one up on the computer Octant runs on, then open these settings again.`;
     case "daemon-not-connected":
       return `${providerName} needs its app running and signed in on the computer Octant runs on. Start it there, then open these settings again.`;
   }
@@ -159,7 +159,7 @@ export function providerCapability(provider: LeasableDesktopProvider): string {
     return `Runs through the ${provider.displayName} app signed in on this computer. Where it runs, and whether it bills you, depends on the place you choose.`;
   }
   if (provider.locality === "host-local") {
-    return "Runs on this host. No account and no cost.";
+    return "Runs on this computer. No account and no cost.";
   }
   return provider.billed
     ? `Runs on your own ${provider.displayName} account with an API key kept on this computer. It bills you, and Octant asks before every start unless you turn that off in Settings.`
@@ -190,13 +190,13 @@ export function startRefusalMessage(
 ): string {
   switch (reason) {
     case "no-provider-configured":
-      return "This Project has no desktop recipe yet, or its provider isn't on this host. Set one under Disposable desktop in the Project's settings.";
+      return "This Project has no desktop recipe yet, or its provider isn't on this computer. Set one under Disposable desktop in the Project's settings.";
     case "provider-disabled":
       return "The desktop provider for this Project is turned off.";
     case "provider-unavailable":
-      return "The desktop provider isn't ready on this host.";
+      return "The desktop provider isn't ready on this computer.";
     case "needs-setup":
-      return "The desktop provider for this Project needs setting up on this host first. Open Disposable desktop in the Project's settings to see what it needs.";
+      return "The desktop provider for this Project needs setting up on this computer first. Open Disposable desktop in the Project's settings to see what it needs.";
     case "computer-use-off":
       return "Computer use is off in Settings.";
     case "plan-mode":
@@ -208,7 +208,7 @@ export function startRefusalMessage(
     case "not-leasable-mode":
       return "Only Work and Code threads can lease a desktop.";
     case "lease-limit":
-      return "This thread or this host already runs as many desktops as it may.";
+      return "This thread or this computer already runs as many desktops as it may.";
     case "release-pending":
       return "A desktop from this provider may still be running. No new one starts until Octant confirms it is gone.";
     case "declined":
@@ -271,7 +271,7 @@ function endReasonMessage(reason: DesktopLeaseEndReason, idleMinutes: number): s
     case "computer-use-off":
       return "Computer use was turned off, so it was destroyed.";
     case "host-restart":
-      return "The host restarted, which destroys every desktop. A tab never reconnects to a desktop that ended.";
+      return "Octant restarted, which destroys every desktop. A tab never reconnects to a desktop that ended.";
   }
 }
 

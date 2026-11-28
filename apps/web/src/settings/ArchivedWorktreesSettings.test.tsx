@@ -78,6 +78,6 @@ describe("ArchivedWorktreesSettings", () => {
 
   it("tells a paired device the worktrees are managed on the host", () => {
     render(<ArchivedWorktreesSettings client={undefined} projectNames={new Map()} />);
-    expect(screen.getByText("Worktrees are managed on the host machine.")).toBeVisible();
+    expect(screen.getByText("Worktrees are managed on the computer running Octant.")).toBeVisible();
   });
 });

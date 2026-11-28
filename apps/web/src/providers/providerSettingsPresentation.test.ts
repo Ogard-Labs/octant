@@ -234,7 +234,7 @@ describe("provider Settings presentation", () => {
     expect(incompatibleReadinessFacts(instance, observed)).toEqual(
       expect.arrayContaining([
         {
-          label: "Host check",
+          label: "System check",
           value: "The installed OpenCode runtime is incompatible.",
         },
         { label: "Version", value: "v0.0.0-beta-18721" },
@@ -295,7 +295,7 @@ describe("provider Settings presentation", () => {
 
     expect(incompatibleReadinessFacts(instance, observed)).toEqual([
       {
-        label: "Host check",
+        label: "System check",
         value: "Claude initialization version did not match the configured binary.",
       },
       { label: "Binary", value: "/opt/homebrew/bin/claude" },

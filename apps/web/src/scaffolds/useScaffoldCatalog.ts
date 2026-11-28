@@ -133,7 +133,7 @@ function runFailureText(run: ScaffoldRun): string {
     case "cancelled":
       return "The scaffold was stopped before it finished.";
     case "unavailable":
-      return "The generator could not be started on this machine.";
+      return "The generator could not be started on this computer.";
     default:
       return "The generator stopped before it finished. Its output is below.";
   }

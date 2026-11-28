@@ -199,7 +199,7 @@ export function AgentHierarchyPanel(props: {
 
       {props.reconnecting ? (
         <p className="agent-hierarchy__banner" role="status">
-          Reconnecting… showing the last list the host sent.
+          Reconnecting… showing the last list this computer sent.
         </p>
       ) : null}
 

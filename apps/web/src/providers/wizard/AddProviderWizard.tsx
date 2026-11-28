@@ -435,8 +435,8 @@ export function AddProviderWizard(props: AddProviderWizardProps) {
           </label>
           {claudeKeyLater ? (
             <p className="add-provider-wizard__hint">
-              This browser cannot save keys, so the account is added without one. Then, on the host,
-              run <code>octant provider key set &quot;Profile name&quot;</code> with the
+              This browser cannot save keys, so the account is added without one. Then, on that
+              computer, run <code>octant provider key set &quot;Profile name&quot;</code> with the
               account&apos;s exact name, or open the account in Octant desktop to add it, and check
               the connection.
             </p>

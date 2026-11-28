@@ -241,7 +241,9 @@ describe("server-reported task access details", () => {
     await screen.findByText(/Task account · main-model/);
     down = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh access report" }));
-    expect(await screen.findByText(/host has not reported current thread access/)).toBeVisible();
+    expect(
+      await screen.findByText(/This computer has not reported current thread access/),
+    ).toBeVisible();
     expect(screen.queryByText(/Task account · main-model/)).toBeNull();
     expect(screen.queryByText(/private transport detail/)).toBeNull();
     expect(
@@ -269,7 +271,9 @@ describe("server-reported task access details", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Access details" }));
-    expect(await screen.findByText("Ask the host owner to make this change.")).toBeVisible();
+    expect(
+      await screen.findByText("Ask the owner of this computer to make this change."),
+    ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open provider settings" })).toBeNull();
     expect(open).not.toHaveBeenCalled();
   });

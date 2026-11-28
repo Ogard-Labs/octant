@@ -786,26 +786,26 @@ function DirectoryIdFields(props: {
         />
       </SettingRow>
       <SettingRow
-        label="Sign in from this host's terminal"
+        label="Sign in from this computer's terminal"
         scope="host"
         settingId={`provider-${props.instanceId}-directory-device-code`}
       >
         <label className="endpoint-flow__check">
           <OctantCheckbox
             aria-describedby={`provider-${props.instanceId}-directory-device-code-guidance`}
-            aria-label={`Allow sign-in with a code from this host's terminal for ${props.instanceName}`}
+            aria-label={`Allow sign-in with a code from this computer's terminal for ${props.instanceName}`}
             defaultChecked={props.deviceCodeSignIn}
             name="deviceCodeSignIn"
           />
           <span>
-            <span>Allow sign-in with a code from this host's terminal</span>
+            <span>Allow sign-in with a code from this computer's terminal</span>
             <span
               className="endpoint-flow__hint"
               id={`provider-${props.instanceId}-directory-device-code-guidance`}
             >
-              For a host without the Octant desktop app: run{" "}
-              <code>octant provider sign-in "{props.instanceName}"</code> on the host and enter the
-              code it shows on any device. Leave this off unless you need it; many organizations
+              For a computer without the Octant desktop app: run{" "}
+              <code>octant provider sign-in "{props.instanceName}"</code> on that computer and enter
+              the code it shows on any device. Leave this off unless you need it; many organizations
               block signing in with a code.
             </span>
           </span>

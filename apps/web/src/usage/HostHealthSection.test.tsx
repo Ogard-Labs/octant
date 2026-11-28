@@ -52,7 +52,7 @@ describe("host health on the Diagnostics page", () => {
       <HostHealthSection client={client} from="2026-11-07T00:00:00.000Z" readKey={1} when={when} />,
     );
 
-    const section = await screen.findByRole("region", { name: "Host health" });
+    const section = await screen.findByRole("region", { name: "Octant health" });
     expect(within(section).getByText("Peak 900 MB · 10:02")).toBeInTheDocument();
     expect(within(section).getByText("Peak 1,250 ms · 10:02")).toBeInTheDocument();
     expect(within(section).getByText(/Restarted 1 time: 10:02\./)).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("host health on the Diagnostics page", () => {
     };
     render(<HostHealthSection client={failing} from={undefined} readKey={1} when={when} />);
     expect(
-      await screen.findByText("This host did not answer its health history."),
+      await screen.findByText("This computer did not answer its health history."),
     ).toBeInTheDocument();
   });
 });

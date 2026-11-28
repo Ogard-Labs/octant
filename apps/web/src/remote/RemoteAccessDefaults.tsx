@@ -55,7 +55,7 @@ export function RemoteAccessDefaults(props: RemoteAccessDefaultsProps) {
   return (
     <section aria-label="Default modes" className="remote-shell__device-panel">
       <h2 className="remote-shell__section-title">Default modes</h2>
-      <span className="text-xs text-muted-foreground">New threads on this host</span>
+      <span className="text-xs text-muted-foreground">New threads on this computer</span>
       {props.mode === "code" ? (
         <CodeDefaultMode client={props.codeClient} connected={props.connected} />
       ) : (
@@ -244,7 +244,7 @@ function CodeDefaultMode(props: {
         if (current) setSettings(bootstrap.settings);
       })
       .catch(() => {
-        if (current) setMessage("The default mode could not be read from the host.");
+        if (current) setMessage("The default mode could not be read from that computer.");
       });
     return () => {
       current = false;
@@ -265,12 +265,12 @@ function CodeDefaultMode(props: {
         defaultAutoApprove: access.autoApprove,
       });
       if (result.kind === "settings-updated") setSettings(result.settings);
-      else setMessage("The host did not change the default mode.");
+      else setMessage("That computer did not change the default mode.");
     } catch {
       // A refusal, or a version another window moved on from: read what the
       // host holds now, so the select shows the truth and the next pick is
       // sent against it.
-      setMessage("The host did not change the default mode.");
+      setMessage("That computer did not change the default mode.");
       await client
         .bootstrap()
         .then((bootstrap) => setSettings(bootstrap.settings))

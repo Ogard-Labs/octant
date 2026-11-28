@@ -38,9 +38,9 @@ const healthLabels: Record<HostHealth, string> = {
   healthy: "Connected",
   connecting: "Connecting",
   stale: "Stale connection",
-  incompatible: "Incompatible host",
+  incompatible: "Incompatible computer",
   unauthorized: "Unauthorized",
-  unavailable: "Host unavailable",
+  unavailable: "Computer unavailable",
 };
 
 function dotTone(health: HostHealth): OctantStatusTone {
@@ -99,7 +99,7 @@ function HostStatusLabel(props: {
   const healthLabel = healthLabels[props.health];
   return (
     <span
-      aria-label={`${props.environment ? "Environment" : "Host"}: ${props.displayName} · ${healthLabel}`}
+      aria-label={`${props.environment ? "Environment" : "Computer"}: ${props.displayName} · ${healthLabel}`}
       className={props.className}
       data-host-health={props.health}
       data-host-id={props.hostId}
@@ -176,7 +176,7 @@ export function HostSelector(props: HostSelectorProps) {
   const fixed = props.fixedHostId !== undefined;
   const interactive = !fixed && hosts.length > 1;
   const environment = props.presentation === "environment";
-  const accessibleLabel = environment ? "Environment" : "Destination host";
+  const accessibleLabel = environment ? "Environment" : "Destination computer";
   const className = `host-selector${interactive ? " host-selector--interactive" : ""}${environment ? " host-selector--environment" : ""}`;
 
   function handleChange(nextHostId: string) {

@@ -262,11 +262,11 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
         return LAUNCH_REQUIRED;
       }
       if (response.status !== 200) {
-        return { status: "failed", failureMessage: "Local Machine access is unavailable." };
+        return { status: "failed", failureMessage: "Access to this computer is unavailable." };
       }
       const authority = decodeLocalSessionAuthority(response.body);
       if (authority === undefined) {
-        return { status: "failed", failureMessage: "Local Machine response is invalid." };
+        return { status: "failed", failureMessage: "Response from this computer is invalid." };
       }
       writeStoredAuthority(
         storage,
@@ -291,7 +291,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
     if (existing !== undefined) return existing;
     const serverUrl = options.serverUrl;
     if (serverUrl === undefined)
-      return Promise.reject(new Error("Local Machine URL is unavailable."));
+      return Promise.reject(new Error("This computer's Octant URL is unavailable."));
     const storage = options.storage ?? defaultStorage();
     const fetch = options.fetch ?? globalThis.fetch;
     const renewal = (async () => {
@@ -300,7 +300,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
         // Leaving the shell mounted would keep issuing requests the host now
         // refuses; the guidance page is the only useful state left.
         if (next.launchRequired === true) setResult(next);
-        throw new Error(next.failureMessage ?? "Local Machine access is unavailable.");
+        throw new Error(next.failureMessage ?? "Access to this computer is unavailable.");
       }
       setResult(next);
     })();
@@ -332,7 +332,7 @@ export function useLaunchSession(options: UseLaunchSessionOptions): LaunchSessio
           if (!cancelled) {
             setResult({
               status: "failed",
-              failureMessage: "Octant could not establish local Machine access.",
+              failureMessage: "Octant could not establish access to this computer.",
             });
           }
         }

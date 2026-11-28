@@ -1695,7 +1695,7 @@ describe("App", () => {
       render(<App />);
       expect(
         await screen.findByText(
-          "Octant refuses to send this window's capability over plain HTTP to 192.168.1.5:13773. Open the Machine over https://, or on its loopback address.",
+          "Octant refuses to send this window's capability over plain HTTP to 192.168.1.5:13773. Open Octant over https://, or on this computer's loopback address.",
         ),
       ).toBeVisible();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -6292,7 +6292,7 @@ describe("App", () => {
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
 
     await openSettingsFromSidebar(user);
-    fireEvent.click(await screen.findByRole("button", { name: "Host" }));
+    fireEvent.click(await screen.findByRole("button", { name: "This computer" }));
     await user.click(await screen.findByRole("button", { name: "Reset native window bounds" }));
     expect(hostBridge.resetBounds).toHaveBeenCalledOnce();
     // The shell stays mounted under the sheet with live regions of its own,

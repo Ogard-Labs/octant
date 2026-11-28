@@ -97,7 +97,7 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
   if (failed && list === undefined) {
     return (
       <p className="canvas-share__note" role="status">
-        Public links could not be read from this host.
+        Public links could not be read from this computer.
       </p>
     );
   }
@@ -112,7 +112,7 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
     return (
       <p className="canvas-share__note" data-testid="canvas-public-links-off">
         {props.onRevoke === undefined && props.onUpdate === undefined
-          ? "Public links are off on this host."
+          ? "Public links are off on this computer."
           : "Public links are off. Turn them on in Settings › Data & privacy › Public links."}
       </p>
     );
@@ -178,8 +178,8 @@ export function CanvasPublicLinksSection(props: CanvasPublicLinksSectionProps) {
               )}
               {share.status === "revoking" ? (
                 <span className="canvas-share__note">
-                  The service has not confirmed yet. This host keeps trying, and the link may still
-                  open until it does.
+                  The service has not confirmed yet. This computer keeps trying, and the link may
+                  still open until it does.
                 </span>
               ) : null}
             </li>

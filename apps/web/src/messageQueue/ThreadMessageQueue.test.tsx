@@ -348,7 +348,7 @@ describe("compact message queue controls", () => {
       );
     }
     render(<Harness />);
-    expect(await screen.findByText(/The server restarted/)).toBeVisible();
+    expect(await screen.findByText(/Octant restarted/)).toBeVisible();
     expect(screen.getByRole("button", { name: "0 queued" })).toHaveAttribute(
       "aria-expanded",
       "false",

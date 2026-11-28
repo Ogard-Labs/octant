@@ -76,7 +76,7 @@ export function useParallelRunOutcomes(options: ParallelRunOutcomesOptions): Par
       );
     } catch {
       setBusy(false);
-      setMessage("The host's Code threads could not be read.");
+      setMessage("This computer's Code threads could not be read.");
       return;
     }
     setCheckouts(bound);

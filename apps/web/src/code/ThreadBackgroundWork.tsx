@@ -134,7 +134,7 @@ export function ThreadBackgroundWork<Id extends string>(props: {
       : void stop(
           "tasks",
           () => client.stopLiveTasks(threadId),
-          "The host could not stop these tasks. Try again.",
+          "This computer could not stop these tasks. Try again.",
         );
   const stopWait = (wait: CodeThreadPullRequestWait) =>
     waitClient === undefined || waitThreadId === undefined
@@ -142,7 +142,7 @@ export function ThreadBackgroundWork<Id extends string>(props: {
       : void stop(
           waitKey(wait),
           () => waitClient.stop(waitThreadId, wait),
-          "The host could not stop this. Try again.",
+          "This computer could not stop this. Try again.",
         );
 
   const shownWaits = turnRunning ? [] : waits;

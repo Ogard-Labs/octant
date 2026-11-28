@@ -236,7 +236,7 @@ const STATUS_COPY: Record<Exclude<PlanStatus, "ready">, string> = {
   idle: "Plans are unavailable in this window.",
   loading: "Loading the plan…",
   unauthorized: "This window is not authorized to read the plan.",
-  unavailable: "The host plan service is unavailable.",
+  unavailable: "The plan service on this computer is unavailable.",
   failure: "The plan could not be loaded.",
 };
 

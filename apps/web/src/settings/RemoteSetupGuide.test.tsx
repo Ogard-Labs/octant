@@ -11,8 +11,8 @@ describe("remote setup", () => {
     const guide = screen.getByRole("region", { name: "What do you want to do remotely?" });
     expect(within(guide).queryByRole("button", { name: /Continue/ })).toBeNull();
 
-    await user.click(within(guide).getByRole("button", { name: "Control my Octant host" }));
-    expect(guide).toHaveTextContent("Files, providers and the journal stay on the Octant host.");
+    await user.click(within(guide).getByRole("button", { name: "Control an Octant computer" }));
+    expect(guide).toHaveTextContent("Files, providers and the journal stay on that computer.");
     await user.click(within(guide).getByRole("button", { name: "Continue to pairing" }));
     expect(open).toHaveBeenLastCalledWith("control-host");
 
@@ -65,17 +65,17 @@ describe("remote setup", () => {
         focusedSetting="remote-setup-checks"
       />,
     );
-    expect(screen.getByRole("button", { name: "Control my Octant host" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Control an Octant computer" })).toHaveFocus();
   });
 
   it("directs a client without host controls to the host instead of offering an inert continuation", async () => {
     const open = vi.fn();
     const user = userEvent.setup();
     render(<RemoteSetupGuide canConfigureHost={false} onContinue={open} />);
-    await user.click(screen.getByRole("button", { name: "Control my Octant host" }));
+    await user.click(screen.getByRole("button", { name: "Control an Octant computer" }));
 
     expect(
-      screen.getByText(/Open Settings › Remote access in the Octant desktop app on the host/),
+      screen.getByText(/Open Settings › Remote access in the Octant desktop app on that computer/),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Continue to pairing" })).toBeNull();
     expect(open).not.toHaveBeenCalled();

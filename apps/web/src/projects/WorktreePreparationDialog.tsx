@@ -174,7 +174,7 @@ export function WorktreePreparationDialog(props: {
           {view?.outputTruncated === true ? <p>Earlier output was truncated.</p> : null}
           {preparation === undefined ? null : (
             <pre className="project-action-run__output">
-              {view?.output || "No output retained on this host."}
+              {view?.output || "No output retained on this computer."}
             </pre>
           )}
           <div className="project-dialog__actions">

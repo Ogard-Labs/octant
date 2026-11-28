@@ -360,7 +360,7 @@ describe("LinearConnectionSettings", () => {
     // Only the expired Company account renders Reconnect.
     expect(screen.getAllByRole("button", { name: "Reconnect" })).toHaveLength(1);
     // Unused legacy personal API key offers Add as account.
-    expect(screen.getByText(/stored on this host, not used/i)).toBeVisible();
+    expect(screen.getByText(/stored on this computer, not used/i)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Add as account" }));
     expect(adoptLegacyPersonalCredential).toHaveBeenCalledOnce();
 

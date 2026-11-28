@@ -96,7 +96,7 @@ export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
           if (port.revise === undefined) {
             return {
               status: "refused",
-              message: "Answers are saved from a window on the host.",
+              message: "Answers are saved from a window on this computer.",
             };
           }
           try {
@@ -121,7 +121,7 @@ export function useCanvasChoiceAnswers(port: CanvasChoiceAnswersPort) {
           }
           return { status: "refused", message: result.message };
         }
-        return { status: "refused", message: "The answers changed on the host; try again." };
+        return { status: "refused", message: "The answers changed on this computer; try again." };
       };
       const next = queue.current.then(run, run);
       queue.current = next;

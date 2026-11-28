@@ -116,10 +116,14 @@ export function BlockedToolsSettings(props: BlockedToolsSettingsProps) {
 
   const body =
     client === undefined ? (
-      <SettingsState kind="empty">Blocked tools are set on the host machine.</SettingsState>
+      <SettingsState kind="empty">
+        Blocked tools are set on the computer running Octant.
+      </SettingsState>
     ) : settings === undefined ? (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
-        {loadFailed ? "Blocked tools could not be read from this host." : "Reading blocked tools…"}
+        {loadFailed
+          ? "Blocked tools could not be read from this computer."
+          : "Reading blocked tools…"}
       </SettingsState>
     ) : (
       <>

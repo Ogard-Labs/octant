@@ -231,7 +231,7 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
           {client === undefined
             ? "Shown where Octant runs."
             : loadFailed
-              ? "Your instructions could not be read from this host."
+              ? "Your instructions could not be read from this computer."
               : "Reading your instructions…"}
         </SettingsState>
       </SettingRow>
@@ -295,7 +295,7 @@ export function ProjectInstructionsSettings(props: ProjectInstructionsSettingsPr
         setProblem(result.message);
       }
     } catch {
-      setProblem("This Project's instructions could not be read from this host.");
+      setProblem("This Project's instructions could not be read from this computer.");
     }
   }, [client, projectId]);
 

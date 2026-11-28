@@ -143,7 +143,7 @@ function renderBody(state: SideChatState, props: SideChatPanelProps, retry: () =
   if (props.client === undefined) {
     return (
       <p className="side-chat__empty" role="status">
-        Side Chat is not available on this host.
+        Side Chat is not available on this computer.
       </p>
     );
   }

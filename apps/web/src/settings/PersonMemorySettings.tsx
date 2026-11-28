@@ -115,7 +115,9 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
   if (client === undefined) {
     return (
       <SettingsSection description={PERSON_MEMORY_FACT} title="Memory">
-        <SettingsState kind="empty">Memory is shown on the host machine only.</SettingsState>
+        <SettingsState kind="empty">
+          Memory is shown on the computer running Octant only.
+        </SettingsState>
       </SettingsSection>
     );
   }
@@ -123,7 +125,7 @@ export function PersonMemorySettings(props: PersonMemorySettingsProps) {
     return (
       <SettingsSection description={PERSON_MEMORY_FACT} title="Memory">
         <SettingsState kind={loadFailed ? "error" : "loading"}>
-          {loadFailed ? "Memory could not be read from this host." : "Reading memory…"}
+          {loadFailed ? "Memory could not be read from this computer." : "Reading memory…"}
         </SettingsState>
       </SettingsSection>
     );

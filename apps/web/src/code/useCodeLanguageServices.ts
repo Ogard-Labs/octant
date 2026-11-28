@@ -528,7 +528,7 @@ export function useCodeLanguageServices(
                 "The file changed while finding references. Check the current text and try again.",
               )
             : unavailable(
-                "References are not available from this host. Retry or open this file externally.",
+                "References are not available from this computer. Retry or open this file externally.",
               );
       const operation = async (): Promise<CompanionOutcome | undefined> => {
         const support = await read(
@@ -554,7 +554,7 @@ export function useCodeLanguageServices(
         const expectedRevision = documentRevision.current;
         if (expectedRevision === undefined)
           return unavailable(
-            "The host could not confirm the current file text. Reconnect or open this file externally.",
+            "This computer could not confirm the current file text. Reconnect or open this file externally.",
           );
         const attempt = {
           generation,
@@ -606,7 +606,7 @@ export function useCodeLanguageServices(
           acknowledged.documentRevision === undefined
         )
           return unavailable(
-            "The host could not confirm the current file text. Reconnect or open this file externally.",
+            "This computer could not confirm the current file text. Reconnect or open this file externally.",
           );
         if (documentRevision.current !== acknowledged.documentRevision) return reloadRequired();
         const answer = await read(
@@ -636,7 +636,7 @@ export function useCodeLanguageServices(
           answer.documentRevision !== acknowledged.documentRevision
         )
           return unavailable(
-            "The host answered for another file revision. Check the current text and try again.",
+            "This computer answered for another file revision. Check the current text and try again.",
           );
         return answer;
       };
@@ -646,7 +646,7 @@ export function useCodeLanguageServices(
           operation().catch(() =>
             current()
               ? unavailable(
-                  "References could not be read from the host. Retry or open this file externally.",
+                  "References could not be read from this computer. Retry or open this file externally.",
                 )
               : stopped(),
           ),

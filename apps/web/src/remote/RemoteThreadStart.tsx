@@ -130,9 +130,12 @@ export function RemoteWorkThreadStart(props: RemoteWorkThreadStartProps) {
         workingDirectory: decodeThreadWorkingDirectory("."),
       });
       if ("kind" in created && created.kind === "thread-created") props.onCreated(created.thread);
-      else setMessage("message" in created ? created.message : "The host did not create a thread.");
+      else
+        setMessage(
+          "message" in created ? created.message : "That computer did not create a thread.",
+        );
     } catch {
-      setMessage("The host did not create a thread.");
+      setMessage("That computer did not create a thread.");
     } finally {
       setBusy(false);
     }
@@ -296,7 +299,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     const settings = controller.bootstrap?.settings;
     if (chosen?.type !== "code" || text.length === 0) return undefined;
     const retireStashRecovery = submission.current?.();
-    if (settings === undefined) return "Code is still loading on this host.";
+    if (settings === undefined) return "Code is still loading on this computer.";
     const prepared = await controller.execute({
       kind: "prepare-code-project-checkout",
       projectId: chosen.id,
@@ -304,7 +307,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     if (prepared?.kind !== "checkout-prepared") {
       return (
         controller.lastExecuteError.current?.message ??
-        `The host could not prepare a checkout for ${chosen.name}.`
+        `That computer could not prepare a checkout for ${chosen.name}.`
       );
     }
     // A host that does not require Git admits a plain folder: it has no branch
@@ -335,11 +338,11 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
     if (remote === undefined) {
       return (
         controller.lastExecuteError.current?.message ??
-        `The host could not read the remotes of ${chosen.name}.`
+        `That computer could not read the remotes of ${chosen.name}.`
       );
     }
     if (remote.status === "unavailable" && remote.reason === "ambiguous") {
-      return `${chosen.name} has more than one remote and none is its default. Start this thread at the host, where the remote can be chosen.`;
+      return `${chosen.name} has more than one remote and none is its default. Start this thread on that computer, where the remote can be chosen.`;
     }
     // The Default modes panel changes the host's default and each Project's
     // mode through its own reads, and this view's snapshots are not refreshed
@@ -353,7 +356,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       (project) => String(project.id) === String(chosen.id),
     );
     if (currentProject?.type !== "code" || currentProject.lifecycle !== "active") {
-      return `${chosen.name} is no longer an active Code Project on this host.`;
+      return `${chosen.name} is no longer an active Code Project on this computer.`;
     }
     const currentSettings = current.settings;
     const defaultMode = defaultPermissionModeFor({
@@ -370,7 +373,7 @@ export function RemoteCodeThreadStart(props: RemoteCodeThreadStartProps) {
       providerGroupsForProject(currentProject, props.providerGroups),
     );
     if (model === undefined) {
-      return `No provider allowed by ${chosen.name}'s provider policy is available on this host.`;
+      return `No provider allowed by ${chosen.name}'s provider policy is available on this computer.`;
     }
     const timestamp = new Date().toISOString();
     const threadId = globalThis.crypto.randomUUID();

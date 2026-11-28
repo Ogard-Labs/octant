@@ -3242,7 +3242,7 @@ export function useCodeController(options: CodeControllerOptions) {
       if (result !== undefined) return { status: "ok" };
       return {
         status: "refused",
-        message: lastExecuteError.current?.message ?? "The host could not change this thread.",
+        message: lastExecuteError.current?.message ?? "This computer could not change this thread.",
       };
     },
     [execute],
@@ -4218,7 +4218,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ? result.failure.message
             : result.kind === "provider-turn-state"
               ? (result.failure?.message ?? "The attempt could not be force-stopped.")
-              : "The host refused Force stop.",
+              : "This computer refused Force stop.",
         );
     } catch (error) {
       if (mounted.current && String(activeThreadId.current) === owner)

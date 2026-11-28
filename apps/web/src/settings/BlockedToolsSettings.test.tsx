@@ -85,6 +85,6 @@ describe("BlockedToolsSettings", () => {
 
   it("says the list is set on the host where the window has no client for it", () => {
     render(<BlockedToolsSettings client={undefined} />);
-    expect(screen.getByText("Blocked tools are set on the host machine.")).toBeVisible();
+    expect(screen.getByText("Blocked tools are set on the computer running Octant.")).toBeVisible();
   });
 });

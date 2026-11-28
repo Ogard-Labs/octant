@@ -408,6 +408,6 @@ describe("ProviderToolingPanel", () => {
 
   it("says so when the host cannot be reached", async () => {
     setup({ list: (() => Promise.reject(new Error("down"))) as never });
-    expect(await screen.findByText(/could not reach the host/)).toBeTruthy();
+    expect(await screen.findByText(/could not reach this computer/)).toBeTruthy();
   });
 });

@@ -121,6 +121,6 @@ describe("read-only guided setup checks", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Run read-only checks" }));
-    expect(await screen.findByText(/The Octant host could not answer/)).toBeVisible();
+    expect(await screen.findByText(/Octant on this computer could not answer/)).toBeVisible();
   });
 });

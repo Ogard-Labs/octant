@@ -196,7 +196,7 @@ export function HostResourceSettings({
     {
       key: "maxAgents",
       label: "Agents",
-      description: "Maximum Octant-managed agents across the host.",
+      description: "Maximum Octant-managed agents across this computer.",
       more: "Per-thread limits still apply.",
       min: 1,
       max: 16,
@@ -223,7 +223,7 @@ export function HostResourceSettings({
   return (
     <SettingsSection
       title="Computer resources"
-      description="Limit new work using this host's hardware and load. Running work finishes; use Stop to end it."
+      description="Limit new work using this computer's hardware and load. Running work finishes; use Stop to end it."
     >
       <fieldset
         aria-busy={loading || undefined}
@@ -272,7 +272,7 @@ export function HostResourceSettings({
         ))}
         <SettingRow
           label="Apply limits"
-          description="Saved on this host; applies to the next launch."
+          description="Saved on this computer; applies to the next launch."
           scope="host"
           settingId="resource-save"
           focused={focusedSetting === "resource-save"}
@@ -349,7 +349,7 @@ export function HostResourceSettings({
               role="status"
             >
               {loading ? (
-                "Reading the host's load…"
+                "Reading this computer's load…"
               ) : snapshot === undefined ? (
                 "Current load readings are unavailable."
               ) : (

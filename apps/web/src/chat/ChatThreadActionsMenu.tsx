@@ -122,7 +122,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
     });
   }
 
-  const unreadable = "Could not read the conversation from the server, so nothing was exported.";
+  const unreadable = "Could not read the conversation from this computer, so nothing was exported.";
 
   function completenessSuffix(complete: boolean): string {
     return complete ? "" : " Some of the conversation could not be included; see the export notes.";

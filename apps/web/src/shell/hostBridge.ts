@@ -906,7 +906,7 @@ export function getInjectedHostBridge(
     typeof (bridge as Record<string, unknown>).listProviderApiKeys !== "function" ||
     typeof (bridge as Record<string, unknown>).addProviderApiKey !== "function"
   ) {
-    throw new TypeError("Invalid Octant host bridge.");
+    throw new TypeError("Invalid Octant desktop bridge.");
   }
   return bridge as OctantHostBridge;
 }

@@ -269,7 +269,7 @@ describe("enqueueCanvasCommentTurn", () => {
     );
     expect(refused).toEqual({
       status: "refused",
-      message: "The host refused the message: thread unavailable.",
+      message: "This computer refused the message: thread unavailable.",
     });
     const unreachable = await enqueueCanvasCommentTurn(
       {

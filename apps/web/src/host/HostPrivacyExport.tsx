@@ -11,7 +11,7 @@ type ExportState =
   | { readonly kind: "error"; readonly text: string };
 
 const REFUSAL: Record<Extract<HostExportClientResult, { kind: "refused" }>["reason"], string> = {
-  "local-owner-only": "Only the person at this computer can export this host's data.",
+  "local-owner-only": "Only the person at this computer can export its data.",
   unrepresentable:
     "The export was refused because it would have included something that cannot be represented.",
   incomplete: "The export stopped before every page was written. Nothing was saved.",
@@ -68,7 +68,7 @@ export function HostPrivacyExport({
   return (
     <SettingsPanel
       title="Export my data"
-      description="Save everything this host holds about you as a readable file."
+      description="Save everything this computer holds about you as a readable file."
     >
       <div className="settings-panel__stack" id="settings-host-export">
         <div className="host-settings__controls">

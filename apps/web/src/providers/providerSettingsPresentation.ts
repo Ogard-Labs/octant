@@ -440,11 +440,11 @@ export function incompatibleReadinessFacts(
         : refused.map(([, label]) => label).join(", ");
   return [
     {
-      label: "Host check",
+      label: "System check",
       value:
         providerRefusalGuidance(instance, observed)?.reason ??
         observed?.message ??
-        "No host incompatibility detail was recorded.",
+        "No incompatibility detail was recorded on this computer.",
     },
     ...(binaryPath === undefined ? [] : [{ label: "Binary", value: binaryPath }]),
     { label: "Version", value: observed?.detectedVersion ?? "Unavailable" },

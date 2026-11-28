@@ -196,7 +196,7 @@ export function RemoteTodoDraft(props: {
       const created = await code.execute(plan.command);
       if (created?.kind !== "thread-created" && created?.kind !== "managed-thread-created")
         return refuseCreate(
-          code.lastExecuteError.current?.message ?? "The host refused to create the thread.",
+          code.lastExecuteError.current?.message ?? "That computer refused to create the thread.",
         );
       durable = true;
       await link(String(created.thread.id));
@@ -283,7 +283,7 @@ export function RemoteTodoDraft(props: {
           ...(selectedProject === undefined ? {} : { projectId: selectedProject.id }),
         });
         if (created.kind !== "thread-created")
-          return refuseCreate("The host refused to create the thread.");
+          return refuseCreate("That computer refused to create the thread.");
         await link(String(created.thread.id));
         try {
           const selected = await clients.chat.execute({
@@ -354,7 +354,7 @@ export function RemoteTodoDraft(props: {
           ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
         });
         if (!("kind" in created) || created.kind !== "thread-created")
-          return refuseCreate("The host refused to create the thread.");
+          return refuseCreate("That computer refused to create the thread.");
         await link(String(created.thread.id));
         try {
           const attachmentIds = [];

@@ -208,7 +208,7 @@ describe("SideTaskInline", () => {
 
       await userEvent.click(await screen.findByRole("button", { name: "Do it here" }));
       await waitFor(() => expect(sideTasks).toHaveBeenCalledTimes(2));
-      expect(await screen.findByRole("alert")).toHaveTextContent("Waiting for the host");
+      expect(await screen.findByRole("alert")).toHaveTextContent("Waiting for this computer");
       expect(screen.getByRole("button", { name: "Do it here" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "New worktree" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "Dismiss Fix stale install docs" })).toBeDisabled();
@@ -266,7 +266,9 @@ describe("SideTaskInline", () => {
     await waitFor(() => expect(sideTasks).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("button", { name: "Do it here" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "New worktree" })).toBeDisabled();
-    expect(await screen.findByRole("alert")).toHaveTextContent("The host recorded this action");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This computer recorded this action",
+    );
     readable = true;
     act(() => window.dispatchEvent(new Event("online")));
     expect(await screen.findByText(/Queued here/)).toBeVisible();

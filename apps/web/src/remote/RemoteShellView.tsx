@@ -192,7 +192,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         message={state.reason}
         role="alert"
         state="warning"
-        title="Host incompatible"
+        title="Computer incompatible"
       />
     );
   }
@@ -216,7 +216,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
         message={state.reason}
         role="alert"
         state="disconnected"
-        title="Host unavailable"
+        title="Computer unavailable"
       />
     );
   }
@@ -253,7 +253,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
               {...(lastReadyAt === undefined ? {} : { lastReadyAt })}
               reach={activeWorkReach(state.kind)}
               hostId={hosts[0]?.hostId ?? "paired-browser"}
-              hostName={hosts[0]?.displayName ?? "Paired host"}
+              hostName={hosts[0]?.displayName ?? "Paired computer"}
               onOpen={(thread) => {
                 setActiveWorkOpen(false);
                 setActiveMode(thread.mode);
@@ -267,7 +267,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       {state.kind === "stale" ? (
         <OctantEmpty
           action={{ label: "Reconnect", onClick: () => props.bridge.reconnect() }}
-          message="The host connection is stale. What you see may be behind; reconnect to send a turn."
+          message="The connection to that computer is stale. What you see may be behind; reconnect to send a turn."
           role="status"
           state="warning"
           title="Connection stale"
@@ -284,7 +284,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
       <ContinuityScreenContext.Provider
         value={{
-          hostLabel: hosts[0]?.displayName ?? "Paired host",
+          hostLabel: hosts[0]?.displayName ?? "Paired computer",
           screenLabel: "This paired browser",
           origin,
         }}
@@ -344,15 +344,15 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       </div>
 
       <section
-        aria-label="Local host only surfaces"
+        aria-label="Only on that computer"
         className="remote-shell__surface-grid"
         role="note"
       >
-        <h2 className="remote-shell__section-title">Local host only</h2>
+        <h2 className="remote-shell__section-title">Only on that computer</h2>
         <p className="remote-shell__local-only">
           {standing.actsAsHostPerson
-            ? "Only a window on the host's own computer does these. You paired this browser yourself, so the host takes its other requests as it takes a window's."
-            : "These stay with the person at the host. A paired browser reads threads and sends turns; it cannot bind folders, approve tool use, or manage credentials."}
+            ? "Only a window on that computer does these. You paired this browser yourself, so it takes your other requests as it takes a window's."
+            : "These stay with the person at that computer. A paired browser reads threads and sends turns; it cannot bind folders, approve tool use, or manage credentials."}
         </p>
         {localHostSurfaces.map((surface) => (
           <OctantCard
@@ -400,7 +400,7 @@ function ConnectionStatusLine(props: { readonly status: ConnectionStatus }) {
       ? (props.status.reason ?? "Remote access is blocked.")
       : props.status.kind === "offline"
         ? "Waiting for the network."
-        : "Reconnecting to the host…";
+        : "Reconnecting to that computer…";
   return (
     <p aria-live="polite" className="remote-shell__status" role="status">
       {message}

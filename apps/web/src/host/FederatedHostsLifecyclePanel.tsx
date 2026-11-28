@@ -31,13 +31,13 @@ function guidanceCopy(snapshot: FederatedHostLifecycleSnapshot): string | undefi
     return "This browser's device credential expired. Re-pair to restore access.";
   }
   if (snapshot.reasonCode === "revoked") {
-    return "Access was revoked on the host. Re-pair or remove this entry.";
+    return "Access was revoked on that computer. Re-pair or remove this entry.";
   }
   if (snapshot.reasonCode === "lost-key") {
     return "This browser lost its device key. Re-pair to continue.";
   }
   if (snapshot.reasonCode === "host-changed") {
-    return "The host identity changed. Re-pair before reconnecting.";
+    return "That computer's identity changed. Re-pair before reconnecting.";
   }
   if (snapshot.state === "unauthorized" && snapshot.actions.canReconnect) {
     return "Session ended. Reconnect renews from this browser's device key without pairing again.";
@@ -77,9 +77,7 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
   useEffect(() => {
     void props.lifecycle.sync().catch((error: unknown) => {
       setMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not refresh federated host lifecycle state.",
+        error instanceof Error ? error.message : "Could not refresh connected computer status.",
       );
     });
   }, [props.lifecycle]);
@@ -131,9 +129,9 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
   return (
     <SettingsSection
       className="federated-hosts-lifecycle"
-      description="Each host keeps its own connection state. Device credential expiry, revoke, or failure on one host never blocks the local host or other healthy hosts. A spent session reconnects from the paired device key; only a lost, revoked, or expired credential needs a new pair."
+      description="Each computer keeps its own connection state. Device credential expiry, revoke, or failure on one computer never blocks this computer or other healthy computers. A spent session reconnects from the paired device key; only a lost, revoked, or expired credential needs a new pair."
       id="settings-federated-hosts"
-      title="Federated hosts"
+      title="Connected computers"
     >
       <ul className="setgroup federated-hosts-lifecycle__list">
         {snapshots.map((snapshot) => {
@@ -218,7 +216,7 @@ export function FederatedHostsLifecycleStrip(props: FederatedHostsLifecyclePanel
   if (attention.length === 0) return null;
   return (
     <div
-      aria-label="Federated host attention"
+      aria-label="Connected computer attention"
       className="federated-hosts-lifecycle-strip"
       role="status"
     >

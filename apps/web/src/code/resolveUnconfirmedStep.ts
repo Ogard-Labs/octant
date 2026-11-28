@@ -30,6 +30,6 @@ export async function resolveUnconfirmedStep(
       ? { status: "refused", message: result.failure.message }
       : { status: "resolved" };
   } catch {
-    return { status: "refused", message: "Octant could not reach the host. Try again." };
+    return { status: "refused", message: "Octant could not reach this computer. Try again." };
   }
 }

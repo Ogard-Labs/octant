@@ -105,7 +105,7 @@ describe("MachineConnectionsMap", () => {
   it("shows LAN, Tailscale, hub-introduced, waiting confirmation, unconfirmed, offline, and unmeasured peer labels", () => {
     render(<MachineConnectionsMap fixture={FIXTURE} />);
 
-    const diagram = screen.getByRole("region", { name: "Machine connections diagram" });
+    const diagram = screen.getByRole("region", { name: "Computer connections diagram" });
     expect(within(diagram).getByLabelText("Mac mini map node")).toHaveTextContent(
       "Listener · Tailscale",
     );
@@ -141,7 +141,7 @@ describe("MachineConnectionsMap", () => {
     fireEvent.dragOver(studioNode);
     fireEvent.drop(studioNode);
 
-    const planRegion = screen.getByRole("region", { name: "Planned machine links" });
+    const planRegion = screen.getByRole("region", { name: "Planned computer links" });
     expect(planRegion).toHaveTextContent("Mac mini ↔ Studio");
     await user.click(within(planRegion).getByRole("button", { name: "Pair with Studio" }));
     expect(onStartDirectPairing).toHaveBeenCalledWith(
@@ -160,7 +160,7 @@ describe("MachineConnectionsMap", () => {
     fireEvent.dragOver(lanNode);
     fireEvent.drop(lanNode);
 
-    const planRegion = screen.getByRole("region", { name: "Planned machine links" });
+    const planRegion = screen.getByRole("region", { name: "Planned computer links" });
     await user.click(
       within(planRegion).getByRole("button", { name: "Make hub join code for Office Mac" }),
     );
@@ -187,7 +187,7 @@ describe("MachineConnectionsMap", () => {
     fireEvent.dragOver(lanNode);
     fireEvent.drop(lanNode);
 
-    const planRegion = screen.getByRole("region", { name: "Planned machine links" });
+    const planRegion = screen.getByRole("region", { name: "Planned computer links" });
     expect(planRegion).toHaveTextContent("Only a computer itself joins a hub or pairs directly.");
     expect(within(planRegion).queryByRole("button")).toBeNull();
     expect(calls).toEqual([]);
@@ -203,18 +203,18 @@ describe("MachineConnectionsMap", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select Office Mac" }));
     await user.click(screen.getByRole("button", { name: "Link selected (3)" }));
 
-    const planRegion = screen.getByRole("region", { name: "Planned machine links" });
+    const planRegion = screen.getByRole("region", { name: "Planned computer links" });
     expect(planRegion).toHaveTextContent("Mac mini ↔ Office Mac");
     expect(planRegion).toHaveTextContent("Mac mini ↔ Studio");
     expect(planRegion).toHaveTextContent("Studio ↔ Office Mac");
 
     // Keyboard list equivalent reaches the same linking panel without dragging.
     await user.click(screen.getByRole("button", { name: "Clear selection" }));
-    expect(screen.queryByRole("region", { name: "Planned machine links" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Planned computer links" })).toBeNull();
 
     const list = screen.getByRole("list", { name: "Connections list" });
     await user.click(within(list).getByRole("button", { name: "Link Mac mini with Studio" }));
-    expect(screen.getByRole("region", { name: "Planned machine links" })).toHaveTextContent(
+    expect(screen.getByRole("region", { name: "Planned computer links" })).toHaveTextContent(
       "Pair Mac mini directly with Studio",
     );
   });

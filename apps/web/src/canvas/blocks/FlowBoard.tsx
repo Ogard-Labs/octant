@@ -206,7 +206,7 @@ export function FlowBoard(props: FlowBoardProps) {
       }
     } catch {
       setOverrides(new Map());
-      setMessage("The board could not be saved on the host.");
+      setMessage("The board could not be saved on this computer.");
     } finally {
       setPending(false);
     }

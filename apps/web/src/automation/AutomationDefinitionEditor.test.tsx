@@ -630,7 +630,7 @@ describe("AutomationDefinitionEditor creation", () => {
         })}
       />,
     );
-    expect(screen.getByText("No Work Projects are available on this host.")).toBeVisible();
+    expect(screen.getByText("No Work Projects are available on this computer.")).toBeVisible();
     expect(screen.getByText("No profiles fit this choice.")).toBeVisible();
     expect(screen.getByText("No access profiles fit this choice.")).toBeVisible();
   });

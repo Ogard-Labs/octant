@@ -74,7 +74,7 @@ export function DesktopSpendCapSettings(props: {
         ),
       );
     } catch {
-      setProblem("The host didn't take the cap. Try again.");
+      setProblem("This computer didn't take the cap. Try again.");
     } finally {
       setBusy(false);
     }
@@ -90,7 +90,7 @@ export function DesktopSpendCapSettings(props: {
       : loaded.status === "local-only"
         ? "Set on the computer Octant runs on."
         : loaded.status === "failed"
-          ? "This window can't ask the host about desktop spending."
+          ? "This window can't ask this computer about desktop spending."
           : summary?.monthlyCapUsdCents === undefined
             ? `Off. ${desktopDollars(summary?.spentUsdCents ?? 0)} counted this month.`
             : `${desktopDollars(summary.spentUsdCents)} of ${desktopDollars(summary.monthlyCapUsdCents)} counted this month (UTC).`;

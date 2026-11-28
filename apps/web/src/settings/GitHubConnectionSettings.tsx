@@ -127,7 +127,7 @@ export function GitHubConnectionSettings({
   return (
     <section aria-label="GitHub" className="github-settings" id="settings-github">
       <SettingsSection
-        description="GitHub authentication on the selected host."
+        description="GitHub authentication on the selected computer."
         title="GitHub account"
       >
         <SettingsFactList
@@ -188,7 +188,7 @@ export function GitHubConnectionSettings({
         {...(snapshot.state === "insecure-storage"
           ? {
               description:
-                "This host's GitHub token is stored in gh's plaintext config file, so Octant blocks GitHub until it moves. Moving it keeps the same token and account; Octant writes it to this host's secure credential store and only then lets gh drop the plaintext copy. If the secure store is unavailable the credential is left untouched.",
+                "This computer's GitHub token is stored in gh's plaintext config file, so Octant blocks GitHub until it moves. Moving it keeps the same token and account; Octant writes it to this computer's secure credential store and only then lets gh drop the plaintext copy. If the secure store is unavailable the credential is left untouched.",
             }
           : {})}
         title="GitHub connection"
@@ -284,8 +284,8 @@ export function GitHubConnectionSettings({
                   : "Log out of GitHub?"
               }
             >
-              Logging out removes the sign-in from this host only. It does not revoke Octant&apos;s
-              GitHub authorization.
+              Logging out removes the sign-in from this computer only. It does not revoke
+              Octant&apos;s GitHub authorization.
             </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
@@ -342,7 +342,7 @@ export function GitHubConnectionSettings({
       <SettingsSection
         description={
           <>
-            Logging out removes the credential from this host only; it does not revoke Octant's
+            Logging out removes the credential from this computer only; it does not revoke Octant's
             GitHub authorization. To revoke it, open your{" "}
             <a href={GITHUB_APPLICATIONS_URL} rel="noreferrer" target="_blank">
               GitHub application settings
@@ -356,7 +356,7 @@ export function GitHubConnectionSettings({
         {credentialRemovable ? (
           <div className="setgroup">
             <SettingRow
-              description="Removes the sign-in from this host, which stays authorized on GitHub until you revoke it there."
+              description="Removes the sign-in from this computer, which stays authorized on GitHub until you revoke it there."
               focused={focusedSetting === "github-logout"}
               label="Log out"
               labelledBySection
@@ -376,7 +376,7 @@ export function GitHubConnectionSettings({
                   >
                     {snapshot.state === "insecure-storage"
                       ? "Remove insecure credential"
-                      : "Log out on this host"}
+                      : "Log out on this computer"}
                   </OctantButton>
                 ) : null}
               </div>

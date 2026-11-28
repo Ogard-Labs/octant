@@ -140,17 +140,17 @@ const STALE_REASON_LABELS: Readonly<Record<string, string>> = {
   "rate-limited": "GitHub reported a rate limit.",
   "refresh-failed": "The last refresh failed.",
   "authentication-changed": "The GitHub authentication changed.",
-  disconnected: "The host was disconnected from GitHub.",
+  disconnected: "This computer was disconnected from GitHub.",
 };
 
 const UNAVAILABLE_FALLBACKS: Readonly<Record<GithubCatalogueUnavailable["reason"], string>> = {
-  unauthorized: "GitHub is not connected on this host.",
+  unauthorized: "GitHub is not connected on this computer.",
   "scope-limited": "The GitHub account is missing a required scope.",
   "rate-limited": "GitHub reported a rate limit. Try again later.",
-  "insecure-storage": "The host's GitHub credential storage is insecure.",
+  "insecure-storage": "This computer's GitHub credential storage is insecure.",
   "external-token": "An ambient GitHub token blocks this capability.",
   "invalid-cursor": "The issue page reference expired. Refresh the list.",
-  unavailable: "GitHub issues are unavailable on this host.",
+  unavailable: "GitHub issues are unavailable on this computer.",
 };
 
 const STATE_FILTERS: ReadonlyArray<{
@@ -590,8 +590,8 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
         <FolderGit2 aria-hidden="true" size={20} />
         <p className="github-issue-browser__empty-title">Choose a repository</p>
         <p className="github-issue-browser__note">
-          Issues are read from any repository this host can reach. Repositories a Code thread has
-          used are listed together here automatically.
+          Issues are read from any repository this computer can reach. Repositories a Code thread
+          has used are listed together here automatically.
         </p>
         <OctantButton
           onClick={() => setRepositoryPickerOpen(true)}

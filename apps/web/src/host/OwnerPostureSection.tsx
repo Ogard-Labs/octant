@@ -49,7 +49,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
       setTargets(result.targets);
       setMessage(
         result.targets.length === 0
-          ? "No active Work or Code threads or Projects on this host."
+          ? "No active Work or Code threads or Projects on this computer."
           : "Choose the Work thread, Code thread or Code Project to change.",
       );
     } else setMessage(result.message);
@@ -164,7 +164,7 @@ export function OwnerPostureSection({ spokes }: { readonly spokes: ReadonlyArray
         </a>
       )}
       {message === "" ? null : <SettingsState kind="empty">{message}</SettingsState>}
-      {busy ? <p role="status">Waiting for this host and your unlock…</p> : null}
+      {busy ? <p role="status">Waiting for that computer and your unlock…</p> : null}
     </SettingsSection>
   );
 }

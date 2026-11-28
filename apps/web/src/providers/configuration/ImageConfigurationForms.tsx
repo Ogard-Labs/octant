@@ -155,7 +155,7 @@ export function OpenAiImageFields(props: {
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
-          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          Manage credentials in the Octant desktop app. Credential changes are unavailable in this
           browser.
         </p>
       ) : null}
@@ -277,7 +277,7 @@ export function GeminiImageFields(props: {
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
-          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          Manage credentials in the Octant desktop app. Credential changes are unavailable in this
           browser.
         </p>
       ) : null}
@@ -424,7 +424,7 @@ export function BflImageFields(props: {
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
-          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          Manage credentials in the Octant desktop app. Credential changes are unavailable in this
           browser.
         </p>
       ) : null}
@@ -510,7 +510,7 @@ export function IdeogramImageFields(props: {
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
-          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          Manage credentials in the Octant desktop app. Credential changes are unavailable in this
           browser.
         </p>
       ) : null}
@@ -926,7 +926,7 @@ export function VideoProfileFields(props: {
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
-          Manage credentials in the Octant host app. Credential changes are unavailable in this
+          Manage credentials in the Octant desktop app. Credential changes are unavailable in this
           browser.
         </p>
       ) : null}

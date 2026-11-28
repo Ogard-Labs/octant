@@ -320,7 +320,7 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
               value={modelValue(memoryChoice)}
             />
           ) : (
-            <span className="settings-state">Shown on the host machine only.</span>
+            <span className="settings-state">Shown on the computer running Octant only.</span>
           )}
         </SettingRow>
         <SettingRow
@@ -346,7 +346,7 @@ export function AutomaticModelSettings(props: AutomaticModelSettingsProps) {
               value={modelValue(reviewChoice)}
             />
           ) : (
-            <span className="settings-state">Shown on the host machine only.</span>
+            <span className="settings-state">Shown on the computer running Octant only.</span>
           )}
         </SettingRow>
       </div>

@@ -78,7 +78,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             return {
               kind: "status-unavailable",
               message:
-                "Sign-in status is unavailable. Check sign-in or cancel this attempt when the host is available.",
+                "Sign-in status is unavailable. Check sign-in or cancel this attempt when this computer is available.",
             };
           if (
             request.kind === "sign-out" &&
@@ -88,7 +88,8 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           )
             return {
               kind: "sign-out-pending",
-              message: "Sign-out is not confirmed. Finish signing out when the host is available.",
+              message:
+                "Sign-out is not confirmed. Finish signing out when this computer is available.",
             };
           if (
             request.kind === "sign-out" &&
@@ -100,7 +101,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             return {
               kind: "cancel-pending",
               message:
-                "Sign-in cancellation is not confirmed. Try Cancel sign-in again when the host is available.",
+                "Sign-in cancellation is not confirmed. Try Cancel sign-in again when this computer is available.",
             };
           return {
             kind: "refused",
@@ -168,7 +169,8 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
           props.knownToNeedSignIn === true
             ? {
                 kind: "status-unavailable",
-                message: "Sign-in status is unavailable. Check sign-in when the host is available.",
+                message:
+                  "Sign-in status is unavailable. Check sign-in when this computer is available.",
               }
             : undefined,
         );

@@ -115,7 +115,7 @@ export function ManagedToolsSettingsView(props: {
             <SettingRow
               settingId="managed-tools-empty"
               label="Bundled tools"
-              description="No managed tools are available on this host."
+              description="No managed tools are available on this computer."
               scope="host"
             >
               <span>Unavailable</span>

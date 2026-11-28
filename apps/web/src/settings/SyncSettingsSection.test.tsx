@@ -67,7 +67,9 @@ describe("SyncSettingsSection", () => {
   it("says store setup happens on the host when this client is not on it", () => {
     render(<SyncSettingsSection client={undefined} folderBrowse={undefined} />);
     expect(
-      screen.getByText("Choose a store and turn sync on in the Octant app on the host computer."),
+      screen.getByText(
+        "Choose a store and turn sync on in the Octant app on the computer running Octant.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });

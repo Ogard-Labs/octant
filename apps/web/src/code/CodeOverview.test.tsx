@@ -755,7 +755,7 @@ describe("CodeOverview", () => {
     );
 
     expect(
-      await screen.findByText("Starting a thread here needs the host connection."),
+      await screen.findByText("Starting a thread here needs a connection to this computer."),
     ).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
   });

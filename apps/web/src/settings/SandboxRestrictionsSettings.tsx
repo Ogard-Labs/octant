@@ -201,7 +201,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
     >
       {props.client === undefined ? (
         <SettingsState kind="empty">
-          Connect to the host to review its sandbox restrictions.
+          Connect to this computer to review its sandbox restrictions.
         </SettingsState>
       ) : (
         <>
@@ -237,8 +237,8 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
             <>
               {snapshot.enrollmentEnabled === false ? (
                 <SettingsState kind="empty">
-                  New policy enrollment is unavailable on this host. Review Advanced protections and
-                  limitations; saved restrictions remain enforced.
+                  New policy enrollment is unavailable on this computer. Review Advanced protections
+                  and limitations; saved restrictions remain enforced.
                 </SettingsState>
               ) : null}
               <p className="oct-meta">
@@ -326,7 +326,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Add folder"
-                description="Use the exact folder on this host."
+                description="Use the exact folder on this computer."
               >
                 <div className="flex w-full min-w-0 flex-wrap items-center gap-2">
                   <label className="sr-only" htmlFor={pathId}>
@@ -364,7 +364,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Blocked actions"
-                description="Writes outside allowed folders and host administration stay confined."
+                description="Writes outside allowed folders and Octant administration stay confined."
               >
                 <span className="oct-meta">
                   {snapshot.strict === true ? "Strict boundary" : "Saved for Strict"}
@@ -380,7 +380,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Network"
-                description="The model connection and host-owned tool bridges remain separate channels."
+                description="The model connection and Octant's tool bridges remain separate channels."
               >
                 <OctantSelectField
                   aria-label="Sandbox network"
@@ -418,17 +418,17 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       ? "thread"
                       : "host"
                 }
-                label="Host services"
+                label="Local services"
                 description="Configure whether Strict blocks ambient local services."
-                more="Provider and host-owned control bridges remain separate."
+                more="Provider and Octant control bridges remain separate."
               >
                 <OctantSelectField
-                  aria-label="Strict host services"
+                  aria-label="Strict local services"
                   value={draft.hostServices}
                   disabled={busy || !snapshot.capabilities.blockedHostServices}
                   options={[
                     { id: "existing-policy", label: "Standard Strict rules" },
-                    { id: "blocked", label: "Block ambient host services" },
+                    { id: "blocked", label: "Block ambient local services" },
                   ]}
                   onValueChange={(hostServices) => {
                     if (hostServices === "existing-policy" || hostServices === "blocked")
@@ -450,7 +450,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                       : "host"
                 }
                 label="Local service exceptions"
-                description="Allow an exact address and port through the proxy while blocking other ambient host services."
+                description="Allow an exact address and port through the proxy while blocking other ambient local services."
                 more="The service's effects are a separate authority."
               >
                 <div className="settings-section-stack">
@@ -604,7 +604,7 @@ export function SandboxRestrictionsSettings(props: SandboxRestrictionsSettingsPr
                         this does not enable Strict.
                         {denial.localService === undefined
                           ? null
-                          : " This permits the named service's effects as a separate authority; other ambient host services stay blocked."}
+                          : " This permits the named service's effects as a separate authority; other ambient local services stay blocked."}
                       </p>
                     ) : null}
                     <div className="settings-view__actions">

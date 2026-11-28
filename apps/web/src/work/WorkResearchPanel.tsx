@@ -46,7 +46,7 @@ const STATUS_COPY: Record<Exclude<WorkResearchStatus, "ready">, string> = {
   idle: "Research is unavailable for this Project.",
   loading: "Loading research…",
   unauthorized: "Research is not authorized in this window.",
-  unavailable: "The host research service is unavailable.",
+  unavailable: "The research service on this computer is unavailable.",
   failure: "Research could not be loaded.",
 };
 

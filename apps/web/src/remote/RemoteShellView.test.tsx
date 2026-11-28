@@ -940,7 +940,7 @@ describe("RemoteShellView", () => {
 
     await user.click(screen.getByRole("button", { name: "Code" }));
     await screen.findByRole("navigation", { name: "Code thread list" });
-    expect(await screen.findByText(/No Code threads on this host yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No Code threads on this computer yet/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /read code bootstrap/i })).not.toBeInTheDocument();
   });
 
@@ -948,7 +948,7 @@ describe("RemoteShellView", () => {
     const { bridge } = await readyBridge();
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    expect(await screen.findByText("Local host only")).toBeInTheDocument();
+    expect(await screen.findByText("Only on that computer")).toBeInTheDocument();
     expect(screen.getByText("Approvals")).toBeInTheDocument();
     expect(screen.getByText("Provider credentials")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable remotely").length).toBeGreaterThanOrEqual(4);
@@ -960,7 +960,7 @@ describe("RemoteShellView", () => {
     const { bridge } = await readyBridge([], false, true);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+    const localOnly = await screen.findByRole("note", { name: "Only on that computer" });
     await waitFor(() => expect(within(localOnly).queryByText("Approvals")).toBeNull());
     expect(within(localOnly).queryByText("Extensions")).toBeNull();
     expect(within(localOnly).queryByText("Provider setup")).toBeNull();
@@ -983,12 +983,12 @@ describe("RemoteShellView", () => {
       const { bridge } = await readyBridge([], false, actsAsHostPerson);
       const { unmount } = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-      const localOnly = await screen.findByRole("note", { name: "Local host only surfaces" });
+      const localOnly = await screen.findByRole("note", { name: "Only on that computer" });
       expect(within(localOnly).getByText("Approvals")).toBeInTheDocument();
       expect(within(localOnly).getByText("Extensions")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Code" }));
       await screen.findByRole("navigation", { name: "Code thread list" });
-      await screen.findByText(/No Code threads on this host yet/i);
+      await screen.findByText(/No Code threads on this computer yet/i);
       expect(screen.queryByRole("region", { name: "Default modes" })).toBeNull();
       unmount();
     }
@@ -1147,7 +1147,7 @@ describe("RemoteShellView", () => {
 
     await user.click(await screen.findByRole("button", { name: "Work" }));
     const work = await screen.findByRole("navigation", { name: "Work thread list" });
-    expect(await within(work).findByText(/Start one from the host/)).toBeInTheDocument();
+    expect(await within(work).findByText(/Start one from that computer/)).toBeInTheDocument();
     expect(within(work).queryByRole("button", { name: "New thread" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Code" }));
@@ -1164,7 +1164,7 @@ describe("RemoteShellView", () => {
     const { bridge } = await readyBridge(seen, false, true);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    const settings = await screen.findByRole("region", { name: "Host settings" });
+    const settings = await screen.findByRole("region", { name: "Computer settings" });
     await user.click(await within(settings).findByRole("button", { name: "Providers" }));
     expect(await within(settings).findByText("Codex local")).toBeInTheDocument();
 
@@ -1199,7 +1199,7 @@ describe("RemoteShellView", () => {
       const { bridge } = await readyBridge(seen, false, true, false, false, () => "full");
       render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-      const settings = await screen.findByRole("region", { name: "Host settings" });
+      const settings = await screen.findByRole("region", { name: "Computer settings" });
       await user.click(await within(settings).findByRole("button", { name: "Diagnostics" }));
       await user.click(await within(settings).findByRole("button", { name: "Save diagnostics…" }));
       await user.click(await within(settings).findByRole("button", { name: "Save file" }));
@@ -1237,7 +1237,7 @@ describe("RemoteShellView", () => {
       );
       render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-      await screen.findByRole("note", { name: "Local host only surfaces" });
+      await screen.findByRole("note", { name: "Only on that computer" });
       expect(screen.queryByRole("button", { name: "Diagnostics" })).toBeNull();
       expect(seen.some((request) => request.path.startsWith("/api/diagnostics"))).toBe(false);
     },
@@ -1249,7 +1249,7 @@ describe("RemoteShellView", () => {
     const { bridge } = await readyBridge(seen, false, true);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    const settings = await screen.findByRole("region", { name: "Host settings" });
+    const settings = await screen.findByRole("region", { name: "Computer settings" });
     await user.click(await within(settings).findByRole("button", { name: "Extensions" }));
     await user.click(await within(settings).findByRole("button", { name: "Claude and Codex" }));
     // The panel is the one a window shows, not the page that sends a person to the computer.
@@ -1265,7 +1265,7 @@ describe("RemoteShellView", () => {
     const { bridge } = await readyBridge(seen, false, true);
     render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-    const settings = await screen.findByRole("region", { name: "Host settings" });
+    const settings = await screen.findByRole("region", { name: "Computer settings" });
     await user.click(await within(settings).findByRole("button", { name: "Permissions" }));
     await waitFor(
       () => {
@@ -1287,7 +1287,7 @@ describe("RemoteShellView", () => {
       const seen: ProductRequest[] = [];
       const { bridge } = await readyBridge(seen, false, false, false, false, accessLevel);
       const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
-      await screen.findByRole("note", { name: "Local host only surfaces" });
+      await screen.findByRole("note", { name: "Only on that computer" });
       expect(screen.queryByRole("button", { name: "Permissions" })).toBeNull();
       expect(seen.map((request) => request.path)).not.toContain("/api/protected-files");
       view.unmount();
@@ -1301,7 +1301,7 @@ describe("RemoteShellView", () => {
       const { bridge } = await readyBridge(seen, false, false, false, false, accessLevel);
       const view = render(<RemoteShellView bridge={bridge} onReset={vi.fn()} />);
 
-      const settings = await screen.findByRole("region", { name: "Host settings" });
+      const settings = await screen.findByRole("region", { name: "Computer settings" });
       expect(
         within(settings)
           .getAllByRole("button")
@@ -1324,7 +1324,7 @@ describe("RemoteShellView", () => {
 
     expect(
       await screen.findByText(
-        "Set up sync, join, and revoke in the Octant app on the host computer.",
+        "Set up sync, join, and revoke in the Octant app on the computer running Octant.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Set up sync · this computer")).toBeInTheDocument();

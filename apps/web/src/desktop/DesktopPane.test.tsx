@@ -139,7 +139,7 @@ describe("Desktop pane", () => {
     const show = await screen.findByRole("button", { name: "Show Mac desktop" });
     expect(requests.some((r) => r.kind === "host-display")).toBe(false);
     fireEvent.click(show);
-    const image = await screen.findByAltText("Mac host display");
+    const image = await screen.findByAltText("Mac display");
     const press = () => fireEvent.keyDown(image, { code: "KeyA", key: "a" });
     const inputs = () => requests.filter((r) => r.kind === "host-display" && r.action === "input");
     press();
@@ -151,14 +151,14 @@ describe("Desktop pane", () => {
     await screen.findByRole("button", { name: "Take control" });
     press();
     expect(inputs()).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Close host display" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close display" }));
     expect(requests.at(-1)).toMatchObject({ kind: "host-display", action: "close", viewId });
   });
   it("forwards only supported Mac gestures and consumes scrolling only during control", async () => {
     const { client, requests } = fakeClient({ overview: { ...overviewOf([]), hostDisplay: true } });
     render(<DesktopPane client={client} threadId={threadId} />);
     fireEvent.click(await screen.findByRole("button", { name: "Show Mac desktop" }));
-    const image = await screen.findByAltText("Mac host display");
+    const image = await screen.findByAltText("Mac display");
     Object.assign(image, { setPointerCapture: vi.fn() });
     image.getBoundingClientRect = () => new DOMRect(0, 0, 100, 100);
     const wheel = (ctrlKey = false) =>

@@ -184,7 +184,7 @@ export function SideTaskProvider(props: SideTaskProviderProps) {
           }
           if (result.kind !== "side-task-refused") {
             setUnconfirmedActions((current) =>
-              new Map(current).set(id, "The host recorded this action."),
+              new Map(current).set(id, "This computer recorded this action."),
             );
           }
           await load();

@@ -181,8 +181,8 @@ export function ProviderCloudSessions(props: {
             }}
           />
           <p>
-            Only this text leaves Octant. Files, history, host tools and credentials are not
-            attached. Check anything you paste for secrets.
+            Only this text leaves Octant. Files, history, tools on this computer and credentials are
+            not attached. Check anything you paste for secrets.
           </p>
           {reviewed ? (
             <>

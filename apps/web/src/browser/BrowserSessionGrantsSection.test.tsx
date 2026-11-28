@@ -90,7 +90,7 @@ it.each(["child", "routine"] as const)(
       ),
     ).toBeVisible();
     expect(
-      screen.getByText(/This permission survives a host restart and an app update/),
+      screen.getByText(/This permission survives an Octant restart and an app update/),
     ).toBeVisible();
     expect(manageSessionGrants.mock.calls.some(([command]) => command.kind === "grant")).toBe(
       false,

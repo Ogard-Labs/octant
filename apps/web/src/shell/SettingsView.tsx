@@ -427,12 +427,12 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   skills: "Review skills, then trust and enable only what you want.",
   background: "What Octant draws behind your work.",
   text: "Fonts and sizes for the interface, code, terminals and transcripts.",
-  integrations: "The services Octant connects to on the selected host.",
+  integrations: "The services Octant connects to on this computer.",
   host: "Octant's background service, and how much of this computer it may use.",
   permissions: "Files agents may not touch, places they may reach, and what you have allowed.",
   limits: "How far an agent runs on its own before Octant stops it or asks you.",
   memory: "What Octant remembers about you, and how to keep things out.",
-  data: "What this host stores and how to back it up.",
+  data: "What this computer stores and how to back it up.",
   "secret-stores": "Use a password manager for API keys.",
   sync: "Where artifact versions go when sync is on.",
 };
@@ -863,7 +863,7 @@ export function SettingsView(props: SettingsViewProps) {
             )}
             {!hasQuery && availableSections.length === 0 ? (
               <p className="settings-view__empty" role="status">
-                No settings are available on this host.
+                No settings are available on this computer.
               </p>
             ) : null}
           </div>
@@ -1076,7 +1076,7 @@ function ActiveSectionContent({
           )}
           {props.workSettings === undefined ? (
             <p className="settings-view__empty" role="status">
-              Work settings are unavailable on this host.
+              Work settings are unavailable on this computer.
             </p>
           ) : (
             <WorkSettingsView
@@ -1592,8 +1592,8 @@ function ActiveSectionContent({
           {setupGuide}
           <section aria-label="Remote access" id="settings-remote-access">
             <p>
-              Turn on the remote listener and pair devices on the host computer, in the Octant
-              desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
+              Turn on the remote listener and pair devices on the computer running Octant, in the
+              Octant desktop app or with the <code>octant pair</code> and <code>octant auth</code>{" "}
               commands.
             </p>
             <BrowserHubSection hubAdministration={hubAdministrationOf(props.hostBridge)} />
@@ -1657,9 +1657,9 @@ function ActiveSectionContent({
           {...(focusedSetting === undefined ? {} : { focusedSetting })}
         />
       ) : (
-        <section aria-label="Host" className="settings-section-stack" id="settings-host">
+        <section aria-label="This computer" className="settings-section-stack" id="settings-host">
           {resources}
-          <p>Host lifecycle controls are available on the host machine only.</p>
+          <p>Background service controls are available on the computer running Octant only.</p>
           {props.hostFederationLifecycle === undefined ? null : (
             <FederatedHostsLifecyclePanel lifecycle={props.hostFederationLifecycle} />
           )}
@@ -2020,7 +2020,8 @@ function ActiveSectionContent({
           ) : (
             <section aria-label="Data & storage">
               <p>
-                Backup, recovery, and retention controls are available on the host machine only.
+                Backup, recovery, and retention controls are available on the computer running
+                Octant only.
               </p>
             </section>
           )}
@@ -2041,7 +2042,7 @@ function ActiveSectionContent({
           )}
           <SettingsSection
             title="Background Browser ownership"
-            description="Keep the host's native Browser running for newly reviewed thread permissions after its windows close."
+            description="Keep this computer's native Browser running for newly reviewed thread permissions after its windows close."
           >
             <div className="setgroup">
               <SettingRow
@@ -2936,7 +2937,9 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       </SettingsSection>
       {props.automationNotificationClient === undefined ? (
         <SettingsSection title="Notifications">
-          <p className="settings-section-line">Notifications are set up on the host machine.</p>
+          <p className="settings-section-line">
+            Notifications are set up on the computer running Octant.
+          </p>
         </SettingsSection>
       ) : (
         <>
@@ -3819,7 +3822,7 @@ function MaintenanceSection({
         ) : null}
         {diagnosticsExportClient !== undefined ? (
           <SettingRow
-            description="Saves a file about this host for you to read and send yourself."
+            description="Saves a file about this computer for you to read and send yourself."
             more="It lists versions, provider status, recent log lines, and activity names, never messages or keys. Nothing is uploaded."
             focused={focusedSetting === settingId("save-diagnostics")}
             label="Save diagnostics"

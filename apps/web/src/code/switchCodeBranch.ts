@@ -140,13 +140,13 @@ export async function switchCodeBranch(
   try {
     const result = await client.executeOperation(command);
     if (result === undefined) {
-      return { status: "refused", message: "The host did not answer the switch request." };
+      return { status: "refused", message: "This computer did not answer the switch request." };
     }
     if (result.kind === "operation-failed") {
       return { status: "refused", message: result.failure.message };
     }
     if (result.kind !== "git-mutation-state" || result.mutation !== "switch-branch") {
-      return { status: "refused", message: "The host answered a different operation." };
+      return { status: "refused", message: "This computer answered a different operation." };
     }
     if (result.state === "completed") {
       return { status: "ok", branch: result.headBranch ?? request.branch };

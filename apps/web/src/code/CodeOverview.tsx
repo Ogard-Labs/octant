@@ -319,7 +319,7 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
     if (props.controller.status === "disconnected") {
       setBoardState({
         kind: "unavailable",
-        message: props.controller.errorMessage ?? "The Code host is disconnected.",
+        message: props.controller.errorMessage ?? "This computer is disconnected.",
       });
       return;
     }
@@ -886,11 +886,11 @@ function CodeProjectQuickStart(props: {
       </header>
       {props.onCreateThread === undefined ? (
         <p className="code-project-overview__note" role="status">
-          Starting a thread here needs the host connection.
+          Starting a thread here needs a connection to this computer.
         </p>
       ) : props.controller.status !== "ready" || props.controller.bootstrap === undefined ? (
         <p className="code-project-overview__note" role="status">
-          Waiting for the host connection.
+          Waiting to connect to this computer.
         </p>
       ) : (
         <>

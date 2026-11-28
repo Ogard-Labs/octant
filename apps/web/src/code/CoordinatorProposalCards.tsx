@@ -47,7 +47,7 @@ export function CoordinatorProposalCards(
       {!planner.ready || planner.failure !== undefined ? (
         <OctantAlert tone="warning">
           {!planner.ready
-            ? "Proposal decisions need a connected host. Reconnect before deciding."
+            ? "Proposal decisions need a connection to this computer. Reconnect before deciding."
             : planner.failure}
         </OctantAlert>
       ) : null}
@@ -74,14 +74,14 @@ export function CoordinatorProposalCards(
             {attempt.status === "none" ? null : (
               <p className="oct-row-detail" role="status">
                 {attempt.status === "blocked"
-                  ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until the host records its outcome."
+                  ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until this computer records its outcome."
                   : "This window cannot retain approval identity. Session storage is required before approving."}
               </p>
             )}
             {entry.proposal.creationAttempt?.status === "failed" ? (
               <p className="oct-row-detail">
                 Creation did not start:{" "}
-                {entry.proposal.creationAttempt.message ?? "The host refused before creation."}{" "}
+                {entry.proposal.creationAttempt.message ?? "This computer refused before creation."}{" "}
                 Review the current settings before explicitly approving again.
               </p>
             ) : null}

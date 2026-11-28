@@ -778,7 +778,7 @@ function RunningDesignBlock({
     } catch {
       next = {
         kind: "stopped",
-        why: { kind: "refused", reason: "Octant could not reach the host to run this." },
+        why: { kind: "refused", reason: "Octant could not reach this computer to run this." },
       };
     }
     if (asked === generation.current) setState(next);

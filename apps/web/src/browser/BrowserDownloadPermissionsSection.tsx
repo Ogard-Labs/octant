@@ -83,7 +83,7 @@ export function BrowserDownloadPermissionsSection(props: {
           targetResult.kind !== "download-permission-targets" ||
           permissionResult.kind !== "download-permissions"
         ) {
-          setError("Recurring download permissions are unavailable on this host.");
+          setError("Recurring download permissions are unavailable on this computer.");
           return;
         }
         setTargets(targetResult.targets);
@@ -475,8 +475,8 @@ export function BrowserDownloadPermissionsSection(props: {
                 )}
                 <p>
                   Each admitted file consumes quota, including a later cancellation. Permission ends
-                  on revocation, changed automation authority or host restart. Revoking closes an
-                  affected page, but a file already dispatched may have been saved. Check the
+                  on revocation, changed automation authority or an Octant restart. Revoking closes
+                  an affected page, but a file already dispatched may have been saved. Check the
                   destination before retrying. This manifest grants no account access, uploads or
                   access to other folders.
                 </p>

@@ -934,7 +934,7 @@ describe("useProviderController", () => {
 
     expect(api.execute).not.toHaveBeenCalled();
     expect(result.current.message).toBe(
-      "This window cannot save provider keys. On the host, run `octant provider key set <provider>`, or use the desktop app.",
+      "This window cannot save provider keys. On that computer, run `octant provider key set <provider>`, or use the desktop app.",
     );
   });
 

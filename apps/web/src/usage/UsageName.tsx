@@ -18,7 +18,7 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   "image-job": "Image job",
   project: "Project",
   "code-project": "Project",
-  host: "Host",
+  host: "Computer",
   thread: "Thread",
 };
 

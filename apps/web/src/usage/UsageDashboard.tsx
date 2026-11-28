@@ -637,9 +637,9 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
         />
       </label>
       <label className="usage-dashboard__field">
-        <span>Host</span>
+        <span>Computer</span>
         <OctantInput
-          aria-label="Filter by host id"
+          aria-label="Filter by computer ID"
           className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
@@ -649,7 +649,7 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
                 : (event.currentTarget.value.trim() as HostId),
             )
           }
-          placeholder="host id"
+          placeholder="computer ID"
           type="search"
           value={filter.hostId ?? ""}
         />

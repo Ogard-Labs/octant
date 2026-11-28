@@ -124,7 +124,7 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
     return (
       <div className="settings-section-stack" id="settings-secret-stores">
         <SettingsSection
-          description="Link a secret store in the Octant app on the host computer."
+          description="Link a secret store in the Octant app on the computer running Octant."
           title="Linked secret stores"
         />
       </div>
@@ -181,13 +181,13 @@ export function SecretStoresSettingsSection(props: SecretStoresSettingsSectionPr
         {view === undefined ? (
           <SettingsState kind={loadFailed ? "error" : "loading"}>
             {loadFailed
-              ? (problem ?? "Secret stores could not be read from this host.")
+              ? (problem ?? "Secret stores could not be read from this computer.")
               : "Reading secret stores…"}
           </SettingsState>
         ) : !view.brokerAvailable ? (
           <SettingsState kind="empty">
-            This host has no credential broker, so it cannot link a secret store. The Octant app on
-            macOS and a Linux host with a keyring provide one.
+            This computer has no credential broker, so it cannot link a secret store. The Octant app
+            on macOS and a Linux computer with a keyring provide one.
           </SettingsState>
         ) : (
           <div className="setgroup">

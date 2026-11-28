@@ -88,7 +88,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
             label: candidate.displayName,
             description: runnable
               ? candidate.summary
-              : `Needs ${candidate.requiresTool}, which is not on this machine.`,
+              : `Needs ${candidate.requiresTool}, which is not on this computer.`,
             disabled: !runnable,
             icon: <KindIcon aria-hidden={true} size={16} />,
           };
@@ -105,7 +105,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
                   ? entry.displayName
                   : anyRunnable
                     ? listOfKinds(kinds)
-                    : "None can run on this machine yet. Open to see what each needs."}
+                    : "None can run on this computer yet. Open to see what each needs."}
               </span>
             </span>
             {/* Down, because the templates open under the row; a chevron to the

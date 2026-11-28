@@ -73,13 +73,13 @@ export function useWorkSettings(
       setSettings(bootstrap.settings);
       if (bootstrap.settings === undefined) {
         setStatus("unsupported");
-        setMessage("Work settings are unavailable on this host.");
+        setMessage("Work settings are unavailable on this computer.");
       } else {
         setStatus("ready");
       }
     } catch {
       setStatus("unsupported");
-      setMessage("Work settings are unavailable on this host.");
+      setMessage("Work settings are unavailable on this computer.");
     }
   }, []);
 

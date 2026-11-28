@@ -143,7 +143,7 @@ export function RunDebugPanel(props: RunDebugPanelProps) {
         warn(
           error instanceof CodeDebugClientFailure && error.kind === "rejected"
             ? error.message
-            : "The host could not be reached.",
+            : "This computer could not be reached.",
         );
       }
     },
@@ -499,7 +499,9 @@ function Configurations(props: {
     case "loading":
       return <p className="run-debug__empty">Reading this thread's debug configurations…</p>;
     case "unreachable":
-      return <Refusal text="The host could not be reached." title="Run and debug is unavailable" />;
+      return (
+        <Refusal text="This computer could not be reached." title="Run and debug is unavailable" />
+      );
     case "refused":
       return <Refusal text={listing.text} title="This thread cannot debug a program" />;
     case "listed":

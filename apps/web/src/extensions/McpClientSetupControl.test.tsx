@@ -237,7 +237,7 @@ describe("MCP application identity setup", () => {
     await user.click(screen.getByRole("button", { name: "Client secret (POST)" }));
     expect(
       screen.getByText(
-        "A client secret is chosen in Settings › Skills & Extensions on the host's own window.",
+        "A client secret is chosen in Settings › Skills & Extensions on that computer's own window.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Link a secret store/)).not.toBeInTheDocument();

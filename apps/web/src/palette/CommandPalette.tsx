@@ -257,7 +257,7 @@ export function CommandPalette() {
           </OctantListbox>
           <footer className="command-palette__footer">
             <p className="command-palette__scope" role="note">
-              Host-offered commands. Every action still runs its normal authority check.
+              Commands from this computer. Every action still runs its normal authority check.
             </p>
             <span aria-hidden="true" className="command-palette__close-hint">
               <OctantKbd>Esc</OctantKbd>

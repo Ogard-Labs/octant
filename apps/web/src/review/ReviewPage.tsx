@@ -811,7 +811,7 @@ function LastReply(props: { readonly reply: Loaded<ReviewReply | undefined> }) {
           Loading the reply…
         </p>
       ) : reply.status === "failed" ? (
-        <p className="oct-meta">The reply could not be read from the host.</p>
+        <p className="oct-meta">The reply could not be read from this computer.</p>
       ) : reply.value === undefined || text === "" ? (
         <p className="oct-meta">The thread has no reply to show.</p>
       ) : (
@@ -907,7 +907,7 @@ function ChangedFiles(props: {
         <p className="oct-meta">
           {diff.status === "ready" && diff.value?.status === "unavailable"
             ? diff.value.message
-            : "The changes could not be read from the host."}
+            : "The changes could not be read from this computer."}
         </p>
       ) : diff.value?.status === "clean" ? (
         <p className="oct-meta">This checkout has no local changes to review.</p>

@@ -2897,7 +2897,7 @@ function renderNonCodeTab(
       // It said "Browser unavailable" over the tab's own title and a sentence
       // about an automation client.
       <OctantEmpty
-        message="This host has no Browser to open pages in."
+        message="This computer has no Browser to open pages in."
         state="warning"
         title="Browser is unavailable"
       />

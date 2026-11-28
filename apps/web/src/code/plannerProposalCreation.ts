@@ -68,7 +68,7 @@ export async function createPlannerProposalTask(
         "This proposal is no longer pending in this Project. Refresh proposals before continuing.",
     };
   if (client.executePlannerProposal === undefined)
-    return { status: "unconfirmed", message: "This host cannot approve planner proposals." };
+    return { status: "unconfirmed", message: "This computer cannot approve planner proposals." };
   const reservation = reservePlannerAttempt(review, threadId, storage);
   if (reservation.status === "unavailable")
     return {
@@ -109,7 +109,9 @@ export async function createPlannerProposalTask(
           message: `${result.message} Creation did not start. Refresh the proposal's current version before explicitly approving again. No first message was sent.`,
         };
       message =
-        result.status === "refused" ? result.message : "The host did not confirm thread creation.";
+        result.status === "refused"
+          ? result.message
+          : "This computer did not confirm thread creation.";
     } catch {
       message = "The approval reply was lost. The thread may already have been created.";
     }
@@ -131,6 +133,6 @@ export async function createPlannerProposalTask(
   }
   return {
     status: "unconfirmed",
-    message: `${message} Check the Project for submitted thread ${String(submittedId)}. Approval stays blocked until the host proves the prior attempt settled. No first message was sent from this approval.`,
+    message: `${message} Check the Project for submitted thread ${String(submittedId)}. Approval stays blocked until this computer proves the prior attempt settled. No first message was sent from this approval.`,
   };
 }

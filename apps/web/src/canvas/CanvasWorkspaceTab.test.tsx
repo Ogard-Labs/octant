@@ -161,7 +161,7 @@ describe("CanvasWorkspaceTab", () => {
 
   it("fails closed when the host canvas client is unavailable", () => {
     render(<CanvasWorkspaceTab tab={canvasTab} client={undefined} />);
-    expect(screen.getByText("The host canvas client is unavailable.")).toBeInTheDocument();
+    expect(screen.getByText("This computer's canvas client is unavailable.")).toBeInTheDocument();
   });
 
   it("exposes focus-zone pin and attach-context actions when handlers are provided", async () => {
@@ -402,7 +402,7 @@ describe("CanvasWorkspaceTab", () => {
     node.focus();
     fireEvent.keyDown(node, { key: "ArrowRight" });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/changed on the host/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/changed on this computer/);
     await waitFor(() => expect(client.get).toHaveBeenCalledTimes(2));
   });
 

@@ -281,7 +281,7 @@ export function summarizeFirstRunReadiness(
       ...base,
       overall: "checking",
       headline: "Checking provider readiness",
-      detail: "Octant is reading the host's provider registry.",
+      detail: "Octant is reading this computer's provider registry.",
     };
   }
   if (usableCount > 0) {

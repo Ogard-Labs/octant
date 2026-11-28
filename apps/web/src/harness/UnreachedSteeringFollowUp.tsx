@@ -80,7 +80,7 @@ export function UnreachedSteeringFollowUp(props: Props) {
         setRetry({ kind: "admit", claimed });
         const reason =
           result.status === "refused"
-            ? `The host refused it: ${result.reason.replaceAll("-", " ")}.`
+            ? `This computer refused it: ${result.reason.replaceAll("-", " ")}.`
             : "The queue changed before it could be added.";
         setNotice(
           `The follow-up was not queued. ${reason} Your notes remain in this window; retry the next message when ready.`,
@@ -124,7 +124,7 @@ export function UnreachedSteeringFollowUp(props: Props) {
       } catch {
         setRetained(notes);
         setNotice(
-          "The host did not confirm who took these notes. Another client may have them. Check the thread before sending them again; they will not be replayed automatically.",
+          "This computer did not confirm who took these notes. Another client may have them. Check the thread before sending them again; they will not be replayed automatically.",
         );
         return;
       }

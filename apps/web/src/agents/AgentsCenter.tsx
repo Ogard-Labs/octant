@@ -149,7 +149,7 @@ export function AgentsCenter(props: AgentsCenterProps) {
       controller.setNotice(
         error instanceof AgentRunClientFailure
           ? error.message
-          : "The host could not save this graph as a Canvas.",
+          : "This computer could not save this graph as a Canvas.",
       );
     } finally {
       setSavingCanvas(false);

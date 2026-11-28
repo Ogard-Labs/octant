@@ -68,8 +68,8 @@ export function ProviderCloudOptIn(props: {
         />
       </SettingRow>
       <p className="settings-note">
-        Only text you review is sent. Remote commands have no local approval callbacks or host
-        tools; provider model and sandbox charges apply.
+        Only text you review is sent. Remote commands have no local approval callbacks or tools on
+        this computer; provider model and sandbox charges apply.
       </p>
       {message === "" ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
     </SettingsSection>

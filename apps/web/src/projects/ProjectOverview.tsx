@@ -1344,7 +1344,7 @@ function label(type: ProjectSummary["type"]): string {
 
 function authorityCopy(type: ProjectSummary["type"]): string {
   if (type === "chat")
-    return "A virtual organization with approved memory. No automatic host access.";
+    return "A virtual organization with approved memory. No automatic access to this computer.";
   if (type === "work") return "Stays inside the Project's folders.";
   return "New Code work starts approval-gated.";
 }

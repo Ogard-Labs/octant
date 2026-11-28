@@ -254,7 +254,7 @@ describe("UsageWorkspace", () => {
 
     const latency = await screen.findByRole("region", { name: "Latency" });
     expect(
-      within(latency).getByText("No host latency observations have been recorded."),
+      within(latency).getByText("No latency observations have been recorded on this computer."),
     ).toBeInTheDocument();
   });
 
@@ -421,12 +421,12 @@ describe("UsageWorkspace", () => {
     render(<UsageWorkspace client={client} />);
 
     await waitFor(() =>
-      expect(screen.getByRole("region", { name: "Contributing hosts" })).toBeInTheDocument(),
+      expect(screen.getByRole("region", { name: "Contributing computers" })).toBeInTheDocument(),
     );
-    const hosts = screen.getByRole("region", { name: "Contributing hosts" });
+    const hosts = screen.getByRole("region", { name: "Contributing computers" });
     expect(within(hosts).getByText("local")).toBeInTheDocument();
     expect(within(hosts).getByText(/Stale · last synchronized/)).toBeInTheDocument();
-    expect(within(hosts).getByText(/not a host with zero usage/)).toBeInTheDocument();
+    expect(within(hosts).getByText(/not a computer with zero usage/)).toBeInTheDocument();
   });
 
   it("states which attribution dimensions the host cannot source", async () => {
@@ -435,10 +435,10 @@ describe("UsageWorkspace", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("region", { name: "What this host can attribute" }),
+        screen.getByRole("region", { name: "What this computer can attribute" }),
       ).toBeInTheDocument(),
     );
-    const sources = screen.getByRole("region", { name: "What this host can attribute" });
+    const sources = screen.getByRole("region", { name: "What this computer can attribute" });
     expect(within(sources).getByText("Not recorded")).toBeInTheDocument();
     expect(within(sources).getByText("Partly recorded")).toBeInTheDocument();
     expect(

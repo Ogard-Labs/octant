@@ -363,7 +363,7 @@ const STATUS_COPY: Record<Exclude<GoalStatus, "ready">, string> = {
   idle: "Goals are unavailable in this window.",
   loading: "Loading the Goal…",
   unauthorized: "This window is not authorized to read the Goal.",
-  unavailable: "The host Goal service is unavailable.",
+  unavailable: "The Goal service on this computer is unavailable.",
   failure: "The Goal could not be loaded.",
 };
 

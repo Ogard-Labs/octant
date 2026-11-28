@@ -368,7 +368,7 @@ describe("useWorkResearchController", () => {
     expect(outcome).toEqual({
       kind: "rejected",
       message:
-        "The source file changed since it was added, so the host refused to record evidence against the version you cited. The brief was reloaded; add the file again to cite its current contents.",
+        "The source file changed since it was added, so this computer refused to record evidence against the version you cited. The brief was reloaded; add the file again to cite its current contents.",
     });
     await waitFor(() => {
       expect(client.listBriefs).toHaveBeenCalledTimes(2);
@@ -500,7 +500,7 @@ describe("useWorkResearchController", () => {
     expect(outcome).toEqual({
       kind: "rejected",
       message:
-        "The brief changed on the host. It was reloaded; try again. The report artifact was removed, so no unreferenced report was left behind.",
+        "The brief changed on this computer. It was reloaded; try again. The report artifact was removed, so no unreferenced report was left behind.",
     });
   });
 
@@ -555,7 +555,7 @@ describe("useWorkResearchController", () => {
     expect(rejected).toEqual({
       kind: "rejected",
       message:
-        "The brief changed on the host. It was reloaded; try again. The report artifact was written and could not be removed, so it remains in the Project; finalizing again updates it instead of writing a second report.",
+        "The brief changed on this computer. It was reloaded; try again. The report artifact was written and could not be removed, so it remains in the Project; finalizing again updates it instead of writing a second report.",
     });
 
     const accepted = await result.current.finalizeReport({ briefId });
@@ -588,7 +588,7 @@ describe("useWorkResearchController", () => {
     expect(outcome).toEqual({
       kind: "rejected",
       message:
-        "The host did not confirm the report artifact, so the brief was not finalized. Check the Project for a report file before finalizing again.",
+        "This computer did not confirm the report artifact, so the brief was not finalized. Check the Project for a report file before finalizing again.",
     });
     expect(client.execute).not.toHaveBeenCalled();
   });
@@ -607,7 +607,8 @@ describe("useWorkResearchController", () => {
 
     expect(outcome).toEqual({
       kind: "rejected",
-      message: "The host declined to write the report artifact, so the brief was not finalized.",
+      message:
+        "This computer declined to write the report artifact, so the brief was not finalized.",
     });
     expect(client.execute).not.toHaveBeenCalled();
   });
@@ -656,7 +657,7 @@ describe("useWorkResearchController", () => {
 
     expect(outcome).toEqual({
       kind: "rejected",
-      message: "The brief changed on the host. It was reloaded; try again.",
+      message: "The brief changed on this computer. It was reloaded; try again.",
     });
     await waitFor(() => {
       expect(client.listBriefs).toHaveBeenCalledTimes(2);
@@ -705,7 +706,7 @@ describe.each(HOSTS)("useWorkResearchController on a $hostPlatform host", (host)
 
     expect(outcome).toEqual({
       kind: "rejected",
-      message: `The host could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${host.computer} — can become a source.`,
+      message: `Octant could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${host.computer} — can become a source.`,
     });
   });
 });

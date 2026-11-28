@@ -135,7 +135,7 @@ export function RemoteDeviceSelfPanel(props: RemoteDeviceSelfPanelProps) {
       <h2 className="remote-shell__section-title">This browser device</h2>
       <p className="remote-shell__device-copy">
         View metadata for this paired browser only. Remote browsers cannot manage other devices or
-        host listener policy.
+        that computer's listener policy.
       </p>
       {metadata === undefined ? (
         <p className="remote-shell__device-muted">

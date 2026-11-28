@@ -88,16 +88,20 @@ monospace identifier that already is. One title per page; a section note or row
 description is one sentence. Numbers use English separators ("1,024", "4.1k");
 dates follow the locale. An empty state's title has no closing period. Copy
 about the host says "this Mac" and "Keychain" only when the host reports macOS,
-"this computer" and "credential store" otherwise. Vocabulary: `Project`,
-`thread`, `Agents`, `Automations`, `checkout`, `worktree`, `base branch`,
-`Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access),
-`delivery` (Investigation / Local implementation / Pull request / Merged).
-Octant calls one thing by one name: Automations are never "routines", threads
-are never "tasks" (keeping `side tasks`, the agent's `Tasks` list, `To-dos`,
-background tasks, and run prompts distinct), and agents a thread starts are
-`Agents` rather than "subagents", "helpers", or "child agents" (keeping
-coordinator `workers` and `test workers` distinct). The word "target" does not
-appear in the interface.
+"this computer" and "credential store" otherwise. Vocabulary: `this computer`,
+`Project`, `thread`, `Agents`, `Automations`, `checkout`, `worktree`, `base
+branch`, `Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full
+access), `delivery` (Investigation / Local implementation / Pull request /
+Merged). Octant calls one thing by one name: the computer Octant runs on is
+`this computer` (or `this Mac` on macOS, or `that computer` / `paired computer`
+from a paired browser) rather than "host", "machine", or "server" (keeping
+network hosts and SSH host aliases, cloud machines and state machines, and
+remote, local dev, MCP, language, and model API servers distinct); Automations
+are never "routines", threads are never "tasks" (keeping `side tasks`, the
+agent's `Tasks` list, `To-dos`, background tasks, and run prompts distinct),
+and agents a thread starts are `Agents` rather than "subagents", "helpers", or
+"child agents" (keeping coordinator `workers` and `test workers` distinct). The
+word "target" does not appear in the interface.
 
 **Plain words.** A sentence in the interface says what the person is waiting
 for, what happened, or what to do next, in the words they use for it. It never
@@ -106,10 +110,10 @@ appears (`AgentRun`), and "shell state" and "projection" give way to what
 the person sees (the workspace, a Project's data). A loading state is its title
 alone ("Loading workspace"); a line under the spinner stays only where it says
 what the title cannot: what to do with a draft while the window reconnects,
-that the host will be asked to approve a browser being paired, and that the
-browser's key stays on its device. Until 2026-11-25 the first sentence the app
-showed was "Loading authoritative shell state.", and thirty loading states
-repeated their title as a message (maintainer request).
+that the paired computer will be asked to approve a browser being paired, and
+that the browser's key stays on its device. Until 2026-11-25 the first sentence
+the app showed was "Loading authoritative shell state.", and thirty loading
+states repeated their title as a message (maintainer request).
 
 Avoid dashboard walls, neon developer styling, permanent low-frequency
 controls, oversized setup cards, pill-shaped controls and invented data. The

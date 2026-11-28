@@ -111,16 +111,16 @@ const REFUSAL_TEXT: Readonly<Record<CodeLanguageRefusalReason, string>> = {
   "thread-inactive": "this thread is no longer active",
   "checkout-unavailable": "the checkout is unavailable",
   "checkout-mismatch": "the thread moved to another checkout",
-  "file-outside-thread": "the host no longer holds this file open",
+  "file-outside-thread": "this computer no longer holds this file open",
   "path-outside-checkout": "the file resolves outside the checkout",
-  "sandbox-read-denied": "sandbox restrictions block this host-owned file read",
+  "sandbox-read-denied": "sandbox restrictions block this file read on this computer",
   "no-reach": "this window cannot reach the thread",
   "turned-off": "they are off in Settings › Code",
   "no-language-server": "no language server reads this file",
-  "confinement-unavailable": "the host cannot confine a language server",
-  "unsupported-platform": "this host's platform is not supported",
+  "confinement-unavailable": "this computer cannot confine a language server",
+  "unsupported-platform": "this computer's platform is not supported",
   "plan-read-only": "Plan threads are read-only",
-  "local-host-required": "only the host's own windows can start this server",
+  "local-host-required": "only windows on this computer can start this server",
   "approval-required": "this server needs an approval first",
 };
 
@@ -139,7 +139,7 @@ export function approvalOutcomeNotice(
     case "not-recorded":
       return "The approval could not be recorded, so the server did not start.";
     case "failed":
-      return "The approval did not reach the host. Try again.";
+      return "The approval did not reach this computer. Try again.";
     case "approved":
     case "refused":
       return undefined;

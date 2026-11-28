@@ -56,11 +56,11 @@ export interface FirstRunOnboardingController {
 
 const BLOCKED_COPY: Partial<Record<ShellControllerStatus, string>> = {
   disconnected:
-    "Octant cannot reach the host right now, so your answer cannot be recorded. First-run setup will appear again until it is.",
+    "Octant cannot reach this computer right now, so your answer cannot be recorded. First-run setup will appear again until it is.",
   "recovery-required":
-    "The host store needs recovery before it can record your answer. First-run setup will appear again until it is.",
+    "This computer's store needs recovery before it can record your answer. First-run setup will appear again until it is.",
   "conflict-reload":
-    "Another window changed this host's settings. Reload to see the current state before answering.",
+    "Another window changed this computer's settings. Reload to see the current state before answering.",
 };
 
 /**

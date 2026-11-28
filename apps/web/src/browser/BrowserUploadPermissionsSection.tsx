@@ -65,7 +65,7 @@ export function BrowserUploadPermissionsSection(props: {
           targetResult.kind !== "upload-permission-targets" ||
           permissionResult.kind !== "upload-permissions"
         ) {
-          setError("Recurring upload permissions are unavailable on this host.");
+          setError("Recurring upload permissions are unavailable on this computer.");
           return;
         }
         setTargets(targetResult.targets);
@@ -410,8 +410,8 @@ export function BrowserUploadPermissionsSection(props: {
                 )}
                 <p>
                   Each admitted file consumes quota, including a later cancellation. Permission ends
-                  on revocation, changed automation authority or host restart. Revoking closes an
-                  affected page but cannot recall data already given to the site. This manifest
+                  on revocation, changed automation authority or an Octant restart. Revoking closes
+                  an affected page but cannot recall data already given to the site. This manifest
                   grants no account access, downloads or other files.
                 </p>
                 {error === undefined ? null : <OctantAlert tone="danger">{error}</OctantAlert>}

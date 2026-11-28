@@ -347,7 +347,7 @@ function AddMcpServerForm(props: Omit<AddMcpServerDialogProps, "open">) {
         <span className="endpoint-flow__hint">
           {props.secretsAvailable
             ? `A secret value is kept in ${thisComputerName(hostPlatform)}'s credential store, never in the package, and Octant can't show it again.`
-            : "This browser can't keep secrets. Add secret values from the Octant window on this host."}
+            : "This browser can't keep secrets. Add secret values from the Octant window on that computer."}
         </span>
       </fieldset>
       {problem === undefined ? null : (

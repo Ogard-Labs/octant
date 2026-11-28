@@ -464,7 +464,7 @@ describe("UsageDashboard", () => {
     render(<UsageDashboard client={client} />);
     expect(await screen.findByLabelText("Filter by provider instance id")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by model id")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter by host id")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by computer ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by mode")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by project id")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter by thread id")).toBeInTheDocument();

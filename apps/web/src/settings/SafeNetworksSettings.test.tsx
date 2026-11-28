@@ -385,7 +385,7 @@ describe("SafeNetworksSettings", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Safe networks could not be read from this host.",
+      "Safe networks could not be read from this computer.",
     );
   });
 });

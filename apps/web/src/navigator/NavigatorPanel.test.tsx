@@ -224,6 +224,6 @@ describe("NavigatorPanel", () => {
   it("says so plainly when the host serves no Navigator at all", async () => {
     render(<Harness />);
 
-    expect(await screen.findByText("Navigator is not available on this host.")).toBeVisible();
+    expect(await screen.findByText("Navigator is not available on this computer.")).toBeVisible();
   });
 });

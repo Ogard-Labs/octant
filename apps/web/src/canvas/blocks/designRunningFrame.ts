@@ -120,7 +120,7 @@ export function designRunRuntimeFor(
         blockId,
         ...(frameId === undefined ? {} : { frameId }),
       });
-      return started ?? { kind: "refused", reason: "This host does not run prototypes." };
+      return started ?? { kind: "refused", reason: "This computer does not run prototypes." };
     },
     contained: drawnIn === "desktop-surface",
     drawnIn,
@@ -164,7 +164,7 @@ export function publishedSnapshotRunRuntimeFor(
     start: async () =>
       (await client.runPublishedSnapshot?.(input)) ?? {
         kind: "refused",
-        reason: "This host does not run published pages.",
+        reason: "This computer does not run published pages.",
       },
     contained: drawnIn === "desktop-surface",
     drawnIn,

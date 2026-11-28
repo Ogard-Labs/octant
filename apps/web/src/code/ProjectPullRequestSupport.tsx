@@ -92,7 +92,7 @@ export function PullRequestSwitches(props: {
   const autoFixOn = switches.autoFix.status === "on";
   const mergeWhenReadyBlocked =
     props.onMergeWhenReady === undefined
-      ? "This host cannot change Merge when ready."
+      ? "This computer cannot change Merge when ready."
       : !open && !mergeWhenReadyOn
         ? "Only an open pull request can merge when ready."
         : detail.headSha === "" && !mergeWhenReadyOn
@@ -100,7 +100,7 @@ export function PullRequestSwitches(props: {
           : undefined;
   const autoFixBlocked =
     props.onAutoFix === undefined
-      ? "This host cannot change Auto-fix."
+      ? "This computer cannot change Auto-fix."
       : autoFixThread === undefined
         ? "Link a Code thread to this pull request to use Auto-fix."
         : !open && !autoFixOn

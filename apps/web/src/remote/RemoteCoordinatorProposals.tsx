@@ -56,7 +56,7 @@ export function RemoteCoordinatorProposals(props: {
   };
   const approve = (entry: CoordinatorProposalEntry) =>
     decide(async () => {
-      if (executePlannerProposal === undefined) return "This host cannot approve workers.";
+      if (executePlannerProposal === undefined) return "This computer cannot approve workers.";
       // The worker's first turn goes straight to the host, never through the
       // controller of the coordinator this view has selected.
       const approved = await approveCoordinatorProposal({
@@ -74,7 +74,7 @@ export function RemoteCoordinatorProposals(props: {
     });
   const decline = (entry: CoordinatorProposalEntry) =>
     decide(async () => {
-      if (executePlannerProposal === undefined) return "This host cannot decline workers.";
+      if (executePlannerProposal === undefined) return "This computer cannot decline workers.";
       const declined = await declineCoordinatorProposal({
         port: { executePlannerProposal },
         entry,

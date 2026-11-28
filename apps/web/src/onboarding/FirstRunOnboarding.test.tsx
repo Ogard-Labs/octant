@@ -581,7 +581,7 @@ describe("FirstRunOnboarding", () => {
   it("says when the host did not record the outcome itself", () => {
     mount({ controller: controller({ refused: true }) });
 
-    expect(screen.getByText(/The host did not record that/)).toBeVisible();
+    expect(screen.getByText(/This computer did not record that/)).toBeVisible();
   });
 
   it("waits for an answer given while the first ones are still settling", async () => {
@@ -935,7 +935,7 @@ describe("FirstRunOnboarding", () => {
 
     expect(screen.getByText("No provider is ready yet")).toBeVisible();
     expect(screen.getByText("No Code folder yet. A thread starts in a Project.")).toBeVisible();
-    expect(screen.getByText("No model this host can use in Code yet.")).toBeVisible();
+    expect(screen.getByText("No model this computer can use in Code yet.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Project" }));
     expect(props.onCreateProject).toHaveBeenCalledWith("code");

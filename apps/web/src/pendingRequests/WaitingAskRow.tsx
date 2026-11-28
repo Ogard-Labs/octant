@@ -24,7 +24,7 @@ export interface WaitingAskRowProps {
   readonly onOpenThread: (ask: WaitingAsk) => void;
 }
 
-export const OFFER_RESTART_NOTICE = "A waiting offer ended when the host restarted.";
+export const OFFER_RESTART_NOTICE = "A waiting offer ended when Octant restarted.";
 
 /** The words of the two plain answers, as each ask's own card names them. */
 const ANSWER_LABELS: Readonly<

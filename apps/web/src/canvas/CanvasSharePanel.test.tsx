@@ -414,7 +414,7 @@ describe("CanvasSharePanel", () => {
     renderPanel({ overview: overview({ sharingEnabled: false }) });
 
     expect(screen.getByTestId("canvas-share-disabled")).toHaveTextContent(
-      "Sharing is turned off on this host.",
+      "Sharing is turned off on this computer.",
     );
     expect(screen.queryByTestId("canvas-share-submit")).toBeNull();
   });

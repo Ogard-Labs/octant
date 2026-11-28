@@ -156,7 +156,7 @@ function providerFact(input: FirstRunHandoffInput): FirstRunHandoffFact {
       id: "provider",
       label: "Provider",
       ready: false,
-      detail: "Octant is still checking this host, so it cannot say a provider is ready.",
+      detail: "Octant is still checking this computer, so it cannot say a provider is ready.",
     };
   }
   if (input.providerOverall === "authority-unavailable") {
@@ -220,7 +220,7 @@ function modelFact(
     id: "model",
     label: "Model",
     ready: false,
-    detail: `No model this host can use in ${MODE_LABEL[mode]} yet.`,
+    detail: `No model this computer can use in ${MODE_LABEL[mode]} yet.`,
   };
 }
 

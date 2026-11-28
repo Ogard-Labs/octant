@@ -622,8 +622,8 @@ export function ProviderCreateForm(
                 </p>
                 {!props.credentialManagementAvailable ? (
                   <p className="provider-settings__field-guidance">
-                    Manage credentials in the Octant host app. Credential changes are unavailable in
-                    this browser.
+                    Manage credentials in the Octant desktop app. Credential changes are unavailable
+                    in this browser.
                   </p>
                 ) : null}
               </>
@@ -687,8 +687,8 @@ export function ProviderCreateForm(
                 </p>
                 {!props.credentialManagementAvailable ? (
                   <p className="provider-settings__field-guidance">
-                    Manage credentials in the Octant host app. Credential changes are unavailable in
-                    this browser.
+                    Manage credentials in the Octant desktop app. Credential changes are unavailable
+                    in this browser.
                   </p>
                 ) : null}
               </>
@@ -774,8 +774,8 @@ export function ProviderCreateForm(
                 </p>
                 {!props.credentialManagementAvailable ? (
                   <p className="provider-settings__field-guidance">
-                    Manage credentials in the Octant host app. Credential changes are unavailable in
-                    this browser.
+                    Manage credentials in the Octant desktop app. Credential changes are unavailable
+                    in this browser.
                   </p>
                 ) : null}
               </>

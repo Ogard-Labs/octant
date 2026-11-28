@@ -41,7 +41,7 @@ export function SandboxRestrictionsNotice() {
       if (result.kind === "sandbox-restrictions-refused") setProblem(result.message);
       else publishSandboxRestrictionsSnapshot(client, result);
     } catch {
-      setProblem("The host could not save this choice. Retry from Sandbox restrictions.");
+      setProblem("This computer could not save this choice. Retry from Sandbox restrictions.");
     } finally {
       setBusy(false);
     }

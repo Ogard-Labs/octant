@@ -205,12 +205,12 @@ export async function enqueueCanvasCommentTurn(
   try {
     result = await client.execute(command);
   } catch {
-    return { status: "refused", message: "The host did not confirm the message." };
+    return { status: "refused", message: "This computer did not confirm the message." };
   }
   if (result.status === "refused") {
     return {
       status: "refused",
-      message: `The host refused the message: ${result.reason.replaceAll("-", " ")}.`,
+      message: `This computer refused the message: ${result.reason.replaceAll("-", " ")}.`,
     };
   }
   if (result.status === "conflict") {

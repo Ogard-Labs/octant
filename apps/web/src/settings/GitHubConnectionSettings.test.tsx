@@ -137,7 +137,7 @@ describe("GitHubConnectionSettings", () => {
     render(<GitHubConnectionSettings client={makeClient({ executeAuthenticationCommand })} />);
 
     await screen.findByText("octocat");
-    const opener = screen.getByRole("button", { name: "Log out on this host" });
+    const opener = screen.getByRole("button", { name: "Log out on this computer" });
     await user.click(opener);
     expect(screen.getByRole("dialog", { name: "Log out of GitHub?" })).toBeInTheDocument();
     // The dialog moves focus to Cancel on the frame after it opens.
@@ -239,7 +239,7 @@ describe("GitHubConnectionSettings", () => {
       await screen.findByText("octocat");
       fireEvent.click(screen.getByRole("button", { name: "Enable Projects metadata" }));
       await screen.findByText("octocat");
-      fireEvent.click(screen.getByRole("button", { name: "Log out on this host" }));
+      fireEvent.click(screen.getByRole("button", { name: "Log out on this computer" }));
       fireEvent.click(screen.getByRole("button", { name: "Confirm local logout" }));
       await screen.findByText("octocat");
 
@@ -265,7 +265,7 @@ describe("GitHubConnectionSettings", () => {
     await user.tab();
     expect(screen.getByRole("link", { name: /GitHub application settings/ })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Log out on this host" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Log out on this computer" })).toHaveFocus();
     screen.getByRole("button", { name: "Advanced diagnostics" }).focus();
 
     await user.keyboard("{Enter}");

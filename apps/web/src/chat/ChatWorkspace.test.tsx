@@ -959,7 +959,7 @@ describe("Chat host queue", () => {
       expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
     );
     await user.click(screen.getByRole("button", { name: "Queue message" }));
-    await screen.findByText(/host has not confirmed/);
+    await screen.findByText(/This computer has not confirmed/);
     await user.click(screen.getByRole("button", { name: "Complete turn" }));
     await user.clear(screen.getByLabelText("Message"));
     await user.type(screen.getByLabelText("Message"), "New draft");
@@ -1022,7 +1022,7 @@ describe("Chat host queue", () => {
         expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled(),
       );
       await user.click(screen.getByRole("button", { name: "Queue message" }));
-      await screen.findByText(/host has not confirmed/);
+      await screen.findByText(/This computer has not confirmed/);
       await user.clear(screen.getByLabelText("Message"));
       await user.type(screen.getByLabelText("Message"), "New draft");
       await user.upload(
@@ -1984,7 +1984,7 @@ describe("ChatWorkspace", () => {
     // to it rather than repeated in a second banner.
     const alerts = screen.getAllByRole("alert");
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toHaveTextContent("Can't reach the host");
+    expect(alerts[0]).toHaveTextContent("Can't reach this computer");
     expect(screen.queryByText(/authoritative transcript/i)).not.toBeInTheDocument();
     expect(screen.queryByText("Connection lost.")).not.toBeInTheDocument();
   });
@@ -2006,7 +2006,7 @@ describe("ChatWorkspace", () => {
       />,
     );
     expect(screen.getByRole("heading", { name: "Chat is disconnected" })).toBeVisible();
-    expect(screen.getByText("The host connection is unavailable.")).toBeVisible();
+    expect(screen.getByText("The connection to this computer is unavailable.")).toBeVisible();
   });
 
   it("says Reconnected for a moment when the host answers again", async () => {
@@ -2014,7 +2014,7 @@ describe("ChatWorkspace", () => {
     const { rerender } = render(
       <ChatWorkspace controller={controller} providerSnapshot={providerSnapshot()} />,
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("Can't reach the host");
+    expect(screen.getByRole("alert")).toHaveTextContent("Can't reach this computer");
 
     rerender(
       <ChatWorkspace

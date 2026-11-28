@@ -15,7 +15,7 @@ const CHOICES: ReadonlyArray<{
   readonly label: string;
   readonly next: string;
 }> = [
-  { intent: "control-host", label: "Control my Octant host", next: "Continue to pairing" },
+  { intent: "control-host", label: "Control an Octant computer", next: "Continue to pairing" },
   {
     intent: "server-command",
     label: "Run a command on a server",
@@ -74,26 +74,26 @@ export function RemoteSetupGuide(props: {
           <div aria-live="polite" className="remote-setup__details">
             {intent === "control-host" ? (
               <>
-                <p>Files, providers and the journal stay on the Octant host.</p>
+                <p>Files, providers and the journal stay on that computer.</p>
                 <ol className="remote-setup__steps">
                   <li>
                     Keep Octant running on that computer and turn on its private HTTPS listener.
                   </li>
-                  <li>Pair this device and confirm the request on the host.</li>
+                  <li>Pair this device and confirm the request on that computer.</li>
                   <li>Open a thread and read its latest message before sending a first message.</li>
                 </ol>
                 <p>
                   An unavailable computer cannot take work. Check its network and that it is awake;
                   reconnecting never repeats an uncertain turn. Scheduled work needs its executing
-                  host awake, or separately configured wake support.
+                  computer awake, or separately configured wake support.
                 </p>
               </>
             ) : (
               <>
                 <p>
                   {intent === "server-command"
-                    ? "The thread and journal stay on the Octant host; the named SSH command runs on the server."
-                    : "Only files and commands run on the server. Inference, approvals and the journal stay on the Octant host."}
+                    ? "The thread and journal stay on this computer; the named SSH command runs on the server."
+                    : "Only files and commands run on the server. Inference, approvals and the journal stay on this computer."}
                 </p>
                 <ol className="remote-setup__steps">
                   <li>
@@ -106,19 +106,19 @@ export function RemoteSetupGuide(props: {
                     with the server administrator before reconnecting.
                   </li>
                   <li>
-                    Have your SSH agent available on the Octant host. A missing agent or an
+                    Have your SSH agent available on this computer. A missing agent or an
                     unavailable key needs fixing there; never paste a private key into a thread.
                   </li>
                   {intent === "server-command" ? (
                     <li>
                       Ask a Work or Code thread to run a read-only check such as <code>pwd</code> on
-                      the registered server, then inspect the host and result.
+                      the registered server, then inspect the server and result.
                     </li>
                   ) : (
                     <li>
-                      Bind an absolute server folder below the registry. The host checks that folder
-                      over SSH; a missing folder must be corrected there. Open the Project and use
-                      Octant Harness for a first read-only thread that lists its files.
+                      Bind an absolute server folder below the registry. This computer checks that
+                      folder over SSH; a missing folder must be corrected there. Open the Project
+                      and use Octant Harness for a first read-only thread that lists its files.
                     </li>
                   )}
                 </ol>
@@ -126,14 +126,14 @@ export function RemoteSetupGuide(props: {
                   <p>
                     Saved actions, extra folders, Project-level guardrail/reviewer settings and some
                     Work panes are unavailable for server Projects. Thread and account levels still
-                    apply. Other provider runtimes act on this host and cannot run a server
+                    apply. Other provider runtimes act on this computer and cannot run a server
                     Project's thread.
                   </p>
                 )}
                 <p>
                   After a dropped connection, inspect the last run's status and reconnect
-                  explicitly. Never repeat a command whose result is uncertain. The Octant host and
-                  server must both be awake for scheduled server work.
+                  explicitly. Never repeat a command whose result is uncertain. This computer and
+                  the server must both be awake for scheduled server work.
                 </p>
               </>
             )}
@@ -146,8 +146,8 @@ export function RemoteSetupGuide(props: {
             />
             {intent === "control-host" && !props.canConfigureHost ? (
               <p>
-                Open Settings › Remote access in the Octant desktop app on the host. Listener and
-                pairing controls are unavailable in this client.
+                Open Settings › Remote access in the Octant desktop app on that computer. Listener
+                and pairing controls are unavailable in this client.
               </p>
             ) : (
               <OctantButton onClick={() => props.onContinue(chosen.intent)} size="sm" type="button">
@@ -181,12 +181,12 @@ export function RemoteSetupGuide(props: {
             </li>
             <li>
               For a devbox, use its tailnet address in your SSH alias and choose a server workflow.
-              For an Octant host, choose Control my Octant host. For browser access, enable HTTPS
-              certificates in the tailnet and run <code>tailscale cert</code> with the host’s full
-              MagicDNS name on that host.{" "}
+              For an Octant computer, choose Control an Octant computer. For browser access, enable
+              HTTPS certificates in the tailnet and run <code>tailscale cert</code> with that
+              computer’s full MagicDNS name on that computer.{" "}
               {props.canConfigureHost
                 ? "In Remote listener, enter that name, choose My own certificate, and enter the certificate and key."
-                : "In Remote listener in Settings on the host, enter that name, choose My own certificate, and enter the certificate and key."}{" "}
+                : "In Remote listener in Settings on that computer, enter that name, choose My own certificate, and enter the certificate and key."}{" "}
               Pair the device, or turn on the hub and use its join code.
             </li>
           </ol>
@@ -200,7 +200,7 @@ export function RemoteSetupGuide(props: {
           <ol className="remote-setup__steps">
             <li>
               In Cloudflare Zero Trust, create a Cloudflare Tunnel. Follow its connector install
-              instructions on a machine that can reach the destination’s private LAN address. Wait
+              instructions on a computer that can reach the destination’s private LAN address. Wait
               for the tunnel to show Healthy.
               <SettingsSetupAction
                 host={props.externalUrlHost}
@@ -218,10 +218,11 @@ export function RemoteSetupGuide(props: {
             <li>
               Enroll the connecting device in your Zero Trust organization using Cloudflare One
               Client (WARP) and enable traffic routing. For a devbox, verify SSH to its private
-              address from that device, then continue to server registration. For an Octant host,
+              address from that device, then continue to server registration. For an Octant
+              computer,
               {props.canConfigureHost
                 ? " enable its HTTPS listener on the routed private address and pair through Remote access."
-                : " enable its HTTPS listener on the routed private address in Settings on the host, then pair this device."}{" "}
+                : " enable its HTTPS listener on the routed private address in Settings on that computer, then pair this device."}{" "}
               Browser pairing needs a certificate trusted for that address.
             </li>
           </ol>

@@ -24,7 +24,7 @@ export const octantSettingsNavigation = {
   sync: { id: "sync", label: "Sync", scope: "host" },
   "remote-access": { id: "remote-access", label: "Remote access", scope: "host" },
   "public-entrance": { id: "public-entrance", label: "Public entrance", scope: "host" },
-  host: { id: "host", label: "Host", scope: "host" },
+  host: { id: "host", label: "This computer", scope: "host" },
   usage: { id: "usage", label: "Usage", scope: "host" },
 } as const satisfies Record<
   string,

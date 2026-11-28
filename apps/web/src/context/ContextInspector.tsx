@@ -109,7 +109,9 @@ export function ContextInspector(props: ContextInspectorProps) {
           >
             <strong>{contextHealthLabel(plan.health)}</strong>
             <span>
-              {plan.blocked ? "No safe request can be constructed." : "Plan is server evaluated."}
+              {plan.blocked
+                ? "No safe request can be constructed."
+                : "Plan is checked on this computer."}
             </span>
           </p>
           <dl className="context-inspector__facts">

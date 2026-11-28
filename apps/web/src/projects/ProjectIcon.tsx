@@ -79,7 +79,7 @@ export function createProjectIconSource(input: {
           : `The icon could not be changed (${String(response.status)}).`;
       return { status: "refused", message };
     } catch {
-      return { status: "refused", message: "The icon could not be sent to the host." };
+      return { status: "refused", message: "The icon could not be sent to this computer." };
     }
   };
   return {

@@ -76,7 +76,7 @@ export function XcodeBuildDataSettings(props: XcodeBuildDataSettingsProps) {
     list === undefined ? (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
         {loadFailed
-          ? "Xcode build data could not be read from this host."
+          ? "Xcode build data could not be read from this computer."
           : "Reading Xcode build data…"}
       </SettingsState>
     ) : list.entries.length === 0 ? (

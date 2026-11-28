@@ -53,7 +53,8 @@ export function RemoteHostPermissions(props: RemoteHostPermissionsProps) {
   return (
     <div className="flex min-w-0 flex-col gap-3" id="settings-permissions">
       <p className="text-xs text-muted-foreground">
-        These belong to the host. “This computer” below is the host, not the one you are using.
+        These belong to the paired computer. “This computer” below means that computer, not the
+        device you are using.
       </p>
       <ProtectedFilesSettings client={clients.protectedFiles} />
       <SafeNetworksSettings client={clients.safeNetworks} projectNames={projectNames} />

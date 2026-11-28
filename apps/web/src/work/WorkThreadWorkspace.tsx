@@ -3933,7 +3933,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   busy={creating || completionLocked}
                   refusedReason={
                     props.turnClient === undefined
-                      ? "Attachments need a connected host."
+                      ? "Attachments need a connection to this computer."
                       : undefined
                   }
                   onRefused={images.refuse}
@@ -4097,7 +4097,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             completionLocked
               ? undefined
               : turnRunning
-                ? { text: "Submit adds this message to the host queue" }
+                ? { text: "Submit adds this message to the queue" }
                 : props.turnClient === undefined
                   ? { text: "Enter saves a Markdown artifact · Shift+Enter for a new line" }
                   : undefined

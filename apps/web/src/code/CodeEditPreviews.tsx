@@ -40,7 +40,7 @@ export function CodeEditPreviews(props: {
       const answer = await props.prepare(query);
       if (currentText.current === text) setResult(answer);
     } catch {
-      setNotice("The host did not answer. Prepare the changes again.");
+      setNotice("This computer did not answer. Prepare the changes again.");
     } finally {
       active.current = false;
       setBusy(false);

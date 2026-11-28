@@ -259,7 +259,7 @@ describe("CommandPalette", () => {
 
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent(
-      "Host-offered commands. Every action still runs its normal authority check.",
+      "Commands from this computer. Every action still runs its normal authority check.",
     );
     expect(footer).toHaveTextContent("Esc");
     expect(footer).toHaveTextContent("Close");

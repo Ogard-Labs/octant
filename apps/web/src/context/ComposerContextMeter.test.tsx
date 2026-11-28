@@ -1401,7 +1401,7 @@ describe("Compact session", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
     await openPopover(user);
     expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
-      "The host stopped answering, so compaction status is unknown.",
+      "This computer stopped answering, so compaction status is unknown.",
     );
     expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
   });

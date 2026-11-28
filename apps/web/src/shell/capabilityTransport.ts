@@ -45,7 +45,7 @@ export function capabilityTransportFor(serverUrl: URL): CapabilityTransport {
       status: "refused",
       reason: "plain-http-off-loopback",
       host: serverUrl.host,
-      message: `Octant refuses to send this window's capability over plain HTTP to ${serverUrl.host}. Open the Machine over https://, or on its loopback address.`,
+      message: `Octant refuses to send this window's capability over plain HTTP to ${serverUrl.host}. Open Octant over https://, or on this computer's loopback address.`,
     };
   }
   const scheme = serverUrl.protocol.slice(0, -1);
@@ -53,6 +53,6 @@ export function capabilityTransportFor(serverUrl: URL): CapabilityTransport {
     status: "refused",
     reason: "unsupported-scheme",
     host: serverUrl.host,
-    message: `Octant refuses to send this window's capability over ${scheme}. A Machine address uses https://, or http:// on its loopback address.`,
+    message: `Octant refuses to send this window's capability over ${scheme}. An Octant address uses https://, or http:// on this computer's loopback address.`,
   };
 }

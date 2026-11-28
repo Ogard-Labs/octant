@@ -36,14 +36,14 @@ navigation rail; the rail names each group of pages with a quiet label and
 draws no hairline between groups. There are six groups, each one question a
 person brings to Settings, and a group lists its pages in this order:
 
-| Group          | Pages, in order                                                       | The question it answers                                                     |
-| -------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| General        | General                                                               | Who you are, app-wide defaults, and what Octant tells you                   |
-| Look & feel    | Appearance, Background, Text, Sidebar, Keybindings                    | How it looks and is driven                                                  |
-| AI             | Providers & Models, Octant Harness, Voice & images, Chat & Work, Code | Which provider or model answers each job, and how each mode starts          |
-| Tools          | Skills & Extensions, Computer use, Integrations                       | What a running agent may reach                                              |
-| Safety         | Permissions, Limits, Secret stores, Memory                            | What an agent may touch, reach and remember, and how far it runs unattended |
-| Data & devices | Data & storage, Sync, Remote access, Public entrance, Host, Usage     | What this computer stores and the other machines it talks to                |
+| Group          | Pages, in order                                                            | The question it answers                                                     |
+| -------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| General        | General                                                                    | Who you are, app-wide defaults, and what Octant tells you                   |
+| Look & feel    | Appearance, Background, Text, Sidebar, Keybindings                         | How it looks and is driven                                                  |
+| AI             | Providers & Models, Octant Harness, Voice & images, Chat & Work, Code      | Which provider or model answers each job, and how each mode starts          |
+| Tools          | Skills & Extensions, Computer use, Integrations                            | What a running agent may reach                                              |
+| Safety         | Permissions, Limits, Secret stores, Memory                                 | What an agent may touch, reach and remember, and how far it runs unattended |
+| Data & devices | Data & storage, Sync, Remote access, Public entrance, This computer, Usage | What this computer stores and the other computers it talks to               |
 
 A page holds the settings of one question. No page holds more than thirty
 settings, and a page of one to three is folded into the page that asks the
@@ -71,7 +71,7 @@ the command of a page it took in, typed whole ("Settings: GitHub") or by name;
 it does not offer the name of a switched-off plugin's page. Web search's rules are in
 [Web search backends](web-search-backends.md#settings). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
-apart from the models its pages choose, and Advanced held two pages. Host opens on Computer resources (automatic or manual local-work limits,
+apart from the models its pages choose, and Advanced held two pages. This computer opens on Computer resources (automatic or manual local-work limits,
 Pause new work, and **Keep the computer awake while agents work** — `While on
 power` by default, `Always`, or `Never`, with a quiet counts-only live status
 line on the desktop app that reports held, idle, or unavailable and never shows
@@ -512,7 +512,7 @@ as rows with Remove (no confirmation), then one "Protect another path" row with
 a text field and an **Add** button; a refused path is said in the section's
 feedback line. A device the host's own person paired edits the section as a
 local window does (maintainer decision, 2026-11-12), from Permissions in the
-paired browser's Host settings; any other paired device sees none of it.
+paired browser's Computer settings; any other paired device sees none of it.
 **Blocked tools** follows Protected files in Settings › Permissions: one row
 per blocked tool, its name with the provider and "Blocked" as meta and an
 **Unblock** button, then a "Block a tool" row with a provider select (Claude
@@ -581,7 +581,7 @@ the branch and its commits stay. A refusal (uncommitted changes, or a turn
 still running in the thread) is said in the
 section's feedback line and the row stays. With none kept it says so in one
 line; a device the host's own person paired uses the section as a local window
-does, from Permissions in the paired browser's Host settings (maintainer
+does, from Permissions in the paired browser's Computer settings (maintainer
 decision, 2026-11-12; the server refuses hub-introduced devices)
 ([rules](../architecture.md#modes-chat-work-and-code)).
 The same section starts with the choices for new and kept worktrees (the
@@ -752,7 +752,7 @@ either surface has a field for a key, and nothing on them shows one.
 
 ## Save diagnostics
 
-Host › Maintenance holds Save diagnostics beside the failure report. The row's
+This computer › Maintenance holds Save diagnostics beside the failure report. The row's
 button, **Save diagnostics…**, saves nothing: it opens a plain list in place,
 headed "This file will include", with one row per section (name, how many
 entries it holds now or "Not available", and one sentence on what it holds),
@@ -760,7 +760,7 @@ then "It never includes" and its plain lines. Only **Save file** asks the host
 to build the bundle; **Cancel** closes the list. In the desktop app Save file
 opens the native save dialog, offering `octant-diagnostics-<date>.zip` in
 Downloads; dismissing it returns to the list with nothing written. A browser
-paired at Full (Host settings › Diagnostics) downloads the zip instead; the
+paired at Full (Computer settings › Diagnostics) downloads the zip instead; the
 phone has no diagnostics screen. The saved line names the file and says
 nothing was sent. A host that cannot list or
 build the bundle shows one error sentence and keeps the button. The list is
@@ -858,7 +858,7 @@ failures, stops, tool failures, retries, first token, and speed; Failures by
 cause with the newest redacted message; Tools, most failures
 first; Retries, limits, and waits; Turns to investigate, whose Open button
 leaves Usage for that thread; Likely prompt-cache misses, worded as a
-likelihood; and Host health, one small chart per measure on its own scale
+likelihood; and Octant health, one small chart per measure on its own scale
 (memory in use, event-loop stalls, longest stall, slow database statements,
 request p95, database size), each with its peak and when, a restart note, and a
 disclosed table. A figure no turn measured is left out or reads Unavailable,

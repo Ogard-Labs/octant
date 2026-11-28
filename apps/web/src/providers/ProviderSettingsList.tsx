@@ -36,7 +36,7 @@ import {
   type ProviderOwnMemorySettingProps,
 } from "./ProviderNativeSetupSetting";
 import { ModelContextWindowField } from "./ModelContextWindowField";
-import { hostCredentialStore, useHostPlatform } from "../platform";
+import { hostCredentialStore, thisComputerName, useHostPlatform } from "../platform";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -523,7 +523,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
               </div>
             )}
             {groups.detected.length === 0 ? null : (
-              <SettingsSection title="Detected on this host">
+              <SettingsSection title="Detected on this computer">
                 <div className="provlist setgroup">
                   {groups.detected.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
@@ -893,8 +893,8 @@ function ProviderRow(props: ProviderRowProps) {
         !detectedLocally &&
         providerBinaryPath(props.instance) !== undefined
       ? scanCoveredDriver
-        ? "Not found by the latest scan in the locations it searched — you can still enable it; the host checks the binary first."
-        : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
+        ? "Not found by the latest scan in the locations it searched — you can still enable it; Octant checks the binary first."
+        : "The latest scan did not check this provider — you can still enable it; Octant checks the binary first."
       : undefined;
   const scannedOffer =
     props.onUseScannedBinary === undefined
@@ -1069,7 +1069,7 @@ function ProviderRow(props: ProviderRowProps) {
             <span
               aria-label="Detected locally"
               className="provider-settings__local-mark"
-              title="Detected locally on this host"
+              title="Detected locally on this computer"
             >
               <CheckCircle2 aria-hidden="true" size={14} />
             </span>
@@ -1174,7 +1174,7 @@ function ProviderRow(props: ProviderRowProps) {
               className="provider-details__section provider-details__section--connection"
             >
               {detectedButDisabled ? (
-                <p className="provider-card__guidance">Detected on this host — enable to use</p>
+                <p className="provider-card__guidance">Detected on this computer — enable to use</p>
               ) : null}
               {!browserClaudeKeySetup ||
               readiness !== "unauthenticated" ||
@@ -1187,7 +1187,7 @@ function ProviderRow(props: ProviderRowProps) {
                 <p className="provider-card__guidance">
                   {hostPlatform === "darwin" ? null : (
                     <>
-                      On the Linux host, run{" "}
+                      On the Linux computer, run{" "}
                       <code>octant provider key set &quot;Profile name&quot;</code> using this
                       profile&apos;s exact name, then check the connection.{" "}
                     </>
@@ -1200,8 +1200,8 @@ function ProviderRow(props: ProviderRowProps) {
               ) : null}
               {usesCredential && !props.credentialManagementAvailable && !browserClaudeKeySetup ? (
                 <p className="provider-card__guidance">
-                  Manage credentials in the Octant host app. Credential replacement, clearing, and
-                  provider removal are unavailable in this browser.
+                  Manage credentials in the Octant desktop app. Credential replacement, clearing,
+                  and provider removal are unavailable in this browser.
                 </p>
               ) : null}
               {usesCredential ? (
@@ -1757,8 +1757,8 @@ function ProviderRow(props: ProviderRowProps) {
                     <span>
                       CLI updates:{" "}
                       {supportsProviderCliUpdate(props.instance.driverKind)
-                        ? "Provider-owned update available on this host"
-                        : "Manual installation required on this host"}
+                        ? "Provider-owned update available on this computer"
+                        : "Manual installation required on this computer"}
                     </span>
                   </div>
                 )}
@@ -2310,10 +2310,11 @@ function authenticationGuidance(
   ) {
     return "Sign in above, then check the connection again.";
   }
+  const computer = thisComputerName(hostPlatform);
   if (isAcpAgentInstance(instance)) {
     const profile = acpAgentProfile(instance.driverKind);
     return instance.configuration.authentication === "api-key"
-      ? `Add or replace the ${profile.apiKeyLabel ?? "API key"} in the Octant host, then check the connection again.`
+      ? `Add or replace the ${profile.apiKeyLabel ?? "API key"} on ${computer}, then check the connection again.`
       : profile.signInGuidance;
   }
   switch (instance.driverKind) {
@@ -2327,16 +2328,16 @@ function authenticationGuidance(
       return "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi.";
     case "claude":
       return instance.configuration.authentication === "api-key"
-        ? `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
+        ? `Add or replace the Anthropic API key on ${computer}. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
         : instance.configuration.authentication === "gateway"
-          ? `Add or replace the gateway token in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
+          ? `Add or replace the gateway token on ${computer}. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`
           : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
     case "anthropic-compatible":
-      return `Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
+      return `Add or replace the Anthropic API key on ${computer}. It remains write-only and is stored in ${hostCredentialStore(hostPlatform)}, then check the connection again.`;
     case "azure-foundry":
-      return `Add or replace the Azure AI Foundry API key in the Octant host. It is stored in ${hostCredentialStore(hostPlatform)} and sent as the api-key header, then check the connection again.`;
+      return `Add or replace the Azure AI Foundry API key on ${computer}. It is stored in ${hostCredentialStore(hostPlatform)} and sent as the api-key header, then check the connection again.`;
     default:
-      return "Add a bearer API key in the Octant host, then check the connection again.";
+      return `Add a bearer API key on ${computer}, then check the connection again.`;
   }
 }
 

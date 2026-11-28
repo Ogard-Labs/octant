@@ -84,7 +84,7 @@ export function GoogleCliAccountSettings({
                 problem:
                   result.kind === "secret-stores-refused"
                     ? result.message
-                    : "This host has not reported its Google Cloud account.",
+                    : "This computer has not reported its Google Cloud account.",
               },
         );
       })
@@ -322,7 +322,7 @@ export function GoogleCliAccountSettings({
       </p>
       <p>
         Removing this reference stops Octant supplying tokens to future commands and cancels
-        commands still being prepared. It does not sign out the host or revoke tokens already
+        commands still being prepared. It does not sign out this computer or revoke tokens already
         received by a running command; those may remain valid until expiry.
       </p>
       <div aria-live="polite">

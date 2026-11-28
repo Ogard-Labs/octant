@@ -857,7 +857,8 @@ function browserGrantRefusal(grant: TerminalBrowserGrantOutcome | undefined): st
 }
 
 const REFUSALS: Readonly<Record<TerminalBrowserGrantRefusalReason, string>> = {
-  "not-local-window": "Only the person at a window on the host can let a terminal use the Browser.",
+  "not-local-window":
+    "Only the person at a window on this computer can let a terminal use the Browser.",
   "not-a-code-thread": "Only a Code thread's terminal can use the Browser.",
   "thread-not-active":
     "This thread is archived or settled, so its terminal cannot use the Browser.",

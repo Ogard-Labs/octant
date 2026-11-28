@@ -270,7 +270,7 @@ function classify(error: unknown): PlanStatus {
 function commandFailureMessage(error: unknown): string {
   if (error instanceof PlanClientFailure) {
     if (error.status === 401) return "This window is not authorized to change the plan.";
-    if (error.status === 0) return "The host plan service is unavailable.";
+    if (error.status === 0) return "The plan service on this computer is unavailable.";
     return error.message;
   }
   return "The plan command was refused as invalid.";

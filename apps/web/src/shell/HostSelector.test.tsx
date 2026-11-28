@@ -74,8 +74,10 @@ describe("HostSelector", () => {
         selectedHostId={LOCAL_HOST_ID}
       />,
     );
-    expect(screen.getByRole("status", { name: "Host: This Mac · Connected" })).toBeVisible();
-    expect(screen.queryByRole("combobox", { name: /destination host/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Computer: This Mac · Connected" })).toBeVisible();
+    expect(
+      screen.queryByRole("combobox", { name: /destination computer/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a fixed Environment honest about its authoritative health", () => {
@@ -100,7 +102,7 @@ describe("HostSelector", () => {
     );
     const dot = screen.getByTestId("host-selector").querySelector(".octant-status-dot");
     expect(dot).toHaveAttribute("data-tone", "danger");
-    expect(screen.getByText("Host unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Computer unavailable")).toBeInTheDocument();
   });
 
   it("renders a stale fixed host with a warning dot", () => {
@@ -122,7 +124,7 @@ describe("HostSelector", () => {
       />,
     );
 
-    const combobox = screen.getByRole("combobox", { name: /destination host/i });
+    const combobox = screen.getByRole("combobox", { name: /destination computer/i });
     expect(combobox).toBeVisible();
     expect(combobox).toHaveTextContent(/Studio/);
 
@@ -147,7 +149,7 @@ describe("HostSelector", () => {
         viewScope={{ kind: "host-filter", hostId: STUDIO }}
       />,
     );
-    const combobox = screen.getByRole("combobox", { name: /destination host/i });
+    const combobox = screen.getByRole("combobox", { name: /destination computer/i });
     expect(combobox).toHaveTextContent(/Studio/);
     await user.click(combobox);
     await user.click(await screen.findByRole("option", { name: /This Mac/ }));

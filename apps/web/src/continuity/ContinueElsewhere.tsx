@@ -90,7 +90,7 @@ export function ContinueElsewhere(props: {
       await navigator.clipboard.writeText(link);
       setDestinationScreen(destination);
       setNotice(
-        `Thread link copied for ${destination}. Open it there; execution remains on this host and no writer was cloned.`,
+        `Thread link copied for ${destination}. Open it there; execution remains on this computer and no writer was cloned.`,
       );
     } catch {
       setNotice("The link could not be copied. Use the thread link above.");
@@ -124,8 +124,8 @@ export function ContinueElsewhere(props: {
       >
         <h2>Continue elsewhere</h2>
         <dl>
-          <dt>Execution host</dt>
-          <dd>{screen.hostLabel ?? "Current host"}</dd>
+          <dt>Computer</dt>
+          <dd>{screen.hostLabel ?? "This computer"}</dd>
           <dt>Controlling screen</dt>
           <dd>{screen.screenLabel ?? "This screen"}</dd>
           <dt>Source provider</dt>
@@ -135,7 +135,7 @@ export function ContinueElsewhere(props: {
         </dl>
         <p>
           The same thread keeps its conversation, thread state, checkout and pending feedback on
-          this host. Nothing sends automatically.
+          this computer. Nothing sends automatically.
         </p>
         <h3>Another provider</h3>
         <p>
@@ -191,17 +191,17 @@ export function ContinueElsewhere(props: {
             />
           </Suspense>
         ) : null}
-        <h3>Another screen, same host</h3>
+        <h3>Another screen, same computer</h3>
         {destinationScreen === undefined ? null : (
           <p>
-            Destination screen: {destinationScreen}. Execution host:{" "}
-            {screen.hostLabel ?? "Current host"}.
+            Destination screen: {destinationScreen}. Computer: {screen.hostLabel ?? "This computer"}
+            .
           </p>
         )}
         <p>
           Open this exact thread from an already paired screen. Execution and the native writer stay
-          on this host. Unsent drafts and local view state stay on this screen; host-held inputs and
-          pending feedback remain with the thread.
+          on this computer. Unsent drafts and local view state stay on this screen; inputs kept on
+          this computer and pending feedback remain with the thread.
         </p>
         {screens.length === 0 ? (
           <p>No paired screens are listed here.</p>

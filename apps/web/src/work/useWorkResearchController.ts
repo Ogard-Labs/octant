@@ -94,13 +94,13 @@ const PANEL_SOURCE_POLICY = {
 } as const;
 
 const FAILURE_COPY: Record<string, string> = {
-  unauthorized: "The host declined the research command for this window.",
-  stale: "The brief changed on the host. It was reloaded; try again.",
-  conflict: "The brief conflicts with newer host state. It was reloaded; try again.",
-  "not-found": "The brief no longer exists on the host.",
-  unsupported: "The host does not support this research action.",
+  unauthorized: "This computer declined the research command for this window.",
+  stale: "The brief changed on this computer. It was reloaded; try again.",
+  conflict: "The brief conflicts with newer saved state. It was reloaded; try again.",
+  "not-found": "The brief no longer exists on this computer.",
+  unsupported: "This computer does not support this research action.",
   interrupted: "The research command was interrupted before completing.",
-  failed: "The research command failed on the host.",
+  failed: "The research command failed on this computer.",
 };
 
 /**
@@ -113,17 +113,17 @@ const FAILURE_COPY: Record<string, string> = {
  */
 function addSourceFailureCopy(hostPlatform: HostPlatform | undefined): Record<string, string> {
   return {
-    unsupported: `The host could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${thisComputerName(hostPlatform)} — can become a source.`,
+    unsupported: `Octant could not read that file at the top level of the folder Work is bound to. Only a file that sits directly in that folder — not in a subfolder and not elsewhere on ${thisComputerName(hostPlatform)} — can become a source.`,
     stale: "The file changed while it was being added. Nothing was recorded; try again.",
     conflict: "That file is already a source on this brief, or the brief's source budget is full.",
   };
 }
 
 const RECORD_EVIDENCE_FAILURE_COPY: Record<string, string> = {
-  unsupported: "The host could not re-read the source file, so no evidence was recorded.",
+  unsupported: "This computer could not re-read the source file, so no evidence was recorded.",
   stale:
-    "The source file changed since it was added, so the host refused to record evidence against the version you cited. The brief was reloaded; add the file again to cite its current contents.",
-  unauthorized: "The host declined to record evidence against that source.",
+    "The source file changed since it was added, so this computer refused to record evidence against the version you cited. The brief was reloaded; add the file again to cite its current contents.",
+  unauthorized: "This computer declined to record evidence against that source.",
 };
 
 const RESYNC_FAILURES = new Set(["stale", "conflict", "not-found"]);
@@ -656,7 +656,7 @@ export function useWorkResearchController(
         return {
           kind: "rejected",
           message:
-            "The host declined to write the report artifact, so the brief was not finalized.",
+            "This computer declined to write the report artifact, so the brief was not finalized.",
         };
       }
       if (write.kind === "unavailable") {
@@ -665,7 +665,7 @@ export function useWorkResearchController(
         return {
           kind: "rejected",
           message:
-            "The host did not confirm the report artifact, so the brief was not finalized. Check the Project for a report file before finalizing again.",
+            "This computer did not confirm the report artifact, so the brief was not finalized. Check the Project for a report file before finalizing again.",
         };
       }
       drafts.current.set(input.briefId, write.artifact);

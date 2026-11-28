@@ -66,7 +66,7 @@ describe("an empty thread's start block", () => {
     // The one template in this fixture cannot run here, and the row says so.
     expect(
       within(surface).getByRole("button", { name: "Start from a template" }),
-    ).toHaveTextContent("None can run on this machine yet.");
+    ).toHaveTextContent("None can run on this computer yet.");
   });
 
   it("names a thread without a title as one to start", () => {
@@ -82,6 +82,6 @@ describe("an empty thread's start block", () => {
     await user.click(screen.getByRole("button", { name: "Start from a template" }));
     expect(
       await screen.findByRole("menuitem", { name: "Native Swift package" }),
-    ).toHaveAccessibleDescription("Needs swift, which is not on this machine.");
+    ).toHaveAccessibleDescription("Needs swift, which is not on this computer.");
   });
 });

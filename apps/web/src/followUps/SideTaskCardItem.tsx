@@ -40,7 +40,7 @@ export function SideTaskCard(props: {
   const message =
     unconfirmedAction === undefined
       ? value.messages.get(id)
-      : `${unconfirmedAction} Waiting for the host's recorded status before another action is allowed.`;
+      : `${unconfirmedAction} Waiting for this computer's recorded status before another action is allowed.`;
   const failure =
     message === undefined ? null : (
       <OctantAlert className="side-task__error" tone="danger">

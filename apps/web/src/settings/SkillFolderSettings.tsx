@@ -242,7 +242,7 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
 const ROOT_STATUS: Readonly<Record<SkillRootStatus["status"], string>> = {
   ready: "Folder is readable. Review, trust and enablement stay separate choices for each skill.",
   missing: "Folder does not exist yet; nothing is indexed. Create it or change the path.",
-  unreadable: "Folder cannot be read on this host. Check its permissions or remove it.",
+  unreadable: "Folder cannot be read on this computer. Check its permissions or remove it.",
   symlink: "Linked folders are ignored. Choose a regular folder.",
   "not-directory": "This path is not a folder. Choose or type a folder path.",
 };
