@@ -54,6 +54,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { HubSettingsSection } from "./HubSettingsSection";
+import { MachineConnectionsMap } from "./MachineConnectionsMap";
 import { PairedComputersSettingsSection } from "./PairedComputersSettingsSection";
 import { PairingCodeQr } from "./PairingCodeQr";
 
@@ -247,6 +248,7 @@ export function RemoteAccessSettingsSection({
     new Map(),
   );
   const [paused, setPaused] = useState<boolean>();
+  const [pairingPromptName, setPairingPromptName] = useState<string>();
   const listenerOpener = useRef<HTMLButtonElement>(null);
   const revokeAllOpener = useRef<HTMLButtonElement>(null);
   const hostnameId = useId();
@@ -1130,6 +1132,19 @@ export function RemoteAccessSettingsSection({
           )}
         </div>
       </SettingsPanel>
+      {hub === undefined && pairedComputers === undefined ? null : (
+        <MachineConnectionsMap
+          hub={hub}
+          listenerStatus={status}
+          onStartDirectPairing={(node) => {
+            setPairingPromptName(node.displayName);
+            const target = document.querySelector<HTMLElement>(
+              '[data-setting-id="paired-computers-code"] textarea',
+            );
+            target?.focus();
+          }}
+        />
+      )}
       {hub === undefined ? null : (
         <HubSettingsSection
           hub={hub}
@@ -1139,7 +1154,10 @@ export function RemoteAccessSettingsSection({
         />
       )}
       {pairedComputers === undefined ? null : (
-        <PairedComputersSettingsSection bridge={pairedComputers} />
+        <PairedComputersSettingsSection
+          bridge={pairedComputers}
+          {...(pairingPromptName === undefined ? {} : { pairingTargetName: pairingPromptName })}
+        />
       )}
     </section>
   );
