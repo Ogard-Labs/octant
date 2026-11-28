@@ -4922,7 +4922,13 @@ third-party reviewer plugin could not take.
   own person paired); hub-introduced and restricted devices are refused 403
   server-side. Every setting change and run record is journaled with
   `eventActorForPrincipal` on `pull-request-review-*` aggregates and rebuilt by
-  replay on restart.
+  replay on restart. Per-PR hand-back settings, review runs, and review guides
+  are keyed by the linked pull request's GitHub node ID when known (with safe
+  replay fallback for pre-node-ID coordinate keys and live adoption of merged
+  duplicate links), so repository renames and owner transfers preserve them
+  while distinct pull requests reusing an old repository name never share them;
+  client requests never supply an authoritative node ID, and live GitHub head
+  and diff reads fail closed when GitHub reports a different node ID.
 - **Trigger, read-only gate, and staleness.** Runs at most once per pushed PR
   head SHA (deduplicated across repeated pushes, refreshes, and restarts) after
   the linked Code thread's worker turn settles. Executes as a host-scope

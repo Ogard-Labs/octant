@@ -88,7 +88,7 @@ a few cells a second, the sun and the burst breathe, the streaks slide. It runs 
 fifteen frames a second, stops while the document is hidden or the ground is off
 screen, caps its backing store at twice the display ratio, sets up in idle time,
 and fades in over 1.2 seconds once it has drawn. Reduced motion, or Motion Still,
-holds one frame. A click on a start screen sends the same pushing, accent-lit ring
+holds its first frame, the same one on every load. A click on a start screen sends the same pushing, accent-lit ring
 through it at twenty-four frames a second for under two seconds. The effect
 (Pixelate or Dither), cell size, shade count and scope are set as for any print,
 and Settings › Background lists the ASCII field and the Pixel ground

@@ -57,10 +57,31 @@ import {
   VISUAL_NOW,
 } from "./fixtures";
 import { ComposerInput } from "../composer/ComposerInput";
+import { groundRenderers } from "./groundScenes";
 
 export interface VisualScene extends SceneMeta {
   readonly render: () => ReactNode;
+  /**
+   * The theme the scene is drawn under, made from the plain one every other
+   * scene takes (no glass washes and no ground).
+   */
+  readonly theme?: (plain: ThemeSettings) => ThemeSettings;
+  /**
+   * The scene is the desktop app, opaque or with its Glass confirmed by the
+   * host. Glass is drawn over a stand-in desktop where the native material
+   * would show the person's own.
+   */
+  readonly desktop?: "opaque" | "glass";
+  /**
+   * Draws with a fixed sequence of random numbers, so a field that picks its
+   * glyphs at random picks the same ones every run.
+   */
+  readonly seededRandom?: boolean;
+  /** Resolves once what the scene draws after its first render (a picture, a canvas) is drawn. */
+  readonly settled?: () => Promise<void>;
 }
+
+type SceneRenderer = Omit<VisualScene, Exclude<keyof SceneMeta, "id">>;
 
 const noop = (): void => undefined;
 
@@ -279,7 +300,7 @@ function RailBesideScene() {
   );
 }
 
-const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => ReactNode }> = [
+const RENDERERS: ReadonlyArray<SceneRenderer> = [
   ...ACCESS_LEVEL_RENDERERS,
   {
     id: "qa-paired-devices-confirm",
@@ -540,6 +561,7 @@ const RENDERERS: ReadonlyArray<{ readonly id: string; readonly render: () => Rea
   { id: "rail", render: () => <RailScene /> },
   { id: "rail-beside", render: () => <RailBesideScene /> },
   { id: "subagent-progress", render: () => <SubagentProgressScene /> },
+  ...groundRenderers(() => <HomeScene />),
 ];
 
 const FOLDED_TRAY_STORAGE = { getItem: () => "false", setItem: noop };
@@ -573,7 +595,7 @@ function SubagentProgressScene() {
 export const SCENES: ReadonlyArray<VisualScene> = SCENE_LIST.map((meta) => {
   const renderer = RENDERERS.find((candidate) => candidate.id === meta.id);
   if (renderer === undefined) throw new Error(`Scene ${meta.id} has no renderer.`);
-  return { ...meta, render: renderer.render };
+  return { ...renderer, ...meta };
 });
 
 export function sceneById(id: string): VisualScene | undefined {

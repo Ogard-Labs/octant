@@ -1291,7 +1291,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Modes, Merge when ready
 
 A bundled, switchable first-party plugin reviews pushed heads of linked Code threads' pull requests, only through the `pull-request-reviewer` seam and the host's review port.
 
-- Off by default; enabled per Code Project with a per-thread override, and off until a model is picked. Its settings change only from a local window or a host-person-paired device.
+- Off by default; enabled per Code Project with a per-thread override, and off until a model is picked. Its settings change only from a local window or a host-person-paired device. Per-PR settings and review runs are keyed by the linked pull request's GitHub node ID (with safe legacy coordinate replay fallback), so repository renames preserve them and reused repository names never share them (maintainer decision, 2026-11-28).
 - It runs at most once per pushed head at Plan's read-only gate, whatever the thread's level; a head that moves mid-run publishes nothing.
 - Posting a comment and handing blocking findings to the worker are opt-ins, off by default. It never approves or requests changes. Under Strict hand-backs stop at Auto-fix's attempt limit; outside Strict there is no cap.
 - It counts toward the parent's spend ceiling, and when unavailable it names the reason and never falls back to another model.
@@ -1303,7 +1303,7 @@ Status: Built. Since: 2026-11-20. Detail: [Architecture: Modes, Merge when ready
 
 A pull request's reading pane has a Guide tab, an ordered list of stops through the change written for one pushed head by a read-only model run, and the Changes tab marks files Viewed with GitHub's own state (maintainer decision, 2026-11-26).
 
-- A guide belongs to one head; after a push it reads as written for an older push and offers Rewrite. Anchors outside the diff at that head are dropped.
+- A guide belongs to one head and is keyed by the linked pull request's GitHub node ID (with safe legacy coordinate replay fallback), so repository renames keep prior guides and reused repository names never share them (maintainer decision, 2026-11-28); after a push it reads as written for an older push and offers Rewrite. Anchors outside the diff at that head are dropped.
 - A run goes through the `pull-request-guide-writer` plugin seam (`@octant/plugin-api/pull-request-guide-writer` and `@octant/plugin-host/pull-request-guide-writers`): the bundled writer is registered as a switchable first-party plugin resolved through effective activation (installation, trust, and enablement stay separate preconditions and discovery grants nothing), and disabling the writer plugin refuses runs (`not-effective`) and bills nothing. One read-only turn at Plan's gate on the guide model the person picked, with no default, under the spend ceiling, one per link at a time. A closed or merged pull request offers no run.
 - A person starts a run from a local window; a paired phone only reads guides. The agent's `guide` reads without asking; `guide-write` asks below Full access and is refused in Plan. Guide text is outside content.
 - Viewed is read and written in GitHub under the person's own `gh` login, from a local window only, and refused once a push moved the reviewed head. Octant keeps no copy and journals nothing for it.
@@ -2898,6 +2898,7 @@ A new window, its background and its drafts behave predictably.
 
 - Without a saved choice, a wide window opens the right dock where the active pane has a dock subject; an explicit show or hide is restored per window.
 - A ground is drawn as chosen and stays readable: the ASCII field stays the default, and no set or density inks heavier than it. A photo comes from the host's library, and the host refuses to delete one while it shows.
+- A still ground holds one frame: a Pixel ground or ASCII field set to still always shows its first frame, so it looks the same on every load and the Visual check's ground scenes can hold it to a fine tolerance.
 - Plugins offer character grounds as data only, while installed, trusted and enabled; a pick copies the values.
 - A new-task composer keeps its identity while its Project changes; a refused binding keeps the prior authorized Project and the draft. A failed first turn returns its text to the composer with the reason.
 - Closing a file tab, the Files tool, its thread or the window checks for unsaved Code Files edits, even when Files is hidden; Save must succeed to continue.
@@ -3245,7 +3246,7 @@ The agent's `preview` returns typed layout warnings and a picture drawn in a no-
 
 - A model that accepts no images, or a host with no browser, still gets the warnings and a sentence saying why no picture was taken.
 - A Canvas read or previewed by another thread carries its outside-content mark to the reader.
-- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23).
+- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23), always comparing Project image files against the version's recorded digests even on the newest version (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Canvas: Preview and placement in the thread](canvas.md#preview-and-placement-in-the-thread).
 
@@ -3257,6 +3258,7 @@ A design is the author's own markup in sandboxed frames. A design that runs scri
 - A prototype runs only on Run. Allow network is off by default and only the person sets it, at a window or on a device the host's own person paired; agents, routines, hub-introduced and restricted devices are refused (maintainer decision, 2026-11-12).
 - With it on, a page on the host's machine reaches public addresses only through the host's filtering proxy, under a short-lived renewed token (maintainer decision, 2026-11-13). In a browser on another machine the prototype is not network-contained, and says so.
 - Sharing design markup needs the person's acknowledgement that it leaves as written.
+- Locally authored versions declaring Project image files record their SHA-256 digests (never image bytes) in a separate per-Canvas aggregate (`canvas-version-images`, purged with the Canvas); the newest version keeps drawing live files while superseded versions (and preview miniatures even on the newest version) withhold changed files as `changed`, and unrecorded versions (pre-existing, carried-in, or replica-adopted) draw live files labelled `"Project images are shown as they are now"` (maintainer decision, 2026-11-28).
 
 Not built yet:
 

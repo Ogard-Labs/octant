@@ -63,6 +63,7 @@ import type { EventActor, UtcTimestamp } from "@octant/contracts";
 import { canvasExportPictureFileNames } from "@octant/domain";
 import { Schema } from "effect";
 import { renderArtifactDocument, type ArtifactDocumentRender } from "./artifactDocumentRender";
+import type { CanvasDesignAssetVersionContext } from "./canvasDesignAssets";
 import { renderCanvasDesignExportFrames, renderCanvasDesignPage } from "./canvasDesignPage";
 import { CanvasExportEventStore } from "./canvasExportEventStore";
 import type {
@@ -134,6 +135,7 @@ export interface CanvasExportServiceOptions {
   readonly resolveDesignAssets?: (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
+    version?: CanvasDesignAssetVersionContext,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
 }
 
@@ -755,6 +757,7 @@ export class CanvasExportService {
    */
   async #withDocumentImages(
     subject: Extract<CanvasExportPictureRequest["subject"], { readonly kind: "document" }>,
+    document: Pick<CanvasExportDocument, "canvasId" | "versionId">,
   ): Promise<CanvasExportPictureRequest["subject"]> {
     const resolve = this.#resolveDesignAssets;
     if (resolve === undefined) return subject;
@@ -772,7 +775,11 @@ export class CanvasExportService {
       if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
       designAssets.push({
         blockId: String(block.blockId),
-        assets: await resolve(declaring, subject.definition.provenance),
+        assets: await resolve(declaring, subject.definition.provenance, {
+          canvasId: document.canvasId,
+          versionId: document.versionId,
+          marks: "labelled",
+        }),
       });
     }
     if (designAssets.length === 0) return subject;
@@ -807,7 +814,8 @@ export class CanvasExportService {
     }
     const picked = pictureSubject(document, frameTheme);
     if (picked.kind === "refused") return picked;
-    const subject = picked.kind === "document" ? await this.#withDocumentImages(picked) : picked;
+    const subject =
+      picked.kind === "document" ? await this.#withDocumentImages(picked, document) : picked;
     const drawn = await renderer.renderPictures({
       format,
       theme: frameTheme?.scheme ?? "light",

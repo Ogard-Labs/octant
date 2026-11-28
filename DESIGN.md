@@ -2113,18 +2113,28 @@ run already compared the change. The scenes (`apps/web/visual-check.html`, sourc
 Appearance and Usage Settings pages, the Agents, Artifacts and Automations
 tables, the Where, Project and approval menus open, the icon rail alone
 and beside the sidebar with the account menu open, and a thread's subagent progress (the transcript rows, a finished
-child's result line and the composer's folded card). Each is drawn in light and
+child's result line and the composer's folded card). The ground scenes
+(`groundScenes.tsx`) draw the application ground under the sidebar and a start
+screen or the Agents page: every background, every effect, each Glass level
+with and without a Tint, both Show behind scopes, and Reduce transparency and
+Increase contrast once each, a covering set rather than every combination. A
+Glass scene is drawn as the desktop app whose host confirmed its glass, over a
+fixed stand-in picture where the native material shows the person's desktop.
+Each scene is drawn in light and
 dark at 1280 by 800, and the tables, the side panel and the subagent progress
-again at 760 wide, from fixed data, a fixed clock, bundled fonts
-and no motion, with no host behind them. A picture fails when more than 50 of
-its pixels differ by more than 24 in any channel, or its size changes. The run
-then uploads the `visual-check` artifact with the actual, baseline and diff
-pictures (differences in red). It does not cover the packaged app, window glass,
-the transcript, other screens, or anything that moves.
+again at 760 wide, from fixed data, a fixed clock, a fixed sequence of random
+numbers for the character field, bundled fonts and no motion, with no host
+behind them. A picture fails when more than 50 of
+its pixels differ by more than 24 in any channel (6 for the ground scenes,
+whose faint ASCII field would vanish inside 24), or its size changes. The run
+then uploads `visual-check-1` and `visual-check-2` artifacts (the pictures are
+drawn in two halves at once, reported as one `Visual check`) with the actual, baseline and diff
+pictures (differences in red). It does not cover the packaged app, the native
+material itself, the transcript, other screens, or anything that moves.
 
 An intended change never blocks a pull request: add the `design change` label.
 The run then draws the new pictures in update mode, uploads them as the
-`visual-check` artifact, lists the changed ones in its job summary and passes. It
+`visual-check-<half>` artifacts, lists the changed ones in its job summary and passes. It
 pushes nothing: a person (or the agent running the pull request) runs
 `bun scripts/visual-baselines-from-ci.ts <run id>` with that run's id, which
 downloads the artifact and copies each new picture over its baseline, reviews

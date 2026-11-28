@@ -2,7 +2,7 @@ import "../styles/canvas-inline.css";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ThreadCanvasPreviewReceipt } from "@octant/contracts";
 import { type CanvasDefinition, type CanvasId, decodeCanvasId } from "@octant/contracts/canvas";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CanvasView } from "./CanvasView";
 import type { DesignAssetRuntime } from "./blocks/designDocument";
 
@@ -27,17 +27,36 @@ export function CanvasPreviewMiniature(props: {
   // A reference the step kept that is not a Canvas id reads as unavailable.
   const canvasId = useMemo(() => decodedCanvasId(props.preview.canvasId), [props.preview.canvasId]);
   const [loaded, setLoaded] = useState<LoadedVersion>({ kind: "loading" });
+  const [hasUnrecordedProjectImages, setHasUnrecordedProjectImages] = useState(false);
+  const activeVersionKey = useRef("");
+  useEffect(() => {
+    activeVersionKey.current = `${String(canvasId ?? "")}:${versionId}`;
+    setHasUnrecordedProjectImages(false);
+  }, [canvasId, versionId]);
   // The images the agent's preview drew (a generated image, a design's
   // declared assets), resolved by the host for this exact version under its
-  // own thread authority, as the Canvas workspace does. Without it they drew
-  // as placeholders the agent never saw.
+  // own thread authority, always comparing recorded Project image digests so a
+  // replaced file is never shown as what was previewed.
   const designAssetRuntime = useMemo<DesignAssetRuntime | undefined>(() => {
     const designAssets = client.designAssets;
     if (designAssets === undefined || canvasId === undefined) return undefined;
+    const requestKey = `${String(canvasId)}:${versionId}`;
     return {
       resolve: async (blockId) => {
-        const outcome = await designAssets({ canvasId, versionId, blockId });
-        return outcome.kind === "ready" ? outcome.assets : undefined;
+        const outcome = await designAssets({
+          canvasId,
+          versionId,
+          blockId,
+          marks: "recorded",
+        });
+        if (outcome.kind !== "ready") return undefined;
+        if (
+          activeVersionKey.current === requestKey &&
+          outcome.assets.some((asset) => asset.status === "resolved" && asset.mark === "unrecorded")
+        ) {
+          setHasUnrecordedProjectImages(true);
+        }
+        return outcome.assets;
       },
     };
   }, [canvasId, client, versionId]);
@@ -87,7 +106,12 @@ export function CanvasPreviewMiniature(props: {
             </span>
           </span>
           <figcaption className="canvas-preview-shot__caption">
-            {`Version ${String(loaded.sequence)}, as the agent previewed it`}
+            {`Version ${String(loaded.sequence)}, previewed by the agent`}
+            {hasUnrecordedProjectImages ? (
+              <span className="canvas-preview-shot__note">
+                Project images are shown as they are now
+              </span>
+            ) : null}
           </figcaption>
         </>
       ) : (

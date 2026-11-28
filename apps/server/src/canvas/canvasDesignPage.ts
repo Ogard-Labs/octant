@@ -10,6 +10,7 @@ import {
   CANVAS_DESIGN_VIEWPORT,
   type CanvasBlockId,
   type CanvasDesignAssetResolution,
+  type CanvasDesignAssetUnavailableReason,
   type CanvasDesignBlock,
   type CanvasId,
   type CanvasProvenance,
@@ -447,7 +448,7 @@ export function renderCanvasDesignPage(
       id,
       outcome?.status === "resolved"
         ? `data:${outcome.mediaType};base64,${outcome.data}`
-        : assetPlaceholder(id),
+        : assetPlaceholder(id, outcome?.reason),
     );
   }
   const budget = new PageAssetBudget(urls);
@@ -711,7 +712,12 @@ export class CanvasExportImages {
         const outcome = declared.has(id)
           ? outcomes.find((entry) => String(entry.assetId) === id)
           : undefined;
-        if (outcome?.status !== "resolved") return assetPlaceholder(id);
+        if (outcome?.status !== "resolved") {
+          return assetPlaceholder(
+            id,
+            outcome?.status === "unavailable" ? outcome.reason : undefined,
+          );
+        }
         const url = `data:${outcome.mediaType};base64,${outcome.data}`;
         if (url.length > this.#remaining) {
           this.#leftOut.add(`${blockId}\u0000${id}`);
@@ -735,18 +741,29 @@ function withAssets(markup: string, budget: AssetAddresses): string {
  * The image drawn where a declared asset could not be: a dashed panel naming
  * the asset, in the default light theme's neutrals.
  */
-function assetPlaceholder(assetId: string): string {
+function assetPlaceholder(assetId: string, reason?: CanvasDesignAssetUnavailableReason): string {
   const id = /^[A-Za-z0-9._-]{1,64}$/.test(assetId) ? assetId : "asset";
   const ground = getDefaultToken("control-hover", "light");
   const edge = getDefaultToken("border-strong", "light");
   const ink = getDefaultToken("text-secondary", "light");
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">',
-    `<rect width="320" height="200" fill="${ground}"/>`,
-    `<rect x="1" y="1" width="318" height="198" fill="none" stroke="${edge}" stroke-dasharray="6 4" stroke-width="2"/>`,
-    `<text x="160" y="106" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="${ink}">${id}</text>`,
-    "</svg>",
-  ].join("");
+  const primaryInk = getDefaultToken("text-primary", "light");
+  const svg =
+    reason === "changed"
+      ? [
+          '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">',
+          `<rect width="320" height="200" fill="${ground}"/>`,
+          `<rect x="1" y="1" width="318" height="198" fill="none" stroke="${edge}" stroke-dasharray="6 4" stroke-width="2"/>`,
+          `<text x="160" y="96" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="${primaryInk}">Image changed since this version</text>`,
+          `<text x="160" y="120" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="${ink}">${id}</text>`,
+          "</svg>",
+        ].join("")
+      : [
+          '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">',
+          `<rect width="320" height="200" fill="${ground}"/>`,
+          `<rect x="1" y="1" width="318" height="198" fill="none" stroke="${edge}" stroke-dasharray="6 4" stroke-width="2"/>`,
+          `<text x="160" y="106" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="${ink}">${id}</text>`,
+          "</svg>",
+        ].join("");
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 }
 

@@ -278,6 +278,10 @@
   font-size: var(--oct-text-xs);
 }
 
+.canvas-preview-shot__note {
+  display: block;
+}
+
 .canvas-ref__progress {
   display: flex;
   align-items: center;

@@ -42,6 +42,7 @@ export type GhPullRequestActionResult =
 export type GhPullRequestSummaryResult =
   | Readonly<{
       status: "read";
+      pullRequestNodeId?: string;
       state: "open" | "closed" | "merged";
       headBranch: string;
       baseBranch: string;
@@ -121,7 +122,7 @@ export class GhPullRequestActionPort {
         "--repo",
         repository,
         "--json",
-        "state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable",
+        "id,state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable",
       ],
       undefined,
       signal,
@@ -129,6 +130,8 @@ export class GhPullRequestActionPort {
     if (result === undefined || result.exitCode !== 0) return { status: "unavailable" };
     const value = parseJson(result.stdout);
     if (!isRecord(value)) return { status: "unavailable" };
+    const pullRequestNodeId =
+      typeof value.id === "string" && NODE_ID_PATTERN.test(value.id) ? value.id : undefined;
     const state =
       value.state === "OPEN"
         ? "open"
@@ -152,6 +155,7 @@ export class GhPullRequestActionPort {
         : undefined;
     return {
       status: "read",
+      ...(pullRequestNodeId === undefined ? {} : { pullRequestNodeId }),
       state,
       headBranch: value.headRefName,
       baseBranch: value.baseRefName,

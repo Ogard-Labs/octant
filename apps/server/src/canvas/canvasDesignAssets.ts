@@ -1,13 +1,17 @@
 import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  type CanvasDesignAssetMarks,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
   type BrowserCaptureId,
   type CanvasDefinition,
   type CanvasDesignAsset,
   type CanvasDesignBlock,
+  type CanvasId,
   type CanvasProvenance,
+  type CanvasVersionId,
+  type CanvasVersionImageDigest,
   type ImageArtifactId,
 } from "@octant/contracts";
 import { createHash } from "node:crypto";
@@ -28,9 +32,15 @@ import { joinWorkPath, resolveContainedWorkPath } from "../work/workPathConfinem
 /**
  * What one source read produced: the bytes, or why there are none. A port
  * never throws for an expected refusal; it answers with one of these.
+ * `changedAt` is the file's change time (`ctimeNs`), reported by Project file
+ * reads so version digest recording refuses a file altered after commit.
  */
 export type CanvasDesignAssetRead =
-  | { readonly status: "read"; readonly bytes: Uint8Array }
+  | {
+      readonly status: "read";
+      readonly bytes: Uint8Array;
+      readonly changedAt?: bigint;
+    }
   | { readonly status: "unavailable"; readonly reason: "missing" | "refused" | "too-large" };
 
 /**
@@ -132,12 +142,45 @@ async function readCanvasDesignAssetSource(
  * XML or HTML text, and a design that wants vector art can already write it
  * inline, where the markup policy reads it.
  */
+/**
+ * Version context handed to the host's design-asset resolver so superseded
+ * versions (and preview miniatures, even on the newest version) compare
+ * Project image files against recorded SHA-256 digests.
+ */
+export interface CanvasDesignAssetVersionContext {
+  readonly canvasId: CanvasId;
+  readonly versionId: CanvasVersionId;
+  readonly marks?: CanvasDesignAssetMarks;
+  /**
+   * Older clients omit `marks` and cannot decode `changed` or `mark`; downgrade
+   * `changed` to `missing` and omit `mark` for them.
+   */
+  readonly legacyClient?: boolean;
+}
+
+export interface ResolveCanvasDesignAssetsOptions {
+  /**
+   * `live` (default): draw Project files as they stand now.
+   * `compare`: compare Project files against `recorded` digests, withholding
+   * changed files as `changed` (or `missing` for legacy clients) and marking
+   * unrecorded versions with `mark: "unrecorded"`.
+   */
+  readonly mode?: "live" | "compare";
+  /** Recorded digests for this block's Project images, keyed by `assetId`. */
+  readonly recorded?: ReadonlyMap<string, CanvasVersionImageDigest>;
+  /** Whether the caller decodes `changed` and `mark: "unrecorded"`. Defaults to `true`. */
+  readonly clientSupportsMarks?: boolean;
+}
+
 export async function resolveCanvasDesignAssets(
   block: Pick<CanvasDesignBlock, "assets">,
   provenance: Pick<CanvasProvenance, "mode" | "projectId" | "threadId">,
   ports: CanvasDesignAssetPorts,
+  options?: ResolveCanvasDesignAssetsOptions,
 ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> {
   const resolutions: CanvasDesignAssetResolution[] = [];
+  const compare = options?.mode === "compare";
+  const clientSupportsMarks = options?.clientSupportsMarks ?? true;
   let spent = 0;
   for (const asset of block.assets ?? []) {
     const unavailable = (reason: CanvasDesignAssetUnavailableReason) => {
@@ -164,6 +207,26 @@ export async function resolveCanvasDesignAssets(
     if (mediaType === undefined) {
       unavailable("not-an-image");
       continue;
+    }
+    if (compare && asset.source.kind === "project-file") {
+      if (options?.recorded !== undefined) {
+        const expected = options.recorded.get(String(asset.assetId));
+        const actualSha256 = createHash("sha256").update(read.bytes).digest("hex");
+        if (expected?.status !== "recorded" || expected.sha256 !== actualSha256) {
+          unavailable(clientSupportsMarks ? "changed" : "missing");
+          continue;
+        }
+      } else {
+        spent += read.bytes.byteLength;
+        resolutions.push({
+          assetId: asset.assetId,
+          status: "resolved",
+          mediaType,
+          data: Buffer.from(read.bytes).toString("base64"),
+          ...(clientSupportsMarks ? { mark: "unrecorded" as const } : {}),
+        });
+        continue;
+      }
     }
     spent += read.bytes.byteLength;
     resolutions.push({
@@ -231,7 +294,11 @@ export async function readCanvasDesignAssetFile(input: {
   const bytes = await prepared.read();
   return bytes === undefined
     ? { status: "unavailable", reason: "refused" }
-    : { status: "read", bytes };
+    : {
+        status: "read",
+        bytes,
+        ...(prepared.changedAt === undefined ? {} : { changedAt: prepared.changedAt }),
+      };
 }
 
 export async function prepareCanvasDesignAssetFile(input: {
@@ -245,6 +312,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   | {
       readonly status: "ready";
       readonly size: number;
+      readonly changedAt?: bigint;
       readonly read: () => Promise<Uint8Array | undefined>;
     }
 > {
@@ -264,14 +332,36 @@ export async function prepareCanvasDesignAssetFile(input: {
     return { status: "unavailable", reason: "missing" };
   }
   const candidate = joinWorkPath(canonicalRoot, relative);
-  try {
-    await input.filesystem.lstat(candidate);
-  } catch {
-    return { status: "unavailable", reason: "missing" };
+  // Track the latest change time across symlink components and the resolved
+  // file so retargeting a symlink to an older file after a Canvas version
+  // commits still reads as changed after commit, without treating an unrelated
+  // sibling file added to an ordinary parent directory as a change to this image.
+  let latestChangedAt: bigint | undefined;
+  let currentSegmentPath = canonicalRoot;
+  for (const segment of relative.split("/")) {
+    currentSegmentPath = joinWorkPath(currentSegmentPath, segment);
+    try {
+      const segmentStat = await input.filesystem.lstat(currentSegmentPath);
+      if (
+        segmentStat.isSymbolicLink &&
+        segmentStat.changedAt !== undefined &&
+        (latestChangedAt === undefined || segmentStat.changedAt > latestChangedAt)
+      ) {
+        latestChangedAt = segmentStat.changedAt;
+      }
+    } catch {
+      return { status: "unavailable", reason: "missing" };
+    }
   }
   const resolved = await resolveContainedWorkPath(input.filesystem, canonicalRoot, candidate);
   if (resolved === undefined || !resolved.stat.isFile) {
     return { status: "unavailable", reason: "refused" };
+  }
+  if (
+    resolved.stat.changedAt !== undefined &&
+    (latestChangedAt === undefined || resolved.stat.changedAt > latestChangedAt)
+  ) {
+    latestChangedAt = resolved.stat.changedAt;
   }
   const pathRefused = (canonical: string) =>
     input.pathRefused?.(candidate) === true || input.pathRefused?.(canonical) === true;
@@ -282,6 +372,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   return {
     status: "ready",
     size: resolved.stat.size,
+    ...(latestChangedAt === undefined ? {} : { changedAt: latestChangedAt }),
     read: async () => {
       if ((await input.filesystem.realpath(input.root).catch(() => undefined)) !== canonicalRoot)
         return undefined;
