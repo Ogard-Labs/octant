@@ -64,7 +64,7 @@ describe("inline questionnaires", () => {
     expect(screen.getByRole("checkbox", { name: "Markdown" })).toBeDisabled();
     await user.keyboard("2");
     expect(screen.getByRole("checkbox", { name: /PDF/ })).toBeChecked();
-    expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("");
   });
 
   it("picks options by number within the question that has focus", async () => {
@@ -136,8 +136,8 @@ describe("inline questionnaires", () => {
       ),
     );
     expect(screen.getByRole("button", { name: "Send answers" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     await user.click(screen.getByRole("checkbox", { name: "Markdown" }));
     expect(screen.getByRole("checkbox", { name: "HTML" })).toBeDisabled();
     await user.click(screen.getByRole("radio", { name: "Save only" }));
@@ -170,15 +170,21 @@ describe("inline questionnaires", () => {
       />
     );
     const { rerender } = render(wrap(card));
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     const group = screen.getByRole("group", { name: "After exporting?" });
-    await user.click(within(group).getByRole("radio", { name: "Write another answer" }));
-    await user.type(screen.getByRole("textbox", { name: "Your answer" }), "Ask after saving");
+    await user.type(
+      within(group).getByRole("textbox", { name: "Your answer" }),
+      "Ask after saving",
+    );
     await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Keep originals");
     rerender(wrap(<p>Inbox</p>));
     rerender(wrap(card));
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).toBeChecked();
-    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Ask after saving");
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).toBeChecked();
+    expect(
+      within(screen.getByRole("group", { name: "After exporting?" })).getByRole("textbox", {
+        name: "Your answer",
+      }),
+    ).toHaveValue("Ask after saving");
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Keep originals");
     expect(submit).not.toHaveBeenCalled();
   });
@@ -194,7 +200,7 @@ describe("inline questionnaires", () => {
       />
     );
     const source = render(wrap(card, "source"));
-    await user.click(within(source.container).getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(within(source.container).getByRole("checkbox", { name: "PDF Recommended" }));
     await user.type(
       within(source.container).getByRole("textbox", { name: /Anything to add/ }),
       "Source note",
@@ -202,7 +208,7 @@ describe("inline questionnaires", () => {
     source.rerender(wrap(<p>Inbox</p>, "source"));
     const other = render(wrap(card, "other"));
     expect(
-      within(other.container).getByRole("checkbox", { name: "PDF (Recommended)" }),
+      within(other.container).getByRole("checkbox", { name: "PDF Recommended" }),
     ).not.toBeChecked();
     expect(within(other.container).getByRole("textbox", { name: /Anything to add/ })).toHaveValue(
       "",
@@ -210,7 +216,7 @@ describe("inline questionnaires", () => {
     await user.click(within(other.container).getByRole("checkbox", { name: "Markdown" }));
     other.unmount();
     source.rerender(wrap(card, "source"));
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Markdown" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("Source note");
     expect(submit).not.toHaveBeenCalled();
@@ -227,7 +233,7 @@ describe("inline questionnaires", () => {
       />
     );
     const { rerender } = render(wrap(card));
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Old note");
     rerender(
       wrap(
@@ -239,11 +245,11 @@ describe("inline questionnaires", () => {
         />,
       ),
     );
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
     rerender(wrap(card));
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).not.toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     rerender(
       wrap(
         <QuestionnaireCard
@@ -254,7 +260,7 @@ describe("inline questionnaires", () => {
         />,
       ),
     );
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).not.toBeChecked();
     expect(submit).not.toHaveBeenCalled();
   });
   it("clears an accepted draft while keeping its submitted summary readable", async () => {
@@ -269,7 +275,7 @@ describe("inline questionnaires", () => {
       />
     );
     const { rerender } = render(wrap(card));
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     await user.click(screen.getByRole("radio", { name: "Save only" }));
     await user.type(screen.getByRole("textbox", { name: /Anything to add/ }), "Submitted note");
     await user.click(screen.getByRole("button", { name: "Send answers" }));
@@ -277,7 +283,7 @@ describe("inline questionnaires", () => {
     expect(screen.getByText("Submitted note")).toBeVisible();
     rerender(wrap(<p>Inbox</p>));
     rerender(wrap(card));
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).not.toBeChecked();
     expect(screen.getByRole("textbox", { name: /Anything to add/ })).toHaveValue("");
     expect(submit).toHaveBeenCalledTimes(1);
   });
@@ -285,17 +291,71 @@ describe("inline questionnaires", () => {
     const user = userEvent.setup();
     const submit = vi.fn(async () => false);
     render(<QuestionnaireCard prompt="Choices" questionnaire={questionnaire} onAnswer={submit} />);
-    await user.click(screen.getByRole("checkbox", { name: "PDF (Recommended)" }));
+    await user.click(screen.getByRole("checkbox", { name: "PDF Recommended" }));
     const group = screen.getByRole("group", { name: "After exporting?" });
-    await user.click(within(group).getByRole("radio", { name: "Write another answer" }));
     await user.type(
       within(group).getByRole("textbox", { name: "Your answer" }),
       "Ask after saving",
     );
     await user.click(screen.getByRole("button", { name: "Send answers" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("not accepted");
-    expect(screen.getByRole("checkbox", { name: "PDF (Recommended)" })).toBeChecked();
-    expect(screen.getByRole("textbox", { name: "Your answer" })).toHaveValue("Ask after saving");
+    expect(screen.getByRole("checkbox", { name: "PDF Recommended" })).toBeChecked();
+    expect(within(group).getByRole("textbox", { name: "Your answer" })).toHaveValue(
+      "Ask after saving",
+    );
+  });
+  it("renders card heading, per-question headers, free-text questions, and more than eight options without clipping", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(async () => true);
+    const tenOptions = Array.from({ length: 10 }, (_, idx) => ({
+      id: `o${String(idx)}`,
+      label: `Region ${String(idx + 1)}`,
+      ...(idx === 0 ? { recommended: true } : {}),
+    }));
+    render(
+      <QuestionnaireCard
+        prompt="Before deploying"
+        questionnaire={{
+          allowComment: false,
+          questions: [
+            {
+              id: "region",
+              header: "Region",
+              prompt: "Which region should host the build?",
+              selection: "single",
+              options: tenOptions,
+            },
+            {
+              id: "notes",
+              header: "Notes",
+              prompt: "Any deployment notes?",
+              selection: "single",
+              options: [],
+              allowCustom: true,
+            },
+          ],
+        }}
+        onAnswer={submit}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Input needed" })).toBeVisible();
+    expect(screen.getByText("2 questions")).toBeVisible();
+    expect(screen.getByText("Region")).toBeVisible();
+    expect(screen.getByText("Notes")).toBeVisible();
+    expect(screen.getByRole("radio", { name: "Region 10" })).toBeVisible();
+    await user.click(screen.getByRole("radio", { name: "Region 10" }));
+    const notesGroup = screen.getByRole("group", { name: "Any deployment notes?" });
+    await user.type(within(notesGroup).getByRole("textbox", { name: "Your answer" }), "Blue/green");
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(submit).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "region", selectedOptionIds: ["o9"] },
+          { questionId: "notes", selectedOptionIds: [], customAnswer: "Blue/green" },
+        ],
+      }),
+    );
   });
   it("disables submission while the answer is in flight", async () => {
     const user = userEvent.setup();

@@ -27,7 +27,15 @@ import {
   CodeProjectPullRequestSwitchesView,
   type CodeProjectPullRequestMergeMethod,
 } from "@octant/contracts";
-import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+import {
+  PendingRequest,
+  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+} from "@octant/contracts/pending-requests";
+import {
+  MobileInboxFailure,
+  type MobileQuestionAnswerOutcome,
+  type MobileRemoteTransport,
+} from "./mobileInboxClient";
 import { threadRoutineReceipts } from "./threadRoutineReceipts";
 import type {
   CoordinatorProposalDecisionPort,
@@ -694,4 +702,106 @@ export async function sendMobileCodeTurn(input: {
     throw new MobileInboxFailure("unavailable", "The host did not start the Code turn.");
   }
   return started;
+}
+
+export type MobileCodePendingQuestion = Extract<
+  PendingRequest,
+  { readonly mode: "code"; readonly kind: "question" }
+>;
+
+const decodeCodePendingRequest = decodeHostAnswer(PendingRequest);
+
+/**
+ * List pending provider questions waiting on a Code thread. Unknown items from
+ * a newer host are skipped rather than hiding this thread's questions.
+ */
+export async function listMobileCodePendingQuestions(
+  transport: MobileRemoteTransport,
+  threadId: string,
+): Promise<ReadonlyArray<MobileCodePendingQuestion>> {
+  const response = await transport.authenticatedFetch({
+    method: "GET",
+    path: "/api/pending-requests",
+    headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
+  });
+  if (!response.ok) {
+    throw new MobileInboxFailure(
+      response.status === 403 ? "rejected" : "unavailable",
+      "Pending questions could not be read from the host.",
+    );
+  }
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null) return [];
+  const rawRequests = (body as Readonly<Record<string, unknown>>)["requests"];
+  if (!Array.isArray(rawRequests)) return [];
+  const result: MobileCodePendingQuestion[] = [];
+  for (const item of rawRequests) {
+    try {
+      const decoded = decodeCodePendingRequest(item);
+      if (
+        decoded.mode === "code" &&
+        decoded.kind === "question" &&
+        String(decoded.threadId) === threadId
+      ) {
+        result.push(decoded);
+      }
+    } catch {
+      // Skip items from a newer host schema so known questions remain visible.
+    }
+  }
+  return result.sort((left, right) => left.requestedAt.localeCompare(right.requestedAt));
+}
+
+/**
+ * Answer a pending provider question or questionnaire on a Code thread over
+ * the phone's authenticated remote session.
+ */
+export async function answerMobileCodeQuestion(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly checkoutId: string;
+  readonly requestId: string;
+  readonly response: string;
+}): Promise<MobileQuestionAnswerOutcome> {
+  const staged = await decodeJson(
+    await input.transport.authenticatedFetch({
+      method: "PUT",
+      path: "/api/code/evidence",
+      body: input.response,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "x-octant-code-thread-id": input.threadId,
+      },
+      contentType: "text/plain; charset=utf-8",
+    }),
+    decodeHostAnswer(CodeEvidenceReference),
+    "The answer could not be staged on the host.",
+  );
+  const outcome = await executeMobileCodeOperation(input.transport, {
+    kind: "answer-provider-input",
+    operationId: newOperationId() as CodeOperationCommand["operationId"],
+    threadId: input.threadId as CodeOperationCommand["threadId"],
+    checkoutId: input.checkoutId as CodeOperationCommand["checkoutId"],
+    requestId: input.requestId,
+    response: staged,
+  });
+  if (outcome.kind === "operation-failed") {
+    return { status: "refused", message: outcome.failure.message };
+  }
+  if (outcome.kind === "provider-turn-state" && outcome.state === "failed") {
+    return {
+      status: "refused",
+      message:
+        outcome.failure?.message ??
+        "The answer was not delivered. The turn changed since it asked.",
+    };
+  }
+  if (
+    outcome.kind === "provider-turn-state" &&
+    outcome.state === "interrupted" &&
+    outcome.failure !== undefined
+  ) {
+    return { status: "refused", message: outcome.failure.message };
+  }
+  return { status: "answered" };
 }

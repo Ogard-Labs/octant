@@ -8,9 +8,11 @@ import {
   type NativeHarnessSessionReadView,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
+import { clearAllMobileQuestionnaireDrafts } from "./questionnaireDraftStore";
 import { NativeHarnessSessionPanel } from "./NativeHarnessSessionPanel";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
@@ -22,6 +24,7 @@ vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
   ...(await import("../../design-system/GlassChip")),
+  ...(await import("../../design-system/tone")),
 }));
 vi.mock("@octant/client-runtime", async () => {
   const actual =
@@ -52,6 +55,7 @@ afterEach(() => {
     });
   }
   document.body.replaceChildren();
+  clearAllMobileQuestionnaireDrafts();
   vi.mocked(loadMobileNativeHarnessSession).mockReset();
 });
 
@@ -437,6 +441,86 @@ describe("phone harness approvals", () => {
     expect(container.textContent).toContain(
       "Couldn't send that. Check the connection and try again.",
     );
+  });
+
+  it("renders a native harness questionnaire with the shared card and sends a valid QuestionnaireResponse", async () => {
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Branch",
+          prompt: "Which branch?",
+          selection: "single" as const,
+          options: [
+            { id: "o0", label: "main", recommended: true },
+            { id: "o1", label: "release" },
+          ],
+        },
+        {
+          id: "q1",
+          header: "Suites",
+          prompt: "Which suites?",
+          selection: "multiple" as const,
+          options: [
+            { id: "o0", label: "Unit" },
+            { id: "o1", label: "Smoke" },
+          ],
+        },
+      ],
+    };
+    const bodies: Array<{ questionId?: string; answer?: string }> = [];
+    const recording: MobileRemoteTransport = {
+      hostId: transport.hostId,
+      authenticatedFetch: async (request) => {
+        bodies.push(JSON.parse(String(request.body)) as { questionId?: string; answer?: string });
+        return Response.json({
+          kind: "question-answered",
+          questionId: "00000000-0000-4000-8000-000000000095",
+        });
+      },
+    };
+    const view = decodeNativeHarnessSessionView({
+      ...pendingLeadApproval(),
+      approvals: [],
+      questions: [
+        {
+          id: "00000000-0000-4000-8000-000000000095",
+          prompt: "Before running",
+          options: [],
+          questionnaire,
+          status: "pending",
+          askedAt: "2026-09-05T12:06:00.000Z",
+        },
+      ],
+    });
+    const container = await renderPanel(view, recording);
+    expect(container.textContent).toContain("Input needed");
+    expect(container.textContent).toContain("2 questions");
+    const option = (role: string, text: string) =>
+      [...container.querySelectorAll<HTMLElement>(`[role="${role}"]`)].find(
+        (node) => node.textContent?.replace(/\s+/g, " ").trim() === text,
+      );
+    await act(async () => option("radio", "main Recommended")?.click());
+    await act(async () => option("checkbox", "Unit")?.click());
+    await act(async () => option("checkbox", "Smoke")?.click());
+    await act(async () =>
+      container
+        .querySelector<HTMLElement>('[data-testid="mobile-native-harness-questionnaire-submit"]')
+        ?.click(),
+    );
+    expect(bodies).toHaveLength(1);
+    const sentAnswer = bodies[0]?.answer ?? "";
+    expect(validateQuestionnaireAnswer(questionnaire, sentAnswer)).toMatchObject({
+      status: "valid",
+    });
+    expect(JSON.parse(sentAnswer)).toEqual({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o0"] },
+        { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+      ],
+    });
   });
 
   it("keeps the pending approval on screen when a later read fails", async () => {

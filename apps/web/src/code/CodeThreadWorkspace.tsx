@@ -3058,6 +3058,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <ProviderQuestionCard
                   key={request.requestId}
                   className="code-thread-workspace__provider-request"
+                  draftIdentity={{
+                    scope: `code-request:${String(thread.id)}`,
+                    requestId: request.requestId,
+                  }}
+                  {...(request.questionnaire === undefined
+                    ? {}
+                    : { questionnaire: request.questionnaire })}
                   onAnswer={(response) =>
                     void props.controller.answerProviderRequest({
                       kind: "input",

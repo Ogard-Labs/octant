@@ -261,6 +261,71 @@ describe("listAllHostsMobileInbox", () => {
     expect(result.rows).toHaveLength(7);
   });
 
+  it("lists pending questionnaires under Input with the question count", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000001";
+    const host = transportFor({
+      hostId: "studio",
+      threadId,
+      title: "Studio chat",
+      updatedAt: now,
+    });
+    const result = await listAllHostsMobileInbox([
+      {
+        ...host,
+        authenticatedFetch: (request) =>
+          request.path === "/api/pending-requests"
+            ? Promise.resolve(
+                Response.json({
+                  requests: [
+                    {
+                      mode: "chat",
+                      kind: "question",
+                      threadId,
+                      threadTitle: "Studio chat",
+                      text: "Before generating the report",
+                      options: [],
+                      questionnaire: {
+                        questions: [
+                          {
+                            id: "q0",
+                            prompt: "Which format?",
+                            selection: "single",
+                            options: [{ id: "o0", label: "PDF" }],
+                          },
+                          {
+                            id: "q1",
+                            prompt: "Which audience?",
+                            selection: "single",
+                            options: [{ id: "o0", label: "Exec" }],
+                          },
+                        ],
+                      },
+                      requestedAt: now,
+                      answer: {
+                        threadId,
+                        expectedVersion: 1,
+                        turnId: "00000000-0000-4000-8000-000000000011",
+                        attemptId: "00000000-0000-4000-8000-000000000012",
+                        requestId: "q-multi",
+                      },
+                    },
+                  ],
+                  truncated: false,
+                  asks: [],
+                }),
+              )
+            : host.authenticatedFetch(request),
+      },
+    ]);
+    expect(result.rows.find((row) => row.threadId === threadId)).toMatchObject({
+      live: "needs-input",
+      waitingAsk: {
+        label: "Input",
+        text: "2 questions · Before generating the report",
+      },
+    });
+  });
+
   it("merges rows from healthy hosts and sorts by freshness", async () => {
     const studio = transportFor({
       hostId: "11111111-1111-4111-8111-111111111111",

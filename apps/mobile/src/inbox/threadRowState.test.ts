@@ -27,6 +27,15 @@ describe("a thread row's state", () => {
         now,
       ),
     ).toMatchObject({ kind: "waiting", word: "Approval" });
+    expect(
+      threadRowState(
+        row({
+          live: "needs-input",
+          waitingAsk: { label: "Input", text: "2 questions · Before deploying" },
+        }),
+        now,
+      ),
+    ).toMatchObject({ kind: "waiting", word: "Input" });
     expect(threadRowState(row({ live: "needs-input" }), now)).toMatchObject({
       kind: "waiting",
       word: "Needs you",

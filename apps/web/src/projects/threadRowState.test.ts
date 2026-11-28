@@ -30,4 +30,21 @@ describe("a sidebar row stopped on a usage limit", () => {
       "Needs you",
     );
   });
+
+  it("shows a typed Input status distinct from generic Needs you when waiting on user input", () => {
+    const input = threadRowState({
+      ...row,
+      activity: "attention",
+      awaitingKind: "user-input",
+    });
+    const approval = threadRowState({
+      ...row,
+      activity: "attention",
+      awaitingKind: "approval",
+    });
+    expect(input.state).toMatchObject({ status: "attention", text: "Input" });
+    expect(input.label).toBe("Input");
+    expect(approval.state).toMatchObject({ status: "attention", text: "Needs you" });
+    expect(input.state?.icon).not.toBe(approval.state?.icon);
+  });
 });

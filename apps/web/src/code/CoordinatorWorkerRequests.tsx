@@ -139,6 +139,7 @@ export function retainedWorkerAsks<T>(
 function answeredHere(response: PendingRequestResponse): string {
   if (response.kind === "approve") return "Approved here";
   if (response.kind === "deny") return "Denied here";
+  if (response.kind === "questionnaire") return "Answered here";
   return `Answered here: ${response.label}`;
 }
 

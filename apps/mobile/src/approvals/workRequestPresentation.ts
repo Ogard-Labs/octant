@@ -131,11 +131,22 @@ export function writeQuestionnaireCustom(
   question: Question,
   text: string,
 ): QuestionnaireDraft {
-  return replaceAnswer(draft, {
-    questionId: question.id,
-    selectedOptionIds: [],
-    ...(text.trim() === "" ? {} : { customAnswer: text }),
-  });
+  const hasCharacters = text.length > 0;
+  return replaceAnswer(
+    {
+      ...draft,
+      customIds: hasCharacters
+        ? draft.customIds.includes(question.id)
+          ? draft.customIds
+          : [...draft.customIds, question.id]
+        : draft.customIds.filter((value) => value !== question.id),
+    },
+    {
+      questionId: question.id,
+      selectedOptionIds: [],
+      ...(hasCharacters ? { customAnswer: text } : {}),
+    },
+  );
 }
 
 /**

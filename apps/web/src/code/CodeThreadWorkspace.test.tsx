@@ -5262,3 +5262,72 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
   expect(await screen.findByText(/Folder drops need the desktop app/)).toBeVisible();
 });
+
+it("renders a Code provider questionnaire through one QuestionnaireCard and submits every answer once", async () => {
+  const user = userEvent.setup();
+  const answerProviderRequest = vi.fn(async () => true);
+  const request = {
+    kind: "input" as const,
+    requestId: "acp-q-1",
+    prompt: "Before editing the migration",
+    options: [],
+    questionnaire: {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Strategy",
+          prompt: "Which migration path?",
+          selection: "single" as const,
+          options: [
+            {
+              id: "o0",
+              label: "Expand and contract",
+              description: "Zero downtime",
+              recommended: true,
+            },
+            { id: "o1", label: "In-place alter", description: "Short lock" },
+          ],
+        },
+        {
+          id: "q1",
+          header: "Checks",
+          prompt: "Which checks should run?",
+          selection: "multiple" as const,
+          options: [
+            { id: "o0", label: "Unit" },
+            { id: "o1", label: "Integration" },
+          ],
+        },
+      ],
+    },
+  };
+  render(
+    <CodeThreadWorkspace
+      controller={controller({
+        turnStatus: "waiting",
+        providerRequests: [request],
+        answerProviderRequest,
+      })}
+      threadId={threadId}
+    />,
+  );
+  expect(await screen.findByRole("heading", { name: "Input needed" })).toBeVisible();
+  expect(screen.getByText("2 questions")).toBeVisible();
+  expect(screen.getByText("Zero downtime")).toBeVisible();
+  await user.click(screen.getByRole("radio", { name: /Expand and contract/ }));
+  await user.click(screen.getByRole("checkbox", { name: "Unit" }));
+  await user.click(screen.getByRole("checkbox", { name: "Integration" }));
+  await user.click(screen.getByRole("button", { name: "Send answers" }));
+  expect(answerProviderRequest).toHaveBeenCalledExactlyOnceWith({
+    kind: "input",
+    requestId: "acp-q-1",
+    response: JSON.stringify({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o0"] },
+        { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+      ],
+    }),
+  });
+});

@@ -573,3 +573,155 @@ it("keeps the chosen reminder across clock ticks and clears it after deferral", 
     clock.mockRestore();
   }
 });
+
+describe("a questionnaire pending row", () => {
+  const twoQuestionForm = {
+    allowComment: false,
+    questions: [
+      {
+        id: "q0",
+        header: "Target",
+        prompt: "Which target branch?",
+        selection: "single" as const,
+        options: [
+          { id: "o0", label: "main", recommended: true },
+          { id: "o1", label: "release" },
+        ],
+      },
+      {
+        id: "q1",
+        header: "Tests",
+        prompt: "Which suites to run?",
+        selection: "multiple" as const,
+        options: [
+          { id: "o0", label: "Unit" },
+          { id: "o1", label: "Integration" },
+        ],
+      },
+    ],
+  };
+
+  it("summarizes a multi-question form with n questions, expands in place, and submits one complete answer", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn(async () => ({ status: "answered" as const }));
+    const onOpenThread = vi.fn();
+    const request = decodePendingRequest({
+      ...codeQuestion(),
+      questionnaire: twoQuestionForm,
+    });
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    expect(screen.getByText("2 questions")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+    await user.click(await screen.findByRole("radio", { name: "main Recommended" }));
+    await user.click(screen.getByRole("checkbox", { name: "Unit" }));
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(onAnswer).toHaveBeenCalledExactlyOnceWith(request, {
+      kind: "questionnaire",
+      response: JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "q0", selectedOptionIds: ["o0"] },
+          { questionId: "q1", selectedOptionIds: ["o0"] },
+        ],
+      }),
+    });
+    expect(onOpenThread).not.toHaveBeenCalled();
+  });
+
+  it("summarizes a find-only lead questionnaire with n questions and Open without answering in place", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = decodePendingRequest({
+      ...workLeadQuestion(),
+      questionnaire: twoQuestionForm,
+    });
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    expect(screen.getByText("2 questions")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("delivers structured questionnaire answers to Chat, Work, and Code through answerPendingRequest", async () => {
+    const response = JSON.stringify({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o0"] },
+        { questionId: "q1", selectedOptionIds: ["o0"] },
+      ],
+    });
+    const chatClients = {
+      chatClient: { execute: vi.fn(async () => ({})) },
+      codeClient: { executeOperation: vi.fn(), putEvidence: vi.fn() },
+      workRequestClient: { execute: vi.fn() },
+      workTurnClient: { startFirstTurn: vi.fn() },
+    };
+    const chatReq = decodePendingRequest({ ...chatQuestion(), questionnaire: twoQuestionForm });
+    await expect(
+      answerPendingRequest(chatClients as never, chatReq, { kind: "questionnaire", response }),
+    ).resolves.toEqual({ status: "answered" });
+    expect(chatClients.chatClient.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "answer-chat-turn-question", answer: response }),
+    );
+
+    const codeClients = {
+      chatClient: { execute: vi.fn() },
+      codeClient: {
+        executeOperation: vi.fn(async () => ({ kind: "operation-accepted" })),
+        putEvidence: vi.fn(async () => ({ evidenceId: "ev-1" })),
+      },
+      workRequestClient: { execute: vi.fn() },
+      workTurnClient: { startFirstTurn: vi.fn() },
+    };
+    const codeReq = decodePendingRequest({ ...codeQuestion(), questionnaire: twoQuestionForm });
+    await expect(
+      answerPendingRequest(codeClients as never, codeReq, { kind: "questionnaire", response }),
+    ).resolves.toEqual({ status: "answered" });
+    expect(codeClients.codeClient.putEvidence).toHaveBeenCalledWith(codeReq.threadId, response);
+
+    const workClients = {
+      chatClient: { execute: vi.fn() },
+      codeClient: { executeOperation: vi.fn(), putEvidence: vi.fn() },
+      workRequestClient: { execute: vi.fn(async () => ({})) },
+      workTurnClient: { startFirstTurn: vi.fn() },
+    };
+    const workReq = decodePendingRequest({
+      mode: "work",
+      kind: "question",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      threadId: "33333333-3333-4333-8333-333333333333",
+      threadTitle: "Quarterly report",
+      text: "Before running",
+      options: [],
+      questionnaire: twoQuestionForm,
+      requestedAt: "2026-10-06T08:00:00.000Z",
+      answer: { requestId: "11111111-1111-4111-8111-111111111111", expectedVersion: 3 },
+    });
+    await expect(
+      answerPendingRequest(workClients as never, workReq, { kind: "questionnaire", response }),
+    ).resolves.toEqual({ status: "answered" });
+    expect(workClients.workRequestClient.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "resolve-work-request",
+        resolution: { kind: "user-input", answer: JSON.parse(response) },
+      }),
+    );
+  });
+});

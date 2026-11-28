@@ -5,6 +5,7 @@ import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
+  decodeWorkQuestionnaireResponse,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
   type OctantMode,
@@ -26,7 +27,8 @@ export const NEEDS_YOU_ROW_LIMIT = 5;
 export type PendingRequestResponse =
   | { readonly kind: "approve" }
   | { readonly kind: "deny" }
-  | { readonly kind: "choice"; readonly label: string; readonly note?: string };
+  | { readonly kind: "choice"; readonly label: string; readonly note?: string }
+  | { readonly kind: "questionnaire"; readonly response: string };
 
 /** A note rides in the next turn's prompt, so it is bounded like a short message. */
 export const MAX_DECISION_NOTE_LENGTH = 2_000;
@@ -360,7 +362,7 @@ export async function answerPendingRequest(
       return started.kind === "accepted" ? { status: "answered" } : NOT_SENT;
     }
     if (request.kind === "approval") {
-      if (response.kind === "choice") return NOT_DELIVERED;
+      if (response.kind !== "approve" && response.kind !== "deny") return NOT_DELIVERED;
       const approved = response.kind === "approve";
       if (request.mode === "work") {
         await clients.workRequestClient.execute({
@@ -383,6 +385,43 @@ export async function answerPendingRequest(
         return providerAnswerOutcome(result);
       }
       return NOT_DELIVERED;
+    }
+    if (response.kind === "questionnaire") {
+      if (request.kind !== "question" || request.questionnaire === undefined) return NOT_DELIVERED;
+      if (request.mode === "work") {
+        const decoded = decodeWorkQuestionnaireResponse(JSON.parse(response.response));
+        await clients.workRequestClient.execute({
+          kind: "resolve-work-request",
+          requestId: request.answer.requestId,
+          expectedVersion: request.answer.expectedVersion,
+          resolution: { kind: "user-input", answer: decoded },
+        });
+        return { status: "answered" };
+      }
+      if (request.mode === "code") {
+        const result = await clients.codeClient.executeOperation({
+          kind: "answer-provider-input",
+          operationId: decodeCodeOperationId(globalThis.crypto.randomUUID()),
+          threadId: request.answer.threadId,
+          checkoutId: request.answer.checkoutId,
+          requestId: request.answer.requestId,
+          response: await clients.codeClient.putEvidence(
+            request.answer.threadId,
+            response.response,
+          ),
+        });
+        return providerAnswerOutcome(result);
+      }
+      await clients.chatClient.execute({
+        kind: "answer-chat-turn-question",
+        threadId: request.answer.threadId,
+        expectedVersion: request.answer.expectedVersion,
+        turnId: request.answer.turnId,
+        attemptId: request.answer.attemptId,
+        requestId: request.answer.requestId,
+        answer: response.response,
+      });
+      return { status: "answered" };
     }
     if (response.kind !== "choice") return NOT_DELIVERED;
     if (request.mode === "work") {

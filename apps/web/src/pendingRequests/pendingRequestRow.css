@@ -258,3 +258,12 @@
   flex: 0 0 auto;
   color: var(--oct-warn-fg);
 }
+
+.pending-request__question-count {
+  align-self: center;
+  margin-inline-end: var(--oct-space-1);
+}
+
+.pending-request__questionnaire {
+  margin-top: var(--oct-space-2);
+}

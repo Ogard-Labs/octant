@@ -80,6 +80,7 @@ function threadLiveFact(thread: ChatThreadNavigationItem):
   | undefined {
   const { state } = threadRowState({
     activity: threadRowActivity(thread),
+    awaitingKind: thread.awaitingKind,
     unread: false,
     woke: false,
     startedAt: thread.turnStartedAt,

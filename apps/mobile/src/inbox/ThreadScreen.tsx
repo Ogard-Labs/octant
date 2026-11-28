@@ -38,6 +38,7 @@ import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel
 import { BrowserApprovalCard } from "../surfaces/BrowserApprovalCard";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { ThreadSecretCards } from "../surfaces/ThreadSecretCard";
+import { ChatQuestionCards, CodeQuestionCards } from "../surfaces/ThreadQuestionCards";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { ThreadVideoClips } from "../surfaces/ThreadVideoClips";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
@@ -1004,6 +1005,28 @@ export function ThreadScreen(props: ThreadScreenProps) {
                     threadId={selected.threadId}
                     threadKind={`${selected.mode}-thread`}
                     transport={transport}
+                  />
+                )}
+                {offlineDemo ||
+                transport === undefined ||
+                selected.mode !== "chat" ||
+                chat.view === undefined ? null : (
+                  <ChatQuestionCards
+                    onSettled={() => void chat.refresh({ quiet: true })}
+                    transport={transport}
+                    view={chat.view}
+                    watchingOnly={watchingOnly}
+                  />
+                )}
+                {offlineDemo ||
+                transport === undefined ||
+                selected.mode !== "code" ||
+                code.thread === undefined ? null : (
+                  <CodeQuestionCards
+                    onSettled={() => void code.refresh({ quiet: true })}
+                    threadId={String(code.thread.id)}
+                    transport={transport}
+                    watchingOnly={watchingOnly}
                   />
                 )}
                 {offlineDemo ||

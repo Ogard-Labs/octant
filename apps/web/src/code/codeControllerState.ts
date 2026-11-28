@@ -61,6 +61,7 @@ export type CodeProviderRequest =
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      readonly questionnaire?: import("@octant/contracts").Questionnaire;
       /** The provider asks for a secret: answered masked, never put as evidence. */
       readonly secret?: true;
     };
@@ -160,14 +161,16 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
     };
   }
-  // App questionnaires follow the session read so answers from another window
-  // withdraw the card here too; provider-native questions keep their event path.
-  if (event.kind === "input-requested" && event.questionnaire === undefined) {
+  // App-owned harness questionnaires follow the session read so answers from
+  // another window withdraw the card here too; provider-native questions and
+  // questionnaires (Claude, Codex, OpenCode, ACP) keep their event path.
+  if (event.kind === "input-requested" && event.harnessQuestion !== true) {
     return {
       kind: "input",
       requestId: event.requestId,
       prompt: event.prompt,
       options: event.options,
+      ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       ...(event.secret === true ? { secret: true } : {}),
     };
   }

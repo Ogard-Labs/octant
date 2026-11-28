@@ -487,12 +487,12 @@ const WAITING_ASK_LABELS: Readonly<Record<WaitingAskKind, string>> = {
 
 const PENDING_REQUEST_LABELS: Readonly<Record<PendingRequest["kind"], string>> = {
   approval: "Approval",
-  question: "Question",
+  question: "Input",
   decision: "Decision",
   "child-approval": "Subagent approval",
-  "child-question": "Subagent question",
+  "child-question": "Input",
   "lead-approval": "Approval",
-  "lead-question": "Question",
+  "lead-question": "Input",
 };
 
 /** What a row says for an ask this app version does not know. */
@@ -568,9 +568,20 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
       request.mode === "code" && request.kind === "approval" && request.browserOrigin !== undefined
         ? WAITING_ASK_LABELS["browser-approval"]
         : PENDING_REQUEST_LABELS[request.kind];
+    const questionCount =
+      (request.kind === "question" || request.kind === "lead-question") &&
+      request.questionnaire !== undefined
+        ? request.questionnaire.questions.length
+        : 0;
+    const text =
+      questionCount > 1
+        ? request.text.trim().length > 0
+          ? `${String(questionCount)} questions · ${request.text}`
+          : `${String(questionCount)} questions`
+        : request.text;
     return listedAsk(request, {
       label,
-      text: request.text,
+      text,
       ...(request.kind === "decision" ? { decision: true } : {}),
       ...(request.kind === "decision" && request.urgent === true ? { urgent: true } : {}),
     });
@@ -793,6 +804,49 @@ export async function createMobileChatThread(input: {
     throw new MobileInboxFailure("unavailable", "Host did not confirm Chat thread creation.");
   }
   return result.thread;
+}
+
+export type MobileQuestionAnswerOutcome =
+  | { readonly status: "answered" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Answer a pending question or questionnaire on a Chat turn attempt over the
+ * phone's authenticated remote session.
+ */
+export async function answerMobileChatQuestion(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly threadId: string;
+  readonly expectedVersion: number;
+  readonly turnId: string;
+  readonly attemptId: string;
+  readonly requestId: string;
+  readonly answer: string;
+}): Promise<MobileQuestionAnswerOutcome> {
+  const response = await input.transport.authenticatedFetch({
+    method: "POST",
+    path: "/api/chat/commands",
+    body: JSON.stringify({
+      kind: "answer-chat-turn-question",
+      threadId: input.threadId,
+      expectedVersion: input.expectedVersion,
+      turnId: input.turnId,
+      attemptId: input.attemptId,
+      requestId: input.requestId,
+      answer: input.answer,
+    }),
+  });
+  if (response.ok) return { status: "answered" };
+  const body = (await response.json().catch(() => undefined)) as
+    | { readonly message?: unknown }
+    | undefined;
+  const message =
+    typeof body?.message === "string" && body.message.trim().length > 0
+      ? body.message.trim()
+      : response.status === 409
+        ? "This question is no longer waiting for an answer."
+        : "The answer could not be delivered.";
+  return { status: "refused", message };
 }
 
 /**

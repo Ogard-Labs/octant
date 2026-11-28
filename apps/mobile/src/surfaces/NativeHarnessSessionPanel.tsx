@@ -29,6 +29,7 @@ import {
   type ConfirmedSendResult,
 } from "../security/BiometricGate";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
+import { MobileQuestionnaireCard } from "./MobileQuestionnaireCard";
 import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
@@ -93,14 +94,18 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
 
   // Every host action goes through here: one at a time, a failure becomes a
   // note instead of a silent no-op, and the view is re-read either way.
-  const run = async (action: () => Promise<string | undefined>) => {
-    if (props.watchingOnly === true || busyRef.current || resource.error !== undefined) return;
+  const run = async (action: () => Promise<string | undefined>): Promise<boolean> => {
+    if (props.watchingOnly === true || busyRef.current || resource.error !== undefined)
+      return false;
     busyRef.current = true;
     setBusy(true);
     try {
-      setNote(await action());
+      const failure = await action();
+      setNote(failure);
+      return failure === undefined;
     } catch {
       setNote(MOBILE_COPY.approvalSendFailed);
+      return false;
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -359,7 +364,39 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           ))}
         </View>
       )}
-      {pendingQuestion === undefined ? null : (
+      {pendingQuestion === undefined ? null : pendingQuestion.questionnaire !== undefined ? (
+        <MobileQuestionnaireCard
+          busy={busy || resource.error !== undefined}
+          draftKey={`harness:${props.transport.hostId}:${props.threadId}:${String(pendingQuestion.id)}`}
+          embedded
+          onSubmit={(response) =>
+            run(async () => {
+              const result = await answerMobileNativeHarnessQuestion({
+                transport: props.transport,
+                threadId: props.threadId,
+                questionId: String(pendingQuestion.id),
+                answer: JSON.stringify(response),
+              });
+              return result?.kind === "question-answered"
+                ? undefined
+                : (result?.message ?? "The answer was refused.");
+            })
+          }
+          prompt={pendingQuestion.prompt}
+          questionnaire={pendingQuestion.questionnaire}
+          submitTestID="mobile-native-harness-questionnaire-submit"
+          subtitle={
+            pendingQuestion.source === undefined
+              ? undefined
+              : `Child ${String(pendingQuestion.source.runId).slice(0, 8)} · ${
+                  pendingQuestion.source.providerName ??
+                  String(pendingQuestion.source.providerInstanceId)
+                } · ${pendingQuestion.source.targetFolder ?? "No folder reported"}`
+          }
+          testID="mobile-native-harness-question"
+          watchingOnly={props.watchingOnly === true}
+        />
+      ) : (
         <View
           style={[styles.question, { borderColor: colors.border }]}
           testID="mobile-native-harness-question"

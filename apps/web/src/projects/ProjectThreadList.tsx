@@ -672,6 +672,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   const rowState = shows.status
     ? threadRowState({
         activity,
+        awaitingKind: props.thread.awaitingKind,
         unread,
         woke: props.thread.woke === true,
         followUp: props.thread.followUp === true,

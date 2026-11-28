@@ -1716,6 +1716,7 @@ function ActivityThreadButton(props: {
   const rowState = shows.status
     ? threadRowState({
         activity: props.thread.activity,
+        awaitingKind: props.thread.awaitingKind,
         unread: props.thread.unread,
         woke: props.thread.woke,
         followUp: props.thread.followUp,

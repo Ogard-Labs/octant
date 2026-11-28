@@ -10,6 +10,7 @@ import { modeIcons } from "../shell/ModeSwitcher";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkerMark } from "../projects/coordinatorMarks";
+import { LazyQuestionnaireCard } from "../transcript/LazyProviderQuestionCard";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   childRequestHeadline,
@@ -19,6 +20,7 @@ import {
   isLeadQuestionPendingRequest,
   MAX_DECISION_NOTE_LENGTH,
   pendingRequestChoices,
+  pendingRequestKey,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
 } from "./pendingRequests";
@@ -100,6 +102,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const selectedPreset = presets.find((preset) => preset.id === presetId);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
+  const [questionnaireOpen, setQuestionnaireOpen] = useState(false);
   const noteToggle = useRef<HTMLButtonElement>(null);
   const noteField = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -182,6 +185,17 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const differs = reviewed !== undefined && reviewed.backs !== recommendedLabel;
   const child = isChildPendingRequest(request) ? request : undefined;
   const lead = isLeadApprovalPendingRequest(request) ? request : undefined;
+  const questionnaire =
+    (request.kind === "question" && request.secret !== true) || request.kind === "lead-question"
+      ? request.questionnaire
+      : undefined;
+  const questionCount = questionnaire?.questions.length;
+  const questionSummary =
+    questionCount === undefined
+      ? undefined
+      : questionCount === 1
+        ? "1 question"
+        : `${String(questionCount)} questions`;
   return (
     <div
       aria-label={
@@ -325,14 +339,44 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       {open && !deferred ? (
         <div className="pending-request__actions">
           {isFindOnlyPendingRequest(request) ? (
-            <OctantButton
-              onClick={() => props.onOpenThread(request)}
-              size="sm"
-              type="button"
-              variant="outline"
-            >
-              Review request
-            </OctantButton>
+            <>
+              {questionSummary === undefined ? null : (
+                <span className="oct-meta pending-request__question-count">{questionSummary}</span>
+              )}
+              <OctantButton
+                onClick={() => props.onOpenThread(request)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {questionSummary === undefined ? "Review request" : "Open"}
+              </OctantButton>
+            </>
+          ) : questionnaire !== undefined ? (
+            <>
+              {questionSummary === undefined ? null : (
+                <span className="oct-meta pending-request__question-count">{questionSummary}</span>
+              )}
+              <OctantButton
+                aria-expanded={questionnaireOpen}
+                disabled={busy}
+                onClick={() => setQuestionnaireOpen((current) => !current)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {questionnaireOpen ? "Hide form" : "Answer"}
+              </OctantButton>
+              <OctantButton
+                disabled={busy}
+                onClick={() => props.onOpenThread(request)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Open
+              </OctantButton>
+            </>
           ) : request.kind === "approval" ? (
             <>
               <OctantButton
@@ -472,6 +516,31 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           placeholder="Add a note for the agent"
           rows={2}
           value={note}
+        />
+      ) : null}
+      {open &&
+      !deferred &&
+      questionnaire !== undefined &&
+      !isFindOnlyPendingRequest(request) &&
+      questionnaireOpen ? (
+        <LazyQuestionnaireCard
+          className="pending-request__questionnaire"
+          draftIdentity={{
+            scope: `pending-row:${request.mode}:${String(request.threadId)}`,
+            requestId: pendingRequestKey(request),
+          }}
+          onAnswer={async (response) => {
+            if (busy || !open || deferred) return false;
+            setBusy(true);
+            setNotice(undefined);
+            const result = await props.onAnswer(request, { kind: "questionnaire", response });
+            if (!mounted.current) return true;
+            if (result.status === "answered") return true;
+            setBusy(false);
+            return { refused: result.message };
+          }}
+          prompt={request.text}
+          questionnaire={questionnaire}
         />
       ) : null}
       {notice === undefined ? null : (

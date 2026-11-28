@@ -113,4 +113,48 @@ describe("providerRequestFromEvent", () => {
       summary: asked.summary,
     });
   });
+
+  it("preserves provider questionnaires on input-requested events and defers app-owned harness questionnaires", () => {
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Database",
+          prompt: "Which database?",
+          selection: "single" as const,
+          options: [
+            { id: "o0", label: "PostgreSQL", recommended: true },
+            { id: "o1", label: "SQLite" },
+          ],
+          allowCustom: true,
+        },
+      ],
+    };
+    expect(
+      providerRequestFromEvent({
+        kind: "input-requested",
+        requestId: "acp-form-1" as never,
+        prompt: "Which database?",
+        options: [],
+        questionnaire,
+      }),
+    ).toEqual({
+      kind: "input",
+      requestId: "acp-form-1",
+      prompt: "Which database?",
+      options: [],
+      questionnaire,
+    });
+    expect(
+      providerRequestFromEvent({
+        kind: "input-requested",
+        requestId: "harness-q-1" as never,
+        prompt: "Which database?",
+        options: [],
+        questionnaire,
+        harnessQuestion: true,
+      }),
+    ).toBeUndefined();
+  });
 });

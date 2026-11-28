@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
+import { clearAllMobileQuestionnaireDrafts } from "./questionnaireDraftStore";
 import { WorkRequestCards } from "./WorkRequestCards";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
@@ -34,6 +35,7 @@ afterEach(() => {
     });
   }
   document.body.replaceChildren();
+  clearAllMobileQuestionnaireDrafts();
 });
 
 /**
@@ -310,7 +312,7 @@ describe("a provider questionnaire on the phone", () => {
     const { transport, commands } = hostWith(detail);
     const container = await render(transport, authenticator());
     expect(byText(container, "button", "Send answers").getAttribute("aria-disabled")).toBe("true");
-    await press(byText(container, "radio", "Hall B (Recommended)"));
+    await press(byText(container, "radio", "Hall B Recommended"));
     await type(container, "Anything to add?", "Thanks");
     await press(byText(container, "button", "Send answers"));
     expect(commands).toEqual([
@@ -327,6 +329,73 @@ describe("a provider questionnaire on the phone", () => {
           },
         },
       },
+    ]);
+  });
+
+  it("keeps unsent questionnaire choices and written answers when leaving and returning to the screen", async () => {
+    const multiDetail = {
+      kind: "user-input",
+      prompt: "Before running",
+      options: [],
+      questionnaire: {
+        questions: [
+          {
+            id: "venue",
+            header: "Venue",
+            prompt: "Which venue?",
+            selection: "single",
+            options: [
+              { id: "a", label: "Hall A" },
+              { id: "b", label: "Hall B", recommended: true },
+            ],
+          },
+          {
+            id: "note",
+            header: "Note",
+            prompt: "Any special setup?",
+            selection: "single",
+            options: [],
+            allowCustom: true,
+          },
+        ],
+      },
+    };
+    const { transport, commands } = hostWith(multiDetail);
+    const auth = authenticator();
+    const first = await render(transport, auth);
+    await press(byText(first, "radio", "Hall B Recommended"));
+    await type(first, "Your answer: Any special setup?", "Extra chairs");
+
+    // Simulate leaving the thread screen (unmounting) and returning.
+    const mounted = roots.pop();
+    act(() => {
+      mounted?.unmount();
+    });
+    first.remove();
+
+    const returned = await render(transport, auth);
+    expect(byText(returned, "radio", "Hall B Recommended").getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    const restoredField = returned.querySelector<HTMLTextAreaElement>(
+      '[aria-label="Your answer: Any special setup?"]',
+    );
+    expect(restoredField?.value).toBe("Extra chairs");
+    await press(byText(returned, "button", "Send answers"));
+    expect(commands).toEqual([
+      expect.objectContaining({
+        kind: "resolve-work-request",
+        resolution: {
+          kind: "user-input",
+          answer: {
+            version: 1,
+            answers: [
+              { questionId: "venue", selectedOptionIds: ["b"] },
+              { questionId: "note", selectedOptionIds: [], customAnswer: "Extra chairs" },
+            ],
+          },
+        },
+      }),
     ]);
   });
 

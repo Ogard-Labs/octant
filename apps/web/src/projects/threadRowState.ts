@@ -11,7 +11,7 @@ import {
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
-import { CircleAlert, Clock, ClockFading, LoaderCircle } from "../ui/icons";
+import { CircleAlert, CircleHelp, Clock, ClockFading, LoaderCircle } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import type { SidebarThreadRowState } from "./SidebarThreadRowContent";
 import { threadRowShortAge } from "./threadRowShortAge";
@@ -65,6 +65,7 @@ export const NO_THREAD_ROW_STATE: ThreadRowStateReading = { unread: false };
  */
 export function threadRowState(props: {
   readonly activity: ThreadRowActivity;
+  readonly awaitingKind?: "approval" | "user-input" | undefined;
   readonly unread: boolean;
   readonly woke: boolean;
   readonly followUp?: boolean;
@@ -80,8 +81,13 @@ export function threadRowState(props: {
   const facts = sidebarThreadStatusInput({ ...props, now });
   const status = resolveSidebarThreadStatus(facts);
   if (status === undefined) return { unread: false };
+  const waitingForInput = status === "attention" && props.awaitingKind === "user-input";
   const label = [
-    ...sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]),
+    ...sidebarThreadStatuses(facts).map((each) =>
+      each === "attention" && props.awaitingKind === "user-input"
+        ? "Input"
+        : SIDEBAR_THREAD_STATUS_LABEL[each],
+    ),
     ...(props.followUp === true ? ["Follow-up"] : []),
   ].join(", ");
   if (status === "unread") return { unread: true, label };
@@ -94,13 +100,19 @@ export function threadRowState(props: {
       ? elapsed === undefined || elapsed === "now"
         ? word
         : `${word} ${elapsed}`
-      : status === "attention"
-        ? "Needs you"
-        : status === "limited"
-          ? limitedText(props.limited?.resetsAt, now)
-          : "Snooze ended";
+      : waitingForInput
+        ? "Input"
+        : status === "attention"
+          ? "Needs you"
+          : status === "limited"
+            ? limitedText(props.limited?.resetsAt, now)
+            : "Snooze ended";
   return {
-    state: { status, text, icon: sidebarThreadStatusIcon(status) },
+    state: {
+      status,
+      text,
+      icon: waitingForInput ? CircleHelp : sidebarThreadStatusIcon(status),
+    },
     unread: false,
     label,
   };
