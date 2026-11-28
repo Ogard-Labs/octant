@@ -1437,6 +1437,8 @@ export function wireWork(deps: WorkDependencies) {
                   workTurnToolLevel(
                     runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
                   ).posture,
+                hasHandleConsumer: () =>
+                  threadSecretFacts.service.hasConsumer() && computer !== undefined,
               }),
             });
         if (

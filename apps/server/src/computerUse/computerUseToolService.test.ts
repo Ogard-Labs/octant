@@ -2001,16 +2001,24 @@ describe("Typing a thread secret through Computer use", () => {
     readonly secureTarget?: boolean;
     readonly projectAppRemembered?: boolean;
     readonly enabled?: boolean;
+    readonly destinationStatus?: "available" | "unavailable" | "leasable";
+    readonly onInspectSecretTarget?: (
+      callIndex: number,
+      signal: AbortSignal | undefined,
+    ) => Promise<void> | void;
   }) {
     const secretJournal: Array<ThreadSecretJournalRecord> = [];
     const computerEvidence: Array<ComputerUseEvidenceEvent> = [];
     const typedValues: Array<ComputerHostTypeSecretRequest> = [];
     let enabled = overrides?.enabled ?? true;
     let secureTarget = overrides?.secureTarget ?? true;
-    const strict = overrides?.strict ?? false;
-    const fullAccess = overrides?.fullAccess ?? false;
+    let windowTitle = "Privacy & Security";
+    let strict = overrides?.strict ?? false;
+    let fullAccess = overrides?.fullAccess ?? false;
+    let dropFullAccessAfterNextRead = false;
     let nowMs = 1_700_000_000_000;
     let observationSequence = 0;
+    let inspectCalls = 0;
 
     const threadSecrets = new ThreadSecretService({
       uuid: () => crypto.randomUUID(),
@@ -2054,7 +2062,20 @@ describe("Typing a thread secret through Computer use", () => {
     );
 
     const inspectSecretTarget = vi.fn(
-      async (_owner: ComputerUseOwner, target: ComputerSecretTargetRequest) => {
+      async (
+        _owner: ComputerUseOwner,
+        target: ComputerSecretTargetRequest,
+        signal?: AbortSignal,
+      ) => {
+        inspectCalls += 1;
+        await overrides?.onInspectSecretTarget?.(inspectCalls, signal);
+        if (signal?.aborted) {
+          return decodeComputerSecretTargetInspection({
+            kind: "refused",
+            reason: "cancelled",
+            message: "Cancelled.",
+          });
+        }
         if (!secureTarget || target.elementIndex !== 4) {
           return decodeComputerSecretTargetInspection({
             kind: "refused",
@@ -2066,7 +2087,7 @@ describe("Typing a thread secret through Computer use", () => {
           kind: "secure-target",
           appId: "com.example.AuthPrompt",
           windowId: 9,
-          windowTitle: "Privacy & Security",
+          windowTitle,
         });
       },
     );
@@ -2098,11 +2119,32 @@ describe("Typing a thread secret through Computer use", () => {
         release: async () => {},
       },
       threadSecrets: () => threadSecrets,
+      ...(overrides?.destinationStatus === undefined
+        ? {}
+        : {
+            destination: () =>
+              overrides.destinationStatus === "available"
+                ? { status: "available" as const, kind: "macos-host" as const }
+                : overrides.destinationStatus === "leasable"
+                  ? {
+                      status: "leasable" as const,
+                      kind: "disposable-desktop" as const,
+                      leasable: [],
+                    }
+                  : { status: "unavailable" as const, kind: "no-destination" as const },
+          }),
       settings: () => ({ enabled, automaticUpdates: true }),
       authority: () => codeAuthority,
       ownerIsCurrent: () => true,
       toolConstraints: () => [],
-      fullAccess: () => fullAccess,
+      fullAccess: () => {
+        if (dropFullAccessAfterNextRead) {
+          dropFullAccessAfterNextRead = false;
+          fullAccess = false;
+          return true;
+        }
+        return fullAccess;
+      },
       strict: () => strict,
       externalContentIngested: () => false,
       ...(overrides?.projectAppRemembered === true ? { projectAppRemembered: () => true } : {}),
@@ -2205,6 +2247,18 @@ describe("Typing a thread secret through Computer use", () => {
       approveNext,
       setSecureTarget: (value: boolean) => {
         secureTarget = value;
+      },
+      setWindowTitle: (value: string) => {
+        windowTitle = value;
+      },
+      setFullAccess: (value: boolean) => {
+        fullAccess = value;
+      },
+      revokeFullAccessAfterNextCheck: () => {
+        dropFullAccessAfterNextRead = true;
+      },
+      setStrict: (value: boolean) => {
+        strict = value;
       },
       setEnabled: (value: boolean) => {
         enabled = value;
@@ -2547,5 +2601,148 @@ describe("Typing a thread secret through Computer use", () => {
       await f.close();
     }
     expect(f.threadSecrets.hasConsumer()).toBe(false);
+  });
+
+  it("does not register Computer use as a secret handle consumer when the native destination is unavailable", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false, destinationStatus: "unavailable" });
+    try {
+      expect(f.threadSecrets.hasConsumer()).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses secret typing without spending the handle when the prompt title changes after approval", async () => {
+    const f = secretFixture({ fullAccess: false, strict: false, projectAppRemembered: true });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Changed-Title-Secret-1!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      const pendingTyping = f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId: obs.observationId,
+          elementIndex: 4,
+        }),
+      });
+      await f.waitForApproval();
+      f.setWindowTitle("Different Admin Prompt");
+      await f.approveNext();
+      expect(await pendingTyping).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "stale-observation" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses secret typing when Full access is revoked before dispatch", async () => {
+    const f = secretFixture({
+      fullAccess: true,
+      strict: false,
+    });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Revoked-FullAccess-Secret-2!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      // Admission sees Full access, then dispatch sees it withdrawn before typing.
+      f.revokeFullAccessAfterNextCheck();
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle,
+            observationId: obs.observationId,
+            elementIndex: 4,
+          }),
+        }),
+      ).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "not-approved" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("stops before spending the handle when the tool call is cancelled after initial target inspection", async () => {
+    const callAbort = new AbortController();
+    const f = secretFixture({
+      fullAccess: true,
+      strict: false,
+      onInspectSecretTarget: (callIndex) => {
+        if (callIndex === 1) callAbort.abort();
+      },
+    });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Cancelled-Call-Secret-3!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle,
+            observationId: obs.observationId,
+            elementIndex: 4,
+          }),
+          signal: callAbort.signal,
+        }),
+      ).toMatchObject({
+        result: { kind: "cancelled" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
+    }
   });
 });

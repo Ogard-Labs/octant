@@ -63,5 +63,22 @@ describe("the bundled Computer use plugin", () => {
         }),
       }),
     ).toMatchObject({ kind: "refused", reason: "unsupported" });
+
+    const macWithoutSecret = createComputerUsePlugin({ execute });
+    expect(JSON.stringify(macWithoutSecret.definitions[0]?.inputSchema)).not.toContain(
+      "type-secret",
+    );
+    expect(JSON.stringify(macWithoutSecret.definitions[0]?.inputSchema)).not.toContain('"handle"');
+    expect(
+      await macWithoutSecret.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId,
+          elementIndex: 4,
+        }),
+      }),
+    ).toMatchObject({ kind: "refused", reason: "unsupported" });
   });
 });

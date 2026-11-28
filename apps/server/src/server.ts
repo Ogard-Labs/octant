@@ -2040,6 +2040,13 @@ export function startOctantServer(
           folders,
           operationId,
           routineRun: routineRun !== undefined,
+          hasHandleConsumer: () =>
+            threadSecretFacts.service.hasConsumer() &&
+            threadDesktopDestination(thread) === undefined &&
+            isToolAllowedByAllowlist(
+              readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
+              "octant_computer",
+            ),
         }),
         registered: registeredCredentialOperations({
           service: credentialRequests,

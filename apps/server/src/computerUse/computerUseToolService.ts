@@ -181,6 +181,8 @@ export function createComputerUseToolService(options: {
         readonly label: string;
         readonly windowId: ComputerWindowId;
         readonly windowTitle: string;
+        readonly signal: AbortSignal;
+        readonly requiresApproval: boolean;
       };
       readonly appId: string;
       readonly sessionId: string;
@@ -205,7 +207,7 @@ export function createComputerUseToolService(options: {
       options.desktop?.typeSecret !== undefined &&
       options.desktop?.inspectSecretTarget !== undefined &&
       options.settings().enabled &&
-      options.destination?.().status !== "leasable";
+      (options.destination === undefined || options.destination().status === "available");
     if (!shouldRegister) {
       unregisterSecretConsumer?.();
       unregisterSecretConsumer = undefined;
@@ -446,9 +448,38 @@ export function createComputerUseToolService(options: {
           return { refused: "owner-changed" };
         // A policy refusal is not an owner change. Reporting it as one sent a
         // person to look for a task-authority problem that did not exist.
-        const refusal = admissionRefusal(action.owner, true);
+        const approvalGranted = action.secret === undefined ? true : action.secret.requiresApproval;
+        const refusal = admissionRefusal(action.owner, approvalGranted);
         if (refusal !== undefined) return { refused: refusal };
         if (action.secret !== undefined) {
+          const secretSignal = AbortSignal.any([signal, action.secret.signal]);
+          if (secretSignal.aborted) {
+            action.result = { kind: "cancelled" };
+            return { refused: "cancelled" };
+          }
+          // If this action skipped one-time approval at admission (Full access
+          // outside Strict), re-check live approval policy right before
+          // dispatch so leaving Full access or turning Strict on cannot bypass
+          // the one-time approval rule.
+          if (!action.secret.requiresApproval) {
+            const liveApproval = decideComputerUseApproval({
+              plan: false,
+              fullAccess: options.fullAccess(action.owner),
+              strict: options.strict?.(action.owner) ?? true,
+              externalContentIngested: options.externalContentIngested(action.owner),
+              hasThreadGrant: false,
+              hasProjectGrant: false,
+              hasProjectScope: false,
+              secretInput: true,
+            });
+            if (liveApproval.kind !== "not-required") {
+              action.result = refused(
+                "not-approved",
+                "Computer use approval rules changed before typing the secret.",
+              );
+              return { refused: "not-approved" };
+            }
+          }
           const secrets = options.threadSecrets?.();
           const desktop = options.desktop;
           if (
@@ -462,16 +493,21 @@ export function createComputerUseToolService(options: {
             );
             return { refused: "unavailable" };
           }
-          // Re-verify the password field before spending the handle so a UI
-          // change while approval waited never consumes or reads the secret.
+          // Re-verify the password field and prompt identity before spending
+          // the handle so a UI or title change while approval waited never
+          // consumes or types the secret into an unapproved prompt.
           const verified = await desktop.inspectSecretTarget(
             action.owner,
             {
               observationId: action.secret.command.observationId,
               elementIndex: action.secret.command.elementIndex,
             },
-            signal,
+            secretSignal,
           );
+          if (secretSignal.aborted) {
+            action.result = { kind: "cancelled" };
+            return { refused: "cancelled" };
+          }
           if (verified.kind !== "secure-target") {
             action.result =
               verified.reason === "cancelled"
@@ -479,17 +515,32 @@ export function createComputerUseToolService(options: {
                 : refused(verified.reason, verified.message);
             return { refused: verified.reason };
           }
+          if (
+            verified.appId !== action.appId ||
+            verified.windowId !== action.secret.windowId ||
+            verified.windowTitle !== action.secret.windowTitle
+          ) {
+            action.result = refused(
+              "stale-observation",
+              "The password prompt changed before typing. Observe the window again.",
+            );
+            return { refused: "stale-observation" };
+          }
           const redeemed = await secrets.redeem({
             consumerId: COMPUTER_USE_SECRET_CONSUMER.id,
             caller: action.secret.caller,
             handle: action.secret.command.handle,
-            signal,
+            signal: secretSignal,
           });
           if (redeemed.status === "refused") {
             action.result = refused(redeemed.failure, SECRET_FAILURE_MESSAGES[redeemed.failure]);
             return { refused: redeemed.failure };
           }
           try {
+            if (secretSignal.aborted) {
+              action.result = { kind: "cancelled" };
+              return { refused: "cancelled" };
+            }
             const typed = await desktop.typeSecret(
               action.owner,
               {
@@ -497,7 +548,7 @@ export function createComputerUseToolService(options: {
                 elementIndex: action.secret.command.elementIndex,
                 text: redeemed.value,
               },
-              signal,
+              secretSignal,
             );
             if (typed.kind === "typed") {
               action.result = { kind: "typed" };
@@ -927,6 +978,8 @@ export function createComputerUseToolService(options: {
         label: inspectedHandle.label,
         windowId: target.windowId,
         windowTitle: target.windowTitle,
+        signal: checkSignal,
+        requiresApproval,
       },
       appId: target.appId,
       sessionId,

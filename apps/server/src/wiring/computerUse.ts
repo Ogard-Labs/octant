@@ -89,6 +89,7 @@ import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import {
   COMPUTER_USE_TOOL_HELP,
+  COMPUTER_USE_TOOL_HELP_NO_SECRET,
   DISPOSABLE_DESKTOP_TOOL_HELP,
 } from "../plugins/computerUse/computerUsePlugin";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -679,6 +680,17 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       ask,
       childOwner(owner) === undefined ? turnId : undefined,
     );
+    const advertisesTypeSecret =
+      tools !== undefined &&
+      tools.definitions.some(
+        (tool) =>
+          typeof tool.inputSchema === "object" &&
+          tool.inputSchema !== null &&
+          "properties" in tool.inputSchema &&
+          typeof tool.inputSchema.properties === "object" &&
+          tool.inputSchema.properties !== null &&
+          "handle" in tool.inputSchema.properties,
+      );
     // Help is the plugin's own static guidance, not application content, so
     // it is answered outside the taint wrapper and never marks the thread.
     return tools === undefined
@@ -690,7 +702,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
-          owner.leaseId === undefined ? COMPUTER_USE_TOOL_HELP : DISPOSABLE_DESKTOP_TOOL_HELP,
+          owner.leaseId !== undefined
+            ? DISPOSABLE_DESKTOP_TOOL_HELP
+            : advertisesTypeSecret
+              ? COMPUTER_USE_TOOL_HELP
+              : COMPUTER_USE_TOOL_HELP_NO_SECRET,
         );
   };
   contributeChildTools((input) => {
