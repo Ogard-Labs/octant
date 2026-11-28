@@ -4843,7 +4843,9 @@ CI or reviewers should be woken, not left polling; maintainer request,
   binds to the switch service (maintainer decision, 2026-11-26). Every read
   compares the pull request's node id with the link's and refuses a number
   that now names another pull request. `ci-logs` reads every check on the
-  current head with `gh pr checks`; only a check whose link is a job in the
+  current head with `gh pr checks --json` (added in GitHub CLI 2.50.0;
+  `ghAuthenticationPort` requires GitHub CLI 2.81.0 or newer so both
+  `gh auth status --json hosts` and `gh pr checks --json` are supported); only a check whose link is a job in the
   same repository's Actions counts as one, and only when its run's head is
   the current head and the run lists that job (anything else is reported as
   an outside service's check or another commit's: a commit status may pair
