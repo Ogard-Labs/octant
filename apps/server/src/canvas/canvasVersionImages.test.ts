@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -475,5 +475,155 @@ describe("Canvas version Project image digests", () => {
     expect(
       await imageStore.recordForVersion(String(adoptedCanvasId), String(adoptedSource.versionId)),
     ).toBeUndefined();
+  });
+
+  it("does not append a digest record if the Canvas is purged while async file reads are still pending", async () => {
+    let exists = true;
+    let releaseRead: (() => void) | undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let allowFinish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      allowFinish = resolve;
+    });
+    const store = new CanvasVersionImageStore({
+      journal,
+      ports: {
+        projectFile: async () => {
+          releaseRead?.();
+          await gate;
+          return { status: "read", bytes: PNG_A };
+        },
+      },
+      canvasExists: () => exists,
+      uuid: randomUUID,
+      actor,
+    });
+    const version = versionWith({
+      canvasId: "66666666-6666-4666-8666-666666666666",
+      blocks: [designWithProjectFile("home.png")],
+    });
+
+    const recording = store.record(version);
+    await readStarted;
+    // Simulate purge erasing the Canvas while the file read is in flight.
+    exists = false;
+    allowFinish?.();
+    await recording;
+
+    const rows = journal.replayAggregate({
+      aggregateType: CANVAS_VERSION_IMAGES_AGGREGATE_TYPE,
+      aggregateId: String(version.canvasId),
+      afterVersion: 0,
+      limit: 10,
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("shares the 5 MiB design budget in declaration order with generated images so rendered Project files stay recorded", async () => {
+    const makeSizedPng = (size: number, tag: number) => {
+      const bytes = new Uint8Array(size);
+      bytes.set(PNG_A.subarray(0, 8), 0);
+      bytes[8] = tag;
+      return bytes;
+    };
+    const generatedBytes = makeSizedPng(Math.floor(2.5 * 1024 * 1024), 1);
+    const largeProjectBytes = makeSizedPng(3 * 1024 * 1024, 2);
+    const smallerProjectBytes = makeSizedPng(Math.floor(2.25 * 1024 * 1024), 3);
+    const expectedSmallerSha = createHash("sha256").update(smallerProjectBytes).digest("hex");
+
+    const store = new CanvasVersionImageStore({
+      journal,
+      ports: {
+        generatedImage: async () => ({ status: "read", bytes: generatedBytes }),
+        projectFile: async ({ path, maximumBytes }) => {
+          const bytes = path === "big.png" ? largeProjectBytes : smallerProjectBytes;
+          if (bytes.byteLength > maximumBytes) {
+            return { status: "unavailable", reason: "too-large" };
+          }
+          return { status: "read", bytes };
+        },
+      },
+      uuid: randomUUID,
+      actor,
+    });
+    const version = versionWith({
+      canvasId: "77777777-7777-4777-8777-777777777777",
+      blocks: [
+        decodeCanvasBlock({
+          blockId: "mixed",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "design",
+          title: "Mixed",
+          size: "desktop",
+          assets: [
+            {
+              assetId: "gen",
+              source: {
+                kind: "generated-image",
+                imageId: "44444444-4444-4444-8444-444444444444",
+              },
+            },
+            { assetId: "big", source: { kind: "project-file", path: "big.png" } },
+            { assetId: "small", source: { kind: "project-file", path: "small.png" } },
+          ],
+          frames: [{ frameId: "f1", title: "Home", html: '<img src="octant-asset:small" alt="">' }],
+        }),
+      ],
+    });
+
+    await store.record(version);
+    const record = await store.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      "mixed",
+    );
+    expect(record?.get("big")).toEqual({
+      blockId: "mixed",
+      assetId: "big",
+      status: "unavailable",
+    });
+    expect(record?.get("small")).toEqual({
+      blockId: "mixed",
+      assetId: "small",
+      status: "recorded",
+      sha256: expectedSmallerSha,
+    });
+  });
+
+  it("marks a Project file symlink retargeted after commit as unavailable even when its new target is older", async () => {
+    if (root === undefined) throw new Error("missing temp root");
+    const targetPath = join(root, "older-draft.png");
+    await writeFile(targetPath, PNG_B);
+    const past = new Date(Date.now() - 60_000);
+    await utimes(targetPath, past, past);
+    // Commit timestamp predates the symlink creation below.
+    const commitTime = new Date(Date.now() - 2_000).toISOString();
+    await symlink(targetPath, join(root, "hero-link.png"));
+
+    const store = new CanvasVersionImageStore({
+      journal,
+      ports: livePorts(),
+      uuid: randomUUID,
+      actor,
+    });
+    const version = versionWith({
+      canvasId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      createdAt: commitTime,
+      blocks: [designWithProjectFile("hero-link.png")],
+    });
+
+    await store.record(version);
+    const record = await store.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      "screen",
+    );
+    expect(record?.get("shot")).toEqual({
+      blockId: "screen",
+      assetId: "shot",
+      status: "unavailable",
+    });
   });
 });

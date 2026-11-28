@@ -332,14 +332,34 @@ export async function prepareCanvasDesignAssetFile(input: {
     return { status: "unavailable", reason: "missing" };
   }
   const candidate = joinWorkPath(canonicalRoot, relative);
-  try {
-    await input.filesystem.lstat(candidate);
-  } catch {
-    return { status: "unavailable", reason: "missing" };
+  // Track the latest change time across every path component (including
+  // symlinks) and the resolved file so retargeting a symlink to an older file
+  // after a Canvas version commits still reads as changed after commit.
+  let latestChangedAt: bigint | undefined;
+  let currentSegmentPath = canonicalRoot;
+  for (const segment of relative.split("/")) {
+    currentSegmentPath = joinWorkPath(currentSegmentPath, segment);
+    try {
+      const segmentStat = await input.filesystem.lstat(currentSegmentPath);
+      if (
+        segmentStat.changedAt !== undefined &&
+        (latestChangedAt === undefined || segmentStat.changedAt > latestChangedAt)
+      ) {
+        latestChangedAt = segmentStat.changedAt;
+      }
+    } catch {
+      return { status: "unavailable", reason: "missing" };
+    }
   }
   const resolved = await resolveContainedWorkPath(input.filesystem, canonicalRoot, candidate);
   if (resolved === undefined || !resolved.stat.isFile) {
     return { status: "unavailable", reason: "refused" };
+  }
+  if (
+    resolved.stat.changedAt !== undefined &&
+    (latestChangedAt === undefined || resolved.stat.changedAt > latestChangedAt)
+  ) {
+    latestChangedAt = resolved.stat.changedAt;
   }
   const pathRefused = (canonical: string) =>
     input.pathRefused?.(candidate) === true || input.pathRefused?.(canonical) === true;
@@ -350,7 +370,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   return {
     status: "ready",
     size: resolved.stat.size,
-    ...(resolved.stat.changedAt === undefined ? {} : { changedAt: resolved.stat.changedAt }),
+    ...(latestChangedAt === undefined ? {} : { changedAt: latestChangedAt }),
     read: async () => {
       if ((await input.filesystem.realpath(input.root).catch(() => undefined)) !== canonicalRoot)
         return undefined;

@@ -467,6 +467,8 @@ export function wireCanvas(deps: CanvasDependencies) {
   const canvasVersionImages = new CanvasVersionImageStore({
     journal: persistence.journal,
     ports: canvasDesignAssetPorts,
+    canvasExists: (canvasId) =>
+      persistence.canvasProjection.getById(decodeCanvasId(canvasId)) !== undefined,
     uuid: randomUUID,
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
@@ -475,7 +477,10 @@ export function wireCanvas(deps: CanvasDependencies) {
     provenance: CanvasProvenance,
     version?: CanvasDesignAssetVersionContext,
   ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> => {
-    if (version === undefined) {
+    const hasProjectFile = (block.assets ?? []).some(
+      (asset) => asset.source.kind === "project-file",
+    );
+    if (version === undefined || !hasProjectFile) {
       return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
     }
     const entry = persistence.canvasProjection.getById(version.canvasId);

@@ -31,9 +31,17 @@ export function registerCanvasVersionImagesEvents(registry: EventRegistry): Even
   return registry.register(CANVAS_VERSION_IMAGES_RECORDED, 1, CanvasVersionImagesRecorded);
 }
 
+export type CanvasVersionImageAssetPorts = Pick<CanvasDesignAssetPorts, "projectFile"> &
+  Partial<Pick<CanvasDesignAssetPorts, "generatedImage" | "browserCapture">>;
+
 export interface CanvasVersionImageStoreOptions {
   readonly journal: Pick<Journal, "append" | "replayAggregate">;
-  readonly ports: Pick<CanvasDesignAssetPorts, "projectFile">;
+  readonly ports: CanvasVersionImageAssetPorts;
+  /**
+   * Authoritative check run immediately before appending so an in-flight
+   * asynchronous recording can never recreate a purged Canvas's aggregate.
+   */
+  readonly canvasExists?: (canvasId: string) => boolean;
   readonly uuid: () => string;
   readonly actor: EventActor;
 }
@@ -50,15 +58,21 @@ export interface CanvasVersionImageStoreOptions {
  */
 export class CanvasVersionImageStore {
   readonly #journal: Pick<Journal, "append" | "replayAggregate">;
-  readonly #ports: Pick<CanvasDesignAssetPorts, "projectFile">;
+  readonly #ports: CanvasVersionImageAssetPorts;
+  readonly #canvasExists: ((canvasId: string) => boolean) | undefined;
   readonly #uuid: () => string;
   readonly #actor: EventActor;
   readonly #pending = new Map<string, Promise<void>>();
   readonly #appendTail = new Map<string, Promise<void>>();
+  readonly #cache = new Map<
+    string,
+    { headVersion: number; readonly byVersion: Map<string, CanvasVersionImagesRecorded> }
+  >();
 
   constructor(options: CanvasVersionImageStoreOptions) {
     this.#journal = options.journal;
     this.#ports = options.ports;
+    this.#canvasExists = options.canvasExists;
     this.#uuid = options.uuid;
     this.#actor = decodeActor(options.actor);
   }
@@ -103,24 +117,40 @@ export class CanvasVersionImageStore {
   ): Promise<CanvasVersionImagesRecorded | undefined> {
     const pending = this.#pending.get(`${canvasId}\u0000${versionId}`);
     if (pending !== undefined) await pending.catch(() => undefined);
+    if (this.#canvasExists !== undefined && !this.#canvasExists(canvasId)) {
+      this.#cache.delete(canvasId);
+      return undefined;
+    }
     try {
-      let afterVersion = 0;
-      while (true) {
-        const page = this.#journal.replayAggregate({
-          aggregateType: CANVAS_VERSION_IMAGES_AGGREGATE_TYPE,
-          aggregateId: canvasId,
-          afterVersion,
-          limit: RECORD_PAGE,
-        });
-        for (const event of page) {
-          const decoded = decodeCanvasVersionImagesRecorded(event.payload);
-          if (String(decoded.versionId) === versionId) return decoded;
-          afterVersion = event.aggregateVersion;
-        }
-        if (page.length < RECORD_PAGE) return undefined;
-      }
+      const cached = this.#syncCanvasCache(canvasId);
+      return cached.byVersion.get(versionId);
     } catch {
       return undefined;
+    }
+  }
+
+  #syncCanvasCache(canvasId: string): {
+    headVersion: number;
+    readonly byVersion: Map<string, CanvasVersionImagesRecorded>;
+  } {
+    let entry = this.#cache.get(canvasId);
+    if (entry === undefined) {
+      entry = { headVersion: 0, byVersion: new Map() };
+      this.#cache.set(canvasId, entry);
+    }
+    while (true) {
+      const page = this.#journal.replayAggregate({
+        aggregateType: CANVAS_VERSION_IMAGES_AGGREGATE_TYPE,
+        aggregateId: canvasId,
+        afterVersion: entry.headVersion,
+        limit: RECORD_PAGE,
+      });
+      for (const event of page) {
+        const decoded = decodeCanvasVersionImagesRecorded(event.payload);
+        entry.byVersion.set(String(decoded.versionId), decoded);
+        entry.headVersion = event.aggregateVersion;
+      }
+      if (page.length < RECORD_PAGE) return entry;
     }
   }
 
@@ -165,9 +195,52 @@ export class CanvasVersionImageStore {
       for (const block of designs) {
         let spent = 0;
         for (const asset of block.assets ?? []) {
-          if (asset.source.kind !== "project-file") continue;
           const remaining = CANVAS_DESIGN_ASSETS_MAX_BYTES - spent;
           const maximumBytes = Math.min(CANVAS_DESIGN_ASSET_MAX_BYTES, remaining);
+
+          // Account for non-Project images in the same declaration order and
+          // shared 5 MiB design budget as `resolveCanvasDesignAssets` so mixed
+          // designs never record a skipped Project image and evict a shown one.
+          if (asset.source.kind === "generated-image") {
+            if (maximumBytes > 0 && this.#ports.generatedImage !== undefined) {
+              const read = await this.#ports.generatedImage({
+                imageId: asset.source.imageId,
+                projectId: provenance.projectId === null ? null : String(provenance.projectId),
+                threadId: String(provenance.threadId),
+                maximumBytes,
+              });
+              if (
+                read.status === "read" &&
+                read.bytes.byteLength <= maximumBytes &&
+                sniffGeneratedImageMediaType(read.bytes) !== undefined
+              ) {
+                spent += read.bytes.byteLength;
+              }
+            }
+            continue;
+          }
+          if (asset.source.kind === "browser-capture") {
+            if (
+              provenance.mode !== "chat" &&
+              maximumBytes > 0 &&
+              this.#ports.browserCapture !== undefined
+            ) {
+              const read = await this.#ports.browserCapture({
+                captureId: asset.source.captureId,
+                threadId: String(provenance.threadId),
+                maximumBytes,
+              });
+              if (
+                read.status === "read" &&
+                read.bytes.byteLength <= maximumBytes &&
+                sniffGeneratedImageMediaType(read.bytes) !== undefined
+              ) {
+                spent += read.bytes.byteLength;
+              }
+            }
+            continue;
+          }
+
           if (provenance.mode === "chat" || provenance.projectId === null || maximumBytes <= 0) {
             images.push({
               blockId: block.blockId,
@@ -183,10 +256,11 @@ export class CanvasVersionImageStore {
             path: asset.source.path,
             maximumBytes,
           });
-          // A file replaced between commit and this read must not be stamped as
-          // the original. Comparing in whole milliseconds matches `createdAt`'s
-          // millisecond precision so a file written just before commit in the
-          // same millisecond is kept while any later change is rejected.
+          // A file or symlink replaced between commit and this read must not be
+          // stamped as the original. Comparing in whole milliseconds matches
+          // `createdAt`'s millisecond precision so a file written just before
+          // commit in the same millisecond is kept while any later change is
+          // rejected.
           const changedAfterCommit =
             read.status === "read" &&
             read.changedAt !== undefined &&
@@ -234,21 +308,14 @@ export class CanvasVersionImageStore {
   #appendRecord(version: CanvasVersion, images: ReadonlyArray<CanvasVersionImageDigest>): void {
     const canvasId = String(version.canvasId);
     const versionId = String(version.versionId);
-    let headVersion = 0;
-    while (true) {
-      const page = this.#journal.replayAggregate({
-        aggregateType: CANVAS_VERSION_IMAGES_AGGREGATE_TYPE,
-        aggregateId: canvasId,
-        afterVersion: headVersion,
-        limit: RECORD_PAGE,
-      });
-      for (const event of page) {
-        const decoded = decodeCanvasVersionImagesRecorded(event.payload);
-        if (String(decoded.versionId) === versionId) return;
-        headVersion = event.aggregateVersion;
-      }
-      if (page.length < RECORD_PAGE) break;
+    // Do not recreate the aggregate if the Canvas was purged while async file reads ran.
+    if (this.#canvasExists !== undefined && !this.#canvasExists(canvasId)) {
+      this.#cache.delete(canvasId);
+      return;
     }
+    const cached = this.#syncCanvasCache(canvasId);
+    if (cached.byVersion.has(versionId)) return;
+    const headVersion = cached.headVersion;
     const payload = decodeCanvasVersionImagesRecorded({
       canvasId: version.canvasId,
       versionId: version.versionId,
@@ -272,5 +339,7 @@ export class CanvasVersionImageStore {
         },
       ],
     });
+    cached.headVersion = headVersion + 1;
+    cached.byVersion.set(versionId, payload);
   }
 }
