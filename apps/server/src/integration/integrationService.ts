@@ -90,12 +90,12 @@ export interface IntegrationService {
   ) => Promise<IntegrationAuthenticationSnapshot>;
   readonly execute: (
     pluginSlug: string,
-    command: IntegrationAuthenticationCommand & { readonly accountRef?: string },
+    command: IntegrationAuthenticationCommand,
     signal: AbortSignal,
   ) => Promise<IntegrationAuthenticationSnapshot>;
   readonly executeOperation: (
     pluginSlug: string,
-    command: Extract<IntegrationCommand, { kind: "operation" }> & { readonly accountRef?: string },
+    command: Extract<IntegrationCommand, { kind: "operation" }>,
     signal: AbortSignal,
   ) => Promise<IntegrationExecutionResult>;
   readonly completeAuthorization: (

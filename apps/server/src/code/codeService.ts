@@ -1965,7 +1965,7 @@ export class CodeService {
     if (parsed === undefined) return refused("invalid-reference");
     let issue: LinkedIssueRef;
     if (parsed.forge === "linear") {
-      const project = this.#readProject(current.projectId);
+      const project = this.#persistence.readProject?.(current.projectId);
       const accountRef = project?.type === "code" ? project.linearTarget?.accountRef : undefined;
       const resolved =
         accountRef === undefined
