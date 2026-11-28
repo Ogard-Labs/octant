@@ -154,7 +154,14 @@ jobs:
     name: Visual check
     needs: [scope, visual]
     # A draft runs nothing, as the single job did; ready_for_review starts it.
-    if: always() && github.event.pull_request.draft != true
+    # It runs after a failed or skipped half (the default `success()` would
+    # skip it after a failure, and a skipped required check passes), but not
+    # once the run is cancelled, which `always()` would still run it for: a push that supersedes this run cancels it, and the check then
+    # ends cancelled, not with a red X for a half nobody let finish. A
+    # cancelled check does not satisfy the requirement, so it never lets a
+    # change through either. A half cancelled while the run goes on is still a
+    # failure below.
+    if: ${{ !cancelled() && github.event.pull_request.draft != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
