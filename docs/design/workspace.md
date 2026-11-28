@@ -659,13 +659,18 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 The sidebar speaks about what a thread is doing now with one vocabulary, in
 descending strength: `working` (Working), `attention` (Needs attention),
 `limited` (Limited), `woke` (Snooze ended), `unread` (New activity), and
-`waiting` (Waiting).
+`waiting` (Waiting). A row draws each as a mark and a short age, never as the
+word: a spinner for Working, a pause mark for Needs you (a wait on the person
+is a pause, not a failure, so the alert mark is kept for Limited), and the age
+since the turn started, since the thread last moved, or until a limit resets
+(maintainer decision, 2026-11-28). The words stay in the tooltip and the row's
+accessible name.
 Waiting (maintainer request, 2026-11-25) is a Code thread between turns that
 still waits on a pull request: its agent's watch, or babysitting or Auto-fix it
 repairs. The host projects the earliest start of those waits as the thread's
 `waitingSince`, never while a turn runs or waits on the person, and never for a
-settled or archived thread, and the row reads "Waiting 6m" beside a
-fading-clock mark, as Working gives its elapsed time. It ranks last because a
+settled or archived thread, and the row draws a fading-clock mark and "6m"
+(its tooltip "Waiting 6m"), as Working gives its elapsed time. It ranks last because a
 watch stays on after it wakes the thread: ranked higher, every turn the watch
 started would hide behind "Waiting" and drop out of a view saved for New
 activity, so the row shows the new-activity dot until the person reads it. `@octant/contracts`
@@ -677,10 +682,11 @@ Project heading, a filter, and a sort all resolve through that policy, so they
 cannot rank the same facts differently.
 
 - **Limited** says a provider usage limit holds the thread's latest turn
-  (maintainer decision, 2026-11-26). The row says it in the warning tone with
-  the alert mark, as "Limited 2h" in the row's short form while the provider
-  named a reset still ahead, and as "Limited" when it named none or the stop is
-  a billing one, which no clock clears. It ranks below Needs you, because a
+  (maintainer decision, 2026-11-26). The row draws the alert mark in the
+  warning tone with the time until the reset ("2h", its tooltip "Limited 2h")
+  while the provider named a reset still ahead, and the mark alone, named
+  "Limited", when it named none or the stop is a billing one, which no clock
+  clears. It ranks below Needs you, because a
   question or an approval is more urgent, and above Snooze ended and New
   activity. The thread stays in the active list; the Status arrangement gives
   it no heading of its own. The host decides which stop is current by the
@@ -3221,20 +3227,28 @@ and carries the full date and time as its tooltip and accessible label. It is
 as an age changes, and it ends at the same edge on every row, left of the
 provider mark. The end of a row is one fixed order, never changed by hover,
 focus or an open menu: the title, then the slot (the age, or the thread's state
-in words in its place, or the row's hover actions, which fade in over the age
-inside a slot sized for them), then the provider mark. The provider mark and the
-title's truncation never move when the pointer arrives. The Project tree and the Activity feed draw the same
-row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
-line names where the thread lives, in a fixed order (the Project's mark and name,
-then the branch in the mono face) and ends with the thread's state in words
-(Working 14m, Needs you) or, with none to report, how long ago it moved. The
-title is the strongest text on a line of its own. A third line appears only for
-who started the thread, a worker's coordinator, or the thread's counted marks,
-and the provider's mark ends the last line. The Project tree's top
-line is the branch alone, because the Project is its heading. A row with no place
-to name carries its state or time at the end of the title line. The row is one
+mark and its short age in its place, or the row's hover actions, which fade in
+over the age inside a slot sized for them), with the provider mark at the end of
+the line beneath. The provider mark and the title's truncation never move when
+the pointer arrives. The Project tree and the Activity feed draw the same row:
+up to three lines, title first (maintainer decision, 2026-11-28; see [the
+sidebar in DESIGN.md](../../DESIGN.md#lists-and-rows)). The title line carries
+the thread's name, the strongest text in the row, and ends with how the thread
+stands: its status mark and a short age (a spinner and "9m" while a turn runs,
+a pause mark and "5m" while it waits on the person, the alert mark and "2h"
+while a usage limit holds it), or, with no state to report, how long ago it
+moved. The state's words ("Working 9m", "Needs you", "Limited 2h") stay in the
+mark's tooltip and the row's accessible name. A quiet second line in the meta
+ink names where the thread lives and what it carries, in a fixed order: the
+Project's 12px mark and name, the branch in the mono face, the counted marks,
+and the provider's mark at its end. A third line appears only for who started
+the thread or a worker's coordinator. The Project tree's second line has no
+Project, because the Project is its heading. A row with nothing for its second
+line keeps the provider's mark at the end of the title line. The row is one
 button whose accessible name reads title, Project, branch, the counted marks,
-then state or time; a state is never colour alone.
+then state or time; a state is never colour alone. Before 2026-11-28 the place
+stood on a small top line above the title and the state was a word, which read
+as a web list rather than a Mac sidebar.
 
 The counted marks let a person scan the list for how much each thread carries
 (maintainer decision, 2026-11-26). Each is a 12px glyph and a number, and each

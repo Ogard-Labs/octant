@@ -1673,7 +1673,7 @@ describe("ProjectSidebarSection activity view", () => {
           name: "Update AuroraDocs logos, Test, Needs attention, Snooze ended, New activity, Follow-up",
         }),
       ).toBeVisible();
-      expect(within(priority).getAllByText("Needs you")).toHaveLength(2);
+      expect(within(priority).getAllByTitle("Needs you")).toHaveLength(2);
       // A running thread is listed once, under Working at the foot of the feed.
       const foot = screen.getByRole("group", { name: "Working and settled" });
       expect(
@@ -3677,7 +3677,7 @@ describe("ProjectSidebarSection folded Project status", () => {
     await screen.findByRole("button", { name: "Collapse Test" });
 
     expect(screen.queryByRole("img", { name: /^Test:/ })).toBeNull();
-    expect(screen.getByText("Needs you")).toBeVisible();
+    expect(screen.getByTitle("Needs you")).toBeVisible();
   });
 
   it("stays quiet about a folded Project for a reader who turned status marks off", async () => {

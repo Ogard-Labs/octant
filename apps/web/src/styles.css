@@ -889,9 +889,11 @@ strong {
   --octant-project-view-color: var(--octant-palette-pink);
 }
 
+/* The groups stand 12px apart, a step more than the rows inside them, so the
+   list reads as groups of rows rather than one run. */
 .activity-nav {
   display: grid;
-  gap: 8px;
+  gap: var(--oct-space-3);
 }
 /* A group heading is a navigation group label (`oct-nav-group`). */
 .activity-nav__group > h2 {
@@ -902,8 +904,8 @@ strong {
   color: var(--oct-meta);
 }
 
-/* A status group's heading stands 8px clear of the rows above it: the list's
-   own 8px gap, with no margin on top of it (the two summed to 16px between
+/* A status group's heading stands 12px clear of the rows above it: the list's
+   own gap, with no margin on top of it (the two summed to 16px between
    groups). The first group stands the same 8px below the Project filter row. */
 .project-nav__toolbar + .activity-nav {
   margin-top: var(--oct-space-2);

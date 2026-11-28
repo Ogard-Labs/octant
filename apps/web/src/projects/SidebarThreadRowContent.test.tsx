@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { CirclePause } from "../ui/icons";
 import { ProjectIconContext } from "./ProjectIcon";
 import { iconSourceFor } from "./projectIcon.test-support";
 import {
@@ -65,7 +66,7 @@ describe("SidebarThreadRowContent Project icon", () => {
 });
 
 describe("SidebarThreadRowContent", () => {
-  it("puts the Project and branch on a quiet top line, the title alone on the next, and the pull request on the last", () => {
+  it("puts the title first with its age at the end, and the Project, branch and pull request on a quiet line beneath", () => {
     const { container } = render(
       <SidebarThreadRowContent
         age={{ label: "3h", title: "3 hours ago" }}
@@ -76,53 +77,63 @@ describe("SidebarThreadRowContent", () => {
       />,
     );
 
-    const context = container.querySelector(".sidebar-navigation__thread-context");
-    expect(context).toHaveTextContent("octant");
-    expect(context).toHaveTextContent("fix-full-access");
-    // The time ends the top line; the title line carries the title alone, so a
-    // long one has the row's whole width before it truncates.
-    expect(context).toHaveTextContent("3h");
+    const lines = container.querySelector(".sidebar-navigation__thread-copy")?.children;
+    expect(lines?.[0]).toHaveClass("sidebar-navigation__thread-main");
+    expect(lines?.[1]).toHaveClass("sidebar-navigation__thread-context");
+    expect(lines).toHaveLength(2);
     expect(container.querySelector(".sidebar-navigation__thread-title")).toHaveTextContent(
       /^Approvals in side chat$/,
     );
     expect(container.querySelector(".sidebar-navigation__thread-main")).toHaveTextContent(
-      /^Approvals in side chat$/,
+      /^Approvals in side chat3h$/,
     );
-    expect(container.querySelector(".sidebar-navigation__thread-detail")).toHaveTextContent(
-      "#1205",
-    );
+    const quiet = container.querySelector(".sidebar-navigation__thread-context");
+    expect(quiet).toHaveTextContent("octant");
+    expect(quiet).toHaveTextContent("fix-full-access");
+    expect(quiet).toHaveTextContent("#1205");
+    expect(quiet).not.toHaveTextContent("3h");
   });
 
-  it("says a running or waiting thread's state in words in place of the time", () => {
+  it("shows a running or waiting thread's state as its mark and age, and keeps the word for its tooltip", () => {
     const { container, rerender } = render(
       <SidebarThreadRowContent
         age={{ label: "3h" }}
         projectName="octant"
-        state={{ status: "working", text: "Working 14m" }}
+        state={{ status: "working", text: "Working 14m", age: "14m" }}
         title="Fix the editor return key"
       />,
     );
-    const context = container.querySelector(".sidebar-navigation__thread-context");
-    expect(context).toHaveTextContent("Working 14m");
-    expect(context).not.toHaveTextContent("3h");
-    expect(container.querySelector(".sidebar-navigation__thread-state")).toHaveAttribute(
-      "data-activity",
-      "working",
-    );
+    const state = () => container.querySelector(".sidebar-navigation__thread-state");
+    expect(state()?.parentElement).toHaveClass("sidebar-navigation__thread-main");
+    expect(state()).toHaveTextContent(/^14m$/);
+    expect(state()).toHaveAttribute("title", "Working 14m");
+    expect(state()).toHaveAttribute("data-activity", "working");
+    expect(state()?.querySelector(".octant-spinner, [data-slot='spinner']")).not.toBeNull();
+    expect(container).not.toHaveTextContent("3h");
 
     rerender(
       <SidebarThreadRowContent
         projectName="octant"
-        state={{ status: "attention", text: "Needs you" }}
+        state={{ status: "attention", text: "Needs you", age: "5m", icon: CirclePause }}
         title="Fix the editor return key"
       />,
     );
-    expect(container.querySelector(".sidebar-navigation__thread-state")).toHaveTextContent(
-      "Needs you",
+    expect(state()).toHaveTextContent(/^5m$/);
+    expect(state()).toHaveAttribute("title", "Needs you");
+    expect(state()?.querySelector("svg")).not.toBeNull();
+
+    rerender(
+      <SidebarThreadRowContent
+        projectName="octant"
+        state={{ status: "woke", text: "Snooze ended", icon: CirclePause }}
+        title="Fix the editor return key"
+      />,
     );
+    expect(state()).toHaveTextContent(/^$/);
+    expect(state()).toHaveAttribute("title", "Snooze ended");
   });
 
-  it("carries the time on the title line when the row names no place", () => {
+  it("opens no second line for a row that names no place and carries no marks", () => {
     const { container } = render(
       <SidebarThreadRowContent age={{ label: "2m" }} title="Fix the editor return key" />,
     );
@@ -131,12 +142,12 @@ describe("SidebarThreadRowContent", () => {
     expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
   });
 
-  it("opens a third line only when there is something for it, and puts the provider at the end of the last line", () => {
+  it("puts the provider at the end of the quiet line, or of the title line when the row has none", () => {
     const provider = { displayName: "Codex", driverKind: "codex-cli" } as never;
     const { container, rerender } = render(
       <SidebarThreadRowContent provider={provider} title="Fix the editor return key" />,
     );
-    expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
+    expect(container.querySelector(".sidebar-navigation__thread-context")).toBeNull();
     expect(
       container.querySelector(
         ".sidebar-navigation__thread-main > .sidebar-navigation__thread-provider",
@@ -145,6 +156,7 @@ describe("SidebarThreadRowContent", () => {
 
     rerender(
       <SidebarThreadRowContent
+        checkout={{ checkoutKind: "managed-worktree", label: "fix-return" }}
         provider={provider}
         pullRequest={pullRequest}
         title="Fix the editor return key"
@@ -152,7 +164,7 @@ describe("SidebarThreadRowContent", () => {
     );
     expect(
       container.querySelector(
-        ".sidebar-navigation__thread-detail > .sidebar-navigation__thread-provider",
+        ".sidebar-navigation__thread-context > .sidebar-navigation__thread-provider:last-child",
       ),
     ).toHaveAttribute("title", "Codex");
     expect(
@@ -160,19 +172,22 @@ describe("SidebarThreadRowContent", () => {
         ".sidebar-navigation__thread-main .sidebar-navigation__thread-provider",
       ),
     ).toBeNull();
+    expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
   });
 
-  it("names a worker's coordinator under its title and marks a coordinator in place of its provider", () => {
+  it("names a worker's coordinator on a third line and marks a coordinator in place of its provider", () => {
     const { container, rerender } = render(
       <SidebarThreadRowContent
         coordinatorName="Backlog"
+        projectName="octant"
         provider={{ displayName: "Claude", driverKind: "claude" }}
         title="Fix the flaky test"
       />,
     );
-    expect(container.querySelector(".sidebar-navigation__thread-detail")).toHaveTextContent(
-      "Backlog",
-    );
+    const lines = container.querySelector(".sidebar-navigation__thread-copy")?.children;
+    expect(lines?.[2]).toHaveClass("sidebar-navigation__thread-detail");
+    expect(lines?.[2]).toHaveTextContent("Backlog");
+    expect(lines?.[1]).not.toHaveTextContent("Backlog");
 
     rerender(
       <SidebarThreadRowContent
@@ -245,8 +260,9 @@ describe("SidebarThreadRowContent counted marks", () => {
     expect(stack).toHaveAttribute("title", "Layer 2 of 3 of a stack, on #1204");
   });
 
-  it("opens no third line for a thread with no pull requests, stack or issues", () => {
+  it("opens no second line for a thread with no pull requests, stack or issues", () => {
     const { container } = render(<SidebarThreadRowContent issueCount={0} title="Quiet" />);
+    expect(container.querySelector(".sidebar-navigation__thread-context")).toBeNull();
     expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
   });
 });

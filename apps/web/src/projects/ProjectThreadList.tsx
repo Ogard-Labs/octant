@@ -679,6 +679,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         waitingSince: props.thread.waitingSince,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
+        updatedAt: props.thread.updatedAt,
         now,
       })
     : NO_THREAD_ROW_STATE;

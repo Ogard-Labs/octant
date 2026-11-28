@@ -79,7 +79,7 @@ describe("ThemeTypographyProvider", () => {
       /\.sidebar-item\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
     );
     expect(shellStyles).toMatch(
-      /\.sidebar-navigation__thread\s*\{[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
+      /\.sidebar-navigation__thread\s*\{[^}]*font-size:\s*var\(--oct-text-detail\);/s,
     );
     expect(systemStyles).toMatch(
       /\.setnav-item\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
@@ -94,7 +94,7 @@ describe("ThemeTypographyProvider", () => {
       /\.settings-navigation \.setnav-item,[^{]*\{[^}]*font-size/s,
     );
     expect(shellStyles).toMatch(
-      /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,
+      /\.sidebar-navigation__thread\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--oct-text-detail\);/s,
     );
     expect(appStyles).toMatch(
       /\.project-row__copy > span\s*\{[^}]*font-family:\s*var\(--oct-font-display\);[^}]*font-size:\s*var\(--octant-ui-font-size\);/s,

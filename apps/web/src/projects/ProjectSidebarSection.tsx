@@ -1723,6 +1723,7 @@ function ActivityThreadButton(props: {
         waitingSince: props.thread.waitingSince,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
+        updatedAt: props.thread.updatedAt,
         now,
       })
     : NO_THREAD_ROW_STATE;

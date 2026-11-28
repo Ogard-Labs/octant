@@ -157,6 +157,18 @@ describe("interface typography contract", () => {
     }
   });
 
+  it("draws a sidebar thread row from two of the scale's sizes: its title at 13 and every other line at 12", () => {
+    const source = readFileSync(resolve(cssRoot, "shell.css"), "utf8");
+    const sizes = new Set<string>();
+    for (const block of cssBlocks(source)) {
+      if (!block.selector.includes(".sidebar-navigation__thread")) continue;
+      for (const match of block.declarations.matchAll(/font-size:\s*([^;]+);/g)) {
+        sizes.add(match[1]?.trim() ?? "");
+      }
+    }
+    expect([...sizes].sort()).toEqual(["var(--oct-text-detail)", "var(--oct-text-xs)"]);
+  });
+
   it("keeps the popup status line on the interface type scale", () => {
     const source = readFileSync(resolve(cssRoot, "components.css"), "utf8");
     const block = cssBlocks(source).find(

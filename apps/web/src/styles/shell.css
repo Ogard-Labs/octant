@@ -1417,8 +1417,8 @@ html[data-octant-native-host="true"] .sidebar__chrome {
      left edges: titles at 42px, destinations at 45px, feed rows at 14px. */
   gap: var(--oct-space-2);
   /* The lines of a row and its padding sit on the 4px grid: a two-line row is
-     48px (16 for the top line, 20 for the title, 6 above and below), a
-     three-line row 64. Compact takes two pixels off each of those lines, so
+     48px (20 for the title, 16 for the quiet line beneath, 6 above and below),
+     a three-line row 64. Compact takes two pixels off each of those lines, so
      44 and 60. The text block is centred in the row. The button recipe's fixed
      height would let a third line overlap the next thread instead of growing
      this row. */
@@ -1435,20 +1435,21 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   border: 0;
   border-radius: var(--oct-radius-sm);
   font-family: var(--oct-font-display);
-  font-size: var(--octant-ui-font-size);
+  font-size: var(--oct-text-detail);
   cursor: default;
   text-align: left;
 }
 
 /* A row's trailing end is built once and never changes on hover, focus or an
-   open menu: [title] [age or actions, 50px] [provider mark]. The slot is the
-   width of the two actions, so the age right-aligns inside it, the actions
-   fade in over it, and neither the title's truncation nor the mark moves. A
-   row whose age stands on its top line, or that carries a state, keeps the
-   same room on the title line empty. */
+   open menu: [title] [age or state, 50px], and beneath it the provider mark.
+   The slot is the width of the two actions, so the age or the state's mark
+   and age right-align inside it, the actions fade in over it, and neither the
+   title's truncation nor the mark moves. A row with neither keeps the same
+   room on the title line empty. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
-  .sidebar-navigation__thread-when {
+  :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state) {
   inline-size: 50px;
+  justify-content: flex-end;
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
@@ -1461,8 +1462,8 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 }
 
 /* A two-line row's trailing column is one 50px slot on the row's right edge:
-   the age ends the top line, the provider mark ends the title line, and the
-   actions fade in over both. Measured before, the age ended 28px short of the
+   the age or state ends the title line, the provider mark ends the quiet line,
+   and the actions fade in over both. Measured before, the age ended 28px short of the
    edge every other row's trailing mark ends on, and the mark stood 58px short
    of it under the age. A forked row keeps its older room for the fork mark. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
@@ -1482,14 +1483,7 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
       .sidebar-navigation__thread-context
     ):not(:has(.sidebar-navigation__thread-lineage))
-    .sidebar-navigation__thread-main:has(> .sidebar-navigation__thread-provider)::after {
-    content: none;
-  }
-
-  .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
-      .sidebar-navigation__thread-context
-    ):not(:has(.sidebar-navigation__thread-lineage))
-    .sidebar-navigation__thread-main
+    .sidebar-navigation__thread-context
     > .sidebar-navigation__thread-provider {
     inline-size: 50px;
     justify-content: flex-end;
@@ -1511,7 +1505,7 @@ html[data-octant-native-host="true"] .sidebar__chrome {
       :has([aria-expanded="true"]),
       :has([data-popup-open])
     )
-    .sidebar-navigation__thread-main
+    .sidebar-navigation__thread-context
     > .sidebar-navigation__thread-provider {
     opacity: 0;
   }
@@ -1574,14 +1568,17 @@ html[data-octant-density="compact"] .sidebar-navigation__thread {
   --thread-line-title: 18px;
 }
 
-/* Compact: the mark steps down to the top line's 14px so the row stays 44px. */
-html[data-octant-density="compact"]
-  .sidebar-navigation__thread-context
-  :is(.project-mark, .project-icon) {
-  width: 14px;
-  height: 14px;
-  /* The 14px mark keeps the 16px icon column, so the name still starts at 96. */
-  margin-inline-end: 2px;
+/* The Project's mark on a row is 12px, the size of the line's other glyphs, so
+   the quiet line reads as one run of small marks and words under the title.
+   Its two letters are decoration beside the name that follows them. */
+.sidebar-navigation__thread-context :is(.project-mark, .project-icon) {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.sidebar-navigation__thread-context .project-mark__letters {
+  scale: 0.66;
 }
 
 .sidebar-navigation__thread-copy {
@@ -1592,11 +1589,12 @@ html[data-octant-density="compact"]
   align-items: stretch;
 }
 
-/* The top line says where the thread lives and how it stands: the Project's
-   mark and name in the secondary ink, the branch in the mono face and the muted
-   ink, and at the end the state in words or the time. It is small and quiet so
-   the title beneath is the strongest text in the row. Names give way before
-   the state does: a long Project or branch truncates, the state stays whole. */
+/* The quiet line under the title says where the thread lives and what it
+   carries: the Project's mark and name, the branch in the mono face, the
+   counted marks, and the provider's mark at its end, all in the meta ink so
+   the title above is the only strong text in the row. A long Project or branch
+   truncates; the marks stay whole. The third line, for who started a thread or
+   its coordinator, is drawn the same way. */
 .sidebar-navigation__thread-context,
 .sidebar-navigation__thread-detail {
   display: flex;
@@ -1615,7 +1613,7 @@ html[data-octant-density="compact"]
   flex: 0 1 auto;
   align-items: center;
   gap: var(--oct-space-1);
-  color: var(--oct-fg-2);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: var(--thread-line-context);
 }
@@ -1623,12 +1621,6 @@ html[data-octant-density="compact"]
 .sidebar-navigation__thread-checkout {
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-}
-
-/* The Project's name starts on the label column every row's text starts on
-   (16px mark, 8px gap), not 4px after the mark as it measured before. */
-.sidebar-navigation__thread-project {
-  gap: var(--oct-space-2);
 }
 
 .sidebar-navigation__thread-project > svg,
@@ -1685,8 +1677,8 @@ html[data-octant-density="compact"]
   color: var(--oct-meta);
 }
 
-/* The title line: the thread's name, one line, the strongest text in the row.
-   With no top line the time or state stands at its end. */
+/* The title line: the thread's name, one line, the strongest text in the row,
+   with the time or the state's mark and age at its end. */
 .sidebar-navigation__thread-main {
   display: flex;
   min-width: 0;
@@ -1694,9 +1686,9 @@ html[data-octant-density="compact"]
   gap: var(--oct-space-2);
 }
 
-/* The state in words with its icon: the only place a row spends colour besides
-   the Project's mark. The word and the icon carry the state, so the colour is
-   never the only signal. */
+/* The state's mark and short age: the only place a row spends colour besides
+   the Project's mark. The mark's shape and the words in its tooltip and the
+   row's name carry the state, so the colour is never the only signal. */
 .sidebar-navigation__thread-state {
   display: inline-flex;
   flex: none;
@@ -1705,7 +1697,7 @@ html[data-octant-density="compact"]
   margin-inline-start: auto;
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
+  font-variant-numeric: tabular-nums;
   line-height: var(--thread-line-context);
   white-space: nowrap;
 }

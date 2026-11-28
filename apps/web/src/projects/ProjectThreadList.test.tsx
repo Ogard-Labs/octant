@@ -266,18 +266,18 @@ describe("ProjectThreadRows", () => {
       label: "Controller foundation, Snooze ended, New activity",
     },
   ] as const)(
-    "says the strongest of overlapping states in words and names them all: $label",
+    "draws the strongest of overlapping states as one mark, names it in its tooltip, and names them all: $label",
     (state) => {
       render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, ...state }]} />);
       const row = screen.getByRole("button", { name: /Controller foundation/ });
       expect(row).toHaveAccessibleName(state.label);
       const words = row.querySelectorAll(".sidebar-navigation__thread-state");
       expect(words).toHaveLength(1);
-      expect(words[0]).toHaveTextContent(state.word);
+      expect(words[0]).toHaveAttribute("title", state.word);
     },
   );
 
-  it("gives a running turn's elapsed time beside the word Working", () => {
+  it("gives a running turn's elapsed time beside its spinner, with the word in the tooltip", () => {
     const fourteenMinutesAgo = new Date(Date.now() - 14 * 60_000).toISOString();
     render(
       <ProjectThreadRows
@@ -286,7 +286,7 @@ describe("ProjectThreadRows", () => {
       />,
     );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
-    expect(within(row).getByText("Working 14m")).toBeVisible();
+    expect(within(row).getByTitle("Working 14m")).toHaveTextContent(/^14m$/);
   });
 
   it("says how long an idle thread has waited on its pull request, once its new activity is read", () => {
@@ -307,7 +307,7 @@ describe("ProjectThreadRows", () => {
         threads={[{ ...thread, activity: "idle", waitingSince: sixMinutesAgo }]}
       />,
     );
-    expect(within(row).getByText("Waiting 6m")).toBeVisible();
+    expect(within(row).getByTitle("Waiting 6m")).toHaveTextContent(/^6m$/);
     expect(row).toHaveAccessibleName("Controller foundation, Waiting");
   });
 
@@ -418,7 +418,7 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByText("feature/x")).toBeNull();
   });
 
-  it("says a thread needs attention in words rather than a badge", () => {
+  it("marks a thread that needs the person with a named mark rather than a badge", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -426,7 +426,7 @@ describe("ProjectThreadRows", () => {
       />,
     );
 
-    expect(screen.getByText("Needs you")).toBeVisible();
+    expect(screen.getByTitle("Needs you")).toBeVisible();
     expect(screen.queryByText("active")).toBeNull();
   });
 
@@ -1793,7 +1793,7 @@ describe("completing and snoozing from a thread row", () => {
     expect(onSnoozeThread).not.toHaveBeenCalled();
   });
 
-  it("says a row whose snooze ended in words", () => {
+  it("marks a row whose snooze ended and names it in its tooltip", () => {
     render(
       <ProjectThreadRows
         onSelectThread={vi.fn()}
@@ -1806,7 +1806,7 @@ describe("completing and snoozing from a thread row", () => {
         ]}
       />,
     );
-    const woke = screen.getByText("Snooze ended");
+    const woke = screen.getByTitle("Snooze ended");
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 

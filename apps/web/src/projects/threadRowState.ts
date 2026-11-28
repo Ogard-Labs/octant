@@ -11,13 +11,13 @@ import {
   type ChatThreadNavigationItem,
   type ThreadRowActivity,
 } from "../shell/navigationModel";
-import { CircleAlert, Clock, ClockFading, LoaderCircle } from "../ui/icons";
+import { CircleAlert, CirclePause, Clock, ClockFading, LoaderCircle } from "../ui/icons";
 import type { IconComponent } from "../ui/icons";
 import type { SidebarThreadRowState } from "./SidebarThreadRowContent";
 import { threadRowShortAge } from "./threadRowShortAge";
 
 /**
- * The mark one status wears. `unread` and `idle` have none: the stylesheet
+ * The mark one status wears beside its short age. `unread` and `idle` have none: the stylesheet
  * draws unread as a dot and idle as nothing at all, so an icon here would be a
  * second, louder reading of the same state.
  */
@@ -25,7 +25,10 @@ export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconCompon
   switch (status) {
     case "working":
       return LoaderCircle;
+    // A thread that waits on the person is paused, not failing: the alert
+    // mark is kept for a usage limit, which the person cannot answer.
     case "attention":
+      return CirclePause;
     case "limited":
       return CircleAlert;
     case "waiting":
@@ -44,24 +47,32 @@ export interface ThreadRowStateReading {
   readonly label?: string;
 }
 
-/** "Limited 2h" while the host named a reset, "Limited" when it named none. */
-function limitedText(resetsAt: string | undefined, now: number): string {
-  const label = SIDEBAR_THREAD_STATUS_LABEL.limited;
+/** How long until a known reset, "2h"; nothing when the host named none. */
+function limitedAge(resetsAt: string | undefined, now: number): string | undefined {
   return resetsAt === undefined
-    ? label
-    : `${label} ${snoozeWakeLabel(resetsAt, new Date(now).toISOString())}`;
+    ? undefined
+    : snoozeWakeLabel(resetsAt, new Date(now).toISOString());
+}
+
+/** A short age, or nothing for one under a minute, which "now" would only repeat. */
+function shortAgeSince(since: string | undefined, now: number): string | undefined {
+  const age = since === undefined ? undefined : threadRowShortAge(since, now);
+  return age === "now" ? undefined : age;
 }
 
 /** A row that hides its status says nothing of it. */
 export const NO_THREAD_ROW_STATE: ThreadRowStateReading = { unread: false };
 
 /**
- * What a row says of its thread's state, in words: how long a turn has run
- * ("Working 14m"), that the thread waits on the person ("Needs you"), that a
- * usage limit holds it ("Limited 2h", counting down to the reset), or that a
- * snooze ended. A thread with none of those has no state to say, and its row
- * ends with how long ago it moved; new activity alone is a dot beside that
- * time. One state is shown, the strongest, as in the status policy.
+ * What a row says of its thread's state: a mark and a short age, with the
+ * state in words for its tooltip and accessible name. The age is how long a
+ * turn has run ("Working 14m" draws a spinner and "14m"), how long the thread
+ * has waited on the person (the time it last moved), or how long a usage limit
+ * still holds it, counting down to the reset. A snooze that ended has no age
+ * and draws its mark alone. A thread with none of those states has none to
+ * say, and its row ends with how long ago it moved; new activity alone is a
+ * dot beside that time. One state is shown, the strongest, as in the status
+ * policy.
  */
 export function threadRowState(props: {
   readonly activity: ThreadRowActivity;
@@ -75,6 +86,8 @@ export function threadRowState(props: {
   readonly now?: number | undefined;
   /** When the thread began waiting between turns; absent when it is not. */
   readonly waitingSince?: string | undefined;
+  /** When the thread last moved, which a Needs-you row counts from. */
+  readonly updatedAt?: string | undefined;
 }): ThreadRowStateReading {
   const now = props.now ?? Date.now();
   const facts = sidebarThreadStatusInput({ ...props, now });
@@ -85,22 +98,36 @@ export function threadRowState(props: {
     ...(props.followUp === true ? ["Follow-up"] : []),
   ].join(", ");
   if (status === "unread") return { unread: true, label };
-  const since =
-    status === "working" ? props.startedAt : status === "waiting" ? props.waitingSince : undefined;
-  const elapsed = since === undefined ? undefined : threadRowShortAge(since, now);
   const word = SIDEBAR_THREAD_STATUS_LABEL[status];
+  const age =
+    status === "working"
+      ? shortAgeSince(props.startedAt, now)
+      : status === "waiting"
+        ? shortAgeSince(props.waitingSince, now)
+        : status === "attention"
+          ? shortAgeSince(props.updatedAt, now)
+          : status === "limited"
+            ? limitedAge(props.limited?.resetsAt, now)
+            : undefined;
   const text =
     status === "working" || status === "waiting"
-      ? elapsed === undefined || elapsed === "now"
+      ? age === undefined
         ? word
-        : `${word} ${elapsed}`
+        : `${word} ${age}`
       : status === "attention"
         ? "Needs you"
         : status === "limited"
-          ? limitedText(props.limited?.resetsAt, now)
+          ? age === undefined
+            ? word
+            : `${word} ${age}`
           : "Snooze ended";
   return {
-    state: { status, text, icon: sidebarThreadStatusIcon(status) },
+    state: {
+      status,
+      text,
+      ...(age === undefined ? {} : { age }),
+      icon: sidebarThreadStatusIcon(status),
+    },
     unread: false,
     label,
   };

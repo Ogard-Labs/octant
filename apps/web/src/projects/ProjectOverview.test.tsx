@@ -940,8 +940,9 @@ describe("ProjectOverview threads and recent activity", () => {
     ).toEqual(["thread-newer", "thread-older"]);
     expect(screen.queryByRole("button", { name: /Someone else's work/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Loose chat/ })).not.toBeInTheDocument();
-    // The strongest state is said in words, and the row's one name keeps all of them.
-    expect(within(list).getByText("Needs you")).toBeVisible();
+    // The strongest state is drawn as one mark named in its tooltip, and the
+    // row's one name keeps all of them.
+    expect(within(list).getByTitle("Needs you")).toBeVisible();
     expect(
       within(list).getByRole("button", {
         name: /Launch checklist.*Needs attention, New activity, Follow-up/,
