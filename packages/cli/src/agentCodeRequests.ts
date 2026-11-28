@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { CodeEvidenceReference, decodeHostAnswer } from "@octant/contracts";
-import { PendingRequest } from "@octant/contracts/pending-requests";
+import {
+  PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE,
+  PendingRequest,
+} from "@octant/contracts/pending-requests";
 import type { OpenedLocalControlSession } from "./localControl";
 import { refusalMessage } from "./agentHost";
 
@@ -17,12 +20,32 @@ export function codeRequestId(request: AgentCodeRequest): string {
     ? String(request.answer.approvalId)
     : String(request.answer.requestId);
 }
+
+/**
+ * Why the terminal sends the person to the thread instead of taking y or n,
+ * or undefined for an approval of one tool call. Entering or leaving Plan
+ * changes the level the thread's later turns run at, and leaving it accepts a
+ * plan the pending list does not carry, so a y here would allow what the
+ * person never saw. An approval from a host that names neither subject is
+ * treated the same way, as the app's lists treat it.
+ */
+export function codeApprovalOpensThread(request: AgentCodeRequest): string | undefined {
+  if (request.kind !== "approval" || request.approves === "tool-call") return undefined;
+  return request.approves === "level-change"
+    ? "This asks to move the thread into or out of Plan. Open this thread in the Octant app to read the plan and the level it moves to, and answer there."
+    : "Open this thread in the Octant app to answer: this host does not say whether the approval changes the thread's level.";
+}
 export async function readCodeRequests(
   session: OpenedLocalControlSession,
   threadId: string,
 ): Promise<AgentCodeRequestRead> {
   try {
-    const response = await session.send({ path: "/api/pending-requests", method: "GET" });
+    // Asks for `approves`, so a level change is told apart from a tool call.
+    const response = await session.send({
+      path: "/api/pending-requests",
+      method: "GET",
+      headers: { accept: PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE },
+    });
     if (response.status !== 200)
       return {
         kind: "refused",
@@ -60,6 +83,8 @@ export async function answerCodeRequest(
     checkoutId: request.answer.checkoutId,
   };
   if (request.kind === "approval") {
+    const opensThread = codeApprovalOpensThread(request);
+    if (opensThread !== undefined) return opensThread;
     if (!/^(y|yes|n|no)$/i.test(text)) return "Answer the approval with y or n.";
     body = {
       kind: "answer-provider-approval",
