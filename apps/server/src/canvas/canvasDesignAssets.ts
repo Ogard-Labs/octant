@@ -28,9 +28,15 @@ import { joinWorkPath, resolveContainedWorkPath } from "../work/workPathConfinem
 /**
  * What one source read produced: the bytes, or why there are none. A port
  * never throws for an expected refusal; it answers with one of these.
+ * `changedAt` is the file's change time (`ctimeNs`), reported by Project file
+ * reads so version digest recording refuses a file altered after commit.
  */
 export type CanvasDesignAssetRead =
-  | { readonly status: "read"; readonly bytes: Uint8Array }
+  | {
+      readonly status: "read";
+      readonly bytes: Uint8Array;
+      readonly changedAt?: bigint;
+    }
   | { readonly status: "unavailable"; readonly reason: "missing" | "refused" | "too-large" };
 
 /**
@@ -231,7 +237,11 @@ export async function readCanvasDesignAssetFile(input: {
   const bytes = await prepared.read();
   return bytes === undefined
     ? { status: "unavailable", reason: "refused" }
-    : { status: "read", bytes };
+    : {
+        status: "read",
+        bytes,
+        ...(prepared.changedAt === undefined ? {} : { changedAt: prepared.changedAt }),
+      };
 }
 
 export async function prepareCanvasDesignAssetFile(input: {
@@ -245,6 +255,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   | {
       readonly status: "ready";
       readonly size: number;
+      readonly changedAt?: bigint;
       readonly read: () => Promise<Uint8Array | undefined>;
     }
 > {
@@ -282,6 +293,7 @@ export async function prepareCanvasDesignAssetFile(input: {
   return {
     status: "ready",
     size: resolved.stat.size,
+    ...(resolved.stat.changedAt === undefined ? {} : { changedAt: resolved.stat.changedAt }),
     read: async () => {
       if ((await input.filesystem.realpath(input.root).catch(() => undefined)) !== canonicalRoot)
         return undefined;

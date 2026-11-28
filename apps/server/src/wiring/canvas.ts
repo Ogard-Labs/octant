@@ -42,6 +42,7 @@ import { copyClaudePageToCanvas } from "../canvas/claudePageCanvasCopy";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "../canvasRoutes";
 import { CanvasEventStore } from "../canvas/canvasEventStore";
 import { markCanvasReader } from "../canvas/canvasOutsideContentMark";
+import { CanvasVersionImageStore } from "../canvas/canvasVersionImages";
 import type { CanvasProjectionEntry } from "../canvas/canvasProjection";
 import { CanvasService, type CanvasServiceDependencies } from "../canvas/canvasService";
 import { CanvasChoiceAnswerService } from "../canvas/canvasChoiceAnswerService";
@@ -462,6 +463,12 @@ export function wireCanvas(deps: CanvasDependencies) {
       });
     },
   };
+  const canvasVersionImages = new CanvasVersionImageStore({
+    journal: persistence.journal,
+    ports: canvasDesignAssetPorts,
+    uuid: randomUUID,
+    actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const resolveDesignAssets = (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
@@ -571,6 +578,9 @@ export function wireCanvas(deps: CanvasDependencies) {
         // The replica publish listens on the same seam as the mirror, so
         // every surface's revisions publish the same way.
         void replicaArtifactSync.service?.versionCommitted(version);
+      },
+      onLocalVersionCommitted: (version) => {
+        void canvasVersionImages.record(version);
       },
     },
     {
