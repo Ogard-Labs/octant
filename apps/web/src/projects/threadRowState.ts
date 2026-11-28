@@ -47,17 +47,34 @@ export interface ThreadRowStateReading {
   readonly label?: string;
 }
 
-/** How long until a known reset, "2h"; nothing when the host named none. */
+/** How long until a known reset, "2h"; nothing when the host named none or it is due. */
 function limitedAge(resetsAt: string | undefined, now: number): string | undefined {
-  return resetsAt === undefined
-    ? undefined
-    : snoozeWakeLabel(resetsAt, new Date(now).toISOString());
+  const age =
+    resetsAt === undefined ? undefined : snoozeWakeLabel(resetsAt, new Date(now).toISOString());
+  return age === "now" ? undefined : age;
 }
 
 /** A short age, or nothing for one under a minute, which "now" would only repeat. */
 function shortAgeSince(since: string | undefined, now: number): string | undefined {
   const age = since === undefined ? undefined : threadRowShortAge(since, now);
   return age === "now" ? undefined : age;
+}
+
+const AGE_UNITS: Readonly<Record<string, string>> = {
+  m: "minute",
+  h: "hour",
+  d: "day",
+  w: "week",
+  y: "year",
+};
+
+/** "5m" as "5 minutes", for a name read aloud; anything else is kept as it is. */
+function spokenAge(age: string): string {
+  const match = /^(\d+)([mhdwy])$/.exec(age);
+  const count = match?.[1];
+  const unit = match?.[2] === undefined ? undefined : AGE_UNITS[match[2]];
+  if (count === undefined || unit === undefined) return age;
+  return `${count} ${unit}${count === "1" ? "" : "s"}`;
 }
 
 /** A row that hides its status says nothing of it. */
@@ -93,11 +110,9 @@ export function threadRowState(props: {
   const facts = sidebarThreadStatusInput({ ...props, now });
   const status = resolveSidebarThreadStatus(facts);
   if (status === undefined) return { unread: false };
-  const label = [
-    ...sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]),
-    ...(props.followUp === true ? ["Follow-up"] : []),
-  ].join(", ");
-  if (status === "unread") return { unread: true, label };
+  const statuses = sidebarThreadStatuses(facts).map((each) => SIDEBAR_THREAD_STATUS_LABEL[each]);
+  const followUp = props.followUp === true ? ["Follow-up"] : [];
+  if (status === "unread") return { unread: true, label: [...statuses, ...followUp].join(", ") };
   const word = SIDEBAR_THREAD_STATUS_LABEL[status];
   const age =
     status === "working"
@@ -121,6 +136,19 @@ export function threadRowState(props: {
             ? word
             : `${word} ${age}`
           : "Snooze ended";
+  // The row draws the age beside a mark, so its accessible name says it in
+  // words after the status it belongs to: "Working, 5 minutes".
+  const spoken = age === undefined ? undefined : spokenAge(age);
+  const label = [
+    ...statuses.map((each) =>
+      each !== word || spoken === undefined
+        ? each
+        : status === "limited"
+          ? `${each}, resets in ${spoken}`
+          : `${each}, ${spoken}`,
+    ),
+    ...followUp,
+  ].join(", ");
   return {
     state: {
       status,

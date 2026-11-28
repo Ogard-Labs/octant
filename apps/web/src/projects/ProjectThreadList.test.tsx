@@ -358,7 +358,7 @@ describe("ProjectThreadRows", () => {
       />,
     );
     expect(within(row).getByTitle("Waiting 6m")).toHaveTextContent(/^6m$/);
-    expect(row).toHaveAccessibleName("Controller foundation, Waiting");
+    expect(row).toHaveAccessibleName("Controller foundation, Waiting, 6 minutes");
   });
 
   it("marks an unread thread with a named dot beside its time and clears it when read", () => {

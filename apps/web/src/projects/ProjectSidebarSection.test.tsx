@@ -1670,7 +1670,7 @@ describe("ProjectSidebarSection activity view", () => {
       // and the row's one accessible name carries them all.
       expect(
         within(priority).getByRole("button", {
-          name: "Update AuroraDocs logos, Test, Needs attention, Snooze ended, New activity, Follow-up",
+          name: /^Update AuroraDocs logos, Test, Needs attention, \d+ \w+, Snooze ended, New activity, Follow-up$/,
         }),
       ).toBeVisible();
       expect(within(priority).getAllByTitle("Needs you")).toHaveLength(2);

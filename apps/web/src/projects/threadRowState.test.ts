@@ -13,7 +13,7 @@ describe("a sidebar row stopped on a usage limit", () => {
     });
     expect(state).toMatchObject({ status: "limited", text: "Limited 2h" });
     expect(state?.icon).toBeDefined();
-    expect(label).toBe("Limited");
+    expect(label).toBe("Limited, resets in 2 hours");
   });
 
   it("reads Limited with no reset", () => {
@@ -61,5 +61,32 @@ describe("a sidebar row's short age beside its status mark", () => {
     });
     expect(state).toMatchObject({ text: "Limited 2h", age: "2h" });
     expect(state?.icon).toBe(CircleAlert);
+  });
+});
+
+describe("a sidebar row's accessible name", () => {
+  it("says the status mark's age in words beside the status", () => {
+    expect(
+      threadRowState({ ...row, activity: "working", startedAt: "2026-07-19T10:55:00.000Z" }).label,
+    ).toBe("Working, 5 minutes");
+    expect(
+      threadRowState({ ...row, activity: "attention", updatedAt: "2026-07-19T09:00:00.000Z" })
+        .label,
+    ).toBe("Needs attention, 2 hours");
+    expect(
+      threadRowState({ ...row, activity: "working", startedAt: "2026-07-18T11:00:00.000Z" }).label,
+    ).toBe("Working, 1 day");
+  });
+
+  it("keeps the other statuses after the strongest one's age", () => {
+    expect(
+      threadRowState({
+        ...row,
+        activity: "attention",
+        unread: true,
+        updatedAt: "2026-07-19T10:59:00.000Z",
+        limited: {},
+      }).label,
+    ).toBe("Needs attention, 1 minute, Limited, New activity");
   });
 });

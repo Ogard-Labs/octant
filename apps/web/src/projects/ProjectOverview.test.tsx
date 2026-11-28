@@ -945,7 +945,7 @@ describe("ProjectOverview threads and recent activity", () => {
     expect(within(list).getByTitle("Needs you")).toBeVisible();
     expect(
       within(list).getByRole("button", {
-        name: /Launch checklist.*Needs attention, New activity, Follow-up/,
+        name: /Launch checklist.*Needs attention, \d+ \w+, New activity, Follow-up/,
       }),
     ).toBeVisible();
 
