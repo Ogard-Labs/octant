@@ -27,6 +27,7 @@ describe("first-party plugin catalog", () => {
     expect(firstPartyPluginCatalog().map((plugin) => plugin.slug)).toEqual([
       "board",
       "pull-request-reviewer",
+      "pull-request-guide-writer",
       "github",
       "linear",
       "azure-arm",

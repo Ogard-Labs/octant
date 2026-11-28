@@ -14,12 +14,17 @@ import { describe, expect, it } from "vitest";
 import { WINDOW_CAPABILITY_HEADER, createRemoteDevicePrincipal } from "../clientPrincipal";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
-import { createBundledPullRequestGuideWriter } from "./bundledPullRequestGuideWriter";
+import {
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+  createBundledPullRequestGuideWriter,
+} from "./bundledPullRequestGuideWriter";
 import {
   createPullRequestGuideRouteHandler,
   pullRequestViewedViewOf,
 } from "./pullRequestGuideRoutes";
 import { PullRequestGuideService } from "./pullRequestGuideService";
+import { PullRequestGuideWriterRegistry } from "./pullRequestGuideWriterRegistry";
 
 const SCOPE_WINDOW = decodeWindowId("73000000-0000-4000-8000-000000000001");
 const TARGET: PullRequestReviewTarget = {
@@ -29,8 +34,19 @@ const TARGET: PullRequestReviewTarget = {
   number: 7,
 };
 
-function setup() {
+function setup(options: { readonly writerEnabled?: boolean } = {}) {
   const viewedCalls: string[] = [];
+  const writers = new PullRequestGuideWriterRegistry();
+  writers.register({
+    writerId: BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+    displayName: BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+    activation: () => ({
+      installed: true,
+      trusted: true,
+      enabled: options.writerEnabled ?? true,
+    }),
+    writer: createBundledPullRequestGuideWriter(),
+  });
   const service = new PullRequestGuideService({
     journal: {
       append: () => {
@@ -50,7 +66,7 @@ function setup() {
       capturePullRequestDiff: async () => ({ status: "unavailable" }),
       inspectRoute: () => ({ status: "refused" }),
     },
-    writer: createBundledPullRequestGuideWriter(),
+    writers,
     uuid: () => "80000000-0000-4000-8000-000000000001",
   });
   const windowAuthorityStore = new WindowAuthorityStore();
@@ -132,6 +148,13 @@ describe("pull request guide routes", () => {
     const write = await handler(local("/write", { target: TARGET }));
     expect(write?.status).toBe(409);
     expect(await write?.json()).toMatchObject({ reason: "no-model" });
+  });
+
+  it("refuses /write with not-effective when the guide writer plugin is disabled", async () => {
+    const { handler, local } = setup({ writerEnabled: false });
+    const write = await handler(local("/write", { target: TARGET }));
+    expect(write?.status).toBe(409);
+    expect(await write?.json()).toMatchObject({ reason: "not-effective" });
   });
 });
 

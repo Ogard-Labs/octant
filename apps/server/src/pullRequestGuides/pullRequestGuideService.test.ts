@@ -29,8 +29,17 @@ import type {
   PullRequestReviewHostRuntimePort,
   PullRequestReviewTurnExecutionResult,
 } from "../pullRequestReviewers/pullRequestReviewService";
-import { createBundledPullRequestGuideWriter } from "./bundledPullRequestGuideWriter";
+import {
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+  createBundledPullRequestGuideWriter,
+} from "./bundledPullRequestGuideWriter";
 import { PullRequestGuideService, validateGuideStops } from "./pullRequestGuideService";
+import { PullRequestGuideWriterRegistry } from "./pullRequestGuideWriterRegistry";
+import {
+  PULL_REQUEST_GUIDE_WRITER_CONTRIBUTION_KIND,
+  type PullRequestGuideWriter,
+} from "@octant/plugin-api/pull-request-guide-writer";
 
 const NOW = "2026-11-26T12:00:00.000Z";
 const WINDOW_ID = decodeWindowId("10000000-0000-4000-8000-000000000001");
@@ -192,6 +201,14 @@ function harness(options: {
       },
     },
   };
+  let writerEnabled = true;
+  const writers = new PullRequestGuideWriterRegistry();
+  writers.register({
+    writerId: BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+    displayName: BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+    activation: () => ({ installed: true, trusted: true, enabled: writerEnabled }),
+    writer: createBundledPullRequestGuideWriter(),
+  });
   const make = () =>
     new PullRequestGuideService({
       journal,
@@ -205,11 +222,20 @@ function harness(options: {
       readThread: () => makeThread(),
       guideRoute: () => options.route,
       runtime,
-      writer: createBundledPullRequestGuideWriter(),
+      writers,
       uuid,
       clock: () => NOW,
     });
-  return { make, turns, spend, head };
+  return {
+    make,
+    turns,
+    spend,
+    head,
+    writers,
+    setWriterEnabled: (enabled: boolean) => {
+      writerEnabled = enabled;
+    },
+  };
 }
 
 describe("review guides", () => {
@@ -410,5 +436,103 @@ describe("review guides", () => {
     if (started.status === "started") await started.done;
     const read = await service.read(WINDOW_ID, TARGET, HEAD_2);
     expect(read.status === "read" && read.view.lastFailure).toBeUndefined();
+  });
+
+  it("refuses guide runs with not-effective and bills nothing when the writer plugin is disabled", async () => {
+    const { make, turns, spend, setWriterEnabled } = harness({ route: ROUTE });
+    setWriterEnabled(false);
+    const service = make();
+    expect(await service.writeForPerson(WINDOW_ID, TARGET)).toEqual({
+      status: "refused",
+      reason: "not-effective",
+    });
+    const confirm = vi.fn(async () => true);
+    expect(await service.writeForThread(WINDOW_ID, THREAD_ID, confirm)).toEqual({
+      status: "refused",
+      reason: "not-effective",
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(turns).toEqual([]);
+    expect(spend).toEqual([]);
+  });
+
+  it("resolves a third-party guide writer only once installed, trusted, and enabled", async () => {
+    const { make, turns, spend, writers, setWriterEnabled } = harness({ route: ROUTE });
+    setWriterEnabled(false);
+    let trusted = false;
+    const customWriter: PullRequestGuideWriter = {
+      kind: PULL_REQUEST_GUIDE_WRITER_CONTRIBUTION_KIND,
+      write: async (_request, host, signal) => {
+        const diff = await host.readPullRequestDiff(signal);
+        if (diff.status !== "ready") return { status: "failed", detail: "no diff" };
+        return {
+          status: "written",
+          stops: [
+            {
+              title: "Third-party stop",
+              why: "Proposed by the active third-party writer plugin.",
+              needsDecision: true,
+              anchors: [{ path: "src/auth.ts", startLine: 2, endLine: 3 }],
+            },
+          ],
+        };
+      },
+    };
+    writers.register({
+      writerId: "acme/custom-guide-writer",
+      displayName: "Custom writer",
+      activation: () => ({ installed: true, trusted, enabled: true }),
+      writer: customWriter,
+    });
+    const service = make();
+    // Discovery/install alone (untrusted) grants nothing and bills nothing.
+    expect(await service.writeForPerson(WINDOW_ID, TARGET)).toEqual({
+      status: "refused",
+      reason: "not-effective",
+    });
+    expect(turns).toEqual([]);
+    expect(spend).toEqual([]);
+
+    // Once trusted as well as installed and enabled, the third-party writer runs.
+    trusted = true;
+    const started = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (started.status !== "started") throw new Error("expected third-party writer to start");
+    const outcome = await started.done;
+    expect(outcome.status).toBe("recorded");
+    if (outcome.status === "recorded") {
+      expect(outcome.guide.stops[0]?.title).toBe("Third-party stop");
+    }
+  });
+
+  it("revokes the writer host port and abandons spend if the plugin is disabled mid-run", async () => {
+    const { make, turns, spend, writers, setWriterEnabled } = harness({ route: ROUTE });
+    setWriterEnabled(false);
+    let active = true;
+    writers.register({
+      writerId: "acme/midrun-disabled-writer",
+      displayName: "Mid-run disabled writer",
+      activation: () => ({ installed: true, trusted: true, enabled: active }),
+      writer: {
+        kind: PULL_REQUEST_GUIDE_WRITER_CONTRIBUTION_KIND,
+        write: async (_request, host, signal) => {
+          await host.readPullRequestDiff(signal);
+          active = false;
+          const turn = await host.runReadOnlyGuideTurn({ prompt: "write guide" }, signal);
+          if (turn.status !== "completed") {
+            return { status: "refused", detail: "writer became inactive" };
+          }
+          return {
+            status: "written",
+            stops: [{ title: "Should not record", why: "", needsDecision: false, anchors: [] }],
+          };
+        },
+      },
+    });
+    const service = make();
+    const started = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (started.status !== "started") throw new Error("expected started run");
+    expect(await started.done).toEqual({ status: "failed", reason: "unavailable" });
+    expect(turns).toEqual([]);
+    expect(spend).toEqual(["admit", "abandon"]);
   });
 });
