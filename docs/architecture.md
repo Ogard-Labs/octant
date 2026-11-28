@@ -124,7 +124,9 @@ The design rests on a small set of invariants that every package obeys:
   own tailnet, or their own tunnel or proxy) for visitor links, webhook
   triggers, and their own paired devices; it takes inbound requests only,
   adds no outbound call, and Octant runs no part of it (maintainer decision,
-  2026-11-26; partly built and run only on loopback; the apps do not use the device relay yet). Four host-initiated
+  2026-11-26; partly built and run only on loopback; desktop and phone apps use
+  the device relay, with no WebSocket routes inside a relay or relay through a
+  standby yet). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed (the
   same feed serves a host the headless build it installs on a server over SSH,
   only while the person has that sheet open and no suitable build is on the

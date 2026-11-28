@@ -2953,7 +2953,8 @@ the path.
   Tailscale Funnel switch, or a tunnel or proxy the person runs themselves
   (decision H29). It is off by default, and nothing on it reaches a private,
   pairing, administration, or member-to-member route (built, run only on
-  loopback; the device relay is partly built, on the server; maintainer decision,
+  loopback; the device relay is partly built on the server and in the phone and
+  desktop apps, with no relay through a standby; maintainer decision,
   2026-11-26).
 - **No Octant relay, no port forwarding.** No traffic goes through a relay or
   tunnel Octant runs, and no member opens or asks for a port on the person's
@@ -2972,7 +2973,8 @@ first.
 
 The hub's public entrance lets things outside the private network reach the
 person's work without any service Octant runs (maintainer decision,
-2026-11-26; designed, not built). Its rules:
+2026-11-26; slices 21 to 26 built and run on loopback, slice 27 partly built).
+Its rules:
 
 - **A separate listener.** It is its own HTTP server in the Octant server
   process, with its own route table, and shares no port, session, cookie,
