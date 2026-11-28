@@ -652,6 +652,12 @@ service journals its own authority-relevant acts directly:
 - Thread and Project access or posture changes: `code.thread-updated@1`, `work.thread-updated@1`,
   `project.code-access-changed@1`, `project.code-permission-mode-changed@1`,
   `project.work-permission-mode-changed@1`, and `remote-access.security-audit-recorded@1`.
+- Host-owned software updates: `host-update.requested@1` and `host-update.step@1` (recording actor,
+  versions, ring, drain choice, step, and a closed failure reason — never URLs or raw command
+  output; gated by `host.service.update` for local windows and person-paired Full devices only, with
+  intent-only payloads on `/api/host-control/update`, signed release verification, detached
+  out-of-service upgrade execution with offline verified SQLite restore on migrated rollback, and
+  loopback bridge handoff preserving `resolveUpdateInstallReadiness` on desktop hosts).
 
 **Structured denial and transition audit records (`packages/contracts/src/auditEvents.ts`):**
 used by the escape suite and acting-principal contracts for redacted failure-path records:

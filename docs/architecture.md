@@ -22389,30 +22389,67 @@ approval-gated` command that undoes it. The terminal shows no one-time
   check before it is kept. The listing's signature, not the host, is the
   trust root, so this adds no host and no key beyond the updater's.
 - **Fleet updates across connected computers** (maintainer decision,
-  2026-11-28; partly built). From one confirmation in Settings › Updates
-  (**Update all computers…**), a person sees every connected computer's Octant
-  and provider CLI versions — desktop apps and headless servers alike — or a
-  concrete skip reason. Headless is never a skip reason; valid reasons are
-  offline, connecting, incompatible, already updating, no permission,
-  hub-introduced (**Pair this computer to update it.**), a release ring that
-  publishes no headless build, a remote desktop app until remote desktop
-  updates land (**Update on that machine.**), or a host that needs a one-time
-  manual update (**Update this computer once by hand, then it can update from
-  here.**). One drain choice (**Wait up to N minutes for running work** or
-  **Stop now**) governs remote server updates in the run. Execution runs in
-  strict order: outdated provider CLIs first via each host's existing
-  `update-provider-cli` command (never arbitrary shell commands; the desktop
-  paired-computer channel allows `POST /api/providers/commands` with a
-  150-second timeout for person-paired hosts, and a channel timeout re-reads
-  observed provider state rather than re-posting), then remote Octant servers,
+  2026-11-28). From one confirmation in Settings › Updates (**Update all
+  computers…**), a person sees every connected computer's Octant and provider
+  CLI versions — desktop apps and headless servers alike — or a concrete skip
+  reason. Headless is never a skip reason; valid reasons are offline,
+  connecting, incompatible, already updating, no permission, hub-introduced
+  (**Pair this computer to update it.**), a release ring that publishes no
+  headless build, or an older host that refuses the unknown update route
+  (**Update this computer once by hand, then it can update from here.**). One
+  drain choice (**Wait up to N minutes for running work** or **Stop now**)
+  governs remote Octant updates in the run. Execution runs in strict order:
+  outdated provider CLIs first via each host's existing `update-provider-cli`
+  command (never arbitrary shell commands; the desktop paired-computer channel
+  allows `POST /api/providers/commands` with a 150-second timeout for
+  person-paired hosts, and a channel timeout re-reads observed provider state
+  rather than re-posting), then remote Octant updates (over-SSH headless
+  servers through `/api/shield/servers/member-install`, plus standalone
+  headless hosts and remote desktop apps through `/api/host-control/update`),
   then this local desktop app last (with **Later** deferring only this local
-  app). One host's failure never stops another, and a failed remote server
-  holds automatic local relaunch so the person can review and retry the failed
-  host. Servers this hub installed over SSH update through the existing
-  `/api/shield/servers/member-install` path with no new authority. Not built
-  yet: standalone headless remote update via `/api/host-control/update` with
-  offline store backup restore, detached runner, and `host-update.*` journal
-  events, and remote desktop app updates.
+  app). One host's failure never stops another, and a failed or waiting remote
+  update holds automatic local relaunch so the person can review and retry.
+  - **Host-owned update route and authority.** `POST /api/host-control/update`
+    (`prepare`, `start`, `status`) is gated by `host.service.update` beside
+    `host.service.restart`: only a local window or a device the host's own
+    person paired at Full may call it; lower access levels, hub-introduced
+    devices, agent grants, routines, peers, and hubs acting on unowned hosts
+    are refused. Forwarding on the private listener and the desktop
+    paired-computer channel admits `POST /api/host-control/update` for
+    person-paired devices only. The request body carries intent only (request
+    id, expected current version, and drain choice — never a URL, file path,
+    version choice, or command arguments); one update runs per host, idempotent
+    by request id. Every requested update and terminal or waiting step is
+    journaled as `host-update.requested@1` and `host-update.step@1` with actor,
+    versions, ring, drain choice, step, and a closed failure reason (never URLs
+    or raw command output).
+  - **Standalone headless execution, offline restore, and result file.** A
+    standalone headless host downloads and verifies its own signed release
+    through `HeadlessBuilds` (Ed25519 signature over the signed listing and
+    artifact manifest plus SHA-256 digest; unsigned builds, downgrades, and
+    `--self-built` are never accepted), drains via `HostDrain`, and spawns its
+    installed `octant server upgrade` **outside its own service** (`systemd-run
+--user` on Linux; a private one-shot LaunchAgent loaded with `launchctl
+bootstrap` on macOS) so stopping the service never kills the upgrader. A
+    crash or failure before the swap lifts the drain and keeps the old version
+    running. After the swap, failed health polls stop the unhealthy candidate;
+    when the store was migrated, the CLI verifies and atomically restores the
+    pre-upgrade SQLite backup offline under exclusive maintenance ownership
+    before switching `current` back and restarting the previous build. If
+    restore fails, Octant stays stopped and reports recovery-required clearly.
+    The runner writes an atomic result file (`host-update-result.json`) in the
+    host's state directory; whichever version starts next journals the terminal
+    `host-update.step@1` outcome and serves it on `status`. The host data map
+    discloses that a headless host contacts the signed release feed only when
+    explicitly asked to update, with no automatic checks.
+  - **Remote desktop app updates.** On a desktop host, `/api/host-control/update`
+    records the intent-only request and hands it to desktop main over the
+    loopback-only `/api/desktop/host-update` bridge (authenticated with the
+    desktop bridge secret, never forwarded remotely). Desktop main runs the
+    existing signed `appUpdateService` and preserves
+    `resolveUpdateInstallReadiness` so running turns or agents hold relaunch
+    until work completes. If a post-update host's protocol range no longer
+    covers the requesting app, the row reports the incompatibility clearly.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

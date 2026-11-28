@@ -57,7 +57,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 7       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 8       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
-| [Updates and development](#updates-and-development)                                   | 6         | 5       | 1            | 0                   |
+| [Updates and development](#updates-and-development)                                   | 6         | 6       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 12        | 11      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 17      | 4            | 0                   |
 | [Start screen](#start-screen)                                                         | 5         | 5       | 0            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **324**   | **216** | **104**      | **4**               |
+| **All areas**                                                                         | **324**   | **217** | **103**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2750,17 +2750,14 @@ Status: Built. Detail: [Architecture: Security and authority, Update feed signin
 
 From one confirmation in Settings › Updates, the person can update outdated provider CLIs and Octant across connected computers — desktop apps and headless servers alike — with this local app restarting last (maintainer decision, 2026-11-28).
 
-- Only a device the host's own person paired at Full (or the hub that installed a server over SSH) can start updates; lower access levels, hub-introduced devices, agent grants, routines, peers and hubs acting on unowned hosts are refused.
-- A connected headless server is never skipped merely because it has no desktop app. Valid skip reasons are concrete connectivity, permission, ring (a ring that publishes no headless build), remote-desktop-not-yet-built, or manual-update-required facts.
-- Order is strictly: outdated provider CLIs first via existing `update-provider-cli` (no second updater; the desktop paired-computer channel allows `POST /api/providers/commands` with a 150-second timeout, and a channel timeout re-reads the observed version rather than posting again), then remote Octant servers with one shared drain choice (**Wait up to N minutes for running work** or **Stop now**), then this local app last (**Later** defers only this local app). One host's failure never stops another.
-- Servers installed over SSH reuse the existing hub upkeep path (`/api/shield/servers/member-install`) without new authority.
+- Only a local window or a device the host's own person paired at Full (or the hub that installed a server over SSH) can start updates (`host.service.update`); lower access levels, hub-introduced devices, agent grants, routines, peers and hubs acting on unowned hosts are refused.
+- A connected headless server is never skipped merely because it has no desktop app. Valid skip reasons are concrete connectivity, permission, ring (a ring that publishes no headless build), or older-host manual-update-required facts.
+- Order is strictly: outdated provider CLIs first via existing `update-provider-cli` (no second updater; the desktop paired-computer channel allows `POST /api/providers/commands` with a 150-second timeout, and a channel timeout re-reads the observed version rather than posting again), then remote Octant updates (over-SSH servers via `/api/shield/servers/member-install`, standalone headless hosts and remote desktop apps via intent-only `POST /api/host-control/update`) with one shared drain choice (**Wait up to N minutes for running work** or **Stop now**), then this local app last (**Later** defers only this local app). One host's failure never stops another.
+- Standalone headless hosts download and verify their own signed release via `HeadlessBuilds` (never unsigned, never downgrade, never `--self-built`), drain via `HostDrain`, run `octant server upgrade` outside their own service (`systemd-run --user` / one-shot LaunchAgent) with offline verified SQLite backup restore on migrated rollback, and write an atomic state-directory result file journaled at next startup as `host-update.step@1` beside `host-update.requested@1`. The host data map discloses this on-demand check.
+- Remote desktop hosts hand `/api/host-control/update` requests to desktop main over loopback `/api/desktop/host-update` (bridge-secret authenticated), reusing the signed `appUpdateService` and preserving `resolveUpdateInstallReadiness` so running work holds restart until safe.
+- Live maintainer verification on a real Linux user service, a Mac launch agent, and a second desktop waits on a candidate or stable release publishing signed headless builds.
 
-Not built yet:
-
-- Remote updates for standalone headless hosts through `/api/host-control/update` (offline store restore in the CLI, detached upgrade runner outside the service, result file, `host-update.requested@1` and `host-update.step@1` events, and `hostDataMap` disclosure): follows in the next delivery part.
-- Remote desktop app updates (listed as "Update on that machine." until built): follows in a later slice.
-
-Status: Partly built. Since: 2026-11-28. Detail: [Architecture: Security and authority, Fleet updates across connected computers](../architecture.md#security-and-authority).
+Status: Built. Since: 2026-11-28. Detail: [Architecture: Security and authority, Fleet updates across connected computers](../architecture.md#security-and-authority).
 
 ### A guided tour on the first start
 
