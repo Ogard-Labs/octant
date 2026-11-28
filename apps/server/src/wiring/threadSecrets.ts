@@ -120,6 +120,7 @@ export function wireThreadSecrets(deps: ThreadSecretsDependencies) {
   deps.onWindowRevoked((window) => threadSecrets.revokeWindow(String(window)));
   return {
     threadSecrets,
+    rememberedThreadSecrets: remembered,
     threadSecretRoutes: createThreadSecretRoutes(threadSecrets, deps.windowAuthorityStore),
     pairedThreadSecretRoutes: createPairedThreadSecretRoutes(threadSecrets, {
       sessionCurrent: deps.isPairedDeviceSessionCurrent,

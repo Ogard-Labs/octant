@@ -90,14 +90,12 @@ import { PeerDelegationService, type PeerDelegationHost } from "./peerDelegation
 import { createPinnedHubTransport, type HubNetwork, type HubTransport } from "./pinnedHubTransport";
 import { createRosterSigningKeyStore } from "./rosterSigningKey";
 import { deviceLifecycleAt, SpokeLinkService } from "./spokeLinkService";
-import { REMOTE_PUSH_GATEWAY_DEFAULT_URL } from "@octant/contracts/remote-push-notifications";
 import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport";
-import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
+import { createDirectPushDeliveryTransport } from "../push/directPushDeliveryTransport";
+import type { DirectPushSendInput } from "../push/directPushSenders";
+import { PushSenderService } from "../push/pushSenderService";
 import { createHubPushDeliveryTransport } from "./hubPushTransport";
 import { ProvisionService } from "./provisionService";
-import { createDirectPushGateway, type DirectPushGateway } from "./directPushGateway";
-import type { DirectPushSendInput } from "./directPushSenders";
-import { DirectPushService } from "./directPushService";
 import { PushService } from "./pushService";
 import { SignInService } from "./signInService";
 import { SpokeProvisionService, type ProvisionHostPorts } from "./spokeProvisionService";
@@ -249,13 +247,10 @@ export interface HubTestHost {
   readonly push: PushService;
   /** This host's side of push through the hub as a spoke. */
   readonly spokePush: SpokePushService;
-  /** This host's own gateway for direct sending, the service behind its switch, and what it sent to the platforms. */
-  readonly directPush: DirectPushService;
-  readonly directGateway: DirectPushGateway;
+  /** This host's own direct push sender service and what it sent to Apple and Google. */
+  readonly directPush: PushSenderService;
   readonly directSent: DirectPushSendInput[];
-  /** This host's own Notifications setting: a test turns it on and names a gateway. */
-  readonly pushSetting: { enabled: boolean; gatewayUrl: string };
-  /** The transport this host's notifications are sent through: the hub's way where the grant ticks Push, else its own. */
+  /** The transport this host's notifications are sent through: the hub's way where the grant ticks Push, else its own direct sender. */
   readonly pushDelivery: PushDeliveryTransport;
   /** The hub side of provisioning: offers, delivery, and the mirror it serves. */
   readonly provision: ProvisionService;
@@ -652,42 +647,37 @@ export async function startHubTestHost(input: {
       newRoutineId: () => `routine${String((routineSerial += 1)).padStart(16, "0")}`,
     });
   let spokeWake = makeSpokeWake();
-  // This host's own Notifications setting, which a test edits: off and the default gateway until it does.
-  const pushSetting = { enabled: false, gatewayUrl: REMOTE_PUSH_GATEWAY_DEFAULT_URL };
-  // Direct sending with an in-memory credential store and a sender that records what reached "Apple and Google".
+  // Direct sending with an in-memory credential store and a sender that records what reached Apple and Google.
   const directCredentials = new Map<string, string>();
-  const directPush = new DirectPushService({
-    state,
+  const directPush = new PushSenderService({
+    dataDirectory: directory,
     credentials: {
       has: async (ref) => directCredentials.has(ref),
       resolve: async (ref) => directCredentials.get(ref) ?? "",
       set: async (ref, value) => void directCredentials.set(ref, value),
       delete: async (ref) => void directCredentials.delete(ref),
     },
-    record: (change) => records.push(change),
+    journal,
+    uuid: randomUUID,
+    clock: isoNow,
+    hostActorId: randomUUID(),
   });
   const directSent: DirectPushSendInput[] = [];
-  const directGateway = createDirectPushGateway({
-    enabled: () => directPush.enabled(),
-    sealingKey: () => directPush.sealingKey(),
-    holdsCredential: async () => true,
-    sender: {
-      send: async (sendInput) => {
-        directSent.push(sendInput);
-        return "accepted";
-      },
+  const directSender = {
+    send: async (sendInput: DirectPushSendInput) => {
+      directSent.push(sendInput);
+      return "accepted" as const;
     },
-    now: Date.now,
-  });
+  };
   const push = new PushService({
     state,
     identity: () => identity,
     transport,
-    gateway: () => pushSetting,
     direct: {
       enabled: () => directPush.enabled(),
-      deliver: (body, headers) => directGateway.deliver(body, headers),
+      sender: directSender,
     },
+    readHeldSecrets: async () => ({ status: "ready", values: [] }),
     record: (change) => records.push(change),
     now: wakeNow,
     ...(input.pushMaxPerMinute === undefined ? {} : { maxPerMinute: input.pushMaxPerMinute }),
@@ -704,12 +694,10 @@ export async function startHubTestHost(input: {
     ...(input.hubLinkTimeoutMs === undefined ? {} : { linkTimeoutMs: input.hubLinkTimeoutMs }),
   });
   const pushDelivery = createHubPushDeliveryTransport({
-    direct: createGatewayPushDeliveryTransport({
-      settings: () => pushSetting,
-      signing: () => identity.signing,
+    direct: createDirectPushDeliveryTransport({
+      pushSender: directPush,
+      sender: directSender,
     }),
-    settings: () => pushSetting,
-    signing: () => identity.signing,
     handoff: () => ({
       granted: () => spokePush.granted(),
       hand: (delivery) => spokePush.hand(delivery),
@@ -1141,6 +1129,7 @@ export async function startHubTestHost(input: {
       signing: identity.signing,
       webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
       hubLink,
+      pushStatus: () => directPush.pushStatusForPhone(spokePush.granted()),
       relayAddressFor: (deviceId) => spokeRelay.relayAddressFor(deviceId),
       onDeviceRemoved: (deviceId) => {
         pairedDeviceAlerts.dropDevice(deviceId);
@@ -1253,9 +1242,7 @@ export async function startHubTestHost(input: {
     push,
     spokePush,
     directPush,
-    directGateway,
     directSent,
-    pushSetting,
     pushDelivery,
     provision,
     spokeProvision,

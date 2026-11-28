@@ -318,12 +318,11 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("general")?.slice(-6)).toEqual([
+    expect(ids("general")?.slice(-5)).toEqual([
       "user-profile",
       "your-instructions",
       "orchestration-instructions",
       "host-phone-notifications",
-      "host-push-gateway",
       "host-automation-notifications",
     ]);
     expect(section("permissions")?.label).toBe("Permissions");
@@ -751,6 +750,10 @@ const UNLISTED_SETTING_ROWS = new Set([
   "sync-join-read",
   "sync-leave-replica",
   "sync-restore",
+  // Sub-controls inside Phone notifications (indexed under host-phone-notifications).
+  "host-push-development",
+  "host-push-apple",
+  "host-push-google",
 ]);
 
 /**

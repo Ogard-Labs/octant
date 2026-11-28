@@ -87,7 +87,7 @@ export const HUB_LINK_ROUTES = {
   wakeNudge: "/api/hub/wake-nudge",
   /** The hub hands a standby the wake times it holds. */
   wakeCopy: "/api/hub/wake-copy",
-  /** A spoke whose hub grant ticks Push hands the hub, or a standing-in standby, a sealed delivery request to forward. */
+  /** A spoke whose hub grant ticks Push hands the hub, or a standing-in standby, a checked v2 delivery request to forward. */
   push: "/api/hub/push",
   /** The hub, or a standing-in standby, asks a spoke whether its grant ticks Push before it forwards. */
   pushGrant: "/api/hub/push-grant",

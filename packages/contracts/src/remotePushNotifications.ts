@@ -10,8 +10,15 @@ const boundedNonEmptyText = (maximumBytes: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
+const nonNegativeInt = Schema.Int.pipe(Schema.greaterThanOrEqualTo(0));
+const unpaddedBase64Url = (minimum: number, maximum: number) =>
+  Schema.String.pipe(
+    Schema.pattern(/^[A-Za-z0-9_-]+$/),
+    Schema.minLength(minimum),
+    Schema.maxLength(maximum),
+  );
 
-/** Opaque provider token; never logged by Octant hosts. */
+/** Opaque platform push token (APNs hex or FCM registration token); never logged by Octant hosts. */
 export const RemotePushToken = boundedNonEmptyText(4_096);
 export type RemotePushToken = typeof RemotePushToken.Type;
 
@@ -19,21 +26,9 @@ export const RemotePushPlatform = Schema.Literal("ios", "android");
 export type RemotePushPlatform = typeof RemotePushPlatform.Type;
 
 /**
- * The phone's notification public key for one host: a raw X25519 key in
- * unpadded base64url. The phone keeps the private half in its secure storage;
- * the host seals each notification's content to this key, so only that phone
- * can read it. Kept beside the token in the owner-only registration file, never
- * journaled or logged.
- */
-export const RemotePushNotificationPublicKey = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{43}$/),
-);
-export type RemotePushNotificationPublicKey = typeof RemotePushNotificationPublicKey.Type;
-
-/**
  * What one phone wants to hear about, per kind, and whether its lock screen may
- * show thread titles. A device sets only its own; titles are off unless the
- * person turns them on for that phone.
+ * show thread names (thread titles, project names, and automation names). A
+ * device sets only its own; names stay off unless the person turns them on.
  */
 export const RemotePushPreferencesV1 = Schema.Struct({
   approvalNeeded: Schema.Boolean,
@@ -50,13 +45,19 @@ export const RemotePushPreferencesV1 = Schema.Struct({
 }).annotations(strict);
 export type RemotePushPreferencesV1 = typeof RemotePushPreferencesV1.Type;
 
-export const RemotePushTokenRegistrationV1 = Schema.Struct({
+/**
+ * Direct-push token registration (v2). The phone sends its platform token
+ * directly over its authenticated session; no gateway capability or notification
+ * key is involved. An older phone sending v1 (without `version: 2`, or with
+ * `notificationPublicKey`) is refused 400 by the strict schema.
+ */
+export const RemotePushTokenRegistrationV2 = Schema.Struct({
+  version: Schema.Literal(2),
   platform: RemotePushPlatform,
   token: RemotePushToken,
-  notificationPublicKey: RemotePushNotificationPublicKey,
   preferences: RemotePushPreferencesV1,
 }).annotations(strict);
-export type RemotePushTokenRegistrationV1 = typeof RemotePushTokenRegistrationV1.Type;
+export type RemotePushTokenRegistrationV2 = typeof RemotePushTokenRegistrationV2.Type;
 
 export const RemotePushTokenClearV1 = Schema.Struct({}).annotations(strict);
 export type RemotePushTokenClearV1 = typeof RemotePushTokenClearV1.Type;
@@ -66,6 +67,37 @@ export const RemotePushTokenReceiptV1 = Schema.Struct({
   occurredAt: UtcTimestamp,
 }).annotations(strict);
 export type RemotePushTokenReceiptV1 = typeof RemotePushTokenReceiptV1.Type;
+
+/** Why a host cannot deliver push notifications right now. */
+export const RemotePushUnavailableReason = Schema.Literal("off", "no-credentials");
+export type RemotePushUnavailableReason = typeof RemotePushUnavailableReason.Type;
+
+/**
+ * Honest push-delivery availability answered by `GET /api/remote/auth/push-token`.
+ * A host without credentials or with direct send switched off reports unavailable
+ * and never falls back to a gateway or third-party push service.
+ */
+export const RemotePushStatusV1 = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("available"),
+    /**
+     * When the host sends directly, which platforms hold a stored credential.
+     * Absent when a spoke delegates delivery to its hub (whose credentials live
+     * on the hub).
+     */
+    platforms: Schema.optional(
+      Schema.Struct({
+        ios: Schema.Boolean,
+        android: Schema.Boolean,
+      }).annotations(strict),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: RemotePushUnavailableReason,
+  }).annotations(strict),
+);
+export type RemotePushStatusV1 = typeof RemotePushStatusV1.Type;
 
 /**
  * The journal records that a device's push registration was added, changed,
@@ -90,7 +122,8 @@ export type RemotePushRegistrationRecordedV1 = typeof RemotePushRegistrationReco
  * Why a registration went: the phone cleared it, its session signed out, the
  * device lost its standing (revoked by the host or by itself, abandoned
  * mid-pairing, expired, or found without an active device record at startup),
- * or the delivery path refused the destination as gone.
+ * or the delivery path refused the destination as gone (including legacy v1
+ * registrations cleared on upgrade).
  */
 export const RemotePushRegistrationClearReason = Schema.Literal(
   "device-cleared",
@@ -123,118 +156,153 @@ export type RemotePushNotificationKind = typeof RemotePushNotificationKind.Type;
 export const RemotePushNotificationMode = Schema.Literal("chat", "work", "code");
 export type RemotePushNotificationMode = typeof RemotePushNotificationMode.Type;
 
-/**
- * Redacted lock-screen payload. Hosts must build this via domain policy —
- * never paste prompts, diffs, paths, or secrets into title/body.
- */
-export const RemotePushNotificationPayloadV1 = Schema.Struct({
-  kind: RemotePushNotificationKind,
-  hostId: StableHostId,
-  threadId: boundedNonEmptyText(64),
-  mode: Schema.optional(RemotePushNotificationMode),
-  title: boundedNonEmptyText(80),
-  body: boundedText(120),
-}).annotations(strict);
-export type RemotePushNotificationPayloadV1 = typeof RemotePushNotificationPayloadV1.Type;
-
-/**
- * A thread move a window on this host holds until an owner phone confirms it.
- * It is its own kind, outside the thread kinds a phone can turn off one by one
- * and the Automation kinds that share them, because it names no thread: the
- * phone opens its Moves waiting for you list, which reads the threads itself.
- */
 export const RemotePushMoveWaitingKind = Schema.Literal("move-waiting");
 export type RemotePushMoveWaitingKind = typeof RemotePushMoveWaitingKind.Type;
 
-/**
- * Redacted lock-screen payload for a held move: that a move waits and the
- * destination's name, never a thread, a title, or a Project.
- */
-export const RemotePushMoveWaitingPayloadV1 = Schema.Struct({
-  kind: RemotePushMoveWaitingKind,
-  hostId: StableHostId,
-  title: boundedNonEmptyText(80),
-  body: boundedText(120),
-}).annotations(strict);
-export type RemotePushMoveWaitingPayloadV1 = typeof RemotePushMoveWaitingPayloadV1.Type;
-
-/**
- * A new device joined the hub or paired with a host. Its own kind, outside the
- * thread kinds, because it names no thread: the phone opens its list of new
- * devices, which reads the host's alerts itself.
- */
 export const RemotePushDeviceJoinedKind = Schema.Literal("device-joined");
 export type RemotePushDeviceJoinedKind = typeof RemotePushDeviceJoinedKind.Type;
 
-/**
- * The sealed text for a new device: its name and private address, which only
- * the phone can read. Never a thread, a title, or a key.
- */
-export const RemotePushDeviceJoinedPayloadV1 = Schema.Struct({
-  kind: RemotePushDeviceJoinedKind,
-  hostId: StableHostId,
-  /**
-   * The alert this notice is for. Two guests with the same name and no address
-   * read alike, so a phone tells their notices apart by the alert, not the text.
-   */
-  alertId: Schema.UUID,
-  title: boundedNonEmptyText(80),
-  body: boundedText(120),
-}).annotations(strict);
-export type RemotePushDeviceJoinedPayloadV1 = typeof RemotePushDeviceJoinedPayloadV1.Type;
+export const RemotePushAlertKind = Schema.Literal(
+  "completion",
+  "waiting",
+  "failure",
+  "approval-needed",
+  "move-waiting",
+  "device-joined",
+);
+export type RemotePushAlertKind = typeof RemotePushAlertKind.Type;
 
-/** The most content a notification seals for the phone, before encryption. */
-export const REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES = 2_048;
+export const RemotePushUrgency = Schema.Literal("high", "normal");
+export type RemotePushUrgency = typeof RemotePushUrgency.Type;
 
 /**
- * The only alert the delivery path, Apple or Google, and the operating system
- * see. The phone replaces it with the sealed content once it opens it.
+ * Generic fallback alert sent when the host-side secret check cannot run
+ * (for example, when the credential store is locked or unreadable), and shown
+ * by the phone when an incoming payload fails validation or belongs to a
+ * removed computer.
  */
 export const REMOTE_PUSH_PLACEHOLDER_ALERT = {
   title: "Octant",
   body: "A paired computer has an update",
 } as const;
 
-const unpaddedBase64Url = (minimum: number, maximum: number) =>
-  Schema.String.pipe(
-    Schema.pattern(/^[A-Za-z0-9_-]+$/),
-    Schema.minLength(minimum),
-    Schema.maxLength(maximum),
-  );
-
 /**
- * HPKE output for one phone: the sender's encapsulated X25519 key and the
- * AES-256-GCM ciphertext (the content padded to its bound, plus the 16-byte
- * tag), both unpadded base64url.
+ * Direct-push alert payload (v2). Every free-text field is built and checked
+ * against credential patterns and held host secrets before leaving the host.
+ * Carries only fixed status words, checked short labels, routing IDs, and
+ * transport metadata: never transcript text, prompts, tool inputs, paths,
+ * diffs, error messages, alertIds, or automation/run IDs.
  */
-export const RemotePushSealedContentV1 = Schema.Struct({
-  encapsulatedKey: unpaddedBase64Url(43, 43),
-  ciphertext: unpaddedBase64Url(
-    22,
-    Math.ceil(((REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES + 16) * 4) / 3),
-  ),
-}).annotations(strict);
-export type RemotePushSealedContentV1 = typeof RemotePushSealedContentV1.Type;
-
-/**
- * What leaves the host for the delivery path. It names no host, thread, title,
- * or kind: a fixed placeholder, an opaque collapse id keyed per destination and
- * thread, an urgency, and the sealed content.
- */
-export const RemotePushEnvelopeV1 = Schema.Struct({
-  alert: Schema.Struct({
-    title: Schema.Literal(REMOTE_PUSH_PLACEHOLDER_ALERT.title),
-    body: Schema.Literal(REMOTE_PUSH_PLACEHOLDER_ALERT.body),
-  }).annotations(strict),
+export const PushAlertV2 = Schema.Struct({
+  version: Schema.Literal(2),
+  kind: RemotePushAlertKind,
+  hostId: StableHostId,
+  threadId: Schema.optional(boundedNonEmptyText(64)),
+  mode: Schema.optional(RemotePushNotificationMode),
+  title: boundedNonEmptyText(80),
+  body: boundedText(120),
   collapseId: unpaddedBase64Url(22, 22),
-  urgency: Schema.Literal("high", "normal"),
-  sealed: RemotePushSealedContentV1,
+  urgency: RemotePushUrgency,
+  sequence: nonNegativeInt,
+  occurredAt: UtcTimestamp,
 }).annotations(strict);
-export type RemotePushEnvelopeV1 = typeof RemotePushEnvelopeV1.Type;
+export type PushAlertV2 = typeof PushAlertV2.Type;
+
+/** Fixed status word for one row of live agent status. */
+export const LiveStatusRowState = Schema.Literal(
+  "needs-input",
+  "approval-needed",
+  "failed",
+  "working",
+  "done",
+);
+export type LiveStatusRowState = typeof LiveStatusRowState.Type;
+
+export const LiveStatusRowV1 = Schema.Struct({
+  threadId: boundedNonEmptyText(64),
+  mode: RemotePushNotificationMode,
+  status: LiveStatusRowState,
+  title: Schema.optional(boundedNonEmptyText(80)),
+  projectName: Schema.optional(boundedNonEmptyText(60)),
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type LiveStatusRowV1 = typeof LiveStatusRowV1.Type;
+
+export const LiveStatusCountsV1 = Schema.Struct({
+  needsYou: nonNegativeInt,
+  failed: nonNegativeInt,
+  working: nonNegativeInt,
+  done: nonNegativeInt,
+}).annotations(strict);
+export type LiveStatusCountsV1 = typeof LiveStatusCountsV1.Type;
+
+export const LiveStatusEventV1 = Schema.Literal("start", "update", "end");
+export type LiveStatusEventV1 = typeof LiveStatusEventV1.Type;
+
+/**
+ * Live Activity / Android Live Update payload (v1): at most five rows ordered
+ * needs-you, failed, working, done, plus aggregate counts and staleness time.
+ * Every free-text field passes the host secret check; thread titles and project
+ * names appear only when "Show thread names" is enabled.
+ */
+export const LiveStatusV1 = Schema.Struct({
+  version: Schema.Literal(1),
+  hostId: StableHostId,
+  computerName: boundedNonEmptyText(80),
+  event: LiveStatusEventV1,
+  counts: LiveStatusCountsV1,
+  rows: Schema.Array(LiveStatusRowV1).pipe(Schema.maxItems(5)),
+  sequence: nonNegativeInt,
+  occurredAt: UtcTimestamp,
+  staleAt: UtcTimestamp,
+  urgency: RemotePushUrgency,
+}).annotations(strict);
+export type LiveStatusV1 = typeof LiveStatusV1.Type;
+
+/**
+ * The one wire union every push transport carries: either an alert notification
+ * or a live-status update. Host code obtains a branded instance only from the
+ * domain push builder after the host-side secret check has run.
+ */
+export const PushMessageV2 = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("alert"),
+    alert: PushAlertV2,
+  }).annotations(strict),
+  Schema.Struct({
+    type: Schema.Literal("live-status"),
+    liveStatus: LiveStatusV1,
+  }).annotations(strict),
+);
+export type PushMessageV2 = typeof PushMessageV2.Type;
+
+/**
+ * Journal event recorded whenever a person changes this host's direct push
+ * sender switch, Apple environment, or stored platform credentials. Never
+ * records any credential value.
+ */
+export const HOST_PUSH_SENDER_EVENT_NAMES = {
+  changed: "host.push-sender-changed@1",
+} as const;
+
+export const HostPushSenderChangeKind = Schema.Literal(
+  "switch-changed",
+  "environment-changed",
+  "credential-changed",
+  "credential-removed",
+);
+export type HostPushSenderChangeKind = typeof HostPushSenderChangeKind.Type;
+
+export const HostPushSenderChangedV1 = Schema.Struct({
+  change: HostPushSenderChangeKind,
+  platform: Schema.optional(RemotePushPlatform),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type HostPushSenderChangedV1 = typeof HostPushSenderChangedV1.Type;
 
 /**
  * One receipt per notification to one device. The journal holds what was
- * tried and how it ended, never the notification text, token, or key.
+ * tried and how it ended, never the notification text or token.
  */
 export const REMOTE_PUSH_DELIVERY_EVENT_NAMES = {
   recorded: "remote.push-delivery-recorded@1",
@@ -299,175 +367,30 @@ export const RemotePushDeviceJoinedDeliveryRecordedV1 = Schema.Struct({
 export type RemotePushDeviceJoinedDeliveryRecordedV1 =
   typeof RemotePushDeviceJoinedDeliveryRecordedV1.Type;
 
-/**
- * The push gateway: the one sender that holds the platform push credential.
- * The phone trades its platform token for a delivery capability there, and
- * the host sends sealed envelopes with that capability, signing each request
- * with its listener identity key. The gateway sees neither content nor host
- * routes; the host's Notifications setting names it and is off by default.
- */
-export const REMOTE_PUSH_GATEWAY_DEFAULT_URL = "https://push.octant.sh";
-
-/** An https gateway address, or http on this computer's loopback address for a local gateway. */
-export const RemotePushGatewayUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
-    (value) => {
-      try {
-        const parsed = new URL(value);
-        if (parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") return false;
-        if (parsed.search !== "") return false;
-        if (parsed.protocol === "https:") return true;
-        return (
-          parsed.protocol === "http:" &&
-          (parsed.hostname === "127.0.0.1" ||
-            parsed.hostname === "localhost" ||
-            parsed.hostname === "[::1]")
-        );
-      } catch {
-        return false;
-      }
-    },
-    {
-      message: () =>
-        "A push gateway address is https, or http on this computer's loopback address.",
-    },
-  ),
-);
-export type RemotePushGatewayUrl = typeof RemotePushGatewayUrl.Type;
-
-/** Settings › General › Phone notifications. Off until the person turns it on. */
-export const RemotePushGatewaySettingsV1 = Schema.Struct({
-  kind: Schema.Literal("remote-push-gateway-settings"),
-  enabled: Schema.Boolean,
-  gatewayUrl: RemotePushGatewayUrl,
-  /** Bumped on every change, so a save from a stale read is refused. */
-  version: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-}).annotations(strict);
-export type RemotePushGatewaySettingsV1 = typeof RemotePushGatewaySettingsV1.Type;
-
-export const SetRemotePushGatewaySettingsV1 = Schema.Struct({
-  enabled: Schema.Boolean,
-  gatewayUrl: RemotePushGatewayUrl,
-  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-}).annotations(strict);
-export type SetRemotePushGatewaySettingsV1 = typeof SetRemotePushGatewaySettingsV1.Type;
-
-/** SHA-256 of the host listener key's SPKI DER, lowercase hex: what the phone saw at pairing. */
-export const RemotePushHostKeyFingerprint = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
-export type RemotePushHostKeyFingerprint = typeof RemotePushHostKeyFingerprint.Type;
-
-/** Phone to gateway: trade a platform token for a capability bound to one host's key. */
-export const RemotePushCapabilityRequestV1 = Schema.Struct({
-  platform: RemotePushPlatform,
-  token: RemotePushToken,
-  hostKeyFingerprint: RemotePushHostKeyFingerprint,
-}).annotations(strict);
-export type RemotePushCapabilityRequestV1 = typeof RemotePushCapabilityRequestV1.Type;
-
-/**
- * The capability is opaque to the phone and the host: `v1.<key id>.<sealed>`,
- * sealed under a key only the issuing gateway holds. The phone registers it
- * with the host in place of the platform token.
- */
-export const RemotePushCapability = Schema.String.pipe(
-  Schema.pattern(/^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{40,4000}$/),
-);
-export type RemotePushCapability = typeof RemotePushCapability.Type;
-
-export const RemotePushCapabilityResponseV1 = Schema.Struct({
-  capability: RemotePushCapability,
-}).annotations(strict);
-export type RemotePushCapabilityResponseV1 = typeof RemotePushCapabilityResponseV1.Type;
-
-/** Host to gateway: one sealed envelope for the destination the capability names. */
-export const RemotePushDeliveryRequestV1 = Schema.Struct({
-  capability: RemotePushCapability,
-  envelope: RemotePushEnvelopeV1,
-}).annotations(strict);
-export type RemotePushDeliveryRequestV1 = typeof RemotePushDeliveryRequestV1.Type;
-
-/**
- * The headers that sign a delivery request. The signature is ECDSA P-256 with
- * SHA-256 (IEEE P1363, unpadded base64url) over the signing text the domain's
- * push notification policy builds (`remotePushDeliverySigningText`), made
- * with the host's listener identity key; the key header carries that key's
- * SPKI DER so the gateway can check it against the capability's fingerprint.
- */
-export const REMOTE_PUSH_DELIVERY_HEADERS = {
-  hostKey: "x-octant-host-key",
-  timestamp: "x-octant-timestamp",
-  signature: "x-octant-signature",
-} as const;
-
-/** How far a signed request's timestamp may stray from the gateway's clock. */
-export const REMOTE_PUSH_DELIVERY_SKEW_MS = 300_000;
-
-/** Why a gateway refused a request; never a platform's own message. */
-export const RemotePushGatewayRefusalCode = Schema.Literal(
-  "malformed",
-  "capability-not-issued-here",
-  "host-key-mismatch",
-  "signature-invalid",
-  "rate-limited",
-  "destination-gone",
-  "platform-failed",
-  "unavailable",
-);
-export type RemotePushGatewayRefusalCode = typeof RemotePushGatewayRefusalCode.Type;
-
-export const RemotePushGatewayRefusalV1 = Schema.Struct({
-  code: RemotePushGatewayRefusalCode,
-}).annotations(strict);
-export type RemotePushGatewayRefusalV1 = typeof RemotePushGatewayRefusalV1.Type;
-
-export const decodeRemotePushTokenRegistrationV1 = Schema.decodeUnknownSync(
-  RemotePushTokenRegistrationV1,
+export const decodeRemotePushTokenRegistrationV2 = Schema.decodeUnknownSync(
+  RemotePushTokenRegistrationV2,
 );
 export const decodeRemotePushTokenClearV1 = Schema.decodeUnknownSync(RemotePushTokenClearV1);
 export const decodeRemotePushTokenReceiptV1 = Schema.decodeUnknownSync(RemotePushTokenReceiptV1);
+export const decodeRemotePushStatusV1 = Schema.decodeUnknownSync(RemotePushStatusV1);
 export const decodeRemotePushRegistrationRecordedV1 = Schema.decodeUnknownSync(
   RemotePushRegistrationRecordedV1,
 );
 export const decodeRemotePushRegistrationClearedV1 = Schema.decodeUnknownSync(
   RemotePushRegistrationClearedV1,
 );
-export const decodeRemotePushNotificationPayloadV1 = Schema.decodeUnknownSync(
-  RemotePushNotificationPayloadV1,
-);
-export const decodeRemotePushDeviceJoinedPayloadV1 = Schema.decodeUnknownSync(
-  RemotePushDeviceJoinedPayloadV1,
-);
+export const decodePushAlertV2 = Schema.decodeUnknownSync(PushAlertV2);
+export const decodeLiveStatusV1 = Schema.decodeUnknownSync(LiveStatusV1);
+export const decodePushMessageV2 = Schema.decodeUnknownSync(PushMessageV2);
+export const decodeHostPushSenderChangedV1 = Schema.decodeUnknownSync(HostPushSenderChangedV1);
 export const decodeRemotePushDeviceJoinedDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushDeviceJoinedDeliveryRecordedV1,
 );
-export const decodeRemotePushMoveWaitingPayloadV1 = Schema.decodeUnknownSync(
-  RemotePushMoveWaitingPayloadV1,
-);
-export const decodeRemotePushEnvelopeV1 = Schema.decodeUnknownSync(RemotePushEnvelopeV1);
 export const decodeRemotePushMoveWaitingDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushMoveWaitingDeliveryRecordedV1,
 );
 export const decodeRemotePushDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushDeliveryRecordedV1,
-);
-export const decodeRemotePushGatewaySettingsV1 = Schema.decodeUnknownSync(
-  RemotePushGatewaySettingsV1,
-);
-export const decodeSetRemotePushGatewaySettingsV1 = Schema.decodeUnknownSync(
-  SetRemotePushGatewaySettingsV1,
-);
-export const decodeRemotePushCapabilityRequestV1 = Schema.decodeUnknownSync(
-  RemotePushCapabilityRequestV1,
-);
-export const decodeRemotePushCapabilityResponseV1 = Schema.decodeUnknownSync(
-  RemotePushCapabilityResponseV1,
-);
-export const decodeRemotePushDeliveryRequestV1 = Schema.decodeUnknownSync(
-  RemotePushDeliveryRequestV1,
-);
-export const decodeRemotePushGatewayRefusalV1 = Schema.decodeUnknownSync(
-  RemotePushGatewayRefusalV1,
 );
 
 // Re-export DeviceId usage for registration stores (host-scoped).

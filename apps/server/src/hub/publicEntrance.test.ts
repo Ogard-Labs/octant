@@ -4,7 +4,7 @@ import { get as httpsGet } from "node:https";
 import { connect } from "node:net";
 import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { DIRECT_PUSH_GATEWAY_ROUTES } from "./directPushRoutes";
+import { PUSH_SENDER_ROUTES } from "../push/pushSenderRoutes";
 import { HUB_ADMINISTRATION_ROUTES } from "./hubAdministrationRoutes";
 import { HUB_LINK_ROUTES } from "./hubLinkRoutes";
 import { HUB_OWNER_ROUTES } from "./hubOwnerRoutes";
@@ -69,7 +69,7 @@ const PRIVATE_PATHS: ReadonlyArray<string> = [
   ...Object.values(HUB_OWNER_ROUTES),
   ...Object.values(PEER_DELEGATION_ROUTES),
   ...Object.values(THREAD_MOVE_ROUTES),
-  ...Object.values(DIRECT_PUSH_GATEWAY_ROUTES),
+  ...Object.values(PUSH_SENDER_ROUTES),
 ].map((path) => path.replace(/:[A-Za-z]+/g, "x"));
 
 describe("the route table", () => {

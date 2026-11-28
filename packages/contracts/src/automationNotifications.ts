@@ -1,64 +1,25 @@
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
-import { HostId } from "./host";
-import {
-  AutomationId,
-  AutomationOpaqueReference,
-  AutomationRunId,
-  AutomationThreadId,
-} from "./automation";
+import { AutomationId, AutomationOpaqueReference, AutomationRunId } from "./automation";
 import { RemotePushNotificationKind } from "./remotePushNotifications";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
-const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
 const boundedNonEmptyText = (maximumBytes: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
- * Automation push kinds reuse the Mobile C redacted kind vocabulary. Approval
- * maps to `approval-needed`; waiting / failure / completion keep the same
- * lock-screen labels as ordinary-thread awareness.
+ * Automation push kinds reuse the Mobile C kind vocabulary. Approval maps to
+ * `approval-needed`; waiting / failure / completion keep the same lock-screen
+ * labels as ordinary-thread awareness.
  */
 export const AutomationNotificationKind = RemotePushNotificationKind;
 export type AutomationNotificationKind = typeof AutomationNotificationKind.Type;
 
 export const AutomationNotificationMode = Schema.Literal("work", "code");
 export type AutomationNotificationMode = typeof AutomationNotificationMode.Type;
-
-/**
- * Deep-link target for Automation Center. Pre-dispatch failures stay
- * actionable without inventing a thread id; post-creation states may also
- * carry an ordinary thread id on the payload.
- */
-export const AutomationNotificationNavigationTarget = Schema.Struct({
-  surface: Schema.Literal("automation-center"),
-  automationId: AutomationId,
-  runId: AutomationRunId,
-}).annotations(strict);
-export type AutomationNotificationNavigationTarget =
-  typeof AutomationNotificationNavigationTarget.Type;
-
-/**
- * Redacted Automation lock-screen payload. Hosts must build this via domain
- * policy — never paste prompts, diffs, paths, credentials, provider payloads,
- * or authority receipts into title/body.
- */
-export const AutomationNotificationPayloadV1 = Schema.Struct({
-  kind: AutomationNotificationKind,
-  hostId: HostId,
-  automationId: AutomationId,
-  automationRunId: AutomationRunId,
-  mode: Schema.optional(AutomationNotificationMode),
-  threadId: Schema.optional(AutomationThreadId),
-  title: boundedNonEmptyText(80),
-  body: boundedText(120),
-  navigation: AutomationNotificationNavigationTarget,
-}).annotations(strict);
-export type AutomationNotificationPayloadV1 = typeof AutomationNotificationPayloadV1.Type;
 
 /** Host-scoped opt-in preferences. Default is fully disabled (privacy-preserving). */
 export const AutomationNotificationPreferences = Schema.Struct({
@@ -176,9 +137,6 @@ export const AUTOMATION_NOTIFICATION_EVENT_NAMES = [
 ] as const;
 export type AutomationNotificationEventName = (typeof AUTOMATION_NOTIFICATION_EVENT_NAMES)[number];
 
-export const decodeAutomationNotificationPayloadV1 = Schema.decodeUnknownSync(
-  AutomationNotificationPayloadV1,
-);
 export const decodeAutomationNotificationPreferences = Schema.decodeUnknownSync(
   AutomationNotificationPreferences,
 );

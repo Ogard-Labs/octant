@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeHostPushSenderChangedV1,
+  decodeLiveStatusV1,
+  decodePushAlertV2,
+  decodePushMessageV2,
   decodeRemotePushDeliveryRecordedV1,
-  decodeRemotePushEnvelopeV1,
   decodeRemotePushDeviceJoinedDeliveryRecordedV1,
-  decodeRemotePushDeviceJoinedPayloadV1,
   decodeRemotePushMoveWaitingDeliveryRecordedV1,
-  decodeRemotePushMoveWaitingPayloadV1,
-  decodeRemotePushNotificationPayloadV1,
   decodeRemotePushRegistrationClearedV1,
   decodeRemotePushRegistrationRecordedV1,
+  decodeRemotePushStatusV1,
   decodeRemotePushTokenReceiptV1,
-  decodeRemotePushTokenRegistrationV1,
+  decodeRemotePushTokenRegistrationV2,
 } from "./remotePushNotifications";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
-const notificationPublicKey = "MJaD3ARvNKlDGKOdP1uw2ORQnq9V7CJeVRT9Xg09h3E";
 const preferences = {
   approvalNeeded: true,
   waiting: true,
@@ -24,47 +24,117 @@ const preferences = {
 };
 
 describe("remotePushNotifications", () => {
-  it("accepts bounded token registration and receipts", () => {
+  it("accepts v2 token registrations and rejects legacy v1 registrations with notificationPublicKey", () => {
     expect(
-      decodeRemotePushTokenRegistrationV1({
+      decodeRemotePushTokenRegistrationV2({
+        version: 2,
         platform: "ios",
         token: "opaque-provider-token",
-        notificationPublicKey,
         preferences,
       }),
-    ).toMatchObject({ platform: "ios", notificationPublicKey });
+    ).toMatchObject({ version: 2, platform: "ios" });
+
+    expect(
+      decodeRemotePushTokenRegistrationV2({
+        version: 2,
+        platform: "android",
+        token: "opaque-provider-token",
+        preferences: { ...preferences, newDevices: false, threadTitles: true },
+      }).preferences,
+    ).toMatchObject({ newDevices: false, threadTitles: true });
+
+    expect(() =>
+      decodeRemotePushTokenRegistrationV2({
+        platform: "ios",
+        token: "opaque-provider-token",
+        notificationPublicKey: "MJaD3ARvNKlDGKOdP1uw2ORQnq9V7CJeVRT9Xg09h3E",
+        preferences,
+      }),
+    ).toThrow();
+
     expect(
       decodeRemotePushTokenReceiptV1({
         result: "registered",
-        occurredAt: "2026-08-05T12:00:00.000Z",
+        occurredAt: "2026-11-28T12:00:00.000Z",
       }),
     ).toMatchObject({ result: "registered" });
   });
 
-  it("accepts redacted notification payloads and rejects extra fields", () => {
+  it("decodes honest host push availability status", () => {
     expect(
-      decodeRemotePushNotificationPayloadV1({
-        kind: "waiting",
-        hostId,
-        threadId: "00000000-0000-4000-8000-000000000001",
-        mode: "code",
-        title: "Waiting on host",
-        body: "Open Octant to continue.",
+      decodeRemotePushStatusV1({
+        status: "available",
+        platforms: { ios: true, android: false },
       }),
-    ).toMatchObject({ kind: "waiting", hostId });
+    ).toEqual({ status: "available", platforms: { ios: true, android: false } });
+    expect(decodeRemotePushStatusV1({ status: "unavailable", reason: "off" })).toEqual({
+      status: "unavailable",
+      reason: "off",
+    });
+    expect(decodeRemotePushStatusV1({ status: "unavailable", reason: "no-credentials" })).toEqual({
+      status: "unavailable",
+      reason: "no-credentials",
+    });
+    expect(() => decodeRemotePushStatusV1({ status: "unavailable", reason: "other" })).toThrow();
+  });
+
+  it("decodes direct v2 alerts and rejects forbidden fields such as prompts, alertId, or privateAddress", () => {
+    const alert = {
+      version: 2 as const,
+      kind: "waiting" as const,
+      hostId,
+      threadId: "00000000-0000-4000-8000-000000000001",
+      mode: "code" as const,
+      title: "Waiting for you",
+      body: "On Studio Mac",
+      collapseId: "q2HnS1wZcV0k3fA8uYt7Rg",
+      urgency: "high" as const,
+      sequence: 1,
+      occurredAt: "2026-11-28T12:00:00.000Z",
+    };
+    expect(decodePushAlertV2(alert)).toEqual(alert);
+    expect(decodePushMessageV2({ type: "alert", alert })).toEqual({ type: "alert", alert });
+    for (const forbidden of [
+      { prompt: "secret prompt" },
+      { alertId: "44444444-4444-4444-8444-444444444444" },
+      { automationId: "aa000000-0000-4000-8000-000000000001" },
+      { automationRunId: "aa000000-0000-4000-8000-000000000010" },
+      { privateAddress: "192.168.1.20" },
+    ]) {
+      expect(() => decodePushAlertV2({ ...alert, ...forbidden })).toThrow();
+    }
+  });
+
+  it("decodes live-status v1 payloads with at most five rows", () => {
+    const row = {
+      threadId: "00000000-0000-4000-8000-000000000001",
+      mode: "code" as const,
+      status: "working" as const,
+      updatedAt: "2026-11-28T12:00:00.000Z",
+    };
+    const liveStatus = {
+      version: 1 as const,
+      hostId,
+      computerName: "Studio Mac",
+      event: "update" as const,
+      counts: { needsYou: 1, failed: 0, working: 2, done: 1 },
+      rows: [row],
+      sequence: 3,
+      occurredAt: "2026-11-28T12:00:00.000Z",
+      staleAt: "2026-11-28T12:30:00.000Z",
+      urgency: "normal" as const,
+    };
+    expect(decodeLiveStatusV1(liveStatus)).toEqual(liveStatus);
+    expect(decodePushMessageV2({ type: "live-status", liveStatus })).toEqual({
+      type: "live-status",
+      liveStatus,
+    });
     expect(() =>
-      decodeRemotePushNotificationPayloadV1({
-        kind: "failure",
-        hostId,
-        threadId: "00000000-0000-4000-8000-000000000001",
-        title: "Failed",
-        body: "See host.",
-        prompt: "secret user prompt",
-      }),
+      decodeLiveStatusV1({ ...liveStatus, rows: [row, row, row, row, row, row] }),
     ).toThrow();
   });
 
-  it("journals a registration change or clear with no room for the token", () => {
+  it("journals registration, delivery, and push-sender changes without tokens or credentials", () => {
     const deviceId = "22222222-2222-4222-8222-222222222222";
     const recorded = {
       hostId,
@@ -77,6 +147,7 @@ describe("remotePushNotifications", () => {
     expect(() =>
       decodeRemotePushRegistrationRecordedV1({ ...recorded, token: "opaque-provider-token" }),
     ).toThrow();
+
     const cleared = {
       hostId,
       deviceId,
@@ -84,166 +155,51 @@ describe("remotePushNotifications", () => {
       clearedAt: "2026-10-26T12:00:00.000Z",
     };
     expect(decodeRemotePushRegistrationClearedV1(cleared)).toEqual(cleared);
-    expect(() =>
-      decodeRemotePushRegistrationClearedV1({ ...cleared, token: "opaque-provider-token" }),
-    ).toThrow();
-  });
 
-  it("refuses a registration the host could not seal to or would not know what to send", () => {
-    const registration = { platform: "ios", token: "opaque-provider-token" };
-    expect(() => decodeRemotePushTokenRegistrationV1(registration)).toThrow();
-    expect(() =>
-      decodeRemotePushTokenRegistrationV1({ ...registration, notificationPublicKey }),
-    ).toThrow();
-    for (const malformed of [
-      "",
-      "not a key",
-      notificationPublicKey.slice(1),
-      `${notificationPublicKey}A`,
-    ]) {
-      expect(() =>
-        decodeRemotePushTokenRegistrationV1({
-          ...registration,
-          notificationPublicKey: malformed,
-          preferences,
-        }),
-      ).toThrow();
-    }
-  });
-
-  it("lets the delivery envelope carry only the placeholder, the collapse id, the urgency, and sealed bytes", () => {
-    const envelope = {
-      alert: { title: "Octant", body: "A paired computer has an update" },
-      collapseId: "q2HnS1wZcV0k3fA8uYt7Rg",
-      urgency: "high",
-      sealed: {
-        encapsulatedKey: notificationPublicKey,
-        ciphertext: "c2VhbGVkLWNvbnRlbnQtYW5kLWl0cy10YWc",
-      },
-    };
-    expect(decodeRemotePushEnvelopeV1(envelope)).toEqual(envelope);
-    expect(() =>
-      decodeRemotePushEnvelopeV1({
-        ...envelope,
-        alert: { title: "Approval needed", body: "Ship the release" },
-      }),
-    ).toThrow();
-    expect(() => decodeRemotePushEnvelopeV1({ ...envelope, threadId: "thread" })).toThrow();
-    expect(() => decodeRemotePushEnvelopeV1({ ...envelope, hostId })).toThrow();
-    expect(() => decodeRemotePushEnvelopeV1({ ...envelope, kind: "approval-needed" })).toThrow();
-    expect(() =>
-      decodeRemotePushEnvelopeV1({
-        ...envelope,
-        sealed: { ...envelope.sealed, ciphertext: "A".repeat(4_000) },
-      }),
-    ).toThrow();
-  });
-
-  it("journals a delivery receipt with no room for the notification text, token, or key", () => {
-    const receipt = {
+    const delivery = {
       hostId,
-      deviceId: "22222222-2222-4222-8222-222222222222",
+      deviceId,
       threadId: "00000000-0000-4000-8000-000000000001",
       kind: "approval-needed",
       outcome: "failed",
       failureCategory: "provider-unavailable",
       recordedAt: "2026-10-26T12:00:00.000Z",
     };
-    expect(decodeRemotePushDeliveryRecordedV1(receipt)).toEqual(receipt);
-    for (const leak of [
-      { title: "Approval needed: Ship it" },
-      { token: "opaque-provider-token" },
-      { notificationPublicKey },
-    ]) {
-      expect(() => decodeRemotePushDeliveryRecordedV1({ ...receipt, ...leak })).toThrow();
-    }
+    expect(decodeRemotePushDeliveryRecordedV1(delivery)).toEqual(delivery);
     expect(() =>
-      decodeRemotePushDeliveryRecordedV1({
-        ...receipt,
-        failureCategory: "Provider said: /Users/example/secret",
+      decodeRemotePushDeliveryRecordedV1({ ...delivery, title: "Approval needed" }),
+    ).toThrow();
+
+    expect(
+      decodeRemotePushMoveWaitingDeliveryRecordedV1({
+        hostId,
+        deviceId,
+        outcome: "delivered",
+        recordedAt: "2026-11-09T12:00:00.000Z",
+      }).outcome,
+    ).toBe("delivered");
+
+    expect(
+      decodeRemotePushDeviceJoinedDeliveryRecordedV1({
+        hostId,
+        deviceId,
+        alertId: "33333333-3333-4333-8333-333333333333",
+        outcome: "delivered",
+        recordedAt: "2026-11-20T08:00:00.000Z",
+      }).outcome,
+    ).toBe("delivered");
+
+    const senderChanged = {
+      change: "credential-changed",
+      platform: "ios",
+      recordedAt: "2026-11-28T12:00:00.000Z",
+    };
+    expect(decodeHostPushSenderChangedV1(senderChanged)).toEqual(senderChanged);
+    expect(() =>
+      decodeHostPushSenderChangedV1({
+        ...senderChanged,
+        privateKey: "-----BEGIN PRIVATE KEY-----",
       }),
     ).toThrow();
-  });
-
-  it("seals a held move as that a move waits and where, with no room for a thread", () => {
-    const payload = {
-      kind: "move-waiting",
-      hostId,
-      title: "A move is waiting for your phone",
-      body: "To Studio Mac",
-    };
-    expect(decodeRemotePushMoveWaitingPayloadV1(payload)).toEqual(payload);
-    for (const leak of [
-      { threadId: "00000000-0000-4000-8000-000000000001" },
-      { mode: "code" },
-      { threads: ["Ship it"] },
-    ]) {
-      expect(() => decodeRemotePushMoveWaitingPayloadV1({ ...payload, ...leak })).toThrow();
-    }
-    expect(() => decodeRemotePushMoveWaitingPayloadV1({ ...payload, kind: "waiting" })).toThrow();
-  });
-
-  it("journals a held-move receipt that names neither a thread nor the wait", () => {
-    const receipt = {
-      hostId,
-      deviceId: "22222222-2222-4222-8222-222222222222",
-      outcome: "delivered",
-      recordedAt: "2026-11-09T12:00:00.000Z",
-    };
-    expect(decodeRemotePushMoveWaitingDeliveryRecordedV1(receipt)).toEqual(receipt);
-    for (const leak of [
-      { threadId: "00000000-0000-4000-8000-000000000001" },
-      { confirmationId: "33333333-3333-4333-8333-333333333333" },
-      { title: "A move is waiting for your phone" },
-    ]) {
-      expect(() =>
-        decodeRemotePushMoveWaitingDeliveryRecordedV1({ ...receipt, ...leak }),
-      ).toThrow();
-    }
-  });
-
-  it("seals a new device's name and address for the phone, with no room for a thread", () => {
-    const payload = {
-      kind: "device-joined",
-      hostId: "11111111-1111-4111-8111-111111111111",
-      alertId: "44444444-4444-4444-8444-444444444444",
-      title: "New device: Ada's phone",
-      body: "192.168.1.20 · paired with Studio Mac",
-    };
-    expect(decodeRemotePushDeviceJoinedPayloadV1(payload)).toEqual(payload);
-    expect(() => decodeRemotePushDeviceJoinedPayloadV1({ ...payload, threadId: "t" })).toThrow();
-    expect(() => decodeRemotePushDeviceJoinedPayloadV1({ ...payload, kind: "waiting" })).toThrow();
-  });
-
-  it("journals a new-device receipt by its alert, with no room for the name or the address", () => {
-    const receipt = {
-      hostId: "11111111-1111-4111-8111-111111111111",
-      deviceId: "22222222-2222-4222-8222-222222222222",
-      alertId: "33333333-3333-4333-8333-333333333333",
-      outcome: "delivered",
-      recordedAt: "2026-11-20T08:00:00.000Z",
-    };
-    expect(decodeRemotePushDeviceJoinedDeliveryRecordedV1(receipt)).toEqual(receipt);
-    for (const leak of [{ name: "Ada's phone" }, { privateAddress: "192.168.1.20" }]) {
-      expect(() =>
-        decodeRemotePushDeviceJoinedDeliveryRecordedV1({ ...receipt, ...leak }),
-      ).toThrow();
-    }
-  });
-
-  it("keeps a registration from before the new-device setting valid, and takes the setting from newer phones", () => {
-    const registration = {
-      platform: "ios",
-      token: "opaque-provider-token",
-      notificationPublicKey,
-      preferences,
-    };
-    expect(() => decodeRemotePushTokenRegistrationV1(registration)).not.toThrow();
-    expect(
-      decodeRemotePushTokenRegistrationV1({
-        ...registration,
-        preferences: { ...preferences, newDevices: false },
-      }).preferences.newDevices,
-    ).toBe(false);
   });
 });

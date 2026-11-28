@@ -29,8 +29,6 @@ const phone = "22222222-2222-4222-8222-222222222222";
 const tablet = "33333333-3333-4333-8333-333333333333";
 const hostActorId = "00000000-0000-4000-8000-000000000002";
 const now = "2026-10-26T12:00:00.000Z";
-const phoneKey = "MJaD3ARvNKlDGKOdP1uw2ORQnq9V7CJeVRT9Xg09h3E";
-const otherKey = "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo";
 const allKinds = {
   approvalNeeded: true,
   waiting: true,
@@ -38,7 +36,6 @@ const allKinds = {
   completion: true,
   threadTitles: false,
 };
-const keyed = { notificationPublicKey: phoneKey, preferences: allKinds };
 const directories: string[] = [];
 const connections: SqliteConnection[] = [];
 
@@ -82,7 +79,7 @@ function host(dataDirectory = mkdtempSync(join(tmpdir(), "octant-push-registrati
 }
 
 describe("push registrations on the host", () => {
-  it("keeps a registration across a restart in an owner-only file the journal never holds the token of", () => {
+  it("keeps a v2 registration across a restart in an owner-only file the journal never holds the token of", () => {
     const first = host();
     const store = first.open();
     expect(
@@ -91,18 +88,18 @@ describe("push registrations on the host", () => {
         deviceId: phone,
         platform: "ios",
         token: "apns-secret-1",
-        ...keyed,
+        preferences: allKinds,
         now,
       }),
     ).toEqual({ result: "registered" });
 
     const restarted = first.open();
     expect(restarted.get({ hostId, deviceId: phone })).toEqual({
+      version: 2,
       hostId,
       deviceId: phone,
       platform: "ios",
       token: "apns-secret-1",
-      notificationPublicKey: phoneKey,
       preferences: allKinds,
       collapseKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
       updatedAt: now,
@@ -123,40 +120,67 @@ describe("push registrations on the host", () => {
       recordedAt: now,
     });
     expect(JSON.stringify(events)).not.toContain("apns-secret-1");
-    expect(JSON.stringify(events)).not.toContain(phoneKey);
   });
 
-  it("keeps the phone's notification key and preferences with its token, and journals a change of either without them", () => {
-    const { open, journaled, dataDirectory } = host();
+  it("clears legacy v1 registrations carrying notificationPublicKey on upgrade as destination-gone", () => {
+    const first = host();
+    mkdirSync(join(first.dataDirectory, "remote"), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      join(first.dataDirectory, PUSH_REGISTRATIONS_FILE),
+      JSON.stringify({
+        version: 1,
+        registrations: [
+          {
+            hostId,
+            deviceId: phone,
+            platform: "ios",
+            token: "v1.k1.legacy-capability",
+            notificationPublicKey: "MJaD3ARvNKlDGKOdP1uw2ORQnq9V7CJeVRT9Xg09h3E",
+            preferences: allKinds,
+            collapseKey: "A".repeat(43),
+            updatedAt: now,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+
+    const upgraded = first.open();
+    expect(upgraded.listDestinations()).toEqual([]);
+    expect(existsSync(join(first.dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+    const events = first.journaled();
+    expect(events.map((event) => event.event_name)).toEqual(["remote.push-registration-cleared@1"]);
+    expect(JSON.parse(events[0]?.payload_json ?? "{}")).toMatchObject({
+      hostId,
+      deviceId: phone,
+      reason: "destination-gone",
+    });
+  });
+
+  it("tracks preference changes including threadTitles and newDevices without exposing tokens", () => {
+    const { open, journaled } = host();
     const store = open();
     const base = { hostId, deviceId: phone, platform: "ios" as const, token: "phone-token", now };
-    expect(store.register({ ...base, ...keyed })).toEqual({ result: "registered" });
+    expect(store.register({ ...base, preferences: allKinds })).toEqual({ result: "registered" });
     const collapseKey = store.get({ hostId, deviceId: phone })?.collapseKey;
-    expect(
-      store.register({ ...base, ...keyed, preferences: { ...allKinds, threadTitles: true } }),
-    ).toEqual({ result: "registered" });
+    expect(store.register({ ...base, preferences: { ...allKinds, threadTitles: true } })).toEqual({
+      result: "registered",
+    });
     expect(
       store.register({
         ...base,
-        notificationPublicKey: otherKey,
-        preferences: { ...allKinds, threadTitles: true },
+        preferences: { ...allKinds, threadTitles: true, newDevices: false },
       }),
     ).toEqual({ result: "registered" });
     expect(
       store.register({
         ...base,
-        notificationPublicKey: otherKey,
-        preferences: { ...allKinds, threadTitles: true },
+        preferences: { ...allKinds, threadTitles: true, newDevices: false },
       }),
     ).toEqual({ result: "already-registered" });
 
     const restarted = open().get({ hostId, deviceId: phone });
-    expect(restarted).toMatchObject({
-      notificationPublicKey: otherKey,
-      preferences: { ...allKinds, threadTitles: true },
-    });
-    // A changed registration keeps its collapse key, so an update still
-    // replaces the notification it updates on the phone.
+    expect(restarted?.preferences).toEqual({ ...allKinds, threadTitles: true, newDevices: false });
     expect(restarted?.collapseKey).toBe(collapseKey);
 
     const events = journaled();
@@ -164,17 +188,13 @@ describe("push registrations on the host", () => {
       events.map((event) => (JSON.parse(event.payload_json) as Record<string, unknown>).change),
     ).toEqual(["added", "changed", "changed"]);
     const journal = JSON.stringify(events);
-    for (const secret of [phoneKey, otherKey, collapseKey ?? "missing", "phone-token"]) {
+    for (const secret of [collapseKey ?? "missing", "phone-token"]) {
       expect(journal).not.toContain(secret);
     }
-    const stored = readFileSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE), "utf8");
-    expect(stored).toContain(otherKey);
-    expect(stored).not.toContain(phoneKey);
   });
 
   it("narrows a remote folder another remote file left open before it writes a token there", () => {
     const { dataDirectory, open } = host();
-    // The host identity key creates `remote/` with the process umask's mode.
     mkdirSync(join(dataDirectory, "remote"), { mode: 0o755 });
     chmodSync(join(dataDirectory, "remote"), 0o755);
     open().register({
@@ -182,7 +202,7 @@ describe("push registrations on the host", () => {
       deviceId: phone,
       platform: "ios",
       token: "phone-token",
-      ...keyed,
+      preferences: allKinds,
       now,
     });
     expect(statSync(join(dataDirectory, "remote")).mode & 0o777).toBe(0o700);
@@ -201,7 +221,7 @@ describe("push registrations on the host", () => {
       deviceId: phone,
       platform: "ios",
       token: "phone-token",
-      ...keyed,
+      preferences: allKinds,
       now,
     });
 
@@ -215,7 +235,7 @@ describe("push registrations on the host", () => {
   it("journals an add, a change, and a clear once each, and a repeat of any of them not at all", () => {
     const { open, journaled, dataDirectory } = host();
     const store = open();
-    const base = { hostId, deviceId: phone, platform: "ios" as const, ...keyed, now };
+    const base = { hostId, deviceId: phone, platform: "ios" as const, preferences: allKinds, now };
     expect(store.register({ ...base, token: "token-a" })).toEqual({ result: "registered" });
     expect(store.register({ ...base, token: "token-a" })).toEqual({
       result: "already-registered",
@@ -235,7 +255,6 @@ describe("push registrations on the host", () => {
         return payload.change ?? payload.reason;
       }),
     ).toEqual(["added", "changed", "device-cleared"]);
-    // The device is named by its own id, as in every other record it makes.
     expect(events.map((event) => JSON.parse(event.actor_json ?? "{}"))).toEqual(
       events.map(() => ({ kind: "remote-device", actorId: phone, deviceId: phone })),
     );
@@ -244,30 +263,7 @@ describe("push registrations on the host", () => {
     expect(open().get({ hostId, deviceId: phone })).toBeUndefined();
   });
 
-  it("isolates tokens across devices on the same host", () => {
-    const store = host().open();
-    store.register({
-      hostId,
-      deviceId: phone,
-      platform: "ios",
-      token: "phone-token",
-      ...keyed,
-      now,
-    });
-    store.register({
-      hostId,
-      deviceId: tablet,
-      platform: "android",
-      token: "tablet-token",
-      ...keyed,
-      now,
-    });
-    store.clear({ hostId, deviceId: phone, reason: "device-revoked", now });
-    expect(store.get({ hostId, deviceId: tablet })?.token).toBe("tablet-token");
-    expect(store.listDeviceIdsForHost(hostId)).toEqual([tablet]);
-  });
-
-  it("clears the registration of a device that no longer stands, as the host", () => {
+  it("isolates tokens across devices on the same host and clears devices without standing", () => {
     const { open, journaled } = host();
     const store = open();
     store.register({
@@ -275,7 +271,7 @@ describe("push registrations on the host", () => {
       deviceId: phone,
       platform: "ios",
       token: "phone-token",
-      ...keyed,
+      preferences: allKinds,
       now,
     });
     store.register({
@@ -283,7 +279,7 @@ describe("push registrations on the host", () => {
       deviceId: tablet,
       platform: "android",
       token: "tablet-token",
-      ...keyed,
+      preferences: allKinds,
       now,
     });
 
@@ -294,6 +290,7 @@ describe("push registrations on the host", () => {
       }),
     ).toBe(1);
     expect(store.listDeviceIdsForHost(hostId)).toEqual([tablet]);
+    expect(store.get({ hostId, deviceId: tablet })?.token).toBe("tablet-token");
     const cleared = journaled().at(-1);
     expect(JSON.parse(cleared?.payload_json ?? "{}")).toMatchObject({
       deviceId: phone,
@@ -305,13 +302,12 @@ describe("push registrations on the host", () => {
     });
   });
 
-  it("keeps no token the journal refused to record", () => {
+  it("keeps no token the journal refused to record and starts empty from an unreadable file", () => {
     const { dataDirectory, journal, connection } = host();
     const store = createPushNotificationTokenStore({
       dataDirectory,
       journal: {
         aggregateVersions: (type) => journal.aggregateVersions(type),
-        // The file is written inside the append, and the commit then fails.
         append: (_input, options) => {
           options?.beforeEvents?.(connection);
           expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(true);
@@ -327,25 +323,28 @@ describe("push registrations on the host", () => {
         deviceId: phone,
         platform: "ios",
         token: "refused-token",
-        ...keyed,
+        preferences: allKinds,
         now,
       }),
     ).toThrow();
     expect(store.get({ hostId, deviceId: phone })).toBeUndefined();
     expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(false);
-  });
 
-  it("starts with no registrations from a file it cannot read back exactly", () => {
-    const first = host();
-    first
-      .open()
-      .register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", ...keyed, now });
-    const file = join(first.dataDirectory, PUSH_REGISTRATIONS_FILE);
+    const second = host();
+    second.open().register({
+      hostId,
+      deviceId: phone,
+      platform: "ios",
+      token: "phone-token",
+      preferences: allKinds,
+      now,
+    });
+    const file = join(second.dataDirectory, PUSH_REGISTRATIONS_FILE);
     writeFileSync(file, readFileSync(file, "utf8").replace('"ios"', '"windows"'));
-    expect(first.open().listDestinations()).toEqual([]);
+    expect(second.open().listDestinations()).toEqual([]);
   });
 
-  it("keeps a registration through a key rotation or a listener stop, and clears it on every other credential change", () => {
+  it("keeps a registration through a key rotation or listener stop, and clears it on every other credential change", () => {
     expect(pushRegistrationClearReasonFor("credential-rotated")).toBeUndefined();
     expect(pushRegistrationClearReasonFor("credentials-rotated-all")).toBeUndefined();
     expect(pushRegistrationClearReasonFor("listener-disabled")).toBeUndefined();

@@ -7,11 +7,27 @@ import {
 /**
  * The values the credential broker handed out in this host process, so text
  * that carries one is redacted even when the value has no recognisable shape.
- * Held in memory only, never written anywhere, and bounded: the oldest value
- * drops out first.
+ * Held in memory only, never written anywhere, and bounded for fast per-chunk
+ * transcript redaction: the oldest value drops out first.
  */
 const issued = new Set<string>();
 const ISSUED_LIMIT = 256;
+
+/**
+ * Uncapped in-memory set of secrets issued by the credential broker or OAuth
+ * broker during this host process lifetime. Checked by the host push-label
+ * scrubber so even a credential handed out more than 256 calls ago cannot leave
+ * in a push payload. Never written anywhere or logged.
+ */
+const pushKnownSecrets = new Set<string>();
+
+/**
+ * Ended active thread secret forms retained in memory up to a cap so a secret
+ * that a thread just finished using still cannot slip out in its completion
+ * notification's title or label.
+ */
+const endedHeld = new Set<string>();
+const ENDED_HELD_LIMIT = 512;
 
 export function noteIssuedSecret(value: string): void {
   if (value.length === 0) return;
@@ -21,12 +37,16 @@ export function noteIssuedSecret(value: string): void {
     const oldest = issued.values().next().value;
     if (oldest !== undefined) issued.delete(oldest);
   }
+  if (isHoldableSecretValue(value)) {
+    for (const form of secretForms(value)) pushKnownSecrets.add(form);
+  }
 }
 
 /**
  * The active thread secrets, held apart from the issued values: none may drop
- * out while a thread can still print it, and each leaves when its secret ends.
- * Counted, since two threads may hold the same value.
+ * out while a thread can still print it, and each leaves when its secret ends
+ * (moving into `endedHeld` up to its cap for push-label checks). Counted, since
+ * two threads may hold the same value.
  */
 const held = new Map<string, number>();
 
@@ -44,10 +64,36 @@ export function holdSecretValue(value: string): () => void {
     released = true;
     for (const form of forms) {
       const count = (held.get(form) ?? 1) - 1;
-      if (count <= 0) held.delete(form);
-      else held.set(form, count);
+      if (count <= 0) {
+        held.delete(form);
+        rememberEndedHeld(form);
+      } else {
+        held.set(form, count);
+      }
     }
   };
+}
+
+function rememberEndedHeld(form: string): void {
+  endedHeld.delete(form);
+  endedHeld.add(form);
+  if (endedHeld.size > ENDED_HELD_LIMIT) {
+    const oldest = endedHeld.values().next().value;
+    if (oldest !== undefined) endedHeld.delete(oldest);
+  }
+}
+
+/**
+ * All secret values and encoded forms currently known in host memory: uncapped
+ * broker/OAuth secrets, active thread secrets, and recently ended thread
+ * secrets. Used by the host-side push-label secret check; never logged or
+ * serialized.
+ */
+export function readInMemoryHostSecrets(): ReadonlyArray<string> {
+  const values = new Set<string>(pushKnownSecrets);
+  for (const form of held.keys()) values.add(form);
+  for (const form of endedHeld) values.add(form);
+  return [...values];
 }
 
 /**

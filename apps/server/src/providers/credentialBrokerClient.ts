@@ -102,9 +102,9 @@ export function makeDesktopProviderCredentialBrokerClient(
 }
 
 /**
- * The Apple and Google push credentials, and the sealing key, of a hub that
- * sends notifications directly. They sit in a credential namespace of their
- * own, so no provider instance or other secret with the same UUID can read one.
+ * The Apple and Google push credentials of a host that sends notifications
+ * directly. They sit in a credential namespace of their own, so no provider
+ * instance or other secret with the same UUID can read one.
  */
 export function makePushPlatformCredentialBrokerClient(
   options: CredentialBrokerClientOptions,
@@ -205,6 +205,7 @@ function makeBrokerCredentialClient(
       if (!hasExactKeys(value, ["stored"]) || value.stored !== true) {
         throw brokerFailure();
       }
+      noteIssuedSecret(credential);
     },
     delete: async (providerInstanceId: string): Promise<void> => {
       const value = await request("delete", providerInstanceId);

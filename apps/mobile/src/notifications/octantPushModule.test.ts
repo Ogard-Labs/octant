@@ -4,24 +4,22 @@ import {
   type OctantPushNativeModule,
 } from "./octantPushModule";
 
-const key = "K".repeat(43);
-
 function native(overrides: Partial<OctantPushNativeModule> = {}): OctantPushNativeModule {
   return {
     isSupported: () => true,
     permissionStatus: async () => "granted",
     requestPermission: async () => "granted",
     devicePushToken: async () => "a".repeat(64),
-    notificationPublicKey: async () => key,
-    forgetHost: async () => undefined,
+    allowHost: async () => true,
+    forgetHost: async () => true,
     ...overrides,
   };
 }
 
 describe("the phone's notification port over the native module", () => {
-  it("passes the system's permission, token and key through", async () => {
-    const notificationPublicKey = vi.fn(async () => key);
-    const port = createNativeNotificationPermissionPort(native({ notificationPublicKey }), {
+  it("passes the system's permission, token, allowHost, and forgetHost through", async () => {
+    const allowHost = vi.fn(async () => true);
+    const port = createNativeNotificationPermissionPort(native({ allowHost }), {
       platform: "ios",
     });
     expect(port.available).toBe(true);
@@ -29,11 +27,11 @@ describe("the phone's notification port over the native module", () => {
     expect(await port.getStatus()).toBe("granted");
     expect(await port.request()).toBe("granted");
     expect(await port.getDevicePushToken()).toBe("a".repeat(64));
-    expect(await port.getNotificationPublicKey("host", "device")).toBe(key);
-    expect(notificationPublicKey).toHaveBeenCalledWith("host", "device");
+    await port.allowHost?.("host");
+    expect(allowHost).toHaveBeenCalledWith("host");
   });
 
-  it("is unavailable and gives no permission, token or key where push is unsupported, as on the Simulator", async () => {
+  it("is unavailable and gives no permission or token where push is unsupported, as on the Simulator", async () => {
     const asked = vi.fn(async () => "granted");
     const port = createNativeNotificationPermissionPort(
       native({
@@ -41,7 +39,6 @@ describe("the phone's notification port over the native module", () => {
         requestPermission: asked,
         permissionStatus: asked,
         devicePushToken: asked,
-        notificationPublicKey: asked,
       }),
       { platform: "ios" },
     );
@@ -49,7 +46,6 @@ describe("the phone's notification port over the native module", () => {
     expect(await port.getStatus()).toBe("undetermined");
     expect(await port.request()).toBe("denied");
     expect(await port.getDevicePushToken()).toBeUndefined();
-    expect(await port.getNotificationPublicKey("host", "device")).toBeUndefined();
     expect(asked).not.toHaveBeenCalled();
   });
 
@@ -61,7 +57,7 @@ describe("the phone's notification port over the native module", () => {
     await expect(port.forgetHost("host")).resolves.toBeUndefined();
   });
 
-  it("reads a module that throws, or answers in the wrong shape, as no permission, token or key", async () => {
+  it("reads a module that throws, or answers in the wrong shape, as no permission or token", async () => {
     const broken = async () => {
       throw new Error("native failure");
     };
@@ -70,14 +66,12 @@ describe("the phone's notification port over the native module", () => {
         permissionStatus: broken,
         requestPermission: broken,
         devicePushToken: broken,
-        notificationPublicKey: broken,
       }),
       { platform: "ios" },
     );
     expect(await throwing.getStatus()).toBe("undetermined");
     expect(await throwing.request()).toBe("denied");
     expect(await throwing.getDevicePushToken()).toBeUndefined();
-    expect(await throwing.getNotificationPublicKey("host", "device")).toBeUndefined();
 
     const damaged = createNativeNotificationPermissionPort(
       native({
@@ -85,7 +79,6 @@ describe("the phone's notification port over the native module", () => {
         permissionStatus: async () => 1,
         requestPermission: async () => "maybe",
         devicePushToken: async () => 12345,
-        notificationPublicKey: async () => "short",
       }),
       { platform: "ios" },
     );
@@ -96,14 +89,12 @@ describe("the phone's notification port over the native module", () => {
         permissionStatus: async () => 1,
         requestPermission: async () => "maybe",
         devicePushToken: async () => 12345,
-        notificationPublicKey: async () => "short",
       }),
       { platform: "ios" },
     );
     expect(await lenient.getStatus()).toBe("undetermined");
     expect(await lenient.request()).toBe("denied");
     expect(await lenient.getDevicePushToken()).toBeUndefined();
-    expect(await lenient.getNotificationPublicKey("host", "device")).toBeUndefined();
   });
 
   it("refuses an empty, padded or oversized token", async () => {
@@ -145,21 +136,21 @@ describe("the phone's notification port over the native module", () => {
     const failing = createNativeNotificationPermissionPort(
       native({
         forgetHost: async () => {
-          throw new Error("keychain busy");
+          throw new Error("storage busy");
         },
       }),
       { platform: "ios" },
     );
-    await expect(failing.forgetHost("host")).rejects.toThrow("keychain busy");
+    await expect(failing.forgetHost("host")).rejects.toThrow("storage busy");
   });
 
-  it("reports a deletion the module says failed, rather than treating any answer as success", async () => {
+  it("reports a cleanup failure rather than treating any answer as success", async () => {
     for (const answer of [false, undefined, null, "true", 0]) {
       const port = createNativeNotificationPermissionPort(
         native({ forgetHost: async () => answer }),
         { platform: "android" },
       );
-      await expect(port.forgetHost("host")).rejects.toThrow("could not delete");
+      await expect(port.forgetHost("host")).rejects.toThrow("could not clear");
     }
     const port = createNativeNotificationPermissionPort(native({ forgetHost: async () => true }), {
       platform: "android",

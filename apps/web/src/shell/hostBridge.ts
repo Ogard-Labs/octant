@@ -356,6 +356,7 @@ export type HubAdministrationOperation =
   | "visitor-comment"
   | "relay"
   | "relay-device"
+  | "push-sender-status"
   | "direct-push"
   | "direct-push-environment"
   | "direct-push-credential"

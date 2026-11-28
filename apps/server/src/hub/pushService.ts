@@ -1,37 +1,32 @@
-// Push through the hub, from the hub's side and from a standing-in standby's. A
-// spoke whose hub grant ticks Push hands the hub a delivery request it has
-// already sealed to the phone's key and signed with its own host key, exactly as
-// the push gateway requires. The hub forwards that request to the gateway byte
-// for byte and relays the answer. It holds no key that opens an envelope, never
-// signs for a spoke, and keeps nothing of the request after the forward: the
-// journal gets the spoke, a size, and a reason word. The switch is the hub's
-// own, off until a person turns it on in a window.
+// Push through the hub, from the hub's side and from a standing-in standby's.
+// A spoke whose hub grant ticks Push hands the hub a v2 delivery (`HubPushHandoffV2`)
+// containing the phone's platform, token, and checked push message. The hub
+// (or a standing-in standby holding its own credentials) checks the roster, its
+// own switch, the size and rate, and with the spoke itself that its grant ticks
+// Push, repeats the host-side secret check against its own held secrets, and
+// sends directly to Apple (APNs) or Google (FCM). No push gateway exists.
 
 import {
   HUB_PUSH_BODY_MAX_BYTES,
   HubMemberId,
   decodeHubPushGrantAnswer,
-  decodeHubPushHandoff,
-  decodeRemotePushDeliveryRequestV1,
+  decodeHubPushHandoffV2,
   type AuditActingPrincipal,
   type HubMembershipChangedPayload,
   type HubPushAnswer,
   type HubPushCopy,
-  type HubPushHandoff,
+  type HubPushHandoffV2,
   type HubPushReason,
   type HubPushResult,
-  type RemotePushGatewayRefusalCode,
-  type RemotePushGatewaySettingsV1,
   type RosterMember,
 } from "@octant/contracts";
-import { decidePushGateway, decidePushRate } from "@octant/domain";
-import { Schema } from "effect";
+import { decidePushRate } from "@octant/domain";
 import {
-  gatewayDeliveryHeaders,
-  gatewayDeliveryUrl,
-  refusalCode,
-} from "../remote/gatewayPushDeliveryTransport";
-import type { DirectPushGateway } from "./directPushGateway";
+  recheckHubPushMessage,
+  type HeldSecretSnapshot,
+} from "@octant/domain/push-notification-policy";
+import { Schema } from "effect";
+import type { DirectPushSender } from "../push/directPushSenders";
 import { listenerPinFromDigest } from "./hubCrypto";
 import { HUB_LINK_REQUEST_TIMEOUT_MS, HUB_PEER_KEY_HEADER, sendHubLinkRequest } from "./hubLink";
 import type { HubHostIdentity } from "./hubService";
@@ -40,7 +35,7 @@ import { memberOrigin } from "./memberOrigin";
 import type { HubTransport } from "./pinnedHubTransport";
 
 const decodeMemberId = Schema.decodeUnknownSync(HubMemberId);
-const DEFAULT_GATEWAY_TIMEOUT_MS = 10_000;
+const DEFAULT_PLATFORM_TIMEOUT_MS = 10_000;
 /**
  * A standing-in standby's grant question makes the spoke probe the hub before it
  * answers (one link request), so the question waits that long plus this much. At
@@ -52,9 +47,9 @@ const NESTED_PROBE_MARGIN_MS = 4_000;
 export const grantConfirmTimeoutMs = (linkTimeoutMs = HUB_LINK_REQUEST_TIMEOUT_MS) =>
   linkTimeoutMs + NESTED_PROBE_MARGIN_MS;
 
-/** How long a spoke waits on the hub or standby: its grant question, the gateway call, and a margin. */
+/** How long a spoke waits on the hub or standby: its grant question, the platform call, and a margin. */
 export const handoffTimeoutMs = (linkTimeoutMs = HUB_LINK_REQUEST_TIMEOUT_MS) =>
-  grantConfirmTimeoutMs(linkTimeoutMs) + DEFAULT_GATEWAY_TIMEOUT_MS + NESTED_PROBE_MARGIN_MS;
+  grantConfirmTimeoutMs(linkTimeoutMs) + DEFAULT_PLATFORM_TIMEOUT_MS + NESTED_PROBE_MARGIN_MS;
 /** One spoke's notifications are a trickle; this is far above any real burst and far below a flood. */
 const DEFAULT_MAX_PER_MINUTE = 60;
 const RATE_WINDOW_MS = 60_000;
@@ -65,24 +60,17 @@ export interface PushServiceOptions {
   readonly identity: () => HubHostIdentity;
   readonly transport: HubTransport;
   /**
-   * This host's own Notifications setting: whether it may contact a gateway at
-   * all, and which one. Read before every forward, so turning it off stops the
-   * next one.
+   * This host's own direct push sender (credentials + APNs/FCM delivery). Both
+   * the hub and a standing-in standby send only with their own credentials.
    */
-  readonly gateway: () => Pick<RemotePushGatewaySettingsV1, "enabled" | "gatewayUrl">;
-  /**
-   * This hub's own gateway, when its person turned on direct sending. While it
-   * is on, the hub delivers to Apple and Google itself instead of forwarding to
-   * the gateway the Notifications setting names.
-   */
-  readonly direct?: {
+  readonly direct: {
     readonly enabled: () => boolean;
-    readonly deliver: DirectPushGateway["deliver"];
+    readonly sender: DirectPushSender;
   };
+  /** Re-checks the spoke's labels against this hub's own held secrets before sending. */
+  readonly readHeldSecrets: () => Promise<HeldSecretSnapshot>;
   readonly record: (change: HubMembershipChangedPayload) => void;
   readonly now: () => number;
-  readonly fetch?: typeof fetch;
-  readonly gatewayTimeoutMs?: number;
   /** The timeout of an ordinary hub-link request; the grant question waits longer. Tests cannot wait eight seconds. */
   readonly linkTimeoutMs?: number;
   readonly maxPerMinute?: number;
@@ -119,6 +107,18 @@ interface Book {
   readonly kind: "hub" | "stand-in";
   readonly roster: ReadonlyArray<RosterMember>;
   readonly selfMemberId: string;
+}
+
+/** Recognizes a legacy v1 sealed-gateway handoff from an older spoke so we refuse with `update-member`. */
+function isLegacyV1Handoff(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return false;
+  const record = raw as Record<string, unknown>;
+  return (
+    record["version"] === undefined &&
+    typeof record["body"] === "string" &&
+    typeof record["hostKey"] === "string" &&
+    typeof record["signature"] === "string"
+  );
 }
 
 export class PushService {
@@ -159,11 +159,11 @@ export class PushService {
   }
 
   /**
-   * A spoke handed over a sealed delivery request, signed with its own identity
-   * key. The sender is the member whose key signed the member-link request, so
-   * the body cannot name another. The hub, or a standby that is standing in,
-   * checks the roster, its own switch, the size and rate, the gateway, and with
-   * the spoke itself that its grant ticks Push, and only then forwards.
+   * A spoke handed over a v2 delivery (`HubPushHandoffV2`). The sender is the
+   * member whose key signed the member-link request, so the body cannot name
+   * another. The hub (or a standing-in standby with its own credentials) checks
+   * the roster, its own switches, the size and rate, confirms the spoke's Push
+   * grant, repeats the secret check, and sends directly to APNs or FCM.
    */
   async forward(senderMemberId: string, raw: unknown): Promise<PushForwardOutcome> {
     const memberId = decodeMemberId(senderMemberId);
@@ -187,77 +187,35 @@ export class PushService {
     counting = book;
     if (!this.#withinRate(senderMemberId)) return refuse("rate-limited");
     if (rawBytes !== undefined && rawBytes > HUB_PUSH_BODY_MAX_BYTES) return refuse("too-large");
-    let handoff: HubPushHandoff;
+    if (isLegacyV1Handoff(raw)) {
+      return refuse("update-member");
+    }
+    let handoff: HubPushHandoffV2;
     try {
-      handoff = decodeHubPushHandoff(raw);
-      // Shape only: the hub reads no field of the envelope and has no key to open it.
-      decodeRemotePushDeliveryRequestV1(JSON.parse(handoff.body));
+      handoff = decodeHubPushHandoffV2(raw);
     } catch {
       return refuse("malformed");
     }
-    const bytes = Buffer.byteLength(handoff.body, "utf8");
-    // A hub that sends directly is its own gateway: the request goes to the
-    // platforms through its own rules, and the Notifications setting, which names
-    // a gateway to contact, is not consulted. A standing-in standby holds no
-    // credentials and still forwards.
-    const sendDirect = book.kind === "hub" ? this.#options.direct : undefined;
-    const direct = sendDirect?.enabled() === true ? sendDirect : undefined;
-    let target: { readonly gatewayUrl: string } | undefined;
-    if (direct === undefined) {
-      const gateway = this.#options.gateway();
-      if (!gateway.enabled) return refuse("gateway-off");
-      const decision = decidePushGateway({
-        requested: handoff.gatewayUrl,
-        configured: gateway.gatewayUrl,
-      });
-      if (decision.status === "refuse") return refuse(decision.kind);
-      target = decision;
+    if (!this.#options.direct.enabled()) {
+      return refuse("sender-off");
     }
     const confirmed = await this.#confirmGrant(book, sender);
     if (confirmed.status === "refused") return refuse(confirmed.kind);
 
-    let gatewayStatus: number;
-    let code: RemotePushGatewayRefusalCode | undefined;
-    if (direct !== undefined) {
-      const answer = await direct.deliver(handoff.body, {
-        hostKey: handoff.hostKey,
-        timestamp: handoff.timestamp,
-        signature: handoff.signature,
-      });
-      gatewayStatus = answer.status;
-      code = "code" in answer ? answer.code : undefined;
-    } else if (target !== undefined) {
-      let response: Response;
-      try {
-        response = await (this.#options.fetch ?? fetch)(gatewayDeliveryUrl(target.gatewayUrl), {
-          method: "POST",
-          headers: gatewayDeliveryHeaders(handoff),
-          body: handoff.body,
-          // The signed request goes only to the address the hub's person set, never to a redirect.
-          redirect: "manual",
-          signal: AbortSignal.timeout(this.#options.gatewayTimeoutMs ?? DEFAULT_GATEWAY_TIMEOUT_MS),
-        });
-      } catch {
-        this.#note(book, memberId, "failed");
-        this.#options.record({
-          change: "push-refused",
-          actingPrincipal: principal,
-          memberId,
-          pushBytes: bytes,
-          pushReason: "gateway-unreachable",
-        });
-        return { status: "refused", kind: "gateway-unreachable" };
-      }
-      gatewayStatus = response.status;
-      code = await refusalCode(response);
-    } else {
-      return refuse("gateway-off");
+    let heldSecrets: HeldSecretSnapshot;
+    try {
+      heldSecrets = await this.#options.readHeldSecrets();
+    } catch {
+      heldSecrets = { status: "unavailable" };
     }
-    this.#note(
-      book,
-      memberId,
-      gatewayStatus >= 200 && gatewayStatus < 300 ? "forwarded" : "failed",
-    );
+    const checkedMessage = recheckHubPushMessage(handoff.message, heldSecrets);
+    const outcome = await this.#options.direct.sender.send({
+      platform: handoff.platform,
+      token: handoff.token,
+      message: checkedMessage,
+    });
+    const bytes = rawBytes ?? Buffer.byteLength(JSON.stringify(handoff.message), "utf8");
+    this.#note(book, memberId, outcome === "accepted" ? "forwarded" : "failed");
     this.#options.record({
       change: "push-forwarded",
       actingPrincipal: principal,
@@ -268,13 +226,12 @@ export class PushService {
       status: "forwarded",
       answer: {
         status: "forwarded",
-        gatewayStatus,
-        ...(code === undefined ? {} : { code }),
+        outcome,
       },
     };
   }
 
-  /** A standby keeps whether the hub's push switch is on, to forward only then if it has to stand in. */
+  /** A standby keeps whether the hub's push switch is on, to send only then if it has to stand in. */
   receiveCopy(copy: HubPushCopy): PushCopyOutcome {
     const state = this.#options.state.load();
     const link = state.link;
@@ -325,7 +282,7 @@ export class PushService {
     }
     // Spokes follow a hand-back right after it is built; one filed now would reach no one.
     if (link.standIn.handingBack === true) return "handing-back";
-    // A standby has no switch of its own: it forwards only while the hub's is on.
+    // A standby has no switch of its own: it sends only while the hub's is on (and with its own credentials).
     if (link.pushCopy?.enabled !== true) return "off";
     return {
       kind: "stand-in",
@@ -349,8 +306,8 @@ export class PushService {
 
   /**
    * Only the spoke knows its own grant, so the hub asks it, over the pinned
-   * link, before it forwards. A spoke that cannot be reached, or that answers
-   * anything but granted, gets no forward: the hub never assumes a grant.
+   * link, before it sends. A spoke that cannot be reached, or that answers
+   * anything but granted, gets no send: the hub never assumes a grant.
    */
   async #confirmGrant(
     book: Book,
@@ -476,10 +433,13 @@ export class PushService {
   }
 }
 
-/** The size of the `body` a request claims, when it is text; the hub reads nothing else of it before the checks. */
 function rawBodyBytes(raw: unknown): number | undefined {
-  if (typeof raw !== "object" || raw === null || !("body" in raw)) return undefined;
-  return typeof raw.body === "string" ? Buffer.byteLength(raw.body, "utf8") : undefined;
+  if (raw === undefined || raw === null) return undefined;
+  try {
+    return Buffer.byteLength(JSON.stringify(raw), "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** The spoke's own word for why it did not grant, when it is one the journal knows. */

@@ -13,7 +13,7 @@ import {
   type HubMembershipChangedPayload,
   type HubMemberId,
   type HubPushAnswer,
-  type HubPushHandoff,
+  type HubPushHandoffV2,
   type HubPushReason,
 } from "@octant/contracts";
 import { listenerPinFromDigest } from "./hubCrypto";
@@ -82,8 +82,8 @@ export class SpokePushService {
     );
   }
 
-  /** Hands one signed delivery request to the hub, or to the standby this spoke follows. */
-  async hand(delivery: HubPushHandoff): Promise<PushHandoffResult> {
+  /** Hands one checked v2 delivery request to the hub, or to the standby this spoke follows. */
+  async hand(delivery: HubPushHandoffV2): Promise<PushHandoffResult> {
     const link = this.#options.state.load().link;
     if (link === undefined || !this.granted())
       return { status: "not-handed", reason: "not-granted" };

@@ -1,21 +1,24 @@
-// The host's push registrations.
+// The host's push registrations (v2).
 //
-// A paired device that turns notifications on registers a delivery token with
-// the host, with the public half of the notification key it made for this
-// host and its own preferences. The token is a send right to that phone, so
-// the host keeps it in one place only: an owner-only file under the data
-// directory's `remote/` folder, beside the listener's identity key and the
-// device inventory, outside the journal and every export. The notification
-// key and the collapse key the host makes for the destination live beside it.
-// No route answers with any of them and nothing logs them. The journal records
-// that a device's registration was added, changed, or cleared, with the device
-// and why, never the token or a key.
+// A paired device that turns notifications on registers its platform push token
+// (APNs hex or FCM registration token) and its preferences directly with the
+// host over its authenticated session. The token is a send right to that phone,
+// so the host keeps it in one place only: an owner-only file under the data
+// directory's `remote/` folder (`0600`), beside the listener's identity key and
+// the device inventory, outside the journal and every export. The collapse key
+// the host makes for the destination lives beside it. No route answers with
+// either and nothing logs them. The journal records that a device's
+// registration was added, changed, or cleared, with the device and why, never
+// the token.
 //
-// A registration survives a restart. It goes when the device clears it, when
-// the device's session signs out, and when the device loses its standing
-// (`pushRegistrationClearReasonFor`); a registration whose device has no
-// standing when the remote gateway starts is cleared then, so a revoke that
-// committed just before a crash cannot leave one behind.
+// Upgrade & version skew:
+// - Legacy v1 registrations on disk (those carrying `notificationPublicKey`
+//   without `version: 2`) are cleared on load and journaled as
+//   `destination-gone`, so old phones turn push on again once updated.
+// - A file that cannot be read back (for example after a host downgrade) holds
+//   no registrations.
+// - A registration survives a restart and goes when the device clears it, signs
+//   out, loses its standing, or is refused by APNs/FCM as `destination-gone`.
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
@@ -23,7 +26,6 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import {
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
-  RemotePushNotificationPublicKey,
   RemotePushPlatform,
   RemotePushPreferencesV1,
   decodeRemotePushRegistrationClearedV1,
@@ -42,12 +44,11 @@ export const PUSH_REGISTRATIONS_FILE = join("remote", "push-registrations.json")
 export const PUSH_REGISTRATION_AGGREGATE = "remote-push-registration";
 
 export interface PushTokenRecord {
+  readonly version: 2;
   readonly hostId: string;
   readonly deviceId: string;
   readonly platform: RemotePushPlatform;
   readonly token: string;
-  /** The phone's X25519 notification public key for this host. */
-  readonly notificationPublicKey: string;
   readonly preferences: RemotePushPreferencesV1;
   /** The host's own key for this destination's collapse ids, base64url. */
   readonly collapseKey: string;
@@ -61,7 +62,6 @@ export interface PushNotificationTokenStore {
     readonly deviceId: string;
     readonly platform: RemotePushPlatform;
     readonly token: string;
-    readonly notificationPublicKey: string;
     readonly preferences: RemotePushPreferencesV1;
     readonly now: string;
   }) => Pick<RemotePushTokenReceiptV1, "result">;
@@ -84,9 +84,8 @@ export interface PushNotificationTokenStore {
   /**
    * Host-internal destination listing for delivery. Every registration in this
    * data directory belongs to this host, under the listener host id the phone
-   * paired with, so delivery lists them all and seals each under its own host
-   * id. Callers must never serialize tokens or keys onto notification payloads,
-   * receipts, or client responses.
+   * paired with. Callers must never serialize tokens onto notification
+   * payloads, receipts, or client responses.
    */
   readonly listDestinations: () => ReadonlyArray<PushTokenRecord>;
 }
@@ -97,6 +96,7 @@ export interface PushNotificationTokenStoreOptions {
   readonly uuid: () => string;
   /** The host's own actor, for clears the host makes rather than the device. */
   readonly hostActorId: string;
+  readonly clock?: () => string;
 }
 
 /**
@@ -128,7 +128,7 @@ export function pushRegistrationClearReasonFor(
 /**
  * Whether a registered device may be sent a notification now: its paired
  * record under the same host id is active and its credential has not passed
- * its expiry. Asked for every notification, not only when the gateway starts,
+ * its expiry. Asked for every notification, not only when the listener starts,
  * so a revoke or expiry stops delivery even before its clear lands.
  */
 export function pushDestinationStands(
@@ -150,20 +150,43 @@ export function pushDestinationStands(
   );
 }
 
-const StoredRegistration = Schema.Struct({
+const StoredRegistrationV2 = Schema.Struct({
+  version: Schema.Literal(2),
   hostId: Schema.NonEmptyTrimmedString,
   deviceId: Schema.NonEmptyTrimmedString,
   platform: RemotePushPlatform,
   token: Schema.NonEmptyString,
-  notificationPublicKey: RemotePushNotificationPublicKey,
   preferences: RemotePushPreferencesV1,
   collapseKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
   updatedAt: Schema.NonEmptyTrimmedString,
 }).annotations({ parseOptions: { onExcessProperty: "error" } });
-const StoredRegistrations = Schema.Struct({
-  registrations: Schema.Array(StoredRegistration),
+
+const StoredRegistrationsV2 = Schema.Struct({
+  registrations: Schema.Array(StoredRegistrationV2),
 }).annotations({ parseOptions: { onExcessProperty: "error" } });
-const decodeStoredRegistrations = Schema.decodeUnknownSync(Schema.parseJson(StoredRegistrations));
+const decodeStoredRegistrationsV2 = Schema.decodeUnknownSync(
+  Schema.parseJson(StoredRegistrationsV2),
+);
+
+/** Legacy v1 shape on disk before direct push: cleared on load as `destination-gone`. */
+const LegacyStoredRegistrationV1 = Schema.Struct({
+  hostId: Schema.NonEmptyTrimmedString,
+  deviceId: Schema.NonEmptyTrimmedString,
+  platform: RemotePushPlatform,
+  token: Schema.NonEmptyString,
+  notificationPublicKey: Schema.NonEmptyTrimmedString,
+  preferences: RemotePushPreferencesV1,
+  collapseKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
+  updatedAt: Schema.NonEmptyTrimmedString,
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
+
+const LegacyStoredRegistrationsV1 = Schema.Struct({
+  version: Schema.optional(Schema.Literal(1)),
+  registrations: Schema.Array(LegacyStoredRegistrationV1),
+}).annotations({ parseOptions: { onExcessProperty: "error" } });
+const decodeLegacyStoredRegistrationsV1 = Schema.decodeUnknownSync(
+  Schema.parseJson(LegacyStoredRegistrationsV1),
+);
 
 function keyOf(hostId: string, deviceId: string): string {
   return `${hostId}\0${deviceId}`;
@@ -175,7 +198,8 @@ function samePreferences(left: RemotePushPreferencesV1, right: RemotePushPrefere
     left.waiting === right.waiting &&
     left.failure === right.failure &&
     left.completion === right.completion &&
-    left.threadTitles === right.threadTitles
+    left.threadTitles === right.threadTitles &&
+    (left.newDevices ?? true) === (right.newDevices ?? true)
   );
 }
 
@@ -184,7 +208,7 @@ export function createPushNotificationTokenStore(
 ): PushNotificationTokenStore {
   const directory = join(options.dataDirectory, "remote");
   const path = join(options.dataDirectory, PUSH_REGISTRATIONS_FILE);
-  const records = load(path);
+  const clock = options.clock ?? (() => new Date().toISOString());
 
   const write = (next: ReadonlyMap<string, PushTokenRecord>): void => {
     if (next.size === 0) {
@@ -235,6 +259,34 @@ export function createPushNotificationTokenStore(
 
   const hostActor = { kind: "system", actorId: options.hostActorId } as const;
 
+  const loaded = load(path);
+  const records = loaded.records;
+  if (loaded.legacyV1.length > 0) {
+    // Clear legacy v1 registrations as `destination-gone` on upgrade so old
+    // gateway capabilities are never kept or attempted.
+    write(records);
+    const now = clock();
+    for (const legacy of loaded.legacyV1) {
+      try {
+        const payload = decodeRemotePushRegistrationClearedV1({
+          hostId: legacy.hostId,
+          deviceId: legacy.deviceId,
+          reason: "destination-gone",
+          clearedAt: now,
+        });
+        append({
+          deviceId: legacy.deviceId,
+          eventName: REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared,
+          payload,
+          actor: hostActor,
+          occurredAt: now,
+        });
+      } catch {
+        // Legacy file is already removed; an unjournaled clear never leaves a stale token behind.
+      }
+    }
+  }
+
   /**
    * Removes first and journals after: a failed append still leaves the token
    * gone, which is the side a revoke must fail on. The failure is thrown so
@@ -275,7 +327,6 @@ export function createPushNotificationTokenStore(
         existing !== undefined &&
         existing.token === input.token &&
         existing.platform === input.platform &&
-        existing.notificationPublicKey === input.notificationPublicKey &&
         samePreferences(existing.preferences, input.preferences)
       ) {
         return { result: "already-registered" as const };
@@ -288,11 +339,11 @@ export function createPushNotificationTokenStore(
         recordedAt: input.now,
       });
       const record: PushTokenRecord = {
+        version: 2,
         hostId: input.hostId,
         deviceId: input.deviceId,
         platform: input.platform,
         token: input.token,
-        notificationPublicKey: input.notificationPublicKey,
         preferences: input.preferences,
         // A changed registration keeps its collapse key, so a notification
         // still replaces the one it updates on the phone.
@@ -349,24 +400,38 @@ export function createPushNotificationTokenStore(
 }
 
 /**
- * A file that is missing or cannot be read back exactly holds no
- * registrations: the host delivers nothing until each phone registers again,
- * and the next write replaces the file.
+ * A file that is missing or cannot be read back holds no registrations: the
+ * host delivers nothing until each phone registers again, and the next write
+ * replaces the file. A legacy v1 file returns its records under `legacyV1` so
+ * startup clears and journals them as `destination-gone`.
  */
-function load(path: string): Map<string, PushTokenRecord> {
+function load(path: string): {
+  readonly records: Map<string, PushTokenRecord>;
+  readonly legacyV1: ReadonlyArray<{ readonly hostId: string; readonly deviceId: string }>;
+} {
   const records = new Map<string, PushTokenRecord>();
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return records;
+    return { records, legacyV1: [] };
   }
   try {
-    for (const record of decodeStoredRegistrations(text).registrations) {
+    for (const record of decodeStoredRegistrationsV2(text).registrations) {
       records.set(keyOf(record.hostId, record.deviceId), record);
     }
+    return { records, legacyV1: [] };
+  } catch {
+    // Fall through to detect legacy v1 registrations.
+  }
+  try {
+    const legacy = decodeLegacyStoredRegistrationsV1(text).registrations.map((entry) => ({
+      hostId: entry.hostId,
+      deviceId: entry.deviceId,
+    }));
+    return { records, legacyV1: legacy };
   } catch {
     records.clear();
+    return { records, legacyV1: [] };
   }
-  return records;
 }

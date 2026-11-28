@@ -1,25 +1,23 @@
 /**
- * Which paired computers this phone registered notifications with, and the
- * platform token each registration was made under. It lets the phone notice
- * that the system issued a new token (Apple and Google both rotate them,
- * and a restored or reinstalled app gets a different one) and register the
- * new one with every computer that expects notifications.
+ * Which paired computers this phone registered direct v2 push notifications
+ * with, and the platform token each registration was made under. It lets the
+ * phone notice that the system issued a new token (Apple and Google both
+ * rotate them, and a restored or reinstalled app gets a different one) and
+ * register the new one with every computer that expects notifications.
  *
- * The record holds a digest of the token, never the token, the capability, or
- * a key. It lives in secure storage beside the host list.
+ * The record holds a digest of the token, never the token itself. It lives in
+ * secure storage beside the host list.
  */
 export interface PushRegistrationRecord {
   readonly hostId: string;
-  /** The device id the computer knows this phone by; the notification key binds it. */
+  /** The device id the computer knows this phone by. */
   readonly deviceId: string;
-  /** The fingerprint the phone saw at pairing, which a new capability is bound to. */
-  readonly hostKeyFingerprint: string;
   /** SHA-256 of the platform token the computer's registration was made under, in hex. */
   readonly tokenDigest: string;
   /**
-   * Set when the phone was told to forget this computer but could not delete
-   * its notification key. The record is kept so the next run tries the
-   * deletion again, and is never rotated, so the key is not used again.
+   * Set when the phone was told to forget this computer but could not finish
+   * clearing local notification state. The record is kept so the next run
+   * retries forgetting, and is never rotated.
    */
   readonly forgetPending?: true;
   /**
@@ -28,13 +26,18 @@ export interface PushRegistrationRecord {
    * registers the same choice again.
    */
   readonly newDevices?: false;
+  /**
+   * Set when the person opted in to showing thread and project names on the
+   * lock screen for this computer; absent, names stay hidden.
+   */
+  readonly threadTitles?: true;
 }
 
 /**
  * Keeps an older operation from undoing a newer one on the same computer. Turning
  * notifications off cancels whatever was started before it and waits for it to
- * stop, so a rotation that began earlier cannot re-register, recreate the key,
- * or restore the record once the person has turned them off.
+ * stop, so a rotation that began earlier cannot re-register or restore the
+ * record once the person has turned them off.
  */
 export interface PhoneNotificationLifecycle {
   /** Ends every operation on this computer started before now, at its next checkpoint. */
@@ -97,7 +100,7 @@ export interface PushRegistrationBook {
   readonly remove: (hostId: string) => Promise<void>;
 }
 
-const BOOK_KEY = "octant.mobile.push-registrations.v1";
+const BOOK_KEY = "octant.mobile.push-registrations.v2";
 
 function isRecord(value: unknown): value is PushRegistrationRecord {
   if (typeof value !== "object" || value === null) return false;
@@ -107,12 +110,11 @@ function isRecord(value: unknown): value is PushRegistrationRecord {
     entry.hostId.length > 0 &&
     typeof entry.deviceId === "string" &&
     entry.deviceId.length > 0 &&
-    typeof entry.hostKeyFingerprint === "string" &&
-    entry.hostKeyFingerprint.length > 0 &&
     typeof entry.tokenDigest === "string" &&
     entry.tokenDigest.length > 0 &&
     (entry.forgetPending === undefined || entry.forgetPending === true) &&
-    (entry.newDevices === undefined || entry.newDevices === false)
+    (entry.newDevices === undefined || entry.newDevices === false) &&
+    (entry.threadTitles === undefined || entry.threadTitles === true)
   );
 }
 

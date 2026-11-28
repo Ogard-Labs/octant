@@ -1238,9 +1238,9 @@ async function putPushToken(
     method: "PUT",
     path: PUSH_TOKEN_PATH,
     body: JSON.stringify({
+      version: 2,
       platform: "ios",
       token,
-      notificationPublicKey: PUSH_NOTIFICATION_KEY,
       preferences: PUSH_PREFERENCES,
     }),
     nonce: nextNonce(),
@@ -1479,14 +1479,22 @@ describe("push registrations follow the paired device (in-memory gateway)", () =
         }),
         await putPushToken(harness, session, token, { csrf: null }),
         await putPushToken(harness, session, token, { origin: "https://evil.example.test" }),
-        // The device is the principal's; a body cannot name another one.
+        // The device is the principal's; a body cannot name another one, and v1 is refused.
+        await putPushToken(harness, session, token, {
+          body: JSON.stringify({
+            version: 2,
+            platform: "ios",
+            token,
+            preferences: PUSH_PREFERENCES,
+            deviceId: "99999999-9999-4999-8999-999999999999",
+          }),
+        }),
         await putPushToken(harness, session, token, {
           body: JSON.stringify({
             platform: "ios",
             token,
             notificationPublicKey: PUSH_NOTIFICATION_KEY,
             preferences: PUSH_PREFERENCES,
-            deviceId: "99999999-9999-4999-8999-999999999999",
           }),
         }),
       ];

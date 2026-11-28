@@ -2934,21 +2934,19 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           </SettingRow>
         </div>
       </SettingsSection>
+      <PhoneNotificationSettings
+        focusedSetting={focusedSetting}
+        hub={hubAdministrationOf(props.hostBridge)}
+      />
       {props.automationNotificationClient === undefined ? (
-        <SettingsSection title="Notifications">
+        <SettingsSection title="Automation notifications">
           <p className="settings-section-line">Notifications are set up on the host machine.</p>
         </SettingsSection>
       ) : (
-        <>
-          <PhoneNotificationSettings
-            client={props.automationNotificationClient}
-            focusedSetting={focusedSetting}
-          />
-          <AutomationNotificationSettings
-            client={props.automationNotificationClient}
-            focused={focusedSetting === "host-automation-notifications"}
-          />
-        </>
+        <AutomationNotificationSettings
+          client={props.automationNotificationClient}
+          focused={focusedSetting === "host-automation-notifications"}
+        />
       )}
     </section>
   );

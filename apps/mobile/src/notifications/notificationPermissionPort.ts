@@ -3,7 +3,7 @@ export type NotificationPermissionStatus = "granted" | "denied" | "undetermined"
 export interface MobileNotificationPermissionPort {
   /**
    * Whether this build and device can receive push at all. False on the
-   * Simulator, on an iPhone too old to open sealed content, on an Android
+   * Simulator, in an iOS build made without the push capability, on an Android
    * build with no push project, and on the web, where the phone offers no
    * enablement.
    */
@@ -13,19 +13,15 @@ export interface MobileNotificationPermissionPort {
   /** The platform token, or undefined when the system gave none. */
   readonly getDevicePushToken: () => Promise<string | undefined>;
   /**
-   * The public half of this phone's notification key for one host, made and
-   * kept in secure storage on first use. The key binds the device id this
-   * phone has with that host, because the host seals to both. Undefined when
-   * the build has no key storage for notifications.
+   * Clears a computer from this phone's forgotten-host list when the person
+   * turns notifications on for it again.
    */
-  readonly getNotificationPublicKey: (
-    hostId: string,
-    deviceId: string,
-  ) => Promise<string | undefined>;
+  readonly allowHost?: (hostId: string) => Promise<void>;
   /**
-   * Removes the notifications this phone shows for one computer and forgets
-   * its notification key, so nothing that computer sealed can be opened
-   * again. Runs when the computer is removed, revoked, or signed out of.
+   * Removes the notifications this phone shows for one computer and marks it
+   * forgotten so late alerts from it are hidden or dropped. Runs when the
+   * computer is removed, revoked, signed out of, or notifications are turned
+   * off.
    */
   readonly forgetHost: (hostId: string) => Promise<void>;
   readonly platform: "ios" | "android";
@@ -47,9 +43,7 @@ export function createUnavailableNotificationPermissionPort(
     async getDevicePushToken() {
       return undefined;
     },
-    async getNotificationPublicKey() {
-      return undefined;
-    },
+    async allowHost() {},
     async forgetHost() {},
   };
 }

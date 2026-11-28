@@ -314,7 +314,6 @@ describe("remote route policy", () => {
       { path: "/api/shield/servers?projectId=p1", method: "GET" },
       { path: "/api/shield/servers", method: "POST" },
       { path: "/api/automation-notifications", method: "PUT" },
-      { path: "/api/push-notifications/gateway", method: "PUT" },
       { path: "/api/artifacts/tag", method: "POST" },
       { path: "/api/artifacts/claude-snapshot", method: "POST" },
       { path: "/api/artifacts/claude-copy", method: "POST" },

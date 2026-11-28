@@ -66,7 +66,6 @@ const PAGES_BEFORE_THE_REGROUPING: Readonly<
     "your-instructions",
     "orchestration-instructions",
     "host-phone-notifications",
-    "host-push-gateway",
     "host-automation-notifications",
   ],
   appearance: [

@@ -1,30 +1,68 @@
 import {
-  type RemotePushCapability,
-  type RemotePushGatewayRefusalCode,
   type RemotePushPlatform,
   type RemotePushPreferencesV1,
+  type RemotePushStatusV1,
+  RemotePushStatusV1 as RemotePushStatusSchema,
   RemotePushTokenReceiptV1,
   decodeHostAnswer,
-  decodeRemotePushCapabilityResponseV1,
-  decodeRemotePushGatewayRefusalV1,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
+
+export type MobilePushStatusResult =
+  | { readonly status: "ready"; readonly push: RemotePushStatusV1 }
+  | { readonly status: "update-host" }
+  | { readonly status: "rejected" }
+  | { readonly status: "unavailable" };
+
+/**
+ * Asks a paired host whether it can send v2 phone notifications directly (or
+ * through its hub). A 404 or 405 means an older host that predates direct
+ * push and must be updated before this phone can register.
+ */
+export async function readMobilePushStatus(
+  transport: MobileRemoteTransport,
+): Promise<MobilePushStatusResult> {
+  let response: Response;
+  try {
+    response = await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/remote/auth/push-token",
+    });
+  } catch {
+    return { status: "unavailable" };
+  }
+  if (response.status === 404 || response.status === 405) {
+    return { status: "update-host" };
+  }
+  if (response.status === 403 || response.status === 401) {
+    return { status: "rejected" };
+  }
+  if (!response.ok) {
+    return { status: "unavailable" };
+  }
+  try {
+    return {
+      status: "ready",
+      push: decodeHostAnswer(RemotePushStatusSchema)(await response.json()),
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
 
 export async function registerMobilePushToken(input: {
   readonly transport: MobileRemoteTransport;
   readonly platform: RemotePushPlatform;
   readonly token: string;
-  /** The public half of the notification key this phone made for this host. */
-  readonly notificationPublicKey: string;
   readonly preferences: RemotePushPreferencesV1;
 }): Promise<RemotePushTokenReceiptV1> {
   const response = await input.transport.authenticatedFetch({
     method: "PUT",
     path: "/api/remote/auth/push-token",
     body: JSON.stringify({
+      version: 2,
       platform: input.platform,
       token: input.token,
-      notificationPublicKey: input.notificationPublicKey,
       preferences: input.preferences,
     }),
   });
@@ -62,62 +100,5 @@ export async function clearMobilePushToken(
     return decodeHostAnswer(RemotePushTokenReceiptV1)(await response.json());
   } catch {
     throw new MobileInboxFailure("unavailable", "Push token clear returned an invalid response.");
-  }
-}
-
-export type MobilePushCapabilityResult =
-  | { readonly status: "issued"; readonly capability: RemotePushCapability }
-  | { readonly status: "refused"; readonly code: RemotePushGatewayRefusalCode | "unknown" }
-  | { readonly status: "unreachable" };
-
-/**
- * Trades this phone's platform token for a delivery capability at the push
- * gateway compiled into its build, bound to one paired computer's key. The
- * host is then given the capability, never the platform token itself.
- */
-export async function requestMobilePushCapability(input: {
-  readonly gatewayUrl: string;
-  readonly platform: RemotePushPlatform;
-  readonly token: string;
-  readonly hostKeyFingerprint: string;
-  readonly fetch?: typeof fetch;
-}): Promise<MobilePushCapabilityResult> {
-  const fetchImpl = input.fetch ?? fetch;
-  const base = input.gatewayUrl.endsWith("/") ? input.gatewayUrl : `${input.gatewayUrl}/`;
-  let response: Response;
-  try {
-    response = await fetchImpl(new URL("v1/capabilities", base).toString(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        platform: input.platform,
-        token: input.token,
-        hostKeyFingerprint: input.hostKeyFingerprint,
-      }),
-      redirect: "error",
-    });
-  } catch {
-    return { status: "unreachable" };
-  }
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return { status: "refused", code: "unknown" };
-  }
-  if (response.ok) {
-    try {
-      return {
-        status: "issued",
-        capability: decodeRemotePushCapabilityResponseV1(body).capability,
-      };
-    } catch {
-      return { status: "refused", code: "unknown" };
-    }
-  }
-  try {
-    return { status: "refused", code: decodeRemotePushGatewayRefusalV1(body).code };
-  } catch {
-    return { status: "refused", code: "unknown" };
   }
 }

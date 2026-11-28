@@ -293,24 +293,26 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     path: "/api/desktop/hub/relay/devices",
     decodeBody: decodeHubRelayDeviceRequest,
   },
+  // This host's own direct push sender: available on any host, not only a hub.
+  "push-sender-status": { method: "GET", path: "/api/desktop/push-sender" },
   "direct-push": {
     method: "POST",
-    path: "/api/desktop/hub/direct-push",
+    path: "/api/desktop/push-sender",
     decodeBody: decodeHubDirectPushSwitchRequest,
   },
   "direct-push-environment": {
     method: "POST",
-    path: "/api/desktop/hub/direct-push/environment",
+    path: "/api/desktop/push-sender/environment",
     decodeBody: decodeHubDirectPushEnvironmentRequest,
   },
   "direct-push-credential": {
     method: "POST",
-    path: "/api/desktop/hub/direct-push/credential",
+    path: "/api/desktop/push-sender/credential",
     decodeBody: decodeHubDirectPushCredentialRequest,
   },
   "direct-push-credential-remove": {
     method: "POST",
-    path: "/api/desktop/hub/direct-push/credential/remove",
+    path: "/api/desktop/push-sender/credential/remove",
     decodeBody: decodeHubDirectPushCredentialRemoveRequest,
   },
   provision: {

@@ -32,22 +32,23 @@ needs an approval. The spec is
 this is what lives here.
 
 - `modules/octant-push` is the native port: the system's permission, the Apple
-  or Firebase token, and one X25519 notification key per computer. On iOS the
-  keys sit in Keychain items shared with the notification service extension
-  (`modules/octant-push/notification-service`), which opens each sealed
-  notification before the system draws it. On Android the keys are encrypted
-  under a Keystore key and the Firebase messaging service opens the data-only
-  message and posts the notification. Both read the same rules from
-  `SealedNotification.swift` and `SealedNotification.kt`.
+  or Firebase token, and forgotten-host tracking. On iOS a keyless notification
+  service extension (`modules/octant-push/notification-service`) validates the
+  direct v2 `octant` metadata, builds the deep link, and hides alerts from
+  removed computers using a non-secret status App Group. On Android the
+  Firebase messaging service validates the data-only v2 message, drops messages
+  from removed computers, and posts the notification. Both read the same rules
+  from `DirectNotification.swift` and `DirectNotification.kt`.
 - `src/notifications/` is the JavaScript side: `enablePhoneNotifications.ts`
-  (turn on, rotate a changed token, forget a computer), `pushRegistrationBook.ts`
-  (a digest of the token each computer was registered under), and
-  `octantPushModule.ts` (the native port, failing closed).
-- Push is unavailable, and the Settings panel says so, on the iOS Simulator, on
-  iOS earlier than 17, in an iOS build made without push, in an Android build with
-  no Firebase project, in Expo Go, and on the web.
+  (check host v2 support, turn on, toggle thread names, rotate a changed token,
+  forget a computer), `pushRegistrationBook.ts` (a digest of the token each
+  computer was registered under), and `octantPushModule.ts` (the native port,
+  failing closed).
+- Push is unavailable, and the Settings panel says so, on the iOS Simulator, in
+  an iOS build made without push, in an Android build with no Firebase project,
+  in Expo Go, and on the web.
 - A build carries the iOS extension and entitlements only when made with
-  `OCTANT_MOBILE_PUSH=1`, which needs the push capability and Keychain sharing on
+  `OCTANT_MOBILE_PUSH=1`, which needs the push and App Group capabilities on
   the app's App ID and the extension's (`app.octant.mobile.notification-service`).
   Android takes its Firebase project file from the `GOOGLE_SERVICES_JSON` build
   variable, never from the repository.
@@ -58,9 +59,9 @@ iphonesimulator -destination 'generic/platform=iOS Simulator'
 CODE_SIGNING_ALLOWED=NO` and, for the extension, `xcodebuild build -project
 Octant.xcodeproj -target OctantNotificationService -sdk iphonesimulator
 CODE_SIGNING_ALLOWED=NO`. The `Mobile (iOS native modules)` workflow does this.
-- The server test `apps/server/src/remote/pushNotificationSealing.phone.test.ts`
-  opens what the host seals with the Swift (on a Mac) and the Kotlin (where
-  `kotlinc` and `java` exist) the phone runs.
+- The server test `apps/server/src/push/directPushNotification.phone.test.ts`
+  verifies direct v2 push payloads with the Swift (on a Mac) and the Kotlin
+  (where `kotlinc` and `java` exist) the phone runs.
 
 ## Threads and storage
 

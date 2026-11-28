@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeStableHostId,
+  type AutomationNotificationPreferences,
+  type UtcTimestamp,
+} from "@octant/contracts";
+import { checkPushLabel } from "./pushLabelPolicy";
+import {
   admitRemotePushByRate,
-  buildRedactedAutomationPushNotification,
-  buildRedactedDeviceJoinedPushNotification,
-  buildRedactedMoveWaitingPushNotification,
-  buildRedactedPushNotification,
   automationNotificationKindForLifecycle,
+  buildLiveStatusPushMessage,
+  buildPushAlert,
   isAutomationNotificationKindEnabled,
+  recheckHubPushMessage,
   REMOTE_PUSH_RATE_LIMIT,
   remotePushDedupeKey,
   remotePushPreferenceAllows,
@@ -20,13 +25,14 @@ import {
   AUTOMATION_NOTIFICATION_MAX_ATTEMPTS,
   nextAutomationNotificationOutcome,
 } from "./automationNotificationPolicy";
-import type { AutomationNotificationPreferences } from "@octant/contracts";
 
-const hostId = "11111111-1111-4111-8111-111111111111";
-const alertId = "44444444-4444-4444-8444-444444444444";
+const hostId = decodeStableHostId("11111111-1111-4111-8111-111111111111");
 const threadId = "00000000-0000-4000-8000-000000000001";
-const automationId = "aa000000-0000-4000-8000-000000000001" as const;
 const runId = "aa000000-0000-4000-8000-000000000010" as const;
+const collapseId = "q2HnS1wZcV0k3fA8uYt7Rg";
+const occurredAt = "2026-11-28T12:00:00.000Z" as UtcTimestamp;
+const staleAt = "2026-11-28T12:30:00.000Z" as UtcTimestamp;
+const readyEmpty = { status: "ready", values: [] } as const;
 
 const prefs = (overrides: Partial<AutomationNotificationPreferences> = {}) =>
   ({
@@ -42,66 +48,210 @@ const prefs = (overrides: Partial<AutomationNotificationPreferences> = {}) =>
 
 const encoder = new TextEncoder();
 
-describe("buildRedactedPushNotification", () => {
-  it("shows only the kind and the computer's label unless the phone opted in to thread names", () => {
-    const payload = buildRedactedPushNotification({
+describe("checkPushLabel", () => {
+  it("drops strings matching secret patterns, paths, or exact held secrets even when no pattern matches", () => {
+    const randomOpaqueSecret = "my-custom-opaque-company-canary-98471";
+    expect(checkPushLabel("Rotate ghp_exampletoken1234567890", [])).toBeUndefined();
+    expect(checkPushLabel("Fix /Users/example/secret.ts", [])).toBeUndefined();
+    expect(
+      checkPushLabel(`Deploy ${randomOpaqueSecret} now`, [randomOpaqueSecret]),
+    ).toBeUndefined();
+    expect(checkPushLabel("Quarterly plan", [randomOpaqueSecret])).toBe("Quarterly plan");
+  });
+
+  it("strips control and bidi characters and checks before stripping so injected control chars cannot evade secret detection", () => {
+    const held = "canary-value-7711";
+    expect(checkPushLabel(`Title\u202E ${held}`, [held])).toBeUndefined();
+    expect(checkPushLabel("Clean\u0007\u202E title\nline2", [])).toBe("Clean title line2");
+  });
+});
+
+describe("buildPushAlert", () => {
+  it("shows only the status word and computer label unless the phone opted in to thread names", () => {
+    const message = buildPushAlert({
+      source: "thread",
       kind: "approval-needed",
       hostId,
       threadId,
       mode: "code",
       computerLabel: "Studio Mac",
       threadTitle: "Acme incident 4411 rollback",
+      projectName: "SecretProject",
       threadTitles: false,
+      collapseId,
+      sequence: 1,
+      occurredAt,
+      heldSecrets: readyEmpty,
     });
-    expect(payload).toEqual({
-      kind: "approval-needed",
-      hostId,
-      threadId,
-      mode: "code",
-      title: "Approval needed",
-      body: "On Studio Mac",
+    expect(message).toEqual({
+      type: "alert",
+      alert: {
+        version: 2,
+        kind: "approval-needed",
+        hostId,
+        threadId,
+        mode: "code",
+        title: "Approval needed",
+        body: "On Studio Mac",
+        collapseId,
+        urgency: "high",
+        sequence: 1,
+        occurredAt,
+      },
     });
-    expect(JSON.stringify(payload)).not.toContain("Acme");
+    expect(JSON.stringify(message)).not.toContain("Acme");
+    expect(JSON.stringify(message)).not.toContain("SecretProject");
   });
 
-  it("adds the thread title only for a phone that opted in", () => {
-    const payload = buildRedactedPushNotification({
+  it("includes thread and project names only for a phone that opted in", () => {
+    const message = buildPushAlert({
+      source: "thread",
       kind: "completion",
       hostId,
       threadId,
       mode: "work",
       computerLabel: "Studio Mac",
       threadTitle: "Quarterly plan",
+      projectName: "Finance",
       threadTitles: true,
+      collapseId,
+      sequence: 2,
+      occurredAt,
+      heldSecrets: readyEmpty,
     });
-    expect(payload.title).toBe("Thread completed: Quarterly plan");
-    expect(payload.body).toBe("On Studio Mac");
+    expect(message.type).toBe("alert");
+    if (message.type === "alert") {
+      expect(message.alert.title).toBe("Thread completed: Quarterly plan");
+      expect(message.alert.body).toBe("Finance · On Studio Mac");
+    }
   });
 
-  it("keeps a title that looks like a secret or a path off the lock screen even when titles are on", () => {
+  it("drops a thread title or project name carrying a secret pattern, path, or exact held host secret", () => {
+    const heldSecret = "opaque-prod-key-zx991827";
+    const heldSecrets = { status: "ready", values: [heldSecret] } as const;
     for (const threadTitle of [
-      "Rotate ghp_exampletoken123",
+      "Rotate ghp_exampletoken1234567890",
       "Fix /Users/example/secret.ts",
-      "password reset for prod",
+      `Use ${heldSecret} in prod`,
     ]) {
-      const payload = buildRedactedPushNotification({
+      const message = buildPushAlert({
+        source: "thread",
         kind: "failure",
         hostId,
         threadId,
         mode: "chat",
         computerLabel: "Studio Mac",
         threadTitle,
+        projectName: `Project ${heldSecret}`,
         threadTitles: true,
+        collapseId,
+        sequence: 3,
+        occurredAt,
+        heldSecrets,
       });
-      expect(payload.title).toBe("Thread failed");
-      expect(JSON.stringify(payload)).not.toContain("ghp_");
-      expect(JSON.stringify(payload)).not.toContain("/Users/");
-      expect(JSON.stringify(payload)).not.toContain("password");
+      expect(message.type).toBe("alert");
+      if (message.type === "alert") {
+        expect(message.alert.title).toBe("Thread failed");
+        expect(message.alert.body).toBe("On Studio Mac");
+      }
+      expect(JSON.stringify(message)).not.toContain(heldSecret);
+      expect(JSON.stringify(message)).not.toContain("ghp_");
+      expect(JSON.stringify(message)).not.toContain("/Users/");
     }
   });
 
-  it("stays within the payload's byte bounds for long or multibyte titles and labels", () => {
-    const payload = buildRedactedPushNotification({
+  it("fails closed to a generic placeholder when the host secret check cannot run", () => {
+    const message = buildPushAlert({
+      source: "thread",
+      kind: "waiting",
+      hostId,
+      threadId,
+      mode: "code",
+      computerLabel: "Studio Mac",
+      threadTitle: "Ship release",
+      projectName: "Octant",
+      threadTitles: true,
+      collapseId,
+      sequence: 4,
+      occurredAt,
+      heldSecrets: { status: "unavailable" },
+    });
+    expect(message.type).toBe("alert");
+    if (message.type === "alert") {
+      expect(message.alert.title).toBe("Octant");
+      expect(message.alert.body).toBe("A paired computer has an update");
+    }
+    expect(JSON.stringify(message)).not.toContain("Ship release");
+    expect(JSON.stringify(message)).not.toContain("Studio Mac");
+  });
+
+  it("drops privateAddress and alertId from device-joined notifications and drops automationId/runId from automation notifications", () => {
+    const joined = buildPushAlert({
+      source: "device-joined",
+      hostId,
+      deviceName: "Ada's phone",
+      joined: "host",
+      computerLabel: "Studio Mac",
+      collapseId,
+      sequence: 5,
+      occurredAt,
+      heldSecrets: readyEmpty,
+    });
+    expect(joined).toEqual({
+      type: "alert",
+      alert: {
+        version: 2,
+        kind: "device-joined",
+        hostId,
+        title: "New device: Ada's phone",
+        body: "Paired with Studio Mac",
+        collapseId,
+        urgency: "high",
+        sequence: 5,
+        occurredAt,
+      },
+    });
+    expect(JSON.stringify(joined)).not.toContain("alertId");
+    expect(JSON.stringify(joined)).not.toContain("privateAddress");
+
+    const moved = buildPushAlert({
+      source: "move-waiting",
+      hostId,
+      destinationName: "Studio Mac",
+      collapseId,
+      sequence: 6,
+      occurredAt,
+      heldSecrets: readyEmpty,
+    });
+    expect(moved.type === "alert" && moved.alert.title).toBe("A move is waiting for your phone");
+    expect(moved.type === "alert" && moved.alert.body).toBe("To Studio Mac");
+
+    const automation = buildPushAlert({
+      source: "automation",
+      kind: "failure",
+      hostId,
+      mode: "code",
+      displayName: "Nightly review",
+      computerLabel: "Studio Mac",
+      threadTitles: true,
+      collapseId,
+      sequence: 7,
+      occurredAt,
+      heldSecrets: readyEmpty,
+    });
+    expect(automation.type === "alert" && automation.alert.title).toBe(
+      "Automation failed: Nightly review",
+    );
+    expect(automation.type === "alert" && automation.alert.body).toBe("On Studio Mac");
+    expect(automation.type === "alert" && automation.alert.threadId).toBeUndefined();
+    expect(automation.type === "alert" && automation.alert.mode).toBeUndefined();
+    expect(JSON.stringify(automation)).not.toContain("automationId");
+    expect(JSON.stringify(automation)).not.toContain("automationRunId");
+  });
+
+  it("stays within UTF-8 byte bounds for long or multibyte labels", () => {
+    const message = buildPushAlert({
+      source: "thread",
       kind: "waiting",
       hostId,
       threadId,
@@ -109,148 +259,101 @@ describe("buildRedactedPushNotification", () => {
       computerLabel: "Ü".repeat(200),
       threadTitle: "日本語のスレッド".repeat(30),
       threadTitles: true,
+      collapseId,
+      sequence: 8,
+      occurredAt,
+      heldSecrets: readyEmpty,
     });
-    expect(encoder.encode(payload.title).byteLength).toBeLessThanOrEqual(80);
-    expect(encoder.encode(payload.body).byteLength).toBeLessThanOrEqual(120);
-    expect(payload.title.startsWith("Waiting for you: 日本語")).toBe(true);
-  });
-});
-
-describe("buildRedactedMoveWaitingPushNotification", () => {
-  it("says only that a move waits and names the destination", () => {
-    expect(
-      buildRedactedMoveWaitingPushNotification({ hostId, destinationName: "Studio Mac" }),
-    ).toEqual({
-      kind: "move-waiting",
-      hostId,
-      title: "A move is waiting for your phone",
-      body: "To Studio Mac",
-    });
-  });
-
-  it("keeps a destination name that looks like a secret or a path off the lock screen", () => {
-    for (const destinationName of ["sk-live-abc", "/Users/example/Mac", "  "]) {
-      expect(buildRedactedMoveWaitingPushNotification({ hostId, destinationName }).body).toBe(
-        "To another computer",
-      );
+    expect(message.type).toBe("alert");
+    if (message.type === "alert") {
+      expect(encoder.encode(message.alert.title).byteLength).toBeLessThanOrEqual(80);
+      expect(encoder.encode(message.alert.body).byteLength).toBeLessThanOrEqual(120);
     }
   });
-
-  it("stays within the payload's byte bounds for a long destination name", () => {
-    const body = buildRedactedMoveWaitingPushNotification({
-      hostId,
-      destinationName: "æ".repeat(200),
-    }).body;
-    expect(encoder.encode(body).byteLength).toBeLessThanOrEqual(120);
-  });
 });
 
-describe("buildRedactedDeviceJoinedPushNotification", () => {
-  it("names the new device and its private address, and where it joined", () => {
-    expect(
-      buildRedactedDeviceJoinedPushNotification({
-        hostId,
-        alertId,
-        deviceName: "Ada's phone",
-        privateAddress: "192.168.1.20",
-        joined: "host",
-        computerLabel: "Studio Mac",
-      }),
-    ).toEqual({
-      kind: "device-joined",
+describe("buildLiveStatusPushMessage and hub re-check", () => {
+  it("caps live-status rows at five, hides thread names when opted out, and checks every label against held secrets", () => {
+    const heldSecret = "hub-secret-canary-4411";
+    const rows = Array.from({ length: 7 }, (_, i) => ({
+      threadId: `00000000-0000-4000-8000-00000000000${i + 1}`,
+      mode: "code" as const,
+      status: "working" as const,
+      updatedAt: `2026-11-28T12:00:0${7 - i}.000Z` as UtcTimestamp,
+      title: i === 0 ? `Leak ${heldSecret}` : `Thread ${i + 1}`,
+      projectName: i === 1 ? "Project /Users/example/repo" : "Octant",
+    }));
+
+    const optedOut = buildLiveStatusPushMessage({
+      event: "update",
       hostId,
-      alertId,
-      title: "New device: Ada's phone",
-      body: "192.168.1.20 · paired with Studio Mac",
-    });
-    expect(
-      buildRedactedDeviceJoinedPushNotification({
-        hostId,
-        alertId,
-        deviceName: "Tablet",
-        joined: "hub",
-        computerLabel: "Studio Mac",
-      }).body,
-    ).toBe("Joined the hub");
-  });
-
-  it("keeps a device name that looks like a secret or a path off the lock screen", () => {
-    for (const deviceName of ["sk-live-abc", "/Users/example/phone", "  "]) {
-      expect(
-        buildRedactedDeviceJoinedPushNotification({
-          hostId,
-          alertId,
-          deviceName,
-          joined: "hub",
-          computerLabel: "Studio Mac",
-        }).title,
-      ).toBe("New device");
-    }
-  });
-
-  it("stays within the payload's byte bounds for a long name", () => {
-    const pushed = buildRedactedDeviceJoinedPushNotification({
-      hostId,
-      alertId,
-      deviceName: "æ".repeat(200),
-      privateAddress: "fd7a:115c:a1e0:ab12:4843:cd96:6258:b240",
-      joined: "host",
-      computerLabel: "æ".repeat(200),
-    });
-    expect(encoder.encode(pushed.title).byteLength).toBeLessThanOrEqual(80);
-    expect(encoder.encode(pushed.body).byteLength).toBeLessThanOrEqual(120);
-  });
-
-  it("tells a phone about new devices unless it turned them off, a phone from before the setting included", () => {
-    const preferences = {
-      approvalNeeded: true,
-      waiting: true,
-      failure: true,
-      completion: true,
-      threadTitles: false,
-    };
-    expect(remotePushWantsNewDevices(preferences)).toBe(true);
-    expect(remotePushWantsNewDevices({ ...preferences, newDevices: true })).toBe(true);
-    expect(remotePushWantsNewDevices({ ...preferences, newDevices: false })).toBe(false);
-    expect(remotePushUrgency("device-joined")).toBe("high");
-  });
-});
-
-describe("buildRedactedAutomationPushNotification", () => {
-  it("includes automation navigation without requiring a thread id", () => {
-    const payload = buildRedactedAutomationPushNotification({
-      kind: "failure",
-      hostId,
-      automationId: automationId as never,
-      automationRunId: runId as never,
-      mode: "code",
-      displayName: "Nightly review",
       computerLabel: "Studio Mac",
+      sequence: 1,
+      occurredAt,
+      staleAt,
+      counts: { needsYou: 0, failed: 0, working: 7, done: 0 },
+      rows,
+      threadTitles: false,
+      heldSecrets: readyEmpty,
+    });
+    expect(optedOut.type).toBe("live-status");
+    if (optedOut.type === "live-status") {
+      expect(optedOut.liveStatus.rows).toHaveLength(5);
+      expect(
+        optedOut.liveStatus.rows.every((r) => r.title === undefined && r.projectName === undefined),
+      ).toBe(true);
+    }
+
+    const optedIn = buildLiveStatusPushMessage({
+      event: "update",
+      hostId,
+      computerLabel: "Studio Mac",
+      sequence: 2,
+      occurredAt,
+      staleAt,
+      counts: { needsYou: 0, failed: 0, working: 7, done: 0 },
+      rows,
       threadTitles: true,
+      heldSecrets: { status: "ready", values: [heldSecret] },
     });
-    expect(payload.navigation).toEqual({
-      surface: "automation-center",
-      automationId,
-      runId,
-    });
-    expect(payload.threadId).toBeUndefined();
-    expect(payload.title).toBe("Automation failed: Nightly review");
-    expect(payload.body).toBe("On Studio Mac");
+    expect(optedIn.type).toBe("live-status");
+    if (optedIn.type === "live-status") {
+      expect(optedIn.liveStatus.rows[0]?.title).toBeUndefined();
+      expect(optedIn.liveStatus.rows[1]?.title).toBe("Thread 2");
+      expect(optedIn.liveStatus.rows[1]?.projectName).toBeUndefined();
+    }
+    expect(JSON.stringify(optedIn)).not.toContain(heldSecret);
   });
 
-  it("names the automation only for a phone that opted in to titles", () => {
-    const payload = buildRedactedAutomationPushNotification({
+  it("re-checks spoke messages on the hub and drops labels matching the hub's own secrets or unreadable keyring", () => {
+    const hubSecret = "only-hub-knows-this-9911";
+    const fromSpoke = buildPushAlert({
+      source: "thread",
       kind: "waiting",
       hostId,
-      automationId: automationId as never,
-      automationRunId: runId as never,
-      threadId: threadId as never,
-      displayName: "Customer Acme sync",
-      computerLabel: "Studio Mac",
-      threadTitles: false,
+      threadId,
+      mode: "code",
+      computerLabel: "Spoke Mac",
+      threadTitle: `Contains ${hubSecret}`,
+      threadTitles: true,
+      collapseId,
+      sequence: 1,
+      occurredAt,
+      heldSecrets: readyEmpty,
     });
-    expect(payload.title).toBe("Automation waiting");
-    expect(JSON.stringify(payload)).not.toContain("Acme");
+    const rechecked = recheckHubPushMessage(fromSpoke, { status: "ready", values: [hubSecret] });
+    expect(rechecked.type).toBe("alert");
+    if (rechecked.type === "alert") {
+      expect(rechecked.alert.title).toBe("Waiting for you");
+      expect(JSON.stringify(rechecked)).not.toContain(hubSecret);
+    }
+
+    const failedClosed = recheckHubPushMessage(fromSpoke, { status: "unavailable" });
+    expect(failedClosed.type).toBe("alert");
+    if (failedClosed.type === "alert") {
+      expect(failedClosed.alert.title).toBe("Octant");
+      expect(failedClosed.alert.body).toBe("A paired computer has an update");
+    }
   });
 });
 
@@ -263,11 +366,13 @@ describe("remote push delivery policy", () => {
     threadTitles: false,
   };
 
-  it("asks the phone's own preference for each kind", () => {
+  it("asks the phone's own preference for each kind and new-devices default", () => {
     expect(remotePushPreferenceAllows(preferences, "approval-needed")).toBe(true);
     expect(remotePushPreferenceAllows(preferences, "waiting")).toBe(false);
     expect(remotePushPreferenceAllows(preferences, "failure")).toBe(true);
     expect(remotePushPreferenceAllows(preferences, "completion")).toBe(false);
+    expect(remotePushWantsNewDevices(preferences)).toBe(true);
+    expect(remotePushWantsNewDevices({ ...preferences, newDevices: false })).toBe(false);
   });
 
   it("deduplicates per thread, kind, and run", () => {
@@ -302,6 +407,7 @@ describe("remote push delivery policy", () => {
     expect(remotePushUrgency("failure")).toBe("normal");
     expect(remotePushUrgency("completion")).toBe("normal");
     expect(remotePushUrgency("move-waiting")).toBe("high");
+    expect(remotePushUrgency("device-joined")).toBe("high");
   });
 });
 

@@ -3850,17 +3850,17 @@ Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: the phone sta
 
 ### Phone push notifications
 
-Push is off on the host and for every device until the person turns it on, and every notification is sealed so the delivery path learns nothing. Delivery goes through an Octant push gateway that stores nothing per device.
+Push is off on the host and for every device until the person turns it on. Any host sends checked v2 status notifications directly to Apple (APNs) and Google (FCM) with the person's own push credentials — no Octant-hosted push gateway or HPKE sealing layer exists (maintainer decision, 2026-11-28).
 
-- The envelope carries only a fixed placeholder; the lock screen shows kind and computer label unless the person opts in to thread titles for that phone.
-- The gateway issues delivery capabilities, accepts only requests signed by the host a capability names, and issues them without app attestation (accepted).
-- A person who builds the phone app from source can make their own hub the gateway. A held thread move is its own notification kind (maintainer request, 2026-11-09).
+- Notifications carry closed status words, counts, IDs, and — only when the phone opts in to "Show thread names" (off by default) — thread, project, or automation names. Every free-text field passes a host-side secret check (secret patterns plus exact values of secrets Octant holds, never reading linked 1Password items), dropping matching fields whole to fallback and failing closed to a generic placeholder when the check cannot run.
+- Spokes that grant Push to a hub hand checked v2 messages to the hub, which re-checks every free-text field and sends directly with its own credentials; standbys send only with their own credentials.
+- A keyless iOS notification service extension (using a non-secret status App Group) and Android FCM receiver validate v2 payloads, build deep links, and hide or drop late alerts from removed computers.
 
 Not built yet:
 
-- Gateway deployment, platform credentials, the native phone pieces and live delivery: maintainer gates. The host side is verified against a local gateway.
+- Live Activity / Android Live Update / Home Screen widget / Inbox live-status polish and physical-device delivery passes.
 
-Status: Partly built. Since: 2026-10-26. Detail: [Mobile maturity: delivery path](mobile-maturity.md#delivery-path), [what leaves the host](mobile-maturity.md#what-leaves-the-host) and [building the phone app yourself](mobile-maturity.md#building-the-phone-app-yourself).
+Status: Partly built. Since: 2026-10-26 (revised 2026-11-28). Detail: [Mobile maturity: Phase C](mobile-maturity.md#phase-c-host-originated-push) and [what leaves the host](mobile-maturity.md#what-leaves-the-host).
 
 ### Phone capture and voice
 

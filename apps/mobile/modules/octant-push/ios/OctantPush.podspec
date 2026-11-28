@@ -2,7 +2,7 @@ Pod::Spec.new do |s|
   s.name           = 'OctantPush'
   s.version        = '0.1.0'
   s.summary        = 'Octant push notifications'
-  s.description    = 'The phone side of sealed push notifications: permission, push token, and per-computer notification keys.'
+  s.description    = 'The phone side of direct push notifications: permission, push token, and forgotten-host handling.'
   s.license        = 'UNLICENSED'
   s.author         = 'Octant'
   s.homepage       = 'https://octant.sh'

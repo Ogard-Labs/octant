@@ -755,6 +755,7 @@ export function startOctantServer(
             token: options.credentialBrokerToken,
           });
     const {
+      rememberedThreadSecrets,
       threadSecrets,
       threadSecretRoutes,
       pairedThreadSecretRoutes,
@@ -1726,15 +1727,19 @@ export function startOctantServer(
       automationCommandService,
       automationScheduler,
       completedThreadArchiveSweep,
+      directPushSender,
       hasPushStanding,
+      heldSecretValues,
       hubPushHandoffSlot,
       webhookEventSourceSlot,
       pushComputerLabel,
       pushDeliveryTransport,
-      pushGatewaySetting,
       pushNotificationTokenStore,
+      pushSenderRoutes,
+      pushSenderService,
     } = wireAutomation({
       options,
+      rememberedThreadSecrets,
       integrationEventSources: integrationEventSources([
         githubRoutineEventSources,
         linearRoutineEventSources,
@@ -1808,6 +1813,7 @@ export function startOctantServer(
     const { threadNotifications } = yield* wireThreadNotifications({
       chatHiddenThreadIds,
       hasPushStanding,
+      heldSecretValues,
       persistence,
       pushComputerLabel,
       pushDeliveryTransport,
@@ -2417,7 +2423,9 @@ export function startOctantServer(
       webhookEventSourceSlot,
       pairedMergeUnlockSlot,
       hubActScopeSlot,
-      pushGatewaySetting,
+      directPushSender,
+      heldSecretValues,
+      pushSenderService,
       codeProjectAccess,
       credentialBroker,
       credentialResolver,
@@ -2592,6 +2600,7 @@ export function startOctantServer(
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
                 (await hubAdministrationRoutes(request)) ??
+                (await pushSenderRoutes(request)) ??
                 (await newDeviceAlertRoutes(request)) ??
                 (await accessActivityRoutes(request)) ??
                 (await threadMoveAdministrationRoutes(request)) ??

@@ -1,15 +1,19 @@
+import { createHash } from "node:crypto";
 import {
+  REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   decodeAutomationNotificationDeliveryQueryResponse,
   decodeAutomationNotificationDeliveryStatus,
+  decodeRemotePushDeliveryRecordedV1,
   type AutomationDefinition,
   type AutomationId,
   type AutomationNotificationDeliveryQueryResponse,
   type AutomationNotificationDeliveryReceipt,
   type AutomationNotificationDeliveryStatus,
   type AutomationNotificationKind,
-  type AutomationNotificationPayloadV1,
   type AutomationRun,
   type AutomationRunLifecycle,
+  type RemotePushDeliveryOutcome,
+  type StableHostId,
   type UtcTimestamp,
 } from "@octant/contracts";
 import {
@@ -18,15 +22,21 @@ import {
   nextAutomationNotificationOutcome,
 } from "@octant/domain/automation-notification-policy";
 import {
+  admitRemotePushByRate,
   automationNotificationKindForLifecycle,
-  buildRedactedAutomationPushNotification,
+  buildPushAlert,
   remotePushPreferenceAllows,
+  type HeldSecretSnapshot,
 } from "@octant/domain/push-notification-policy";
-import { sealPushNotification } from "../remote/pushNotificationSealing";
+import type { Journal } from "../persistence/journal";
 import type {
   PushNotificationTokenStore,
   PushTokenRecord,
 } from "../remote/pushNotificationTokenStore";
+import {
+  PUSH_DELIVERY_AGGREGATE,
+  derivePushCollapseId,
+} from "../remote/threadNotificationDeliveryService";
 import type { AutomationNotificationDeliveryStore } from "./automationNotificationDeliveryStore";
 import type { AutomationNotificationPreferencesStore } from "./automationNotificationPreferencesStore";
 import type { PushDeliveryTransport } from "./pushDeliveryTransport";
@@ -46,9 +56,18 @@ export interface AutomationNotificationDeliveryServiceOptions {
   readonly hasStanding: (hostId: string, deviceId: string) => boolean;
   /** The name the paired computer shows the phone. */
   readonly computerLabel: () => string;
+  /** Reads the host's held secret values for the push-label secret floor. */
+  readonly readHeldSecrets: () => Promise<HeldSecretSnapshot>;
   readonly transport: PushDeliveryTransport;
   readonly clock: () => UtcTimestamp;
   readonly uuid?: () => string;
+  /**
+   * Optional journal for recording per-device `remote.push-delivery-recorded@1`
+   * receipts when an automation run has an ordinary thread so the phone's Inbox
+   * lists routine notifications beside thread notifications.
+   */
+  readonly journal?: Pick<Journal, "append" | "replayAggregate">;
+  readonly hostActorId?: string;
   /**
    * Optional hook to append an opaque delivery ref onto the run aggregate.
    * Failures here must never change run lifecycle — they are swallowed after
@@ -71,11 +90,26 @@ const TERMINAL_OUTCOMES = new Set(["delivered", "failed", "cancelled", "exhauste
 
 const REOPENABLE_OUTCOMES = new Set(["skipped-preference", "skipped-no-destination", "queued"]);
 
+const FAILURE_CATEGORY = /^[a-z0-9-]{1,64}$/;
+
+function deviceReceiptAggregateId(destination: PushTokenRecord, dedupeKey: string): string {
+  const bytes = createHash("sha256")
+    .update(
+      `remote-push-delivery:automation:${destination.hostId}:${destination.deviceId}:${dedupeKey}`,
+    )
+    .digest();
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 /**
  * Host-side Automation notification delivery. Observes run lifecycle truth,
- * builds redacted payloads via the shared domain policy, delivers to registered
- * device destinations, and journals durable receipts. Notification failure
- * never mutates run or ordinary-thread lifecycle.
+ * builds checked v2 payloads via the single shared domain builder, delivers to
+ * every standing registered device that wants the kind (with per-device rate
+ * limiting), and journals durable receipts. Notification failure never mutates
+ * run or ordinary-thread lifecycle.
  */
 export class AutomationNotificationDeliveryService {
   readonly #preferences: AutomationNotificationDeliveryServiceOptions["preferences"];
@@ -83,8 +117,12 @@ export class AutomationNotificationDeliveryService {
   readonly #tokens: AutomationNotificationDeliveryServiceOptions["tokens"];
   readonly #hasStanding: AutomationNotificationDeliveryServiceOptions["hasStanding"];
   readonly #computerLabel: () => string;
+  readonly #readHeldSecrets: () => Promise<HeldSecretSnapshot>;
   readonly #transport: PushDeliveryTransport;
   readonly #clock: () => UtcTimestamp;
+  readonly #uuid: () => string;
+  readonly #journal: AutomationNotificationDeliveryServiceOptions["journal"];
+  readonly #hostActorId: string;
   readonly #recordRunNotificationRef:
     | AutomationNotificationDeliveryServiceOptions["recordRunNotificationRef"]
     | undefined;
@@ -93,6 +131,8 @@ export class AutomationNotificationDeliveryService {
     | undefined;
   readonly #cancelledDedupeKeys = new Set<string>();
   readonly #inflight = new Set<string>();
+  readonly #recentSends = new Map<string, ReadonlyArray<number>>();
+  #sequence = 0;
 
   constructor(options: AutomationNotificationDeliveryServiceOptions) {
     this.#preferences = options.preferences;
@@ -100,8 +140,12 @@ export class AutomationNotificationDeliveryService {
     this.#tokens = options.tokens;
     this.#hasStanding = options.hasStanding;
     this.#computerLabel = options.computerLabel;
+    this.#readHeldSecrets = options.readHeldSecrets;
     this.#transport = options.transport;
     this.#clock = options.clock;
+    this.#uuid = options.uuid ?? (() => crypto.randomUUID());
+    this.#journal = options.journal;
+    this.#hostActorId = options.hostActorId ?? "local-user";
     this.#recordRunNotificationRef = options.recordRunNotificationRef;
     this.#resolveAutomationProjectId = options.resolveAutomationProjectId;
   }
@@ -281,11 +325,6 @@ export class AutomationNotificationDeliveryService {
     return queued;
   }
 
-  /**
-   * Every registration in this data directory is this host's, under the
-   * listener host id the phone paired with, so delivery reads them all rather
-   * than asking for the host's local id, and keeps those whose device stands.
-   */
   #standingDestinations(): ReadonlyArray<PushTokenRecord> {
     return this.#tokens
       .listDestinations()
@@ -319,6 +358,7 @@ export class AutomationNotificationDeliveryService {
     this.#inflight.add(input.dedupeKey);
     const nextAttempt = input.attemptCount + 1;
     try {
+      let deliveredAny = false;
       let lastFailure:
         | { readonly kind: "failed"; readonly retryable: boolean; readonly category: string }
         | undefined;
@@ -351,53 +391,119 @@ export class AutomationNotificationDeliveryService {
           };
           continue;
         }
-        const sealed = sealPushNotification({
-          hostId: current.hostId,
-          deviceId: current.deviceId,
-          notificationPublicKey: current.notificationPublicKey,
-          collapseKey: current.collapseKey,
-          threadId: String(input.run.threadId ?? input.run.id),
-          kind: input.kind,
-          content: this.#buildPayload({
-            run: input.run,
-            ...(input.definition === undefined ? {} : { definition: input.definition }),
-            kind: input.kind,
-            destination: current,
-          }),
+        const now = this.#clock();
+        const deviceKey = `${current.hostId}\0${current.deviceId}`;
+        const rate = admitRemotePushByRate({
+          recent: this.#recentSends.get(deviceKey) ?? [],
+          now: Date.parse(now),
         });
-        if (sealed.status === "refused") {
-          lastFailure = { kind: "failed", retryable: false, category: `sealing-${sealed.reason}` };
+        this.#recentSends.set(deviceKey, rate.recent);
+        if (rate.kind === "rate-limited") {
+          this.#recordDeviceDeliveryReceipt({
+            destination: current,
+            run: input.run,
+            kind: input.kind,
+            dedupeKey: input.dedupeKey,
+            outcome: "rate-limited",
+            recordedAt: now,
+          });
+          lastFailure = { kind: "failed", retryable: false, category: "rate-limited" };
           continue;
         }
+
+        let heldSecrets: HeldSecretSnapshot;
+        try {
+          heldSecrets = await this.#readHeldSecrets();
+        } catch {
+          heldSecrets = { status: "unavailable" };
+        }
+        const stillCurrent = this.#tokens.get({
+          hostId: current.hostId,
+          deviceId: current.deviceId,
+        });
+        if (
+          stillCurrent === undefined ||
+          !this.#hasStanding(stillCurrent.hostId, stillCurrent.deviceId)
+        ) {
+          lastFailure = {
+            kind: "failed",
+            retryable: false,
+            category: "destination-without-standing",
+          };
+          continue;
+        }
+
+        this.#sequence += 1;
+        const message = this.#buildMessage({
+          run: input.run,
+          ...(input.definition === undefined ? {} : { definition: input.definition }),
+          kind: input.kind,
+          destination: stillCurrent,
+          sequence: this.#sequence,
+          occurredAt: now,
+          heldSecrets,
+        });
         const result = await this.#transport.send({
           destination: {
-            deviceId: current.deviceId,
-            platform: current.platform,
-            token: current.token,
+            deviceId: stillCurrent.deviceId,
+            platform: stillCurrent.platform,
+            token: stillCurrent.token,
           },
-          envelope: sealed.envelope,
+          message,
         });
         if (result.kind === "destination-gone") {
-          this.#clearGone(current);
+          this.#clearGone(stillCurrent);
+          this.#recordDeviceDeliveryReceipt({
+            destination: stillCurrent,
+            run: input.run,
+            kind: input.kind,
+            dedupeKey: input.dedupeKey,
+            outcome: "destination-gone",
+            recordedAt: this.#clock(),
+          });
           lastFailure = { kind: "failed", retryable: false, category: "destination-gone" };
           continue;
         }
         if (result.kind === "delivered") {
-          const receipt = this.#recordReceipt({
-            receiptId: this.#receiptId(input.dedupeKey),
-            automationId: input.run.automationId,
-            runId: input.run.id,
+          deliveredAny = true;
+          this.#recordDeviceDeliveryReceipt({
+            destination: stillCurrent,
+            run: input.run,
             kind: input.kind,
             dedupeKey: input.dedupeKey,
             outcome: "delivered",
-            attemptCount: nextAttempt,
-            destinationCount: input.destinations.length,
             recordedAt: this.#clock(),
           });
-          this.#safeRecordRunRef(input.run, receipt.receiptId, receipt.recordedAt);
-          return;
+          continue;
         }
+        this.#recordDeviceDeliveryReceipt({
+          destination: stillCurrent,
+          run: input.run,
+          kind: input.kind,
+          dedupeKey: input.dedupeKey,
+          outcome: "failed",
+          failureCategory: FAILURE_CATEGORY.test(result.category)
+            ? result.category
+            : "transport-error",
+          recordedAt: this.#clock(),
+        });
         lastFailure = result;
+      }
+
+      if (deliveredAny) {
+        const receipt = this.#recordReceipt({
+          receiptId: this.#receiptId(input.dedupeKey),
+          automationId: input.run.automationId,
+          runId: input.run.id,
+          kind: input.kind,
+          dedupeKey: input.dedupeKey,
+          outcome: "delivered",
+          attemptCount: nextAttempt,
+          destinationCount: input.destinations.length,
+          recordedAt: this.#clock(),
+        });
+        this.#safeRecordRunRef(input.run, receipt.receiptId, receipt.recordedAt);
+        return;
       }
 
       const decision = nextAutomationNotificationOutcome({
@@ -437,6 +543,55 @@ export class AutomationNotificationDeliveryService {
     }
   }
 
+  #recordDeviceDeliveryReceipt(input: {
+    readonly destination: PushTokenRecord;
+    readonly run: AutomationRun;
+    readonly kind: AutomationNotificationKind;
+    readonly dedupeKey: string;
+    readonly outcome: RemotePushDeliveryOutcome;
+    readonly failureCategory?: string;
+    readonly recordedAt: UtcTimestamp;
+  }): void {
+    if (this.#journal === undefined || input.run.threadId === undefined) return;
+    const aggregateId = deviceReceiptAggregateId(input.destination, input.dedupeKey);
+    try {
+      const existing = this.#journal.replayAggregate({
+        aggregateType: PUSH_DELIVERY_AGGREGATE,
+        aggregateId,
+        afterVersion: 0,
+        limit: 1,
+      });
+      if (existing.length > 0) return;
+      const eventId = this.#uuid();
+      const payload = decodeRemotePushDeliveryRecordedV1({
+        hostId: input.destination.hostId,
+        deviceId: input.destination.deviceId,
+        threadId: String(input.run.threadId),
+        kind: input.kind,
+        outcome: input.outcome,
+        ...(input.failureCategory === undefined ? {} : { failureCategory: input.failureCategory }),
+        recordedAt: input.recordedAt,
+      });
+      this.#journal.append({
+        aggregate: { aggregateType: PUSH_DELIVERY_AGGREGATE, aggregateId },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId,
+            eventName: REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded,
+            eventVersion: 1,
+            correlationId: eventId,
+            actor: { kind: "system", actorId: this.#hostActorId },
+            occurredAt: input.recordedAt,
+            payload,
+          },
+        ],
+      });
+    } catch {
+      // Receipt recording never alters run or delivery lifecycle.
+    }
+  }
+
   #clearGone(destination: PushTokenRecord): void {
     try {
       this.#tokens.clear({
@@ -451,34 +606,39 @@ export class AutomationNotificationDeliveryService {
     }
   }
 
-  /**
-   * Built per destination: the phone's own host id (the one it paired with and
-   * opens the seal under) and its own title preference decide the text.
-   */
-  #buildPayload(input: {
+  #buildMessage(input: {
     readonly run: AutomationRun;
     readonly definition?: AutomationDefinition;
     readonly kind: AutomationNotificationKind;
     readonly destination: PushTokenRecord;
-  }): AutomationNotificationPayloadV1 {
+    readonly sequence: number;
+    readonly occurredAt: UtcTimestamp;
+    readonly heldSecrets: HeldSecretSnapshot;
+  }) {
+    const rawMode = input.definition?.mode ?? input.run.definitionSnapshot.mode;
     const mode =
-      input.definition?.mode === "work" || input.definition?.mode === "code"
-        ? input.definition.mode
-        : input.run.definitionSnapshot.mode === "work" ||
-            input.run.definitionSnapshot.mode === "code"
-          ? input.run.definitionSnapshot.mode
-          : undefined;
+      rawMode === "chat" || rawMode === "work" || rawMode === "code" ? rawMode : undefined;
     const displayName =
       input.definition?.displayName ?? input.run.definitionSnapshot.displayName ?? undefined;
-    return buildRedactedAutomationPushNotification({
+    return buildPushAlert({
+      source: "automation",
       kind: input.kind,
-      hostId: input.destination.hostId,
-      automationId: input.run.automationId,
-      automationRunId: input.run.id,
+      hostId: input.destination.hostId as StableHostId,
       computerLabel: this.#computerLabel(),
       threadTitles: input.destination.preferences.threadTitles,
-      ...(mode === undefined ? {} : { mode }),
-      ...(input.run.threadId === undefined ? {} : { threadId: input.run.threadId }),
+      collapseId: derivePushCollapseId(
+        input.destination.collapseKey,
+        String(input.run.threadId ?? input.run.id),
+      ),
+      sequence: input.sequence,
+      occurredAt: input.occurredAt,
+      heldSecrets: input.heldSecrets,
+      ...(input.run.threadId === undefined
+        ? {}
+        : {
+            threadId: String(input.run.threadId),
+            ...(mode === undefined ? {} : { mode }),
+          }),
       ...(displayName === undefined ? {} : { displayName }),
     });
   }

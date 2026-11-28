@@ -25,9 +25,11 @@ import {
   type RemoteSessionRequestV1,
 } from "@octant/contracts/remote-request-proof";
 import {
+  decodeRemotePushStatusV1,
   decodeRemotePushTokenClearV1,
   decodeRemotePushTokenReceiptV1,
-  decodeRemotePushTokenRegistrationV1,
+  decodeRemotePushTokenRegistrationV2,
+  type RemotePushStatusV1,
   decodeRemoteServerGrantRequest,
   encodeRemoteServerGrantResult,
   encodeRemoteServerProxyRefusal,
@@ -326,6 +328,7 @@ export interface RemoteHttpAuthenticationOptions {
   readonly admission?: RemoteAdmissionPort;
   readonly credentialSelfService?: RemoteCredentialSelfServicePort;
   readonly pushTokenStore?: PushNotificationTokenStore;
+  readonly pushStatus?: () => Promise<RemotePushStatusV1>;
   readonly requestRegistry?: RemoteRequestRegistryPort;
   readonly sessionRevalidation?: RemoteSessionRevalidationPort;
   readonly sessionNow?: () => number;
@@ -1104,9 +1107,16 @@ async function handlePushTokenRoute(
       throw new RemoteHttpAuthFailure(401, "unauthorized", true);
     }
   };
+  if (handoff.request.method === "GET") {
+    const status =
+      options.pushStatus === undefined
+        ? ({ status: "unavailable", reason: "off" } as const)
+        : await options.pushStatus();
+    return jsonResponse(200, decodeRemotePushStatusV1(status));
+  }
   if (handoff.request.method === "PUT") {
     const body = decodeBounded(
-      decodeRemotePushTokenRegistrationV1,
+      decodeRemotePushTokenRegistrationV2,
       await readJsonObject(handoff.request),
     );
     requireActiveSession();
@@ -1115,7 +1125,6 @@ async function handlePushTokenRoute(
       deviceId,
       platform: body.platform,
       token: body.token,
-      notificationPublicKey: body.notificationPublicKey,
       preferences: body.preferences,
       now: occurredAt,
     });

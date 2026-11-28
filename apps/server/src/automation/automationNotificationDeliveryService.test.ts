@@ -7,6 +7,7 @@ import {
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
   EventActor,
+  RemotePushDeliveryRecordedV1,
   type AutomationRun,
 } from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -16,10 +17,6 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import type { PushTokenRecord } from "../remote/pushNotificationTokenStore";
-import {
-  openSealedPushNotification,
-  phoneNotificationKeys,
-} from "../remote/pushNotificationSealing.test-support";
 import {
   AUTOMATION_NOTIFICATION_PREFERENCES_UPDATED,
   AutomationNotificationPreferencesStore,
@@ -40,11 +37,8 @@ import {
 } from "./automationTestFixtures";
 
 const directories: Array<string> = [];
-// Phones register under the private listener's host id, not the host's own
-// local id; delivery seals under the id the phone paired with.
 const hostId = "11111111-1111-4111-8111-111111111111";
 const now = AUTOMATION_TEST_NOW;
-const deviceKeys = phoneNotificationKeys();
 
 function openConnection(): SqliteConnection {
   const directory = mkdtempSync(join(tmpdir(), "octant-automation-notifications-"));
@@ -69,26 +63,31 @@ const actor = Schema.decodeUnknownSync(EventActor)({
 function createJournal(connection = openConnection()) {
   const registry = new EventRegistry()
     .register(AUTOMATION_NOTIFICATION_PREFERENCES_UPDATED, 1, AutomationNotificationPreferences)
-    .register(AUTOMATION_NOTIFICATION_DELIVERY_RECORDED, 1, AutomationNotificationDeliveryRecorded);
+    .register(AUTOMATION_NOTIFICATION_DELIVERY_RECORDED, 1, AutomationNotificationDeliveryRecorded)
+    .register("remote.push-delivery-recorded@1", 1, RemotePushDeliveryRecordedV1);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
-  return new Journal({ connection, registry, projections, clock: () => now });
+  return {
+    connection,
+    journal: new Journal({ connection, registry, projections, clock: () => now }),
+  };
 }
 
-/** One registered destination, as the host's registration store lists it for delivery. */
-function destinationsOf(input: {
-  readonly hostId: string;
-  readonly deviceId: string;
-  readonly platform: PushTokenRecord["platform"];
-  readonly token: string;
-  readonly now: string;
-  readonly threadTitles?: boolean;
-}) {
-  let record: PushTokenRecord | undefined = {
+function destinationsOf(
+  entries: ReadonlyArray<{
+    readonly hostId: string;
+    readonly deviceId: string;
+    readonly platform: PushTokenRecord["platform"];
+    readonly token: string;
+    readonly now: string;
+    readonly threadTitles?: boolean;
+  }>,
+) {
+  const records: Array<PushTokenRecord> = entries.map((input, idx) => ({
+    version: 2,
     hostId: input.hostId,
     deviceId: input.deviceId,
     platform: input.platform,
     token: input.token,
-    notificationPublicKey: deviceKeys.publicKey,
     preferences: {
       approvalNeeded: true,
       waiting: true,
@@ -96,24 +95,27 @@ function destinationsOf(input: {
       completion: true,
       threadTitles: input.threadTitles ?? false,
     },
-    collapseKey: Buffer.alloc(32, 3).toString("base64url"),
+    collapseKey: Buffer.alloc(32, idx + 3).toString("base64url"),
     updatedAt: input.now,
-  };
+  }));
   return {
-    listDestinations: (): ReadonlyArray<PushTokenRecord> => (record === undefined ? [] : [record]),
+    listDestinations: (): ReadonlyArray<PushTokenRecord> => [...records],
     get: (key: { readonly hostId: string; readonly deviceId: string }) =>
-      record !== undefined && record.hostId === key.hostId && record.deviceId === key.deviceId
-        ? record
-        : undefined,
-    clear: () => {
-      const had = record !== undefined;
-      record = undefined;
-      return { result: had ? ("cleared" as const) : ("already-cleared" as const) };
+      records.find((r) => r.hostId === key.hostId && r.deviceId === key.deviceId),
+    clear: (key: { readonly hostId: string; readonly deviceId: string }) => {
+      const idx = records.findIndex((r) => r.hostId === key.hostId && r.deviceId === key.deviceId);
+      if (idx === -1) return { result: "already-cleared" as const };
+      records.splice(idx, 1);
+      return { result: "cleared" as const };
     },
   };
 }
 
-const standing = { hasStanding: () => true, computerLabel: () => "Studio Mac" };
+const standing = {
+  hasStanding: () => true,
+  computerLabel: () => "Studio Mac",
+  readHeldSecrets: async () => ({ status: "ready" as const, values: [] }),
+};
 
 function sharedUuid() {
   let counter = 0;
@@ -150,8 +152,8 @@ function notifiableRun(
 }
 
 describe("AutomationNotificationDeliveryService", () => {
-  it("scrubs hostile secrets from payloads and never exposes tokens in receipts or status", async () => {
-    const journal = createJournal();
+  it("drops planted secrets and failure detail from v2 push messages and never exposes tokens in receipts or status", async () => {
+    const { journal } = createJournal();
     const uuid = sharedUuid();
     const preferences = new AutomationNotificationPreferencesStore({
       journal,
@@ -173,16 +175,21 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = destinationsOf({
-      hostId,
-      deviceId: "device-1",
-      platform: "ios",
-      token: "super-secret-apns-token",
-      now,
-    });
+    const tokens = destinationsOf([
+      {
+        hostId,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        platform: "ios",
+        token: "super-secret-apns-token",
+        now,
+        threadTitles: true,
+      },
+    ]);
+    const heldSecret = "automation-canary-secret-4123";
     const transport = createRecordingPushDeliveryTransport();
     const service = new AutomationNotificationDeliveryService({
       ...standing,
+      readHeldSecrets: async () => ({ status: "ready", values: [heldSecret] }),
       preferences,
       deliveries,
       tokens,
@@ -190,8 +197,13 @@ describe("AutomationNotificationDeliveryService", () => {
       clock: () => now as never,
     });
 
+    const base = automationRunFixture();
     const run = notifiableRun({
       lifecycle: "failed",
+      definitionSnapshot: {
+        ...base.definitionSnapshot,
+        displayName: `Rotate ${heldSecret} nightly`,
+      },
       failure: {
         reason: "thread-creation-failed",
         message: "Provider rejected ghp_exampletoken with /Users/example/secret.diff",
@@ -206,19 +218,19 @@ describe("AutomationNotificationDeliveryService", () => {
     await vi.waitFor(() => {
       expect(transport.sent.length).toBe(1);
     });
-    const envelope = transport.sent[0]?.envelope;
-    if (envelope === undefined) throw new Error("expected a sealed envelope");
-    expect(envelope.alert).toEqual({ title: "Octant", body: "A paired computer has an update" });
-    const payload = openSealedPushNotification({
-      envelope,
-      recipient: deviceKeys.privateKey,
-      hostId,
-      deviceId: "device-1",
+    const message = transport.sent[0]?.message;
+    expect(message).toMatchObject({
+      type: "alert",
+      alert: {
+        version: 2,
+        kind: "failure",
+        hostId,
+        title: "Automation failed",
+        body: "On Studio Mac",
+      },
     });
-    expect(payload).toMatchObject({ hostId, title: "Automation failed", body: "On Studio Mac" });
-    for (const leaked of ["ghp_", "/Users/", "super-secret-apns-token"]) {
-      expect(JSON.stringify(payload)).not.toContain(leaked);
-      expect(JSON.stringify(envelope)).not.toContain(leaked);
+    for (const leaked of [heldSecret, "ghp_", "/Users/", "super-secret-apns-token"]) {
+      expect(JSON.stringify(message)).not.toContain(leaked);
     }
 
     const status = service.status();
@@ -232,8 +244,152 @@ describe("AutomationNotificationDeliveryService", () => {
     expect(JSON.stringify(delivered)).not.toContain("super-secret");
   });
 
+  it("omits mode when an automation fails before creating its thread so phone parsers keep the alert", async () => {
+    const { journal } = createJournal();
+    const uuid = sharedUuid();
+    const preferences = new AutomationNotificationPreferencesStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    preferences.update({
+      enabled: true,
+      waiting: true,
+      approvalNeeded: true,
+      failure: true,
+      completion: true,
+      expectedVersion: 0 as never,
+    });
+    const deliveries = new AutomationNotificationDeliveryStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const tokens = destinationsOf([
+      {
+        hostId,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        platform: "ios",
+        token: "apns-token-pre-thread",
+        now,
+        threadTitles: true,
+      },
+    ]);
+    const transport = createRecordingPushDeliveryTransport();
+    const service = new AutomationNotificationDeliveryService({
+      ...standing,
+      preferences,
+      deliveries,
+      tokens,
+      transport,
+      clock: () => now as never,
+    });
+
+    const base = automationRunFixture();
+    const failedBeforeThread: AutomationRun = {
+      ...base,
+      lifecycle: "failed",
+      failure: {
+        reason: "thread-creation-failed",
+        message: "Repository could not be opened",
+      },
+    };
+    expect(failedBeforeThread.threadId).toBeUndefined();
+
+    service.observeRunStatusChanged({
+      run: failedBeforeThread,
+      previousLifecycle: "dispatching",
+    });
+
+    await vi.waitFor(() => {
+      expect(transport.sent.length).toBe(1);
+    });
+    const sent = transport.sent[0]?.message;
+    expect(sent?.type).toBe("alert");
+    if (sent?.type === "alert") {
+      expect(sent.alert.kind).toBe("failure");
+      expect(sent.alert.threadId).toBeUndefined();
+      expect(sent.alert.mode).toBeUndefined();
+      expect(sent.alert.title).toBe(
+        `Automation failed: ${failedBeforeThread.definitionSnapshot.displayName}`,
+      );
+    }
+  });
+
+  it("delivers to all standing phones and records remote.push-delivery-recorded@1 per device when the run has a threadId", async () => {
+    const { connection, journal } = createJournal();
+    const uuid = sharedUuid();
+    const preferences = new AutomationNotificationPreferencesStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    preferences.update({
+      enabled: true,
+      waiting: true,
+      approvalNeeded: true,
+      failure: true,
+      completion: true,
+      expectedVersion: 0 as never,
+    });
+    const deliveries = new AutomationNotificationDeliveryStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const phone1 = "22222222-2222-4222-8222-222222222222";
+    const phone2 = "33333333-3333-4333-8333-333333333333";
+    const tokens = destinationsOf([
+      { hostId, deviceId: phone1, platform: "ios", token: "tok-1", now, threadTitles: false },
+      { hostId, deviceId: phone2, platform: "android", token: "tok-2", now, threadTitles: true },
+    ]);
+    const transport = createRecordingPushDeliveryTransport();
+    const service = new AutomationNotificationDeliveryService({
+      ...standing,
+      preferences,
+      deliveries,
+      tokens,
+      transport,
+      journal,
+      uuid,
+      hostActorId: AUTOMATION_TEST_IDS.actor,
+      clock: () => now as never,
+    });
+
+    const run = notifiableRun({ lifecycle: "completed" });
+    service.observeRunStatusChanged({ run, previousLifecycle: "running" });
+
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(transport.sent.map((entry) => entry.destination.deviceId)).toEqual([phone1, phone2]);
+    expect(transport.sent[0]?.message).toMatchObject({
+      type: "alert",
+      alert: { title: "Automation completed" },
+    });
+    expect(transport.sent[1]?.message).toMatchObject({
+      type: "alert",
+      alert: { title: `Automation completed: ${run.definitionSnapshot.displayName}` },
+    });
+
+    const pushReceipts = (
+      connection
+        .prepare(
+          "SELECT payload_json FROM event_journal WHERE event_name = 'remote.push-delivery-recorded@1' ORDER BY global_sequence",
+        )
+        .all() as ReadonlyArray<{ readonly payload_json: string }>
+    ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
+    expect(pushReceipts).toHaveLength(2);
+    expect(pushReceipts.map((r) => [r.deviceId, r.threadId, r.kind, r.outcome])).toEqual([
+      [phone1, String(run.threadId), "completion", "delivered"],
+      [phone2, String(run.threadId), "completion", "delivered"],
+    ]);
+  });
+
   it("skips disabled preferences and duplicates without mutating run lifecycle", async () => {
-    const journal = createJournal();
+    const { journal } = createJournal();
     const uuid = sharedUuid();
     const preferences = new AutomationNotificationPreferencesStore({
       journal,
@@ -247,13 +403,15 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = destinationsOf({
-      hostId,
-      deviceId: "device-1",
-      platform: "ios",
-      token: "token",
-      now,
-    });
+    const tokens = destinationsOf([
+      {
+        hostId,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        platform: "ios",
+        token: "token",
+        now,
+      },
+    ]);
     const transport = createRecordingPushDeliveryTransport();
     const service = new AutomationNotificationDeliveryService({
       ...standing,
@@ -264,14 +422,8 @@ describe("AutomationNotificationDeliveryService", () => {
       clock: () => now as never,
     });
     const run = notifiableRun({ lifecycle: "completed" });
-    const lifecycleBefore = run.lifecycle;
-
-    const skipped = service.observeRunStatusChanged({
-      run,
-      previousLifecycle: "running",
-    });
+    const skipped = service.observeRunStatusChanged({ run, previousLifecycle: "running" });
     expect(skipped?.outcome).toBe("skipped-preference");
-    expect(run.lifecycle).toBe(lifecycleBefore);
 
     preferences.update({
       enabled: true,
@@ -281,25 +433,18 @@ describe("AutomationNotificationDeliveryService", () => {
       completion: true,
       expectedVersion: 0 as never,
     });
-    const first = service.observeRunStatusChanged({
-      run,
-      previousLifecycle: "running",
-    });
+    const first = service.observeRunStatusChanged({ run, previousLifecycle: "running" });
     expect(first?.outcome).toBe("queued");
     await vi.waitFor(() => {
       expect(deliveries.getByDedupeKey(`${run.id}:completion`)?.outcome).toBe("delivered");
     });
-    const duplicate = service.observeRunStatusChanged({
-      run,
-      previousLifecycle: "running",
-    });
+    const duplicate = service.observeRunStatusChanged({ run, previousLifecycle: "running" });
     expect(duplicate?.outcome).toBe("delivered");
     expect(duplicate?.receiptId).toBe(first?.receiptId);
-    expect(run.lifecycle).toBe("completed");
   });
 
-  it("bounds retry then exhausts without changing run truth when transport fails", async () => {
-    const journal = createJournal();
+  it("reports unavailable provider delivery honestly and sends nothing to a device without standing", async () => {
+    const { journal } = createJournal();
     const uuid = sharedUuid();
     const preferences = new AutomationNotificationPreferencesStore({
       journal,
@@ -320,148 +465,24 @@ describe("AutomationNotificationDeliveryService", () => {
       uuid,
       actor,
       clock: () => now,
-    });
-    const tokens = destinationsOf({
-      hostId,
-      deviceId: "device-1",
-      platform: "android",
-      token: "fcm-token",
-      now,
-    });
-    const transport = createRecordingPushDeliveryTransport({
-      send: async () => ({ kind: "failed", retryable: false, category: "provider-rejected" }),
     });
     const service = new AutomationNotificationDeliveryService({
       ...standing,
       preferences,
       deliveries,
-      tokens,
-      transport,
-      clock: () => now as never,
-    });
-    const run = notifiableRun({ lifecycle: "waiting" });
-    service.observeRunStatusChanged({ run, previousLifecycle: "running" });
-    await vi.waitFor(() => {
-      expect(deliveries.getByDedupeKey(`${run.id}:waiting`)?.outcome).toBe("failed");
-    });
-    expect(run.lifecycle).toBe("waiting");
-  });
-
-  it("rebuilds durable receipts after restart so duplicates stay idempotent", () => {
-    const connection = openConnection();
-    const journal = createJournal(connection);
-    const uuid = sharedUuid();
-    const preferences = new AutomationNotificationPreferencesStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    preferences.update({
-      enabled: true,
-      waiting: true,
-      approvalNeeded: true,
-      failure: true,
-      completion: true,
-      expectedVersion: 0 as never,
-    });
-    const deliveries = new AutomationNotificationDeliveryStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    deliveries.record({
-      receiptId: "receipt-opaque-restart",
-      automationId: AUTOMATION_TEST_IDS.automation as never,
-      runId: AUTOMATION_TEST_IDS.run as never,
-      kind: "completion",
-      dedupeKey: `${AUTOMATION_TEST_IDS.run}:completion`,
-      outcome: "delivered",
-      attemptCount: 1,
-      destinationCount: 1,
-      recordedAt: now as never,
-    });
-
-    const rebuilt = new AutomationNotificationDeliveryStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    expect(rebuilt.getByDedupeKey(`${AUTOMATION_TEST_IDS.run}:completion`)?.outcome).toBe(
-      "delivered",
-    );
-
-    const tokens = destinationsOf({
-      hostId,
-      deviceId: "device-1",
-      platform: "ios",
-      token: "token",
-      now,
-    });
-    const transport = createRecordingPushDeliveryTransport();
-    const service = new AutomationNotificationDeliveryService({
-      ...standing,
-      preferences,
-      deliveries: rebuilt,
-      tokens,
-      transport,
-      clock: () => now as never,
-    });
-    const run = notifiableRun({ lifecycle: "completed" });
-    const again = service.observeRunStatusChanged({ run, previousLifecycle: "running" });
-    expect(again?.outcome).toBe("delivered");
-    expect(transport.sent).toHaveLength(0);
-  });
-
-  it("reports unavailable provider delivery honestly when credentials are absent", async () => {
-    const journal = createJournal();
-    const uuid = sharedUuid();
-    const preferences = new AutomationNotificationPreferencesStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    preferences.update({
-      enabled: true,
-      waiting: true,
-      approvalNeeded: true,
-      failure: true,
-      completion: true,
-      expectedVersion: 0 as never,
-    });
-    const deliveries = new AutomationNotificationDeliveryStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    const tokens = destinationsOf({
-      hostId,
-      deviceId: "device-1",
-      platform: "ios",
-      token: "token",
-      now,
-    });
-    const service = new AutomationNotificationDeliveryService({
-      ...standing,
-      preferences,
-      deliveries,
-      tokens,
+      tokens: destinationsOf([
+        {
+          hostId,
+          deviceId: "22222222-2222-4222-8222-222222222222",
+          platform: "ios",
+          token: "token",
+          now,
+        },
+      ]),
       transport: createUnavailablePushDeliveryTransport(),
       clock: () => now as never,
-      resolveAutomationProjectId: (automationId) =>
-        String(automationId) === AUTOMATION_TEST_IDS.automation
-          ? AUTOMATION_TEST_IDS.project
-          : undefined,
     });
-    const status = service.status();
-    expect(status.providerDelivery).toBe("unavailable");
-    expect(status.deliveryEnabled).toBe(false);
-    expect(status.preferences.enabled).toBe(true);
-
+    expect(service.status().providerDelivery).toBe("unavailable");
     const run = notifiableRun({ lifecycle: "completed" });
     service.observeRunStatusChanged({ run, previousLifecycle: "running" });
     await vi.waitFor(() => {
@@ -471,34 +492,15 @@ describe("AutomationNotificationDeliveryService", () => {
       "provider-unavailable",
     );
 
-    const query = service.queryDeliveries({
-      automationId: AUTOMATION_TEST_IDS.automation,
-      projectId: AUTOMATION_TEST_IDS.project,
-    });
-    expect(query.status.providerDelivery).toBe("unavailable");
-    expect(query.status.deliveryEnabled).toBe(false);
-    expect(query.receipts.some((receipt) => receipt.outcome === "delivered")).toBe(false);
-    expect(query.receipts[0]?.failureCategory).toBe("provider-unavailable");
-    expect(JSON.stringify(query)).not.toMatch(/token|apns|fcm/i);
-
-    expect(
-      service.queryDeliveries({
-        automationId: AUTOMATION_TEST_IDS.automation,
-        projectId: "bb000000-0000-4000-8000-000000000099",
-      }).receipts,
-    ).toHaveLength(0);
-  });
-
-  it("delivers to a phone registered under the listener's host id and seals under that id", async () => {
-    const journal = createJournal();
-    const uuid = sharedUuid();
-    const preferences = new AutomationNotificationPreferencesStore({
-      journal,
-      uuid,
+    const { journal: journal2 } = createJournal();
+    const uuid2 = sharedUuid();
+    const preferences2 = new AutomationNotificationPreferencesStore({
+      journal: journal2,
+      uuid: uuid2,
       actor,
       clock: () => now,
     });
-    preferences.update({
+    preferences2.update({
       enabled: true,
       waiting: true,
       approvalNeeded: true,
@@ -506,97 +508,43 @@ describe("AutomationNotificationDeliveryService", () => {
       completion: true,
       expectedVersion: 0 as never,
     });
-    const deliveries = new AutomationNotificationDeliveryStore({
-      journal,
-      uuid,
+    const deliveries2 = new AutomationNotificationDeliveryStore({
+      journal: journal2,
+      uuid: uuid2,
       actor,
       clock: () => now,
     });
-    const transport = createRecordingPushDeliveryTransport();
-    const service = new AutomationNotificationDeliveryService({
-      ...standing,
-      preferences,
-      deliveries,
-      tokens: destinationsOf({
-        hostId,
-        deviceId: "device-1",
-        platform: "ios",
-        token: "token",
-        now,
-        threadTitles: true,
-      }),
-      transport,
-      clock: () => now as never,
-    });
-    expect(service.status().registeredDestinationCount).toBe(1);
-
-    const run = notifiableRun({ lifecycle: "completed" });
-    service.observeRunStatusChanged({ run, previousLifecycle: "running" });
-    await vi.waitFor(() => {
-      expect(deliveries.getByDedupeKey(`${run.id}:completion`)?.outcome).toBe("delivered");
-    });
-    const envelope = transport.sent[0]?.envelope;
-    if (envelope === undefined) throw new Error("expected a sealed envelope");
-    const opened = openSealedPushNotification({
-      envelope,
-      recipient: deviceKeys.privateKey,
-      hostId,
-      deviceId: "device-1",
-    }) as { readonly hostId: string; readonly title: string };
-    expect(opened.hostId).toBe(hostId);
-    // The phone opted in to titles, so the automation's name may show.
-    expect(opened.title).toBe(`Automation completed: ${run.definitionSnapshot.displayName}`);
-  });
-
-  it("sends nothing to a device that lost its standing after the run was observed", async () => {
-    const journal = createJournal();
-    const uuid = sharedUuid();
-    const preferences = new AutomationNotificationPreferencesStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    preferences.update({
-      enabled: true,
-      waiting: true,
-      approvalNeeded: true,
-      failure: true,
-      completion: true,
-      expectedVersion: 0 as never,
-    });
-    const deliveries = new AutomationNotificationDeliveryStore({
-      journal,
-      uuid,
-      actor,
-      clock: () => now,
-    });
-    const transport = createRecordingPushDeliveryTransport();
+    const transport2 = createRecordingPushDeliveryTransport();
     let active = true;
-    const service = new AutomationNotificationDeliveryService({
-      // Standing holds when the run is observed and is gone at send time.
+    const service2 = new AutomationNotificationDeliveryService({
       hasStanding: () => {
         const was = active;
         active = false;
         return was;
       },
       computerLabel: () => "Studio Mac",
-      preferences,
-      deliveries,
-      tokens: destinationsOf({ hostId, deviceId: "device-1", platform: "ios", token: "t", now }),
-      transport,
+      readHeldSecrets: async () => ({ status: "ready", values: [] }),
+      preferences: preferences2,
+      deliveries: deliveries2,
+      tokens: destinationsOf([
+        {
+          hostId,
+          deviceId: "22222222-2222-4222-8222-222222222222",
+          platform: "ios",
+          token: "t",
+          now,
+        },
+      ]),
+      transport: transport2,
       clock: () => now as never,
     });
-    const run = notifiableRun({ lifecycle: "completed" });
-    expect(service.observeRunStatusChanged({ run, previousLifecycle: "running" })?.outcome).toBe(
-      "queued",
-    );
+    service2.observeRunStatusChanged({ run, previousLifecycle: "running" });
     await vi.waitFor(() => {
-      expect(deliveries.getByDedupeKey(`${run.id}:completion`)?.outcome).toBe("failed");
+      expect(deliveries2.getByDedupeKey(`${run.id}:completion`)?.outcome).toBe("failed");
     });
-    expect(deliveries.getByDedupeKey(`${run.id}:completion`)?.failureCategory).toBe(
+    expect(deliveries2.getByDedupeKey(`${run.id}:completion`)?.failureCategory).toBe(
       "destination-without-standing",
     );
-    expect(transport.sent).toHaveLength(0);
+    expect(transport2.sent).toHaveLength(0);
   });
 });

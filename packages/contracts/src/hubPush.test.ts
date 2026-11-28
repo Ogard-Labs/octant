@@ -1,49 +1,64 @@
 import { describe, expect, it } from "vitest";
 import { decodeHubMembershipChangedPayload } from "./hubMembership";
 import {
-  HUB_PUSH_BODY_MAX_BYTES,
   decodeHubPushAnswer,
   decodeHubPushCopy,
   decodeHubPushGrantAnswer,
-  decodeHubPushHandoff,
+  decodeHubPushHandoffV2,
   decodeHubPushSwitchRequest,
 } from "./hubPush";
 
 const handoff = {
-  body: '{"capability":"v1.k1.x","envelope":{}}',
-  hostKey: "aG9zdC1rZXk",
-  timestamp: "2026-10-29T08:00:00.000Z",
-  signature: "c2lnbmF0dXJl",
+  version: 2 as const,
+  platform: "ios" as const,
+  token: "a".repeat(64),
+  message: {
+    type: "alert" as const,
+    alert: {
+      version: 2 as const,
+      kind: "waiting" as const,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      threadId: "00000000-0000-4000-8000-000000000001",
+      mode: "code" as const,
+      title: "Waiting for you",
+      body: "On Studio Mac",
+      collapseId: "q2HnS1wZcV0k3fA8uYt7Rg",
+      urgency: "high" as const,
+      sequence: 1,
+      occurredAt: "2026-11-28T08:00:00.000Z",
+    },
+  },
 };
 
 describe("hub push wire shapes", () => {
-  it("decodes a signed delivery request with a gateway only when the spoke names a custom one", () => {
-    expect(decodeHubPushHandoff(handoff).body).toBe(handoff.body);
-    expect(
-      decodeHubPushHandoff({ ...handoff, gatewayUrl: "http://127.0.0.1:8080" }).gatewayUrl,
-    ).toBe("http://127.0.0.1:8080");
-    expect(() => decodeHubPushHandoff({ ...handoff, gatewayUrl: "http://example.com" })).toThrow();
-  });
-
-  it("refuses a body that is too large to be a sealed delivery and any field it does not take", () => {
+  it("decodes a v2 direct push handoff and refuses extra fields or v1 shapes", () => {
+    expect(decodeHubPushHandoffV2(handoff).message.type).toBe("alert");
+    expect(() => decodeHubPushHandoffV2({ ...handoff, version: 1 })).toThrow();
     expect(() =>
-      decodeHubPushHandoff({ ...handoff, body: "x".repeat(HUB_PUSH_BODY_MAX_BYTES + 1) }),
+      decodeHubPushHandoffV2({
+        body: '{"capability":"v1.k1.x"}',
+        hostKey: "key",
+        timestamp: "2026-11-28T08:00:00.000Z",
+        signature: "sig",
+      }),
     ).toThrow();
-    for (const extra of ["envelope", "capability", "threadId", "memberId"]) {
-      expect(() => decodeHubPushHandoff({ ...handoff, [extra]: "x" })).toThrow();
+    for (const extra of ["gatewayUrl", "memberId", "secret"]) {
+      expect(() => decodeHubPushHandoffV2({ ...handoff, [extra]: "x" })).toThrow();
     }
   });
 
-  it("decodes the gateway's relayed answer and refuses a status that is not an HTTP status", () => {
-    expect(decodeHubPushAnswer({ status: "forwarded", gatewayStatus: 202 }).gatewayStatus).toBe(
-      202,
-    );
-    expect(
-      decodeHubPushAnswer({ status: "forwarded", gatewayStatus: 429, code: "rate-limited" }).code,
-    ).toBe("rate-limited");
-    expect(() => decodeHubPushAnswer({ status: "forwarded", gatewayStatus: 0 })).toThrow();
+  it("decodes the direct delivery outcome and refuses unexpected fields", () => {
+    expect(decodeHubPushAnswer({ status: "forwarded", outcome: "accepted" })).toEqual({
+      status: "forwarded",
+      outcome: "accepted",
+    });
+    expect(decodeHubPushAnswer({ status: "forwarded", outcome: "destination-gone" })).toEqual({
+      status: "forwarded",
+      outcome: "destination-gone",
+    });
+    expect(() => decodeHubPushAnswer({ status: "forwarded", outcome: "unknown" })).toThrow();
     expect(() =>
-      decodeHubPushAnswer({ status: "forwarded", gatewayStatus: 202, message: "text" }),
+      decodeHubPushAnswer({ status: "forwarded", outcome: "accepted", message: "text" }),
     ).toThrow();
   });
 
@@ -60,14 +75,14 @@ describe("hub push wire shapes", () => {
         change: "push-refused",
         actingPrincipal: { kind: "peer", memberId: "11111111-1111-4111-8111-111111111111" },
         pushBytes: 900,
-        pushReason: "rate-limited",
+        pushReason: "update-member",
       }).pushReason,
-    ).toBe("rate-limited");
+    ).toBe("update-member");
     expect(() =>
       decodeHubMembershipChangedPayload({
         change: "push-forwarded",
         actingPrincipal: { kind: "local-window" },
-        pushReason: "the envelope was bad",
+        pushReason: "the payload was bad",
       }),
     ).toThrow();
   });

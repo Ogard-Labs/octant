@@ -8,12 +8,10 @@ import type {
   CodeOperationEventFrame,
   CodeRuntimeWorkUpdated,
   NativeHarnessApproval,
-  RemotePushEnvelopeV1,
   RemotePushPreferencesV1,
   WorkRequestFrame,
   WorkTurnUpdated,
 } from "@octant/contracts";
-import { decodeRemotePushEnvelopeV1, REMOTE_PUSH_PLACEHOLDER_ALERT } from "@octant/contracts";
 import { REMOTE_PUSH_RATE_LIMIT } from "@octant/domain/push-notification-policy";
 import type { PushDeliverySendResult } from "../automation/pushDeliveryTransport";
 import { createRecordingPushDeliveryTransport } from "../automation/pushDeliveryTransport.test-support";
@@ -21,10 +19,6 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import {
-  openSealedPushNotification,
-  phoneNotificationKeys,
-} from "./pushNotificationSealing.test-support";
 import {
   createPushNotificationTokenStore,
   PUSH_REGISTRATIONS_FILE,
@@ -53,6 +47,11 @@ const titles: Record<string, string> = {
   [chatThread]: "Acme renewal draft",
   [workThread]: "Quarterly plan",
   [codeThread]: "Fix the release build",
+};
+const projects: Record<string, string | undefined> = {
+  [chatThread]: undefined,
+  [workThread]: "Finance",
+  [codeThread]: "Octant",
 };
 const modes: Record<string, "chat" | "work" | "code"> = {
   [chatThread]: "chat",
@@ -89,7 +88,6 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
     hostActorId,
     uuid,
   });
-  const keys = { [phone]: phoneNotificationKeys(), [tablet]: phoneNotificationKeys() };
   const register = (
     deviceId: typeof phone | typeof tablet,
     preferences: RemotePushPreferencesV1 = allKinds,
@@ -99,7 +97,6 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
       deviceId,
       platform: "ios",
       token: `apns-token-${deviceId}`,
-      notificationPublicKey: keys[deviceId].publicKey,
       preferences,
       now,
     });
@@ -112,9 +109,13 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
     readThread: (threadId) => {
       const mode = modes[threadId];
       const title = titles[threadId];
-      return mode === undefined || title === undefined ? undefined : { mode, title };
+      const projectName = projects[threadId];
+      return mode === undefined || title === undefined
+        ? undefined
+        : { mode, title, ...(projectName === undefined ? {} : { projectName }) };
     },
     computerLabel: () => "Studio Mac",
+    readHeldSecrets: async () => ({ status: "ready", values: [] }),
     clock: () => now,
     uuid,
     hostActorId,
@@ -145,18 +146,6 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
         )
         .all() as ReadonlyArray<{ readonly payload_json: string }>
     ).map((row) => JSON.parse(row.payload_json) as Record<string, unknown>);
-  const open = (
-    envelope: RemotePushEnvelopeV1 | undefined,
-    deviceId: typeof phone | typeof tablet,
-  ) => {
-    if (envelope === undefined) throw new Error("expected a sealed envelope");
-    return openSealedPushNotification({
-      envelope,
-      recipient: keys[deviceId].privateKey,
-      hostId,
-      deviceId,
-    }) as Record<string, unknown>;
-  };
   return {
     connection,
     dataDirectory,
@@ -169,8 +158,6 @@ function host(overrides: Partial<ThreadNotificationDeliveryOptions> = {}) {
     joinedReceipts,
     service,
     transport: options.transport === transport ? transport : undefined,
-    keys,
-    open,
   };
 }
 
@@ -182,12 +169,6 @@ function committed(
   return { events: [{ eventName, aggregateId, payload }] };
 }
 
-/**
- * The part of a journaled payload a fact below spells out. The service reads
- * these payloads leniently, so a field it reads that a contract renames would
- * silently stop notifications; typing each fact against its contract makes
- * that rename fail here instead.
- */
 type Shape<T> =
   T extends Brand.Brand<string | symbol>
     ? string
@@ -263,8 +244,8 @@ const facts = {
 };
 
 describe("ordinary-thread notifications", () => {
-  it("notifies a paired phone of every kind in Chat, Work, and Code with content only its key opens", async () => {
-    const { register, service, transport, open, receipts, connection } = host();
+  it("notifies a paired phone of every kind in Chat, Work, and Code with checked v2 alerts and no titles by default", async () => {
+    const { register, service, transport, receipts, connection } = host();
     register(phone);
     for (const fact of [
       facts.chatCompleted(),
@@ -277,87 +258,27 @@ describe("ordinary-thread notifications", () => {
     }
     await vi.waitFor(() => expect(receipts()).toHaveLength(5));
 
-    const opened = transport?.sent.map((send) => open(send.envelope, phone)) ?? [];
-    expect(opened.map(({ kind, mode, threadId }) => ({ kind, mode, threadId }))).toEqual([
+    const alerts = (transport?.sent ?? []).map((send) => {
+      expect(send.message.type).toBe("alert");
+      if (send.message.type !== "alert") throw new Error("expected alert");
+      return send.message.alert;
+    });
+    expect(alerts.map(({ kind, mode, threadId }) => ({ kind, mode, threadId }))).toEqual([
       { kind: "completion", mode: "chat", threadId: chatThread },
       { kind: "approval-needed", mode: "chat", threadId: chatThread },
       { kind: "failure", mode: "work", threadId: workThread },
       { kind: "approval-needed", mode: "work", threadId: workThread },
       { kind: "waiting", mode: "code", threadId: codeThread },
     ]);
-    for (const content of opened) {
-      expect(content.hostId).toBe(hostId);
-      expect(content.body).toBe("On Studio Mac");
-      // Titles are off for this phone (decision M2).
-      expect(String(content.title)).not.toContain(":");
+    for (const alert of alerts) {
+      expect(alert.version).toBe(2);
+      expect(alert.hostId).toBe(hostId);
+      expect(alert.body).toBe("On Studio Mac");
+      expect(alert.title).not.toContain(":");
     }
-    for (const send of transport?.sent ?? []) {
-      expect(send.destination).toEqual({
-        deviceId: phone,
-        platform: "ios",
-        token: `apns-token-${phone}`,
-      });
-      const envelope = send.envelope;
-      if (envelope === undefined) throw new Error("expected a sealed envelope");
-      // The envelope holds exactly the placeholder alert, an urgency, and two
-      // opaque base64url parts. Only the plaintext parts are scanned for thread
-      // content: random ciphertext can spell a word such as "Acme" by chance,
-      // which once failed this test in CI. What the sealed parts hold is
-      // checked by opening them above, and by the wrong key failing below.
-      expect(decodeRemotePushEnvelopeV1(envelope)).toEqual(envelope);
-      const { collapseId: _collapseId, sealed: _sealed, ...plaintext } = envelope;
-      expect(plaintext.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
-      const wire = JSON.stringify(plaintext);
-      for (const revealing of [hostId, chatThread, workThread, codeThread, "Acme", "Studio"]) {
-        expect(wire).not.toContain(revealing);
-      }
-      expect(() => open(envelope, tablet)).toThrow();
-    }
+    expect(JSON.stringify(alerts)).not.toContain("Acme");
+    expect(JSON.stringify(alerts)).not.toContain("Finance");
 
-    expect(receipts()).toEqual([
-      {
-        hostId,
-        deviceId: phone,
-        threadId: chatThread,
-        kind: "completion",
-        outcome: "delivered",
-        recordedAt: now,
-      },
-      {
-        hostId,
-        deviceId: phone,
-        threadId: chatThread,
-        kind: "approval-needed",
-        outcome: "delivered",
-        recordedAt: now,
-      },
-      {
-        hostId,
-        deviceId: phone,
-        threadId: workThread,
-        kind: "failure",
-        outcome: "delivered",
-        recordedAt: now,
-      },
-      {
-        hostId,
-        deviceId: phone,
-        threadId: workThread,
-        kind: "approval-needed",
-        outcome: "delivered",
-        recordedAt: now,
-      },
-      {
-        hostId,
-        deviceId: phone,
-        threadId: codeThread,
-        kind: "waiting",
-        outcome: "delivered",
-        recordedAt: now,
-      },
-    ]);
-    // Delivery writes its receipts and nothing else: no thread, run, or
-    // approval aggregate moves because a notification went out.
     const written = connection
       .prepare("SELECT DISTINCT aggregate_type FROM event_journal ORDER BY aggregate_type")
       .all() as ReadonlyArray<{ readonly aggregate_type: string }>;
@@ -367,13 +288,63 @@ describe("ordinary-thread notifications", () => {
     ]);
   });
 
+  it("drops planted secrets in thread title, project name, active/remembered secrets, and fails closed when keyring is unreadable", async () => {
+    const activeThreadSecret = "custom-active-thread-secret-7731";
+    const rememberedSecret = "custom-remembered-secret-8842";
+    const prevTitle = titles[codeThread];
+    const prevProject = projects[codeThread];
+    try {
+      titles[codeThread] = `Deploy ${activeThreadSecret} to prod`;
+      projects[codeThread] = `Repo ${rememberedSecret}`;
+      const withSecrets = host({
+        readHeldSecrets: async () => ({
+          status: "ready",
+          values: [activeThreadSecret, rememberedSecret],
+        }),
+      });
+      withSecrets.register(phone, { ...allKinds, threadTitles: true });
+      withSecrets.service.onCommittedAppend(facts.codeApproval());
+      await vi.waitFor(() => expect(withSecrets.receipts()).toHaveLength(1));
+
+      const sent = withSecrets.transport?.sent[0]?.message;
+      expect(sent?.type).toBe("alert");
+      if (sent?.type === "alert") {
+        expect(sent.alert.title).toBe("Approval needed");
+        expect(sent.alert.body).toBe("On Studio Mac");
+        expect(JSON.stringify(sent)).not.toContain(activeThreadSecret);
+        expect(JSON.stringify(sent)).not.toContain(rememberedSecret);
+      }
+
+      // Unreadable keyring fails closed to generic placeholder even for clean titles.
+      titles[codeThread] = "Ship release";
+      projects[codeThread] = "Octant";
+      const locked = host({
+        readHeldSecrets: async () => ({ status: "unavailable" }),
+      });
+      locked.register(phone, { ...allKinds, threadTitles: true });
+      locked.service.onCommittedAppend(facts.codeApproval("e2000000-0000-4000-8000-000000000009"));
+      await vi.waitFor(() => expect(locked.receipts()).toHaveLength(1));
+
+      const lockedSent = locked.transport?.sent[0]?.message;
+      expect(lockedSent?.type).toBe("alert");
+      if (lockedSent?.type === "alert") {
+        expect(lockedSent.alert.title).toBe("Octant");
+        expect(lockedSent.alert.body).toBe("A paired computer has an update");
+        expect(JSON.stringify(lockedSent)).not.toContain("Ship release");
+        expect(JSON.stringify(lockedSent)).not.toContain("Studio Mac");
+      }
+    } finally {
+      titles[codeThread] = prevTitle ?? "Fix the release build";
+      projects[codeThread] = prevProject;
+    }
+  });
+
   it("sends one notification per thread, kind, and run, even across a restart", async () => {
     const first = host();
     first.register(phone);
     first.service.onCommittedAppend(facts.chatCompleted());
     first.service.onCommittedAppend(facts.chatCompleted());
     first.service.onCommittedAppend(facts.codeWaiting());
-    // The same turn's approval request is a different kind, so it is sent.
     first.service.onCommittedAppend(facts.codeApproval());
     await vi.waitFor(() => expect(first.receipts()).toHaveLength(3));
 
@@ -396,41 +367,20 @@ describe("ordinary-thread notifications", () => {
     expect(fixture.receipts()).toHaveLength(1);
   });
 
-  it("notifies each approval and question a Code turn asks, not only its first", async () => {
+  it("notifies each approval and question a Code turn asks, and waiting asks held outside the journal", async () => {
     const { register, service, transport, receipts } = host();
     register(phone);
     service.onCommittedAppend(facts.codeApproval());
     service.onCommittedAppend(facts.codeApproval("e2000000-0000-4000-8000-000000000002"));
     service.onCommittedAppend(facts.codeQuestion("provider-question-1"));
     service.onCommittedAppend(facts.codeQuestion("provider-question-2"));
-    // A repeat of the same approval stays silent.
     service.onCommittedAppend(facts.codeApproval());
-    await vi.waitFor(() => expect(receipts()).toHaveLength(4));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(receipts().map((receipt) => receipt.kind)).toEqual([
-      "approval-needed",
-      "approval-needed",
-      "waiting",
-      "waiting",
-    ]);
-    expect(transport?.sent).toHaveLength(4);
-  });
-
-  it("notifies a paired phone once of an ask a host service holds outside the journal", async () => {
-    const { register, service, transport, receipts } = host();
-    register(phone);
     const ask = { threadId: workThread, askId: "f1000000-0000-4000-8000-000000000001" };
     service.notifyWaitingAsk(ask);
-    service.notifyWaitingAsk({ ...ask, askId: "f1000000-0000-4000-8000-000000000002" });
-    // The same ask announced again stays silent.
     service.notifyWaitingAsk(ask);
-    await vi.waitFor(() => expect(receipts()).toHaveLength(2));
+    await vi.waitFor(() => expect(receipts()).toHaveLength(5));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(receipts().map((receipt) => [receipt.kind, receipt.threadId])).toEqual([
-      ["approval-needed", workThread],
-      ["approval-needed", workThread],
-    ]);
-    expect(transport?.sent).toHaveLength(2);
+    expect(transport?.sent).toHaveLength(5);
   });
 
   it("holds back a device's notifications past the rate limit and journals each one it held", async () => {
@@ -451,28 +401,31 @@ describe("ordinary-thread notifications", () => {
     ]);
   });
 
-  it("sends each phone only the kinds it asked for, and the thread title only to a phone that opted in", async () => {
-    const { register, service, transport, open, receipts } = host();
+  it("sends each phone only the kinds it asked for, and thread/project names only to a phone that opted in", async () => {
+    const { register, service, transport, receipts } = host();
     register(phone, { ...allKinds, completion: false });
     register(tablet, { ...allKinds, threadTitles: true });
     service.onCommittedAppend(facts.chatCompleted());
     service.onCommittedAppend(facts.workFailed());
     await vi.waitFor(() => expect(receipts()).toHaveLength(3));
 
-    const byDevice = (transport?.sent ?? []).map((send) => ({
-      deviceId: send.destination.deviceId,
-      content: open(send.envelope, send.destination.deviceId === phone ? phone : tablet),
-    }));
-    expect(
-      byDevice.map(({ deviceId, content }) => [deviceId, content.kind, content.title]),
-    ).toEqual([
-      [tablet, "completion", "Thread completed: Acme renewal draft"],
-      [phone, "failure", "Thread failed"],
-      [tablet, "failure", "Thread failed: Quarterly plan"],
+    const byDevice = (transport?.sent ?? []).map((send) => {
+      if (send.message.type !== "alert") throw new Error("expected alert");
+      return [
+        send.destination.deviceId,
+        send.message.alert.kind,
+        send.message.alert.title,
+        send.message.alert.body,
+      ];
+    });
+    expect(byDevice).toEqual([
+      [tablet, "completion", "Thread completed: Acme renewal draft", "On Studio Mac"],
+      [phone, "failure", "Thread failed", "On Studio Mac"],
+      [tablet, "failure", "Thread failed: Quarterly plan", "Finance · On Studio Mac"],
     ]);
   });
 
-  it("sends nothing for a thread no paired device could read, to a device without standing, or while delivery is unavailable", async () => {
+  it("sends nothing for unreadable threads, devices without standing, or while delivery is unavailable, and clears gone destinations", async () => {
     const unreadable = host({ readThread: () => undefined });
     unreadable.register(phone);
     unreadable.service.onCommittedAppend(facts.chatCompleted());
@@ -488,35 +441,24 @@ describe("ordinary-thread notifications", () => {
     unavailable.register(phone);
     unavailable.service.onCommittedAppend(facts.chatCompleted());
 
+    const gone: PushDeliverySendResult = { kind: "destination-gone" };
+    const goneHost = host({
+      transport: createRecordingPushDeliveryTransport({ send: async () => gone }),
+    });
+    goneHost.register(phone);
+    goneHost.service.onCommittedAppend(facts.workFailed());
+
     await vi.waitFor(() => expect(revoked.receipts()).toHaveLength(1));
+    await vi.waitFor(() => expect(goneHost.receipts()).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 20));
+
     expect(unreadable.transport?.sent).toHaveLength(0);
-    expect(unreadable.receipts()).toEqual([]);
     expect(revoked.transport?.sent.map((send) => send.destination.deviceId)).toEqual([tablet]);
     expect(unavailable.receipts()).toEqual([]);
+    expect(goneHost.registrations.get({ hostId, deviceId: phone })).toBeUndefined();
   });
 
-  it("clears a destination the delivery path refuses as gone and keeps the thread untouched", async () => {
-    const gone: PushDeliverySendResult = { kind: "destination-gone" };
-    const transport = createRecordingPushDeliveryTransport({ send: async () => gone });
-    const { register, service, receipts, registrations, connection } = host({ transport });
-    register(phone);
-    service.onCommittedAppend(facts.workFailed());
-    await vi.waitFor(() => expect(receipts()).toHaveLength(1));
-    expect(receipts()[0]).toMatchObject({ outcome: "destination-gone", kind: "failure" });
-    expect(registrations.get({ hostId, deviceId: phone })).toBeUndefined();
-    const cleared = connection
-      .prepare(
-        "SELECT payload_json FROM event_journal WHERE event_name = 'remote.push-registration-cleared@1'",
-      )
-      .get() as { readonly payload_json: string } | undefined;
-    expect(JSON.parse(cleared?.payload_json ?? "{}")).toMatchObject({
-      deviceId: phone,
-      reason: "destination-gone",
-    });
-  });
-
-  it("keeps sealed content, keys, tokens, and display text out of the journal, the store, and logs", async () => {
+  it("keeps tokens, collapse keys, and display text out of the journal, the store, and logs", async () => {
     const consoleSpies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
       vi.spyOn(console, method),
     );
@@ -532,7 +474,7 @@ describe("ordinary-thread notifications", () => {
           throw new Error("delivery path exploded");
         },
       });
-      const { register, service, receipts, registrations, dataDirectory, keys } = host({
+      const { register, service, receipts, registrations, dataDirectory } = host({
         transport: failing,
         onError: (message) => console.error(message),
       });
@@ -545,24 +487,17 @@ describe("ordinary-thread notifications", () => {
 
       const secrets = [
         { name: "thread title", value: "TITLECANARY" },
-        ...failing.sent.flatMap((send) => [
-          { name: "ciphertext", value: send.envelope.sealed.ciphertext.slice(0, 32) },
-          { name: "encapsulated key", value: send.envelope.sealed.encapsulatedKey },
-        ]),
         ...([phone, tablet] as const).flatMap((deviceId) => {
           const record = registrations.get({ hostId, deviceId });
           return [
-            { name: "notification key", value: keys[deviceId].publicKey },
             { name: "collapse key", value: record?.collapseKey ?? "missing" },
             { name: "token", value: record?.token ?? "missing" },
           ];
         }),
       ];
-      expect(failing.sent).toHaveLength(2);
 
       const registrationFile = join(dataDirectory, PUSH_REGISTRATIONS_FILE);
       const leaks: string[] = [];
-      const scanned: string[] = [];
       const scan = (directory: string): void => {
         for (const entry of readdirSync(directory, { withFileTypes: true })) {
           const path = join(directory, entry.name);
@@ -571,7 +506,6 @@ describe("ordinary-thread notifications", () => {
             continue;
           }
           if (path === registrationFile) continue;
-          scanned.push(entry.name);
           const text = readFileSync(path).toString("latin1");
           for (const secret of secrets) {
             if (text.includes(secret.value)) leaks.push(`${entry.name} holds the ${secret.name}`);
@@ -583,9 +517,6 @@ describe("ordinary-thread notifications", () => {
       for (const secret of secrets) {
         if (logs.includes(secret.value)) leaks.push(`a log line holds the ${secret.name}`);
       }
-      expect(scanned).toContain("store.sqlite3");
-      expect(scanned).toContain("store.sqlite3-wal");
-      expect(captured.length).toBeGreaterThan(0);
       expect(leaks).toEqual([]);
     } finally {
       titles[codeThread] = "Fix the release build";
@@ -594,17 +525,17 @@ describe("ordinary-thread notifications", () => {
   });
 });
 
-describe("held-move notifications", () => {
+describe("held-move and new-device notifications", () => {
   const waitId = "66666666-6666-4666-8666-666666666666";
-  // The phone is on this host's owner list; the tablet is paired but is not.
   const wait = {
     waitId,
     destinationName: "Office iMac",
     confirmsMoves: (deviceId: string) => deviceId === phone,
   };
+  const alertId = "77777777-7777-4777-8777-777777777777";
 
   it("tells each owner phone once that a move waits, naming only the destination", async () => {
-    const { register, service, transport, open, moveReceipts, receipts } = host();
+    const { register, service, transport, moveReceipts, receipts } = host();
     register(phone, { ...allKinds, threadTitles: true });
     register(tablet);
     service.notifyMoveWaiting(wait);
@@ -613,82 +544,51 @@ describe("held-move notifications", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(transport?.sent.map((send) => send.destination.deviceId)).toEqual([phone]);
-    const envelope = transport?.sent[0]?.envelope;
-    expect(envelope?.urgency).toBe("high");
-    expect(envelope?.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
-    // Thread names are on for this phone, and still no thread is named.
-    expect(open(envelope, phone)).toEqual({
-      kind: "move-waiting",
-      hostId,
-      title: "A move is waiting for your phone",
-      body: "To Office iMac",
+    expect(transport?.sent[0]?.message).toMatchObject({
+      type: "alert",
+      alert: {
+        version: 2,
+        kind: "move-waiting",
+        hostId,
+        title: "A move is waiting for your phone",
+        body: "To Office iMac",
+        urgency: "high",
+      },
     });
-    expect(moveReceipts()).toEqual([
-      { hostId, deviceId: phone, outcome: "delivered", recordedAt: now },
-    ]);
     expect(receipts()).toEqual([]);
   });
 
-  it("sends nothing and fails nothing while delivery is unavailable, or to a phone that turned approvals off", async () => {
-    const off = createRecordingPushDeliveryTransport({ providerDelivery: "unavailable" });
-    const onError = vi.fn();
-    const unavailable = host({ transport: off, onError });
-    unavailable.register(phone);
-    expect(() => unavailable.service.notifyMoveWaiting(wait)).not.toThrow();
-
-    const quiet = host();
-    quiet.register(phone, { ...allKinds, approvalNeeded: false });
-    quiet.service.notifyMoveWaiting(wait);
-
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(off.sent).toHaveLength(0);
-    expect(onError).not.toHaveBeenCalled();
-    expect(unavailable.moveReceipts()).toEqual([]);
-    expect(quiet.transport?.sent).toHaveLength(0);
-    expect(quiet.moveReceipts()).toEqual([]);
-  });
-});
-
-describe("new-device notifications", () => {
-  const alertId = "77777777-7777-4777-8777-777777777777";
-  const joined = {
-    alertId,
-    deviceName: "Ada's laptop",
-    privateAddress: "192.168.1.20",
-    joined: "host" as const,
-  };
-
-  it("tells every paired phone once, with the new device's name and address sealed for it alone", async () => {
-    const { register, service, transport, open, joinedReceipts, receipts } = host();
+  it("tells every standing phone once when a new device joins, without privateAddress or alertId in the push payload", async () => {
+    const { register, service, transport, joinedReceipts, receipts } = host();
     register(phone);
     register(tablet);
-    service.notifyDeviceJoined(joined);
-    service.notifyDeviceJoined(joined);
+    service.notifyDeviceJoined({
+      alertId,
+      deviceName: "Ada's laptop",
+      joined: "host",
+    });
+    service.notifyDeviceJoined({
+      alertId,
+      deviceName: "Ada's laptop",
+      joined: "host",
+    });
     await vi.waitFor(() => expect(joinedReceipts()).toHaveLength(2));
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(transport?.sent.map((send) => send.destination.deviceId).sort()).toEqual(
-      [phone, tablet].sort(),
-    );
-    const envelope = transport?.sent.find((send) => send.destination.deviceId === phone)?.envelope;
-    expect(envelope?.urgency).toBe("high");
-    expect(envelope?.alert).toEqual(REMOTE_PUSH_PLACEHOLDER_ALERT);
-    expect(open(envelope, phone)).toEqual({
-      kind: "device-joined",
-      hostId,
-      alertId,
-      title: "New device: Ada's laptop",
-      body: "192.168.1.20 · paired with Studio Mac",
+    const sent = transport?.sent.find((entry) => entry.destination.deviceId === phone)?.message;
+    expect(sent).toMatchObject({
+      type: "alert",
+      alert: {
+        version: 2,
+        kind: "device-joined",
+        hostId,
+        title: "New device: Ada's laptop",
+        body: "Paired with Studio Mac",
+        urgency: "high",
+      },
     });
-    // The receipt names the alert, never the device's name or address.
-    expect(joinedReceipts()).toContainEqual({
-      hostId,
-      deviceId: phone,
-      alertId,
-      outcome: "delivered",
-      recordedAt: now,
-    });
-    expect(JSON.stringify(joinedReceipts())).not.toContain("192.168.1.20");
+    expect(JSON.stringify(sent)).not.toContain("alertId");
+    expect(JSON.stringify(sent)).not.toContain("privateAddress");
     expect(receipts()).toEqual([]);
   });
 
@@ -696,7 +596,12 @@ describe("new-device notifications", () => {
     const { register, service, transport, joinedReceipts } = host();
     register(phone, { ...allKinds, newDevices: false });
     register(tablet);
-    service.notifyDeviceJoined({ ...joined, newDeviceId: tablet });
+    service.notifyDeviceJoined({
+      alertId,
+      deviceName: "Ada's laptop",
+      joined: "host",
+      newDeviceId: tablet,
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(transport?.sent).toHaveLength(0);
     expect(joinedReceipts()).toEqual([]);

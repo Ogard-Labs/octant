@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
-import { MobileInboxFailure, type MobileRemoteTransport } from "@octant/client-runtime";
+import {
+  MobileInboxFailure,
+  readMobilePushStatus,
+  type MobilePushStatusResult,
+  type MobileRemoteTransport,
+} from "@octant/client-runtime";
 import type { MobileNotificationPermissionPort } from "./notificationPermissionPort";
 import {
-  ENABLE_REFUSAL_COPY,
   enablePhoneNotifications,
   forgetPhoneNotificationsForHost,
+  formatEnableRefusal,
 } from "./enablePhoneNotifications";
 import type { PushRegistrationBook } from "./pushRegistrationBook";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
@@ -14,8 +19,8 @@ import { useTheme } from "../../design-system";
 export interface PushNotificationsPanelProps {
   readonly transport: MobileRemoteTransport | undefined;
   readonly permission: MobileNotificationPermissionPort;
-  /** The paired computer's key fingerprint, which the gateway binds the capability to. */
-  readonly hostKeyFingerprint: string;
+  /** The computer's display name for version-skew and status messages. */
+  readonly hostLabel: string;
   /** Which computers this phone registered with, and under which token. */
   readonly book: PushRegistrationBook;
   /** The device id the computer knows this phone by, read from the pairing. */
@@ -26,9 +31,11 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
   const { colors } = useTheme();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
-  // Whether this phone hears about new devices on this computer, once
-  // notifications are on for it; undefined while they are not.
-  const [newDevices, setNewDevices] = useState<boolean | undefined>();
+  const [hostStatus, setHostStatus] = useState<MobilePushStatusResult | undefined>();
+  // Present once notifications are registered for this computer; undefined while off.
+  const [registered, setRegistered] = useState<
+    { readonly newDevices: boolean; readonly threadTitles: boolean } | undefined
+  >();
   const hostId = props.transport?.hostId;
 
   useEffect(() => {
@@ -36,10 +43,13 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     void props.book.list().then((records) => {
       const record = records.find((entry) => entry.hostId === hostId);
       if (!live) return;
-      setNewDevices(
+      setRegistered(
         record === undefined || record.forgetPending === true
           ? undefined
-          : record.newDevices !== false,
+          : {
+              newDevices: record.newDevices !== false,
+              threadTitles: record.threadTitles === true,
+            },
       );
     });
     return () => {
@@ -47,27 +57,56 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     };
   }, [props.book, hostId, message]);
 
-  const setHearNewDevices = async (value: boolean) => {
+  useEffect(() => {
+    const transport = props.transport;
+    if (transport === undefined || !props.permission.available) {
+      setHostStatus(undefined);
+      return;
+    }
+    let live = true;
+    void readMobilePushStatus(transport).then(async (status) => {
+      if (!live) return;
+      setHostStatus(status);
+      if (status.status === "update-host") {
+        await forgetPhoneNotificationsForHost({
+          hostId: transport.hostId,
+          permission: props.permission,
+          book: props.book,
+          transport,
+        }).catch(() => undefined);
+        if (live) setRegistered(undefined);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [props.transport, props.permission, props.book]);
+
+  const updatePreference = async (
+    patch: { readonly newDevices?: boolean; readonly threadTitles?: boolean },
+    onText: string,
+    offText: string,
+    enabledValue: boolean,
+  ) => {
     if (props.transport === undefined) return;
     setBusy(true);
     setMessage(undefined);
     try {
       const result = await enablePhoneNotifications({
         transport: props.transport,
-        hostKeyFingerprint: props.hostKeyFingerprint,
         deviceId: await props.resolveDeviceId(),
         permission: props.permission,
         book: props.book,
-        newDevices: value,
+        ...patch,
       });
       setMessage(
         result.status === "registered"
-          ? value
-            ? "This phone will hear when a new device joins or pairs."
-            : "This phone will no longer hear about new devices from this computer."
+          ? enabledValue
+            ? onText
+            : offText
           : result.status === "cancelled"
             ? "Notifications were turned off for this computer."
-            : ENABLE_REFUSAL_COPY[result.reason],
+            : formatEnableRefusal(result.reason, props.hostLabel),
       );
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Could not change the setting.");
@@ -87,7 +126,6 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     try {
       const result = await enablePhoneNotifications({
         transport: props.transport,
-        hostKeyFingerprint: props.hostKeyFingerprint,
         deviceId: await props.resolveDeviceId(),
         permission: props.permission,
         book: props.book,
@@ -97,7 +135,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
           ? "Notifications are on for this computer."
           : result.status === "cancelled"
             ? "Notifications were turned off for this computer."
-            : ENABLE_REFUSAL_COPY[result.reason],
+            : formatEnableRefusal(result.reason, props.hostLabel),
       );
     } catch (cause) {
       setMessage(
@@ -127,8 +165,8 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         transport: props.transport,
       });
       setMessage(
-        !forgotten.keyForgotten
-          ? "Notifications are off, but this phone could not delete its notification key for this computer. Octant will try again the next time it opens."
+        !forgotten.localCleared
+          ? "Notifications are off, but this phone could not clear its local notification state. Octant will try again the next time it opens."
           : forgotten.clearedOnComputer
             ? "Notifications are off for this computer."
             : "Notifications are off on this phone. The computer could not be told, so it may still try to send them.",
@@ -186,6 +224,26 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
     [colors],
   );
 
+  const hostStatusNotice =
+    hostStatus?.status === "update-host"
+      ? formatEnableRefusal("update-host", props.hostLabel)
+      : hostStatus?.status === "ready" && hostStatus.push.status === "unavailable"
+        ? formatEnableRefusal(
+            hostStatus.push.reason === "no-credentials" ? "host-no-credentials" : "host-push-off",
+            props.hostLabel,
+          )
+        : hostStatus?.status === "ready" &&
+            hostStatus.push.status === "available" &&
+            hostStatus.push.platforms !== undefined &&
+            !hostStatus.push.platforms[props.permission.platform]
+          ? formatEnableRefusal(
+              props.permission.platform === "ios"
+                ? "host-missing-ios-credential"
+                : "host-missing-android-credential",
+              props.hostLabel,
+            )
+          : undefined;
+
   return (
     <View style={styles.panel} testID="mobile-push-panel">
       <Text style={styles.title}>Notifications</Text>
@@ -193,13 +251,21 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         <>
           <Text style={styles.help}>
             Hear when a thread on this computer finishes, fails, or waits for you. Notifications are
-            sealed so only this phone can read them; the lock screen shows the kind and the
-            computer's name.
+            sent directly from this computer and show the status and computer name unless you turn
+            on Show thread names.
           </Text>
+          {hostStatusNotice !== undefined ? (
+            <Text style={styles.help} testID="mobile-push-host-notice">
+              {hostStatusNotice}
+            </Text>
+          ) : null}
           <Pressable
-            disabled={busy}
+            disabled={busy || hostStatus?.status === "update-host"}
             onPress={() => void enable()}
-            style={[styles.button, busy ? styles.buttonDisabled : null]}
+            style={[
+              styles.button,
+              busy || hostStatus?.status === "update-host" ? styles.buttonDisabled : null,
+            ]}
             testID="mobile-push-enable"
           >
             {busy ? (
@@ -215,22 +281,52 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
           your paired hosts.
         </Text>
       )}
-      {newDevices === undefined || !props.permission.available ? null : (
-        <View style={styles.row} testID="mobile-push-new-devices">
-          <View style={styles.rowText}>
-            <Text style={styles.rowLabel}>New devices</Text>
-            <Text style={styles.help}>
-              Hear when a device joins this computer's hub or pairs with it, with its name and
-              address.
-            </Text>
+      {registered === undefined || !props.permission.available ? null : (
+        <>
+          <View style={styles.row} testID="mobile-push-thread-titles">
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>Show thread names</Text>
+              <Text style={styles.help}>
+                Include thread and project names on the lock screen. Checked against secrets on this
+                computer before sending.
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="Show thread names"
+              disabled={busy}
+              onValueChange={(value) =>
+                void updatePreference(
+                  { threadTitles: value },
+                  "Lock screen notifications will include thread and project names.",
+                  "Lock screen notifications will show only status and computer name.",
+                  value,
+                )
+              }
+              value={registered.threadTitles}
+            />
           </View>
-          <Switch
-            accessibilityLabel="New devices"
-            disabled={busy}
-            onValueChange={(value) => void setHearNewDevices(value)}
-            value={newDevices}
-          />
-        </View>
+          <View style={styles.row} testID="mobile-push-new-devices">
+            <View style={styles.rowText}>
+              <Text style={styles.rowLabel}>New devices</Text>
+              <Text style={styles.help}>
+                Hear when a device joins this computer's hub or pairs with it, with its name.
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="New devices"
+              disabled={busy}
+              onValueChange={(value) =>
+                void updatePreference(
+                  { newDevices: value },
+                  "This phone will hear when a new device joins or pairs.",
+                  "This phone will no longer hear about new devices from this computer.",
+                  value,
+                )
+              }
+              value={registered.newDevices}
+            />
+          </View>
+        </>
       )}
       {props.transport !== undefined ? (
         <Pressable

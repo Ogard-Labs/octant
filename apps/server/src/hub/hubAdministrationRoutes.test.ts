@@ -58,7 +58,6 @@ async function setup(
     spokeWake: host.spokeWake,
     push: host.push,
     spokePush: host.spokePush,
-    directPush: host.directPush,
     provision: host.provision,
     spokeProvision: host.spokeProvision,
     signIn: host.signIn,
@@ -153,14 +152,13 @@ describe("hub administration over the loopback channel", () => {
     expect(accepting).toBe(false);
   });
 
-  it("answers a window the visitor view alone, without reading direct sending's credentials", async () => {
+  it("answers a window the visitor view alone", async () => {
     const view = { links: [], comments: [], published: true };
     const counts = { enabled: false, grants: 0, streams: 0 };
-    const { host, handle } = await setup(undefined, new HubTestNetwork(), undefined, {
+    const { handle } = await setup(undefined, new HubTestNetwork(), undefined, {
       visitors: { status: () => counts, setEnabled: vi.fn() },
       spokeVisitors: { view: () => view, share: vi.fn(), stop: vi.fn(), decideComment: vi.fn() },
     });
-    const credentials = vi.spyOn(host.directPush, "status");
     const read = (headers: Record<string, string> = {}) =>
       handle(
         new Request(`http://127.0.0.1${HUB_ADMINISTRATION_ROUTES.visitorSwitch}`, {
@@ -171,7 +169,6 @@ describe("hub administration over the loopback channel", () => {
           },
         }),
       );
-
     const answered = await read();
     expect(answered?.status).toBe(200);
     expect(answered?.headers.get("cache-control")).toBe("no-store");
@@ -184,7 +181,6 @@ describe("hub administration over the loopback channel", () => {
     ]) {
       expect((await read(headers))?.status).toBe(401);
     }
-    expect(credentials).not.toHaveBeenCalled();
   });
 
   it("turns the Tailscale certificate on only for a window that sends the acknowledgement", async () => {

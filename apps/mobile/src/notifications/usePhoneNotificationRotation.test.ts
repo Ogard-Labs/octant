@@ -30,7 +30,6 @@ it("leaves pending native notification-key deletion untouched in the offline env
   const pending = {
     hostId: "real-host",
     deviceId: "real-device",
-    hostKeyFingerprint: "real-fingerprint",
     tokenDigest: "real-token-digest",
     forgetPending: true,
   } as const;

@@ -1,60 +1,52 @@
 import { Schema } from "effect";
-import { RemotePushGatewayRefusalCode, RemotePushGatewayUrl } from "./remotePushNotifications";
+import { PushMessageV2, RemotePushPlatform, RemotePushToken } from "./remotePushNotifications";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const base64Url = (maximum: number) =>
-  Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]+$/), Schema.maxLength(maximum));
 
 /**
- * The most a spoke may hand the hub for one notification. A delivery request is
- * a capability and one sealed envelope, both bounded well below this, so a
- * larger body is not a delivery request at all.
+ * The most a spoke may hand the hub for one notification. A v2 handoff holds a
+ * platform, a push token, and one checked push message (alert or live status),
+ * well below this bound.
  */
 export const HUB_PUSH_BODY_MAX_BYTES = 16_384;
 
 /**
- * One sealed delivery, exactly as the spoke would have sent it to the push
- * gateway: the request body it signed and the three headers the gateway
- * checks. The hub forwards `body` byte for byte with these headers. It never
- * re-signs, because the gateway accepts only the key whose fingerprint the
- * phone sealed into the capability, which is the spoke's.
- *
- * `gatewayUrl` is present only when the spoke's own Notifications setting names
- * a gateway other than the default. The hub forwards to its own configured
- * gateway when it is absent and refuses a name that is not its own.
+ * Direct-push handoff from a spoke to its hub (v2). The spoke sends the phone's
+ * platform, token, and checked push message; the hub repeats the secret check
+ * against its own held secrets and sends directly to Apple (APNs) or Google
+ * (FCM) with its own credentials.
  */
-export const HubPushHandoff = Schema.Struct({
-  body: Schema.String.pipe(
-    Schema.filter(
-      (value) => new TextEncoder().encode(value).byteLength <= HUB_PUSH_BODY_MAX_BYTES,
-      {
-        message: () => "A sealed delivery request is small.",
-      },
-    ),
-  ),
-  hostKey: base64Url(512),
-  timestamp: Schema.String.pipe(Schema.maxLength(40)),
-  signature: base64Url(256),
-  gatewayUrl: Schema.optional(RemotePushGatewayUrl),
+export const HubPushHandoffV2 = Schema.Struct({
+  version: Schema.Literal(2),
+  platform: RemotePushPlatform,
+  token: RemotePushToken,
+  message: PushMessageV2,
 }).annotations(strict);
-export type HubPushHandoff = typeof HubPushHandoff.Type;
-export const decodeHubPushHandoff = Schema.decodeUnknownSync(HubPushHandoff);
+export type HubPushHandoffV2 = typeof HubPushHandoffV2.Type;
+export const decodeHubPushHandoffV2 = Schema.decodeUnknownSync(HubPushHandoffV2);
 
-/**
- * The gateway's answer, relayed to the spoke as data. The spoke classifies it
- * the way it classifies a gateway answer it received itself.
- */
+/** Outcome returned by the hub after sending directly to APNs or FCM. */
+export const HubPushDeliveryOutcome = Schema.Literal(
+  "accepted",
+  "destination-gone",
+  "failed",
+  "unavailable",
+);
+export type HubPushDeliveryOutcome = typeof HubPushDeliveryOutcome.Type;
+
+/** The hub's delivery answer, relayed to the spoke as data. */
 export const HubPushAnswer = Schema.Struct({
   status: Schema.Literal("forwarded"),
-  gatewayStatus: Schema.Int.pipe(Schema.between(100, 599)),
-  code: Schema.optional(RemotePushGatewayRefusalCode),
+  outcome: HubPushDeliveryOutcome,
 }).annotations(strict);
 export type HubPushAnswer = typeof HubPushAnswer.Type;
 export const decodeHubPushAnswer = Schema.decodeUnknownSync(HubPushAnswer);
 
 /**
  * Why a push forward or a grant check came to nothing. The journal keeps this
- * word and a size, never a capability, an envelope, or a gateway's message.
+ * word and a size, never a token, payload, or platform error message.
+ * Legacy gateway reasons stay in the schema so existing journal entries still
+ * replay cleanly.
  */
 export const HubPushReason = Schema.Literal(
   "push-service-off",
@@ -64,6 +56,8 @@ export const HubPushReason = Schema.Literal(
   "malformed",
   "too-large",
   "rate-limited",
+  "update-member",
+  "sender-off",
   "gateway-off",
   "gateway-mismatch",
   "gateway-unreachable",
@@ -81,7 +75,7 @@ export const HubPushGrantAnswer = Schema.Struct({ status: Schema.Literal("grante
 export type HubPushGrantAnswer = typeof HubPushGrantAnswer.Type;
 export const decodeHubPushGrantAnswer = Schema.decodeUnknownSync(HubPushGrantAnswer);
 
-/** The hub tells a standby whether its push switch is on, so the standby forwards only when it is. */
+/** The hub tells a standby whether its push switch is on, so the standby sends only when it is. */
 export const HubPushCopy = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
 export type HubPushCopy = typeof HubPushCopy.Type;
 export const decodeHubPushCopy = Schema.decodeUnknownSync(HubPushCopy);

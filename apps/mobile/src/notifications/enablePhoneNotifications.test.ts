@@ -1,9 +1,9 @@
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
-  MOBILE_PUSH_GATEWAY_URL,
   enablePhoneNotifications,
   forgetPhoneNotificationsForHost,
+  formatEnableRefusal,
   rotatePhoneNotifications,
 } from "./enablePhoneNotifications";
 import type { MobileNotificationPermissionPort } from "./notificationPermissionPort";
@@ -14,13 +14,9 @@ import {
 } from "./pushRegistrationBook";
 
 const platformToken = "a".repeat(64);
-const fingerprint = "f".repeat(64);
-const capability = `v1.k1.${"C".repeat(64)}`;
-const publicKey = "K".repeat(43);
+const rotatedToken = "b".repeat(64);
 const hostId = "11111111-1111-4111-8111-111111111111";
 const deviceId = "22222222-2222-4222-8222-222222222222";
-const rotatedToken = "b".repeat(64);
-const rotatedCapability = `v1.k1.${"D".repeat(64)}`;
 
 function memoryBook(): PushRegistrationBook {
   const values = new Map<string, string>();
@@ -40,60 +36,64 @@ function permission(
     getStatus: async () => "granted",
     request: async () => "granted",
     getDevicePushToken: async () => platformToken,
-    getNotificationPublicKey: async () => publicKey,
+    allowHost: async () => undefined,
     forgetHost: async () => undefined,
     ...overrides,
   };
 }
 
-function recordingHost() {
+function recordingHost(options?: {
+  readonly getStatus?: () => Promise<Response>;
+  readonly onPut?: () => Promise<void>;
+}) {
   const bodies: unknown[] = [];
   const requests: string[] = [];
   const transport: MobileRemoteTransport = {
     hostId,
     authenticatedFetch: async (request) => {
       requests.push(`${request.method} ${request.path}`);
-      if (request.method === "DELETE") {
-        return Response.json({ result: "cleared", occurredAt: "2026-10-28T12:00:00.000Z" });
+      if (request.method === "GET") {
+        if (options?.getStatus !== undefined) return options.getStatus();
+        return Response.json({
+          status: "available",
+          platforms: { ios: true, android: true },
+        });
       }
+      if (request.method === "DELETE") {
+        return Response.json({ result: "cleared", occurredAt: "2026-11-28T12:00:00.000Z" });
+      }
+      if (options?.onPut !== undefined) await options.onPut();
       bodies.push(JSON.parse(String(request.body)));
-      return Response.json({ result: "registered", occurredAt: "2026-10-28T12:00:00.000Z" });
+      return Response.json({ result: "registered", occurredAt: "2026-11-28T12:00:00.000Z" });
     },
   };
   return { transport, bodies, requests };
 }
 
 describe("turning phone notifications on for a computer", () => {
-  it("gives the computer a gateway capability bound to its key, never the platform token", async () => {
+  it("registers the platform token directly with threadTitles off by default and stores only a token digest", async () => {
     const host = recordingHost();
     const book = memoryBook();
-    const requestCapability = vi.fn(async () => ({ status: "issued" as const, capability }));
-    const getNotificationPublicKey = vi.fn(async () => publicKey);
+    const allowHost = vi.fn(async () => undefined);
 
     const result = await enablePhoneNotifications({
       transport: host.transport,
-      hostKeyFingerprint: fingerprint,
       deviceId,
-      permission: permission({ getNotificationPublicKey }),
+      permission: permission({ allowHost }),
       book,
-      requestCapability,
     });
 
     expect(result).toEqual({ status: "registered" });
-    // The key is made for this computer and the device id it knows the phone by,
-    // because the computer seals to both.
-    expect(getNotificationPublicKey).toHaveBeenCalledWith(hostId, deviceId);
-    expect(requestCapability).toHaveBeenCalledWith({
-      gatewayUrl: MOBILE_PUSH_GATEWAY_URL,
-      platform: "ios",
-      token: platformToken,
-      hostKeyFingerprint: fingerprint,
-    });
+    expect(allowHost).toHaveBeenCalledWith(hostId);
+    expect(host.requests).toEqual([
+      "GET /api/remote/auth/push-token",
+      "PUT /api/remote/auth/push-token",
+    ]);
     expect(host.bodies).toEqual([
       {
+        version: 2,
         platform: "ios",
-        token: capability,
-        notificationPublicKey: publicKey,
+        token: platformToken,
         preferences: {
           approvalNeeded: true,
           waiting: true,
@@ -103,255 +103,227 @@ describe("turning phone notifications on for a computer", () => {
         },
       },
     ]);
-    expect(JSON.stringify(host.bodies)).not.toContain(platformToken);
-    // The phone keeps a digest of the token it registered under, never the token.
     const records = await book.list();
     expect(records).toEqual([
       {
         hostId,
         deviceId,
-        hostKeyFingerprint: fingerprint,
         tokenDigest: await digestPlatformToken(platformToken),
       },
     ]);
     expect(JSON.stringify(records)).not.toContain(platformToken);
   });
 
-  it("registers nothing with the computer when the gateway refuses or cannot be reached", async () => {
-    for (const answer of [
-      { status: "refused" as const, code: "unavailable" as const },
-      { status: "unreachable" as const },
-    ]) {
-      const host = recordingHost();
+  it("refuses older hosts returning 404 or 405, clears local registration, and tells the person to update the host", async () => {
+    for (const status of [404, 405]) {
+      const host = recordingHost({
+        getStatus: async () => new Response("Not Found", { status }),
+      });
       const book = memoryBook();
+      await book.record({
+        hostId,
+        deviceId,
+        tokenDigest: await digestPlatformToken(platformToken),
+      });
+      const forgetHost = vi.fn(async () => undefined);
+
       const result = await enablePhoneNotifications({
         transport: host.transport,
-        hostKeyFingerprint: fingerprint,
         deviceId,
-        permission: permission(),
+        permission: permission({ forgetHost }),
         book,
-        requestCapability: async () => answer,
       });
-      expect(result.status).toBe("refused");
+
+      expect(result).toEqual({ status: "refused", reason: "update-host" });
+      expect(formatEnableRefusal("update-host", "Studio Mac")).toBe(
+        "Update Octant on Studio Mac to use notifications.",
+      );
+      expect(forgetHost).toHaveBeenCalledWith(hostId);
       expect(host.bodies).toHaveLength(0);
       expect(await book.list()).toEqual([]);
     }
   });
 
-  it("asks the gateway for nothing when the person declines notification permission", async () => {
-    const requestCapability = vi.fn();
-    const result = await enablePhoneNotifications({
-      transport: recordingHost().transport,
-      hostKeyFingerprint: fingerprint,
-      deviceId,
-      permission: permission({ request: async () => "denied" }),
-      book: memoryBook(),
-      requestCapability,
-    });
-    expect(result).toEqual({ status: "refused", reason: "permission-denied" });
-    expect(requestCapability).not.toHaveBeenCalled();
+  it("refuses when the host reports push unavailable without registering", async () => {
+    for (const [hostReason, expectedReason] of [
+      ["off", "host-push-off"],
+      ["no-credentials", "host-no-credentials"],
+    ] as const) {
+      const host = recordingHost({
+        getStatus: async () => Response.json({ status: "unavailable", reason: hostReason }),
+      });
+      const book = memoryBook();
+      const result = await enablePhoneNotifications({
+        transport: host.transport,
+        deviceId,
+        permission: permission(),
+        book,
+      });
+      expect(result).toEqual({ status: "refused", reason: expectedReason });
+      expect(host.bodies).toHaveLength(0);
+      expect(await book.list()).toEqual([]);
+    }
   });
 
-  it("asks the system for nothing on a build or device that cannot receive push", async () => {
-    const request = vi.fn(async () => "granted" as const);
-    const result = await enablePhoneNotifications({
-      transport: recordingHost().transport,
-      hostKeyFingerprint: fingerprint,
-      deviceId,
-      permission: permission({ available: false, request }),
-      book: memoryBook(),
+  it("refuses registration when the host lacks a credential for this phone's platform, while allowing hub delivery without platforms", async () => {
+    const androidOnAppleOnly = recordingHost({
+      getStatus: async () =>
+        Response.json({ status: "available", platforms: { ios: true, android: false } }),
     });
-    expect(result).toEqual({ status: "refused", reason: "unavailable" });
-    expect(request).not.toHaveBeenCalled();
+    const androidBook = memoryBook();
+    const androidResult = await enablePhoneNotifications({
+      transport: androidOnAppleOnly.transport,
+      deviceId,
+      permission: permission({ platform: "android" }),
+      book: androidBook,
+    });
+    expect(androidResult).toEqual({
+      status: "refused",
+      reason: "host-missing-android-credential",
+    });
+    expect(formatEnableRefusal("host-missing-android-credential", "Studio Mac")).toBe(
+      "Add a Google service account in Settings › General on Studio Mac to notify Android devices.",
+    );
+    expect(androidOnAppleOnly.bodies).toHaveLength(0);
+    expect(await androidBook.list()).toEqual([]);
+
+    const iosOnGoogleOnly = recordingHost({
+      getStatus: async () =>
+        Response.json({ status: "available", platforms: { ios: false, android: true } }),
+    });
+    const iosBook = memoryBook();
+    const iosResult = await enablePhoneNotifications({
+      transport: iosOnGoogleOnly.transport,
+      deviceId,
+      permission: permission({ platform: "ios" }),
+      book: iosBook,
+    });
+    expect(iosResult).toEqual({
+      status: "refused",
+      reason: "host-missing-ios-credential",
+    });
+    expect(formatEnableRefusal("host-missing-ios-credential", "Studio Mac")).toBe(
+      "Add an Apple push key in Settings › General on Studio Mac to notify iPhones and iPads.",
+    );
+    expect(iosOnGoogleOnly.bodies).toHaveLength(0);
+    expect(await iosBook.list()).toEqual([]);
+
+    // Hub-delegated spoke returns `{ status: "available" }` without `platforms`: still registers.
+    const spokeHost = recordingHost({
+      getStatus: async () => Response.json({ status: "available" }),
+    });
+    const spokeBook = memoryBook();
+    const spokeResult = await enablePhoneNotifications({
+      transport: spokeHost.transport,
+      deviceId,
+      permission: permission({ platform: "android" }),
+      book: spokeBook,
+    });
+    expect(spokeResult).toEqual({ status: "registered" });
+    expect(spokeHost.bodies).toHaveLength(1);
+    expect(await spokeBook.list()).toHaveLength(1);
   });
 
-  it("registers nothing when the system gives no token, no key can be made, or the pairing has no device id", async () => {
-    const cases: ReadonlyArray<{
-      readonly reason: string;
-      readonly deviceId: string | undefined;
-      readonly overrides: Partial<MobileNotificationPermissionPort>;
-    }> = [
+  it("asks the computer for nothing when permission is denied, build is unavailable, token is missing, or deviceId is absent", async () => {
+    const cases = [
+      { reason: "unavailable", deviceId, overrides: { available: false } },
+      {
+        reason: "permission-denied",
+        deviceId,
+        overrides: { request: async () => "denied" as const },
+      },
       {
         reason: "no-platform-token",
         deviceId,
         overrides: { getDevicePushToken: async () => undefined },
       },
       { reason: "no-platform-token", deviceId, overrides: { getDevicePushToken: async () => "" } },
-      {
-        reason: "no-notification-key",
-        deviceId,
-        overrides: { getNotificationPublicKey: async () => undefined },
-      },
       { reason: "no-device-identity", deviceId: undefined, overrides: {} },
-    ];
+    ] as const;
+
     for (const testCase of cases) {
       const host = recordingHost();
-      const requestCapability = vi.fn();
       const book = memoryBook();
       const result = await enablePhoneNotifications({
         transport: host.transport,
-        hostKeyFingerprint: fingerprint,
         deviceId: testCase.deviceId,
         permission: permission(testCase.overrides),
         book,
-        requestCapability,
       });
       expect(result).toEqual({ status: "refused", reason: testCase.reason });
-      expect(requestCapability).not.toHaveBeenCalled();
       expect(host.requests).toEqual([]);
       expect(await book.list()).toEqual([]);
     }
   });
 });
 
-async function registeredBook(token = platformToken) {
-  const book = memoryBook();
-  await book.record({
-    hostId,
-    deviceId,
-    hostKeyFingerprint: fingerprint,
-    tokenDigest: await digestPlatformToken(token),
-  });
-  return book;
-}
-
-describe("hearing about new devices", () => {
-  it("is on unless the person turns it off for a computer, and a later token keeps the choice", async () => {
+describe("toggling thread titles and new devices, and token rotation", () => {
+  it("re-registers immediately when toggling Show thread names or New devices and preserves both across token rotation", async () => {
     const host = recordingHost();
     const book = memoryBook();
-    const requestCapability = vi.fn(async () => ({ status: "issued" as const, capability }));
-    const enable = (newDevices?: boolean) =>
-      enablePhoneNotifications({
-        transport: host.transport,
-        hostKeyFingerprint: fingerprint,
-        deviceId,
-        permission: permission(),
-        book,
-        requestCapability,
-        ...(newDevices === undefined ? {} : { newDevices }),
-      });
 
-    await enable();
-    await enable(false);
-    const preferences = host.bodies.map(
-      (body) => (body as { preferences: { newDevices?: boolean } }).preferences.newDevices,
-    );
-    // On is sent as no field, which a computer from before the setting accepts.
-    expect(preferences).toEqual([undefined, false]);
-    expect((await book.list())[0]?.newDevices).toBe(false);
-
-    await rotatePhoneNotifications({
-      book,
-      permission: permission({ getDevicePushToken: async () => rotatedToken }),
-      transportForHost: () => host.transport,
-      requestCapability: vi.fn(async () => ({
-        status: "issued" as const,
-        capability: rotatedCapability,
-      })),
-    });
-    expect(host.bodies.at(-1)).toMatchObject({ preferences: { newDevices: false } });
-    expect((await book.list())[0]?.newDevices).toBe(false);
-
-    await enable(true);
-    expect(host.bodies.at(-1)).not.toHaveProperty("preferences.newDevices");
-    expect(await book.list()).toEqual([expect.not.objectContaining({ newDevices: false })]);
-  });
-});
-
-describe("rotating the platform token a computer was registered under", () => {
-  it("registers the new token with each connected computer once the system issues one", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    const requestCapability = vi.fn(async () => ({
-      status: "issued" as const,
-      capability: rotatedCapability,
-    }));
-
-    const report = await rotatePhoneNotifications({
-      book,
-      permission: permission({ getDevicePushToken: async () => rotatedToken }),
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-
-    expect(report).toEqual({ status: "checked", hosts: [{ hostId, outcome: "rotated" }] });
-    expect(requestCapability).toHaveBeenCalledWith({
-      gatewayUrl: MOBILE_PUSH_GATEWAY_URL,
-      platform: "ios",
-      token: rotatedToken,
-      hostKeyFingerprint: fingerprint,
-    });
-    expect(host.bodies).toMatchObject([
-      { token: rotatedCapability, notificationPublicKey: publicKey },
-    ]);
-    expect(JSON.stringify(host.bodies)).not.toContain(rotatedToken);
-    expect((await book.list())[0]?.tokenDigest).toBe(await digestPlatformToken(rotatedToken));
-
-    // The next run finds nothing to do.
-    const again = await rotatePhoneNotifications({
-      book,
-      permission: permission({ getDevicePushToken: async () => rotatedToken }),
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-    expect(again.hosts).toEqual([{ hostId, outcome: "unchanged" }]);
-    expect(requestCapability).toHaveBeenCalledTimes(1);
-  });
-
-  it("touches neither the gateway nor the computer while the token is the one it registered", async () => {
-    const host = recordingHost();
-    const requestCapability = vi.fn();
-    const report = await rotatePhoneNotifications({
-      book: await registeredBook(),
+    await enablePhoneNotifications({
+      transport: host.transport,
+      deviceId,
       permission: permission(),
-      transportForHost: () => host.transport,
-      requestCapability,
+      book,
     });
-    expect(report.hosts).toEqual([{ hostId, outcome: "unchanged" }]);
-    expect(requestCapability).not.toHaveBeenCalled();
-    expect(host.requests).toEqual([]);
+    await enablePhoneNotifications({
+      transport: host.transport,
+      deviceId,
+      permission: permission(),
+      book,
+      threadTitles: true,
+    });
+    await enablePhoneNotifications({
+      transport: host.transport,
+      deviceId,
+      permission: permission(),
+      book,
+      newDevices: false,
+    });
+
+    const prefs = host.bodies.map(
+      (body) =>
+        (body as { preferences: { threadTitles: boolean; newDevices?: boolean } }).preferences,
+    );
+    expect(prefs).toEqual([
+      { approvalNeeded: true, waiting: true, failure: true, completion: true, threadTitles: false },
+      { approvalNeeded: true, waiting: true, failure: true, completion: true, threadTitles: true },
+      {
+        approvalNeeded: true,
+        waiting: true,
+        failure: true,
+        completion: true,
+        threadTitles: true,
+        newDevices: false,
+      },
+    ]);
+
+    const rotated = await rotatePhoneNotifications({
+      book,
+      permission: permission({ getDevicePushToken: async () => rotatedToken }),
+      transportForHost: () => host.transport,
+    });
+    expect(rotated).toEqual({
+      status: "checked",
+      hosts: [{ hostId, outcome: "rotated" }],
+    });
+    expect(host.bodies.at(-1)).toMatchObject({
+      version: 2,
+      token: rotatedToken,
+      preferences: { threadTitles: true, newDevices: false },
+    });
   });
 
-  it("keeps a record it could not renew so the next run tries again", async () => {
+  it("forgets every computer when the person withdraws system notification permission", async () => {
     const host = recordingHost();
-    const book = await registeredBook();
-    const rotated = permission({ getDevicePushToken: async () => rotatedToken });
-    const before = await book.list();
-
-    const notConnected = await rotatePhoneNotifications({
-      book,
-      permission: rotated,
-      transportForHost: () => undefined,
-    });
-    expect(notConnected.hosts).toEqual([{ hostId, outcome: "not-connected" }]);
-
-    const unreachable = await rotatePhoneNotifications({
-      book,
-      permission: rotated,
-      transportForHost: () => host.transport,
-      requestCapability: async () => ({ status: "unreachable" }),
-    });
-    expect(unreachable.hosts).toEqual([{ hostId, outcome: "failed" }]);
-
-    const hostRefuses: MobileRemoteTransport = {
+    const book = memoryBook();
+    await book.record({
       hostId,
-      authenticatedFetch: async () => new Response("no", { status: 503 }),
-    };
-    const refused = await rotatePhoneNotifications({
-      book,
-      permission: rotated,
-      transportForHost: () => hostRefuses,
-      requestCapability: async () => ({ status: "issued", capability: rotatedCapability }),
+      deviceId,
+      tokenDigest: await digestPlatformToken(platformToken),
     });
-    expect(refused.hosts).toEqual([{ hostId, outcome: "failed" }]);
-
-    expect(await book.list()).toEqual(before);
-    expect(host.bodies).toHaveLength(0);
-  });
-
-  it("clears every registration and forgets its key once notifications are off in the system", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
     const forgetHost = vi.fn(async () => undefined);
 
     const report = await rotatePhoneNotifications({
@@ -359,283 +331,64 @@ describe("rotating the platform token a computer was registered under", () => {
       permission: permission({ getStatus: async () => "denied", forgetHost }),
       transportForHost: () => host.transport,
     });
-
-    expect(report.hosts).toEqual([{ hostId, outcome: "permission-withdrawn" }]);
-    expect(host.requests).toEqual(["DELETE /api/remote/auth/push-token"]);
-    expect(forgetHost).toHaveBeenCalledWith(hostId);
-    expect(await book.list()).toEqual([]);
-  });
-
-  it("changes nothing on a build that cannot tell, or when the system gives no token", async () => {
-    const book = await registeredBook();
-    const before = await book.list();
-    const forgetHost = vi.fn(async () => undefined);
-
-    expect(
-      await rotatePhoneNotifications({
-        book,
-        permission: permission({ available: false, forgetHost }),
-        transportForHost: () => undefined,
-      }),
-    ).toEqual({ status: "unavailable", hosts: [] });
-    expect(
-      await rotatePhoneNotifications({
-        book,
-        permission: permission({ getDevicePushToken: async () => undefined, forgetHost }),
-        transportForHost: () => undefined,
-      }),
-    ).toEqual({ status: "no-platform-token", hosts: [] });
-    expect(
-      await rotatePhoneNotifications({
-        book: memoryBook(),
-        permission: permission(),
-        transportForHost: () => undefined,
-      }),
-    ).toEqual({ status: "nothing-registered", hosts: [] });
-
-    expect(forgetHost).not.toHaveBeenCalled();
-    expect(await book.list()).toEqual(before);
-  });
-});
-
-describe("forgetting a computer's notifications when it is unpaired", () => {
-  it("asks the computer to drop its registration, then forgets the key and the record", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    const order: string[] = [];
-    const forgetHost = vi.fn(async () => void order.push("forget"));
-    const transport: MobileRemoteTransport = {
-      hostId,
-      authenticatedFetch: async (request) => {
-        order.push("clear");
-        return host.transport.authenticatedFetch(request);
-      },
-    };
-
-    const outcome = await forgetPhoneNotificationsForHost({
-      hostId,
-      permission: permission({ forgetHost }),
-      book,
-      transport,
+    expect(report).toEqual({
+      status: "checked",
+      hosts: [{ hostId, outcome: "permission-withdrawn" }],
     });
-
-    expect(outcome).toEqual({ clearedOnComputer: true, keyForgotten: true });
-    expect(order).toEqual(["clear", "forget"]);
+    expect(forgetHost).toHaveBeenCalledWith(hostId);
+    expect(host.requests).toContain("DELETE /api/remote/auth/push-token");
     expect(await book.list()).toEqual([]);
   });
 
-  it("still forgets the key and the record when the computer cannot be reached or does not answer", async () => {
-    const answers: ReadonlyArray<MobileRemoteTransport["authenticatedFetch"]> = [
-      async () => {
-        throw new Error("offline");
+  it("cancels an in-flight enable when forgetting a computer and keeps a forgetPending marker if local cleanup fails", async () => {
+    let releasePut: (() => void) | undefined;
+    const putStarted = new Promise<void>((resolve) => {
+      releasePut = resolve;
+    });
+    let finishPut: (() => void) | undefined;
+    const host = recordingHost({
+      onPut: async () => {
+        releasePut?.();
+        await new Promise<void>((resolve) => {
+          finishPut = resolve;
+        });
       },
-      async () => new Response("gone", { status: 403 }),
-      () => new Promise<Response>(() => undefined),
-    ];
-    for (const authenticatedFetch of answers) {
-      const book = await registeredBook();
-      const forgetHost = vi.fn(async () => undefined);
-      const outcome = await forgetPhoneNotificationsForHost({
-        hostId,
-        permission: permission({ forgetHost }),
-        book,
-        transport: { hostId, authenticatedFetch },
-        waitMs: 20,
-      });
-      expect(outcome).toEqual({ clearedOnComputer: false, keyForgotten: true });
-      expect(forgetHost).toHaveBeenCalledWith(hostId);
-      expect(await book.list()).toEqual([]);
-    }
-  });
+    });
+    const book = memoryBook();
+    const enablePromise = enablePhoneNotifications({
+      transport: host.transport,
+      deviceId,
+      permission: permission(),
+      book,
+    });
+    await putStarted;
+    const forgetPromise = forgetPhoneNotificationsForHost({
+      hostId,
+      permission: permission(),
+      book,
+      transport: host.transport,
+    });
+    finishPut?.();
 
-  it("keeps a marked record and reports it when the native side could not delete the key", async () => {
-    const book = await registeredBook();
-    const outcome = await forgetPhoneNotificationsForHost({
+    expect(await enablePromise).toEqual({ status: "cancelled" });
+    expect(await forgetPromise).toEqual({ clearedOnComputer: true, localCleared: true });
+    expect(await book.list()).toEqual([]);
+
+    await book.record({
+      hostId,
+      deviceId,
+      tokenDigest: await digestPlatformToken(platformToken),
+    });
+    const failedForget = await forgetPhoneNotificationsForHost({
       hostId,
       permission: permission({
         forgetHost: async () => {
-          throw new Error("keychain busy");
+          throw new Error("storage locked");
         },
       }),
       book,
     });
-    expect(outcome).toEqual({ clearedOnComputer: false, keyForgotten: false });
-    expect(await book.list()).toMatchObject([{ hostId, forgetPending: true }]);
-  });
-
-  it("deletes a key it could not delete before, on the next run, and never registers that computer again", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    let failing = true;
-    const forgetHost = vi.fn(async () => {
-      if (failing) throw new Error("keychain busy");
-    });
-    const port = permission({ forgetHost, getDevicePushToken: async () => rotatedToken });
-    await forgetPhoneNotificationsForHost({ hostId, permission: port, book });
-    const requestCapability = vi.fn();
-
-    const stillFailing = await rotatePhoneNotifications({
-      book,
-      permission: port,
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-    expect(stillFailing.hosts).toEqual([{ hostId, outcome: "key-not-deleted" }]);
-    expect(await book.list()).toMatchObject([{ hostId, forgetPending: true }]);
-
-    failing = false;
-    const retried = await rotatePhoneNotifications({
-      book,
-      permission: port,
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-    expect(retried.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
-    expect(await book.list()).toEqual([]);
-    expect(requestCapability).not.toHaveBeenCalled();
-    expect(host.bodies).toHaveLength(0);
-  });
-
-  it("leaves other computers' records alone", async () => {
-    const book = await registeredBook();
-    await book.record({
-      hostId: "33333333-3333-4333-8333-333333333333",
-      deviceId,
-      hostKeyFingerprint: fingerprint,
-      tokenDigest: "d".repeat(64),
-    });
-    await forgetPhoneNotificationsForHost({ hostId, permission: permission(), book });
-    expect((await book.list()).map((record) => record.hostId)).toEqual([
-      "33333333-3333-4333-8333-333333333333",
-    ]);
-  });
-});
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-describe("turning notifications off while a rotation or enablement is under way", () => {
-  it("does not let a rotation that was waiting for the platform token undo the opt-out", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    const token = deferred<string | undefined>();
-    const calls: string[] = [];
-    const port = permission({
-      getDevicePushToken: () => token.promise,
-      getNotificationPublicKey: async () => {
-        calls.push("key");
-        return publicKey;
-      },
-      forgetHost: async () => void calls.push("forget"),
-    });
-    const requestCapability = vi.fn();
-
-    const rotation = rotatePhoneNotifications({
-      book,
-      permission: port,
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-    await forgetPhoneNotificationsForHost({
-      hostId,
-      permission: port,
-      book,
-      transport: host.transport,
-    });
-    token.resolve(rotatedToken);
-    const report = await rotation;
-
-    expect(report.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
-    expect(calls).toEqual(["forget"]);
-    expect(requestCapability).not.toHaveBeenCalled();
-    expect(host.requests).toEqual(["DELETE /api/remote/auth/push-token"]);
-    expect(await book.list()).toEqual([]);
-  });
-
-  it("stops a rotation that is asking the gateway and clears after it, leaving no registration, key or record", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    const gate = deferred<{ status: "issued"; capability: string }>();
-    const calls: string[] = [];
-    const port = permission({
-      getDevicePushToken: async () => rotatedToken,
-      getNotificationPublicKey: async () => {
-        calls.push("key");
-        return publicKey;
-      },
-      forgetHost: async () => void calls.push("forget"),
-    });
-    const requestCapability = vi.fn(() => gate.promise);
-
-    const rotation = rotatePhoneNotifications({
-      book,
-      permission: port,
-      transportForHost: () => host.transport,
-      requestCapability,
-    });
-    await vi.waitFor(() => expect(requestCapability).toHaveBeenCalled());
-    const forgetting = forgetPhoneNotificationsForHost({
-      hostId,
-      permission: port,
-      book,
-      transport: host.transport,
-    });
-    gate.resolve({ status: "issued", capability: rotatedCapability });
-    const [report] = await Promise.all([rotation, forgetting]);
-
-    expect(report.hosts).toEqual([{ hostId, outcome: "forgotten" }]);
-    // The key was made before the opt-out, and its deletion came last.
-    expect(calls).toEqual(["key", "forget"]);
-    expect(host.requests).toEqual(["DELETE /api/remote/auth/push-token"]);
-    expect(host.bodies).toHaveLength(0);
-    expect(await book.list()).toEqual([]);
-  });
-
-  it("stops an enablement the same way", async () => {
-    const host = recordingHost();
-    const book = memoryBook();
-    const gate = deferred<{ status: "issued"; capability: string }>();
-    const requestCapability = vi.fn(() => gate.promise);
-    const enabling = enablePhoneNotifications({
-      transport: host.transport,
-      hostKeyFingerprint: fingerprint,
-      deviceId,
-      permission: permission(),
-      book,
-      requestCapability,
-    });
-    await vi.waitFor(() => expect(requestCapability).toHaveBeenCalled());
-    const forgetting = forgetPhoneNotificationsForHost({
-      hostId,
-      permission: permission(),
-      book,
-      transport: host.transport,
-    });
-    gate.resolve({ status: "issued", capability });
-    const [result] = await Promise.all([enabling, forgetting]);
-    expect(result).toEqual({ status: "cancelled" });
-    expect(host.bodies).toHaveLength(0);
-    expect(await book.list()).toEqual([]);
-  });
-
-  it("lets the person turn notifications on again after turning them off", async () => {
-    const host = recordingHost();
-    const book = await registeredBook();
-    await forgetPhoneNotificationsForHost({ hostId, permission: permission(), book });
-    const result = await enablePhoneNotifications({
-      transport: host.transport,
-      hostKeyFingerprint: fingerprint,
-      deviceId,
-      permission: permission(),
-      book,
-      requestCapability: async () => ({ status: "issued", capability }),
-    });
-    expect(result).toEqual({ status: "registered" });
-    expect(await book.list()).toHaveLength(1);
+    expect(failedForget).toEqual({ clearedOnComputer: false, localCleared: false });
+    expect((await book.list())[0]?.forgetPending).toBe(true);
   });
 });

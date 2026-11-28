@@ -16,12 +16,12 @@ export interface OctantPushNativeModule {
   readonly requestPermission: () => Promise<unknown>;
   /** The platform token as text, or nothing when the system gave none. */
   readonly devicePushToken: () => Promise<unknown>;
-  readonly notificationPublicKey: (hostId: string, deviceId: string) => Promise<unknown>;
-  /** Answers `true` once the key is deleted; `false` when the deletion failed. */
+  /** Removes a computer from the forgotten-host list when re-enabling push. */
+  readonly allowHost?: (hostId: string) => Promise<unknown>;
+  /** Answers `true` once delivered notifications are cleared and the host is forgotten. */
   readonly forgetHost: (hostId: string) => Promise<unknown>;
 }
 
-const NOTIFICATION_PUBLIC_KEY = /^[A-Za-z0-9_-]{43}$/;
 /** The same bound the host puts on a registered token (`RemotePushToken`). */
 const PLATFORM_TOKEN_MAX_BYTES = 4_096;
 
@@ -34,9 +34,7 @@ function permissionStatus(answer: unknown): NotificationPermissionStatus | undef
 /**
  * The notification port over the native module. It fails closed: a module
  * that is missing, reports itself unsupported, throws, or answers in a shape
- * it was not built to answer gives no permission, no token, and no key. The
- * Simulator, a denied permission, and a missing token each arrive here as a
- * refusal the enable flow names, never as a registration of nothing.
+ * it was not built to answer gives no permission and no token.
  */
 export function createNativeNotificationPermissionPort(
   native: OctantPushNativeModule | null,
@@ -96,24 +94,21 @@ export function createNativeNotificationPermissionPort(
         return undefined;
       }
     },
-    async getNotificationPublicKey(hostId, deviceId) {
-      if (native === null || !available) return undefined;
+    async allowHost(hostId) {
+      if (native === null || native.allowHost === undefined) return;
       try {
-        const key = await native.notificationPublicKey(hostId, deviceId);
-        return typeof key === "string" && NOTIFICATION_PUBLIC_KEY.test(key) ? key : undefined;
+        await native.allowHost(hostId);
       } catch {
-        return undefined;
+        // Allowing a host is best-effort; registration itself stays authoritative.
       }
     },
     // Not gated on `available`: a computer removed from a build whose push
-    // support went away still loses any key an earlier build made for it.
-    // The module answers `true` only when the key and the delivered
-    // notifications are gone; `false`, or any other answer, is a failure the
-    // caller must keep a record of, never a deletion.
+    // support went away still clears delivered notifications and marks the
+    // host forgotten.
     async forgetHost(hostId) {
       if (native === null) return;
       if ((await native.forgetHost(hostId)) !== true) {
-        throw new Error("The phone could not delete the notification key for this computer.");
+        throw new Error("The phone could not clear notifications for this computer.");
       }
     },
   };
