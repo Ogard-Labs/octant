@@ -102,7 +102,7 @@ function canonicalBytes(ordered: Readonly<Record<string, string>>): Uint8Array {
   return new TextEncoder().encode(`{${canonical}}`);
 }
 
-const decodeFeed = Schema.decodeUnknownEither(AppUpdateFeed);
+const decodeFeed = Schema.decodeUnknownResult(AppUpdateFeed);
 
 /**
  * Decide what a fetched feed offers this app, refusing anything it cannot
@@ -130,8 +130,8 @@ export function resolveUpdateOffer(input: {
   ) => boolean;
 }): UpdateOffer {
   const decoded = decodeFeed(input.document);
-  if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
-  const feed = decoded.right;
+  if (decoded._tag === "Failure") return { kind: "refuse", refusal: "malformed" };
+  const feed = decoded.success;
 
   let verified = false;
   try {
@@ -205,8 +205,8 @@ export function resolveNightlyInstallRelease(input: {
   ) => boolean;
 }): NightlyInstallRelease {
   const decoded = decodeFeed(input.document);
-  if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
-  const feed = decoded.right;
+  if (decoded._tag === "Failure") return { kind: "refuse", refusal: "malformed" };
+  const feed = decoded.success;
   let verified = false;
   try {
     verified = input.verifySignature(
@@ -256,7 +256,7 @@ export type HeadlessBuildOffer =
       >;
     };
 
-const decodeHeadlessFeed = Schema.decodeUnknownEither(HeadlessBuildFeed);
+const decodeHeadlessFeed = Schema.decodeUnknownResult(HeadlessBuildFeed);
 
 /**
  * Decide whether a fetched headless build document names a build this host
@@ -276,8 +276,8 @@ export function resolveHeadlessBuildOffer(input: {
   ) => boolean;
 }): HeadlessBuildOffer {
   const decoded = decodeHeadlessFeed(input.document);
-  if (decoded._tag === "Left") return { kind: "refuse", refusal: "malformed" };
-  const feed = decoded.right;
+  if (decoded._tag === "Failure") return { kind: "refuse", refusal: "malformed" };
+  const feed = decoded.success;
   let verified = false;
   try {
     verified = input.verifySignature(

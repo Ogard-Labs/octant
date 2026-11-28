@@ -51,25 +51,29 @@ import type {
 
 export const MOVED_CODE_THREAD_FORMAT = "octant.thread-move.code/1" as const;
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 const MovedCodeThread = Schema.Struct({
   format: Schema.Literal(MOVED_CODE_THREAD_FORMAT),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
   /** The branch the thread worked on; absent for a detached head. */
-  branch: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  branch: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(255))),
+  ),
   /** The provider the thread ran on, by kind, so the destination can pick its own instance of it. */
-  providerDriverKind: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  providerDriverKind: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(64)),
+  ),
   modelId: ProviderModelId,
   externalContentIngested: Schema.Boolean,
-  refusedFiles: Schema.Array(Schema.String).pipe(Schema.maxItems(10_000)),
-  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  refusedFiles: Schema.Array(Schema.String).pipe(Schema.check(Schema.isMaxLength(10_000))),
+  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.check(Schema.isMaxLength(10_000))),
   parts: Schema.optional(MovedThreadParts),
-}).annotations(strict);
+});
 type MovedCodeThread = typeof MovedCodeThread.Type;
 
-const decodeMovedCodeThread = Schema.decodeUnknownSync(MovedCodeThread);
-const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
+const decodeMovedCodeThread = Schema.decodeUnknownSync(MovedCodeThread, {
+  onExcessProperty: "error",
+});
+const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId, { onExcessProperty: "error" });
 
 /** A Code Project on the destination, as far as a move needs it. */
 export interface MoveDestinationCodeProject {

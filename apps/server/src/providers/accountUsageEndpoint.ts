@@ -9,7 +9,7 @@ import {
 } from "@octant/contracts";
 import { overageAllowsContinuedUse } from "@octant/domain";
 import { parseRetryAfter } from "@octant/provider-sdk/image-generation";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 
 /**
  * Shared shape of the account usage endpoints a CLI's own sign-in can read.
@@ -80,7 +80,7 @@ export function requestAccountUsage(
 const BACKGROUND_READ_INTERVAL_MS = 5 * 60_000;
 
 interface AccountUsageReadingState {
-  outcome?: Either.Either<ProviderServiceLimits, ProviderFailure>;
+  outcome?: Result.Result<ProviderServiceLimits, ProviderFailure>;
   attemptedAt?: number;
   inFlight?: Promise<void> | undefined;
 }
@@ -110,18 +110,18 @@ export function readAccountUsage(
 ): Effect.Effect<ProviderServiceLimits, ProviderFailure> {
   const state = readings.get(key) ?? {};
   readings.set(key, state);
-  const settle = (outcome: Either.Either<ProviderServiceLimits, ProviderFailure>) => {
+  const settle = (outcome: Result.Result<ProviderServiceLimits, ProviderFailure>) => {
     state.outcome = outcome;
   };
   if (onDemand) {
-    return Effect.either(read).pipe(
+    return Effect.result(read).pipe(
       Effect.tap((outcome) =>
         Effect.sync(() => {
           state.attemptedAt = now();
           settle(outcome);
         }),
       ),
-      Effect.flatMap((outcome) => outcome),
+      Effect.flatMap((outcome) => Effect.fromResult(outcome)),
     );
   }
   return Effect.suspend(() => {
@@ -129,15 +129,15 @@ export function readAccountUsage(
       state.attemptedAt === undefined || now() - state.attemptedAt >= BACKGROUND_READ_INTERVAL_MS;
     if (due && state.inFlight === undefined) {
       state.attemptedAt = now();
-      state.inFlight = Effect.runPromise(Effect.either(read))
+      state.inFlight = Effect.runPromise(Effect.result(read))
         .then(settle)
         .finally(() => {
           state.inFlight = undefined;
         });
     }
-    return (
+    return Effect.fromResult(
       state.outcome ??
-      Either.left(accountUsageFailure("unavailable", "Account usage has not been read yet."))
+        Result.fail(accountUsageFailure("unavailable", "Account usage has not been read yet.")),
     );
   });
 }

@@ -113,10 +113,10 @@ export function admitCanvasCommentCommand(
   origin?: CanvasCommentOrigin,
 ): CanvasCommentAdmitResult {
   const decodedCommand = decodeCanvasCommentCommand(input);
-  if (decodedCommand._tag === "Left") {
+  if (decodedCommand._tag === "Failure") {
     return reject("malformed-request", "Canvas comment command is malformed.");
   }
-  const command: CanvasCommentCommand = decodedCommand.right;
+  const command: CanvasCommentCommand = decodedCommand.success;
 
   if (command.expectedSequence !== state.sequence) {
     return reject("stale-version", "Canvas comment command targets a stale board sequence.");

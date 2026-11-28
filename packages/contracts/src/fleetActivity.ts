@@ -1,10 +1,9 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { WindowId } from "./shell";
 
 export const FLEET_OFFER_WINDOWS_MEDIA_TYPE = "application/vnd.octant.fleet-offer-windows+json";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_FLEET_ACTIVITY_TITLE_LENGTH = 200;
 export const MAX_FLEET_ACTIVITY_THREADS = 64;
@@ -17,7 +16,7 @@ export const MAX_FLEET_ACTIVITY_THREADS = 64;
  * CLI seen only in a terminal pane: a guess from pixels or PTY output, which
  * may say a thread looks busy and nothing more.
  */
-export const FleetActivitySource = Schema.Literal("journal", "session", "screen");
+export const FleetActivitySource = Schema.Literals(["journal", "session", "screen"]);
 export type FleetActivitySource = typeof FleetActivitySource.Type;
 
 /**
@@ -26,27 +25,28 @@ export type FleetActivitySource = typeof FleetActivitySource.Type;
  * left this list, and only the reader knows when it last looked.
  */
 export const FleetActivityThread = Schema.Struct({
-  mode: Schema.Literal("chat", "work", "code"),
-  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH)),
+  mode: Schema.Literals(["chat", "work", "code"]),
+  threadId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  title: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH),
+  ),
   /** Navigation hint for the local menu bar; never a capability. */
   offerWindowId: Schema.optional(WindowId),
   /** Absent for a Chat thread filed under no Project. */
   projectName: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH)),
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_FLEET_ACTIVITY_TITLE_LENGTH)),
   ),
-  state: Schema.Literal("needs-you", "working"),
+  state: Schema.Literals(["needs-you", "working"]),
   activitySource: FleetActivitySource,
   /** When the request was raised or the turn started; absent when the host did not say. */
   since: Schema.optional(UtcTimestamp),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((thread) => thread.activitySource !== "screen" || thread.state === "working", {
-      message: () => "A state seen only on screen can never say a thread needs the person.",
-      jsonSchema: {},
-    }),
-  );
+}).check(
+  Schema.makeFilter((thread) => thread.activitySource !== "screen" || thread.state === "working", {
+    message: "A state seen only on screen can never say a thread needs the person.",
+    jsonSchema: {},
+  }),
+);
 export type FleetActivityThread = typeof FleetActivityThread.Type;
 
 /**
@@ -55,17 +55,23 @@ export type FleetActivityThread = typeof FleetActivityThread.Type;
  * needs-you rows first and says so with `truncated`.
  */
 export const FleetActivity = Schema.Struct({
-  threads: Schema.Array(FleetActivityThread).pipe(Schema.maxItems(MAX_FLEET_ACTIVITY_THREADS)),
+  threads: Schema.Array(FleetActivityThread).check(Schema.isMaxLength(MAX_FLEET_ACTIVITY_THREADS)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type FleetActivity = typeof FleetActivity.Type;
 
 export const FleetActivityFailure = Schema.Struct({
-  code: Schema.Literal("invalid", "unauthorized", "unavailable"),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  code: Schema.Literals(["invalid", "unauthorized", "unavailable"]),
+  message: NonEmptyTrimmedString,
+});
 export type FleetActivityFailure = typeof FleetActivityFailure.Type;
 
-export const decodeFleetActivityThread = Schema.decodeUnknownSync(FleetActivityThread);
-export const decodeFleetActivity = Schema.decodeUnknownSync(FleetActivity);
-export const decodeFleetActivityFailure = Schema.decodeUnknownSync(FleetActivityFailure);
+export const decodeFleetActivityThread = Schema.decodeUnknownSync(
+  FleetActivityThread,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFleetActivity = Schema.decodeUnknownSync(FleetActivity, STRICT_DECODE_OPTIONS);
+export const decodeFleetActivityFailure = Schema.decodeUnknownSync(
+  FleetActivityFailure,
+  STRICT_DECODE_OPTIONS,
+);

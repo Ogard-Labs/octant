@@ -8,7 +8,7 @@ import {
   WINDOWS_STRICT_REFUSAL,
   windowsStrictRuntimeRefusal,
 } from "@octant/domain/guardrail-policy";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeAcpConfinementLive, makeAcpProcessLive } from "./acpProcess";
 import { acpProviderProfiles } from "./acpProfiles";
@@ -67,7 +67,7 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
       const root = mkdtempSync(join(tmpdir(), "octant-opencode-windows-"));
       directories.push(root);
       return await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.scoped(
             makeOpenCodeProcessLive({
               platform: "win32",
@@ -88,8 +88,8 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
         { mode: "chat", executionPolicy: "approval-gated", strict: false },
       ] as const) {
         const started = await startAndStop(level);
-        if (Either.isLeft(started)) throw new Error(started.left.message);
-        expect(running(started.right)).toBe(false);
+        if (Result.isFailure(started)) throw new Error(started.failure.message);
+        expect(running(started.success)).toBe(false);
       }
     }, 90_000);
 
@@ -107,8 +107,8 @@ describe.runIf(process.platform === "win32" && fakeOpenCode !== undefined)(
         ],
       ] as const) {
         const refused = await startAndStop(level);
-        expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused)) expect(refused.left.message).toBe(message);
+        expect(Result.isFailure(refused)).toBe(true);
+        if (Result.isFailure(refused)) expect(refused.failure.message).toBe(message);
       }
     }, 60_000);
   },
@@ -127,7 +127,7 @@ describe.runIf(process.platform === "win32" && fakePi !== undefined)("Pi on a Wi
     const root = join(base, "project");
     mkdirSync(root);
     return await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           makePiProcessLive({
             platform: "win32",
@@ -162,15 +162,15 @@ describe.runIf(process.platform === "win32" && fakePi !== undefined)("Pi on a Wi
       { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       const started = await startAndStop(level);
-      if (Either.isLeft(started)) throw new Error(started.left.message);
-      await vi.waitFor(() => expect(running(started.right)).toBe(false), { timeout: 20_000 });
+      if (Result.isFailure(started)) throw new Error(started.failure.message);
+      await vi.waitFor(() => expect(running(started.success)).toBe(false), { timeout: 20_000 });
     }
   }, 120_000);
 
   it("refuses Strict by name before Pi runs", async () => {
     const refused = await startAndStop({ mode: "code", executionPolicy: "approval-gated" });
-    expect(Either.isLeft(refused)).toBe(true);
-    if (Either.isLeft(refused)) expect(refused.left.message).toBe(WINDOWS_STRICT_REFUSAL);
+    expect(Result.isFailure(refused)).toBe(true);
+    if (Result.isFailure(refused)) expect(refused.failure.message).toBe(WINDOWS_STRICT_REFUSAL);
   }, 60_000);
 });
 
@@ -186,7 +186,7 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
       const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-windows-")));
       directories.push(base);
       return await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.scoped(
             makeAcpProcessLive({
               platform: "win32",
@@ -227,8 +227,8 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
         { mode: "chat", executionPolicy: "approval-gated", strict: false },
       ] as const) {
         const started = await startAndStop(level);
-        if (Either.isLeft(started)) throw new Error(started.left.message);
-        await vi.waitFor(() => expect(running(started.right)).toBe(false), { timeout: 20_000 });
+        if (Result.isFailure(started)) throw new Error(started.failure.message);
+        await vi.waitFor(() => expect(running(started.success)).toBe(false), { timeout: 20_000 });
       }
     }, 120_000);
 
@@ -246,8 +246,8 @@ describe.runIf(process.platform === "win32" && fakeAcpAgent !== undefined)(
         [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
       ] as const) {
         const refused = await startAndStop(level);
-        expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused)) expect(refused.left.message).toBe(message);
+        expect(Result.isFailure(refused)).toBe(true);
+        if (Result.isFailure(refused)) expect(refused.failure.message).toBe(message);
       }
     }, 60_000);
   },

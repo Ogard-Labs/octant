@@ -1,8 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * A snooze hides a thread from the active list until `until` passes. The
  * thread stays active in every other respect: a running turn keeps running
@@ -20,8 +18,8 @@ export const ThreadSnooze = Schema.Struct({
    * erase a wake time the person chose; absent means an ordinary user snooze
    * (including every record written before this field existed).
    */
-  origin: Schema.optional(Schema.Literal("user", "usage-limit")),
-}).annotations(strict);
+  origin: Schema.optional(Schema.Literals(["user", "usage-limit"])),
+});
 export type ThreadSnooze = typeof ThreadSnooze.Type;
 
 /**
@@ -32,7 +30,7 @@ export type ThreadSnooze = typeof ThreadSnooze.Type;
  */
 export const ThreadUsageLimited = Schema.Struct({
   resetsAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type ThreadUsageLimited = typeof ThreadUsageLimited.Type;
 
 export const ThreadLimitedFields = {

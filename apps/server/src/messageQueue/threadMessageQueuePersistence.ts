@@ -21,7 +21,7 @@ import {
   type EventEnvelope,
   type ThreadMessageQueueSnapshot,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -31,7 +31,7 @@ import type { ThreadMessageQueueResource } from "./threadMessageQueuePort";
 
 export const THREAD_MESSAGE_QUEUE_CHANGED = "thread.message-queue-changed@1";
 const MetadataItem = Schema.Struct({
-  ...ThreadMessageQueueItem.omit("payload").fields,
+  ...ThreadMessageQueueItem.mapFields(Struct.omit(["payload"])).fields,
   codeOperationId: Schema.optional(CodeOperationId),
   /**
    * The window or paired device whose authority this message waits under: the
@@ -52,41 +52,50 @@ const QueueState = Schema.Struct({
    * itself. While it is set a second failure or restart holds the queue; a
    * completed turn or a person's resume clears it.
    */
-  continuedPast: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  continuedPast: Schema.optional(Schema.String.pipe(Schema.check(Schema.isMaxLength(256)))),
   /**
    * Set at start-up on a queue the restart cut nothing from. Its restart hold
    * lifts by itself once the windows that queued its messages are back.
    */
   liftsAfterRestart: Schema.optional(Schema.Literal(true)),
-  items: Schema.Array(MetadataItem).pipe(Schema.maxItems(MAX_THREAD_MESSAGE_QUEUE_ITEMS)),
+  items: Schema.Array(MetadataItem).pipe(
+    Schema.check(Schema.isMaxLength(MAX_THREAD_MESSAGE_QUEUE_ITEMS)),
+  ),
 });
 export type QueueState = typeof QueueState.Type;
 const Settled = Schema.Struct({
   messageId: ThreadQueueMessageId,
   /** `steered`: delivered into the turn that was running, never a turn of its own. */
-  status: Schema.Literal("removed", "completed", "failed", "cancelled", "steered"),
+  status: Schema.Literals(["removed", "completed", "failed", "cancelled", "steered"]),
 });
 export type QueueSettlement = typeof Settled.Type;
 const QueueChanged = Schema.Struct({
   threadId: MentionableThreadId,
   state: QueueState,
   requestId: Schema.optional(ThreadMessageQueueRequestId),
-  requestFingerprint: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))),
+  requestFingerprint: Schema.optional(
+    Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+  ),
   enqueued: Schema.optional(
     Schema.Struct({
       messageId: ThreadQueueMessageId,
-      fingerprint: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      fingerprint: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
     }),
   ),
   settled: Schema.optional(Settled),
-})
-  .annotations({ parseOptions: { onExcessProperty: "error" } })
-  .pipe(Schema.filter((value) => String(value.threadId) === String(value.state.scope.threadId)));
-const decodeState = Schema.decodeUnknownSync(QueueState);
-const decodeChanged = Schema.decodeUnknownSync(QueueChanged);
-const jsonRow = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.String }));
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((value) => String(value.threadId) === String(value.state.scope.threadId)),
+  ),
+);
+const decodeState = Schema.decodeUnknownSync(QueueState, { onExcessProperty: "error" });
+const decodeChanged = Schema.decodeUnknownSync(QueueChanged, { onExcessProperty: "error" });
+const jsonRow = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.String }), {
+  onExcessProperty: "error",
+});
 const scopeRow = Schema.decodeUnknownSync(
   Schema.Struct({ mode: Schema.String, thread_id: MentionableThreadId }),
+  { onExcessProperty: "error" },
 );
 export const THREAD_MESSAGE_QUEUE_SQL = `
 CREATE TABLE thread_message_queue_projection (
@@ -138,7 +147,10 @@ export class ThreadMessageQueueProjection implements Projection {
           ? { mode: "chat", threadId: decodeChatDeleted(event.payload).threadId }
           : decodeThreadRetentionThreadPurged(event.payload);
       const id = queueId(
-        Schema.decodeUnknownSync(ThreadMessageQueueScope)({ mode: p.mode, threadId: p.threadId }),
+        Schema.decodeUnknownSync(ThreadMessageQueueScope, { onExcessProperty: "error" })({
+          mode: p.mode,
+          threadId: p.threadId,
+        }),
       );
       connection
         .prepare("INSERT OR IGNORE INTO thread_message_queue_deleted(queue_id) VALUES(?)")
@@ -274,6 +286,7 @@ export class ThreadMessageQueuePersistence {
             status: Schema.String,
             fingerprint: Schema.String,
           }),
+          { onExcessProperty: "error" },
         )(row);
   }
   receipt(
@@ -286,6 +299,7 @@ export class ThreadMessageQueuePersistence {
       ? undefined
       : Schema.decodeUnknownSync(
           Schema.Struct({ queue_id: Schema.String, fingerprint: Schema.String }),
+          { onExcessProperty: "error" },
         )(row);
   }
   content(messageId: string): QueueContent | undefined {
@@ -308,7 +322,9 @@ export class ThreadMessageQueuePersistence {
     return rows.map((row) => this.#decodeContent(jsonRow(row).value));
   }
   #decodeContent(value: string): QueueContent {
-    const decoded = Schema.decodeUnknownSync(Content)(JSON.parse(value));
+    const decoded = Schema.decodeUnknownSync(Content, { onExcessProperty: "error" })(
+      JSON.parse(value),
+    );
     return {
       scope: decoded.scope,
       messageId: decoded.messageId,

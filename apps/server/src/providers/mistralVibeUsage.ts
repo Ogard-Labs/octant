@@ -132,7 +132,7 @@ export function makeMistralVibeUsageFacts(
     const observedAt = new Date(clock()).toISOString() as UtcTimestamp;
     let payg = vibeBudgetPaygEnabled(body);
     if (payg === undefined) {
-      const subscription = yield* Effect.either(
+      const subscription = yield* Effect.result(
         requestAccountUsage(
           fetch,
           "Mistral Vibe",
@@ -141,8 +141,8 @@ export function makeMistralVibeUsageFacts(
           now,
         ),
       );
-      if (subscription._tag === "Right") {
-        payg = vibeSubscriptionPaygEnabled(subscription.right);
+      if (subscription._tag === "Success") {
+        payg = vibeSubscriptionPaygEnabled(subscription.success);
       }
     }
     const window =

@@ -125,7 +125,7 @@ export function withAddedAcpAgentLaunch(
                 capabilities: { ...result.capabilities, appManagedTools: "unsupported" as const },
               },
         ),
-        Effect.catchAll((error) => {
+        Effect.catch((error) => {
           if (steps.trusted || error.category === "unauthenticated") return Effect.fail(error);
           return Effect.promise(checkPendingInstallScripts).pipe(
             Effect.flatMap((pending) =>

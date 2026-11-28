@@ -24,9 +24,12 @@ function readConfiguration(path: string): SupervisorConfig {
       throw new Error("Invalid mediation config file.");
     const value: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
     unlinkSync(path);
-    return Schema.decodeUnknownSync(LinuxMediationSupervisorConfig)(value, {
-      onExcessProperty: "error",
-    });
+    return Schema.decodeUnknownSync(LinuxMediationSupervisorConfig, { onExcessProperty: "error" })(
+      value,
+      {
+        onExcessProperty: "error",
+      },
+    );
   } finally {
     closeSync(descriptor);
   }

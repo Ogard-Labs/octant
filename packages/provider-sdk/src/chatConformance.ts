@@ -328,7 +328,7 @@ function failureFromExit<A>(
   operation: string,
 ): ProviderFailure {
   assertConformance(Exit.isFailure(exit), `${operation} unexpectedly succeeded`);
-  const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+  const failure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
   assertConformance(failure !== undefined, `${operation} did not return a typed provider failure`);
   assertConformance(
     failureCategories.has(failure.category),
@@ -489,7 +489,7 @@ export async function runProviderChatConformance(
         const toolRequestObserved =
           yield* Deferred.make<Extract<ProviderRuntimeEvent, { readonly kind: "tool-request" }>>();
         const runtimeEvents = yield* connection.subscribe;
-        const collector = yield* Effect.fork(
+        const collector = yield* Effect.forkChild(
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === fixture.sessionStart.sessionId),
             Stream.takeUntil(

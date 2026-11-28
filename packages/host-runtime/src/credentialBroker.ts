@@ -564,7 +564,9 @@ async function handleBrokerRequest(
     const body = await readJsonRecord(request);
     if (body.kind !== "ok") return failure("invalid-request", 400);
     try {
-      const reference = Schema.decodeUnknownSync(CredentialRequestReference)(body.value);
+      const reference = Schema.decodeUnknownSync(CredentialRequestReference, {
+        onExcessProperty: "error",
+      })(body.value);
       const revision = await linked.stores.commandLinkRevision();
       if (revision === undefined) return Response.json({ status: "not-linked" });
       const result = await linked.stores.read(reference.store, reference.reference);

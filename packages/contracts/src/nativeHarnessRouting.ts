@@ -15,13 +15,12 @@
  */
 
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { MultiModelCandidateRejectionReason } from "./multiModelPool";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /** Same ceiling as a multi-model pool: these are the same candidate lists. */
 export const MAX_NATIVE_HARNESS_SLOT_CANDIDATES = 16;
@@ -45,13 +44,13 @@ export const NATIVE_HARNESS_BUILT_IN_SLOT_IDS = [
   "deep",
 ] as const;
 
-export const NativeHarnessSlotId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/),
+export const NativeHarnessSlotId = Schema.Trimmed.pipe(
+  Schema.check(Schema.isNonEmpty(), Schema.isPattern(/^[a-z][a-z0-9-]{0,63}$/)),
   Schema.brand("NativeHarnessSlotId"),
 );
 export type NativeHarnessSlotId = typeof NativeHarnessSlotId.Type;
 
-const slotId = Schema.decodeSync(NativeHarnessSlotId);
+const slotId = Schema.decodeSync(NativeHarnessSlotId, STRICT_DECODE_OPTIONS);
 
 export const NATIVE_HARNESS_BUILT_IN_SLOTS = {
   default: slotId("default"),
@@ -72,7 +71,7 @@ export const NATIVE_HARNESS_BUILT_IN_SLOTS = {
  * remain in the schema so saved routing bindings continue to decode cleanly,
  * while Settings hides them until the server resolves them.
  */
-export const NativeHarnessJob = Schema.Literal(
+export const NativeHarnessJob = Schema.Literals([
   "lead",
   "planner",
   "explorer",
@@ -85,15 +84,15 @@ export const NativeHarnessJob = Schema.Literal(
   "image-understanding",
   "advisor",
   "custom",
-);
+]);
 export type NativeHarnessJob = typeof NativeHarnessJob.Type;
 
 export const NativeHarnessSlotCandidate = Schema.Struct({
   hostId: HostId,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-}).annotations(strict);
+  reasoning: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+});
 export type NativeHarnessSlotCandidate = typeof NativeHarnessSlotCandidate.Type;
 
 export function nativeHarnessSlotCandidateKey(candidate: NativeHarnessSlotCandidate): string {
@@ -121,20 +120,19 @@ function uniqueCandidates(candidates: ReadonlyArray<NativeHarnessSlotCandidate>)
  */
 export const NativeHarnessSlot = Schema.Struct({
   id: NativeHarnessSlotId,
-  candidates: Schema.Array(NativeHarnessSlotCandidate).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_NATIVE_HARNESS_SLOT_CANDIDATES),
-    Schema.filter(uniqueCandidates),
+  candidates: Schema.Array(NativeHarnessSlotCandidate).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_NATIVE_HARNESS_SLOT_CANDIDATES),
+    Schema.makeFilter(uniqueCandidates),
   ),
   overflowPromotion: Schema.optional(NativeHarnessSlotCandidate),
   askBeforeUsing: Schema.optional(Schema.Boolean),
   continueOnFallback: Schema.optional(Schema.Boolean),
 })
-  .annotations(strict)
   // A promotion target that already sits in the chain has the same window as
   // the entry that overflowed, so it cannot be the answer to an overflow.
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (slot) =>
         slot.overflowPromotion === undefined ||
         !slot.candidates.some(
@@ -146,20 +144,20 @@ export const NativeHarnessSlot = Schema.Struct({
   );
 export type NativeHarnessSlot = typeof NativeHarnessSlot.Type;
 
-export const NativeHarnessSlotTable = Schema.Array(NativeHarnessSlot).pipe(
-  Schema.maxItems(MAX_NATIVE_HARNESS_SLOTS),
-  Schema.filter((slots) => new Set(slots.map((slot) => slot.id)).size === slots.length),
+export const NativeHarnessSlotTable = Schema.Array(NativeHarnessSlot).check(
+  Schema.isMaxLength(MAX_NATIVE_HARNESS_SLOTS),
+  Schema.makeFilter((slots) => new Set(slots.map((slot) => slot.id)).size === slots.length),
 );
 export type NativeHarnessSlotTable = typeof NativeHarnessSlotTable.Type;
 
 export const NativeHarnessJobSlotBinding = Schema.Struct({
   job: NativeHarnessJob,
   slotId: NativeHarnessSlotId,
-}).annotations(strict);
+});
 export type NativeHarnessJobSlotBinding = typeof NativeHarnessJobSlotBinding.Type;
 
-export const NativeHarnessJobSlotMap = Schema.Array(NativeHarnessJobSlotBinding).pipe(
-  Schema.filter(
+export const NativeHarnessJobSlotMap = Schema.Array(NativeHarnessJobSlotBinding).check(
+  Schema.makeFilter(
     (bindings) => new Set(bindings.map((binding) => binding.job)).size === bindings.length,
   ),
 );
@@ -173,7 +171,7 @@ export type NativeHarnessJobSlotMap = typeof NativeHarnessJobSlotMap.Type;
 export const NativeHarnessRoutingConfiguration = Schema.Struct({
   slots: NativeHarnessSlotTable,
   jobSlots: NativeHarnessJobSlotMap,
-}).annotations(strict);
+});
 export type NativeHarnessRoutingConfiguration = typeof NativeHarnessRoutingConfiguration.Type;
 
 export const DEFAULT_NATIVE_HARNESS_JOB_SLOTS: ReadonlyArray<NativeHarnessJobSlotBinding> = [
@@ -201,7 +199,7 @@ export const NativeHarnessRoutingSettings = Schema.Struct({
   configuration: NativeHarnessRoutingConfiguration,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type NativeHarnessRoutingSettings = typeof NativeHarnessRoutingSettings.Type;
 
 /**
@@ -222,60 +220,65 @@ export const NativeHarnessProjectRoutingOverride = Schema.Struct({
   configuration: NativeHarnessRoutingConfiguration,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type NativeHarnessProjectRoutingOverride = typeof NativeHarnessProjectRoutingOverride.Type;
 
 export const UpdateNativeHarnessRoutingSettings = Schema.Struct({
   configuration: NativeHarnessRoutingConfiguration,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type UpdateNativeHarnessRoutingSettings = typeof UpdateNativeHarnessRoutingSettings.Type;
 
-export const NativeHarnessProjectRoutingCommand = Schema.Union(
+export const NativeHarnessProjectRoutingCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("set-project-routing-override"),
     projectId: ProjectId,
     configuration: NativeHarnessRoutingConfiguration,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("clear-project-routing-override"),
     projectId: ProjectId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessProjectRoutingCommand = typeof NativeHarnessProjectRoutingCommand.Type;
 
-export const NativeHarnessRoutingCommandResult = Schema.Union(
+export const NativeHarnessRoutingCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("routing-settings"),
     settings: NativeHarnessRoutingSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-routing-override"),
     override: NativeHarnessProjectRoutingOverride,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-routing-override-cleared"),
     projectId: ProjectId,
     version: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("routing-refused"),
-    reason: Schema.Literal("stale-version", "not-authorized", "project-not-found", "not-a-subset"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    reason: Schema.Literals([
+      "stale-version",
+      "not-authorized",
+      "project-not-found",
+      "not-a-subset",
+    ]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type NativeHarnessRoutingCommandResult = typeof NativeHarnessRoutingCommandResult.Type;
 
 /** What makes the failure chain step to the next candidate. */
-export const NativeHarnessRouteFailureReason = Schema.Literal(
+export const NativeHarnessRouteFailureReason = Schema.Literals([
   "rate-limited",
   "endpoint-unavailable",
   "authentication-failed",
   "server-error",
   "timeout",
-);
+]);
 export type NativeHarnessRouteFailureReason = typeof NativeHarnessRouteFailureReason.Type;
 
 /**
@@ -284,17 +287,17 @@ export type NativeHarnessRouteFailureReason = typeof NativeHarnessRouteFailureRe
  * the harness runs only its own endpoints, so it steps past the rest with
  * `not-harness-runnable` and never runs them itself.
  */
-export const NativeHarnessCandidateRejectionReason = Schema.Union(
+export const NativeHarnessCandidateRejectionReason = Schema.Union([
   MultiModelCandidateRejectionReason,
   Schema.Literal("not-harness-runnable"),
-);
+]);
 export type NativeHarnessCandidateRejectionReason =
   typeof NativeHarnessCandidateRejectionReason.Type;
 
 export const NativeHarnessRejectedCandidate = Schema.Struct({
   candidate: NativeHarnessSlotCandidate,
-  reasons: Schema.Array(NativeHarnessCandidateRejectionReason).pipe(Schema.minItems(1)),
-}).annotations(strict);
+  reasons: Schema.Array(NativeHarnessCandidateRejectionReason).check(Schema.isMinLength(1)),
+});
 export type NativeHarnessRejectedCandidate = typeof NativeHarnessRejectedCandidate.Type;
 
 const RouteDecisionFields = {
@@ -304,7 +307,7 @@ const RouteDecisionFields = {
   rejected: Schema.Array(NativeHarnessRejectedCandidate),
 } as const;
 
-const PositiveTokens = Schema.Int.pipe(Schema.positive());
+const PositiveTokens = PositiveInt;
 
 function differentCandidates(decision: {
   readonly candidate: NativeHarnessSlotCandidate;
@@ -321,20 +324,20 @@ function differentCandidates(decision: {
  * are separate kinds on purpose: an oversized request that walked the failure
  * chain would fail at full price on every same-sized entry.
  */
-export const NativeHarnessRouteDecision = Schema.Union(
+export const NativeHarnessRouteDecision = Schema.Union([
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("inherited-parent"),
     /** The unconfigured role slot; this does not claim a configured selection. */
     requestedSlotId: NativeHarnessSlotId,
     candidate: NativeHarnessSlotCandidate,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("primary"),
     slotId: NativeHarnessSlotId,
     candidate: NativeHarnessSlotCandidate,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("failure-fallback"),
@@ -344,18 +347,14 @@ export const NativeHarnessRouteDecision = Schema.Union(
     reason: NativeHarnessRouteFailureReason,
     /** When `from` may be tried again; the chain reverts to the primary then. */
     cooldownUntil: UtcTimestamp,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(differentCandidates)),
+  }).check(Schema.makeFilter(differentCandidates)),
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("reverted-to-primary"),
     slotId: NativeHarnessSlotId,
     candidate: NativeHarnessSlotCandidate,
     from: NativeHarnessSlotCandidate,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(differentCandidates)),
+  }).check(Schema.makeFilter(differentCandidates)),
   Schema.Struct({
     ...RouteDecisionFields,
     kind: Schema.Literal("overflow-promotion"),
@@ -365,10 +364,9 @@ export const NativeHarnessRouteDecision = Schema.Union(
     requiredTokens: PositiveTokens,
     windowTokens: PositiveTokens,
   })
-    .annotations(strict)
     // Promotion is only honest when the request really did not fit.
-    .pipe(
-      Schema.filter(
+    .check(
+      Schema.makeFilter(
         (decision) =>
           differentCandidates(decision) && decision.requiredTokens > decision.windowTokens,
       ),
@@ -380,11 +378,10 @@ export const NativeHarnessRouteDecision = Schema.Union(
     slotId: NativeHarnessSlotId,
     candidate: NativeHarnessSlotCandidate,
   })
-    .annotations(strict)
     // The only sanctioned fallback for a slot nobody configured is `default`;
     // a `default` with no ready candidate is an `unroutable` decision instead.
-    .pipe(
-      Schema.filter(
+    .check(
+      Schema.makeFilter(
         (decision) =>
           decision.requestedSlotId !== decision.slotId && String(decision.slotId) === "default",
       ),
@@ -393,16 +390,15 @@ export const NativeHarnessRouteDecision = Schema.Union(
     ...RouteDecisionFields,
     kind: Schema.Literal("unroutable"),
     slotId: NativeHarnessSlotId,
-    reason: Schema.Literal("no-eligible-candidate", "slot-empty", "circuit-open"),
+    reason: Schema.Literals(["no-eligible-candidate", "slot-empty", "circuit-open"]),
   })
-    .annotations(strict)
     // "No eligible candidate" is a claim about candidates that were seen.
-    .pipe(
-      Schema.filter(
+    .check(
+      Schema.makeFilter(
         (decision) => decision.reason !== "no-eligible-candidate" || decision.rejected.length > 0,
       ),
     ),
-);
+]);
 export type NativeHarnessRouteDecision = typeof NativeHarnessRouteDecision.Type;
 
 export const NATIVE_HARNESS_ROUTING_AGGREGATE_TYPE = "native-harness-routing";
@@ -412,30 +408,47 @@ export const NATIVE_HARNESS_ROUTING_EVENT_NAMES = {
   projectOverrideCleared: "native-harness-routing-project-override-cleared@1",
 } as const;
 
-export const decodeNativeHarnessSlotId = Schema.decodeUnknownSync(NativeHarnessSlotId);
-export const decodeNativeHarnessJob = Schema.decodeUnknownSync(NativeHarnessJob);
+export const decodeNativeHarnessSlotId = Schema.decodeUnknownSync(
+  NativeHarnessSlotId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNativeHarnessJob = Schema.decodeUnknownSync(
+  NativeHarnessJob,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessSlotCandidate = Schema.decodeUnknownSync(
   NativeHarnessSlotCandidate,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessSlot = Schema.decodeUnknownSync(NativeHarnessSlot);
+export const decodeNativeHarnessSlot = Schema.decodeUnknownSync(
+  NativeHarnessSlot,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessRoutingConfiguration = Schema.decodeUnknownSync(
   NativeHarnessRoutingConfiguration,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessRoutingSettings = Schema.decodeUnknownSync(
   NativeHarnessRoutingSettings,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessProjectRoutingOverride = Schema.decodeUnknownSync(
   NativeHarnessProjectRoutingOverride,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeUpdateNativeHarnessRoutingSettings = Schema.decodeUnknownSync(
   UpdateNativeHarnessRoutingSettings,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessProjectRoutingCommand = Schema.decodeUnknownSync(
   NativeHarnessProjectRoutingCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessRoutingCommandResult = Schema.decodeUnknownSync(
   NativeHarnessRoutingCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessRouteDecision = Schema.decodeUnknownSync(
   NativeHarnessRouteDecision,
+  STRICT_DECODE_OPTIONS,
 );

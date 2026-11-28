@@ -17,9 +17,9 @@ import type { TransientProviderCredential } from "../useProviderController";
 
 type KeyChoice = "none" | "bearer" | "header";
 
-const decodeConfiguration = Schema.decodeUnknownEither(OutsideHarnessEndpointProviderConfiguration);
-const decodeImageConfiguration = Schema.decodeUnknownEither(OutsideImageProviderConfiguration);
-const decodeVideoConfiguration = Schema.decodeUnknownEither(OutsideVideoProviderConfiguration);
+const decodeConfiguration = Schema.decodeUnknownResult(OutsideHarnessEndpointProviderConfiguration);
+const decodeImageConfiguration = Schema.decodeUnknownResult(OutsideImageProviderConfiguration);
+const decodeVideoConfiguration = Schema.decodeUnknownResult(OutsideVideoProviderConfiguration);
 
 /** A declared per-image price as a person reads it, from integer micro-dollars. */
 function perImagePrice(usdMicros: number | undefined): string {
@@ -139,7 +139,7 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
         : declared.media === "image"
           ? decodeImageConfiguration({ kind: "outside-image", ...media })
           : decodeVideoConfiguration({ kind: "outside-video", ...media });
-    if (name.trim().length === 0 || decoded._tag === "Left") {
+    if (name.trim().length === 0 || decoded._tag === "Failure") {
       setProblem(
         declared === undefined
           ? "Give it a name, an address, at least one model ID, and a key header other than proxy-authorization, cookie, or host."
@@ -149,7 +149,7 @@ export function OutsideDriverAddForm(props: OutsideDriverAddFormProps) {
     }
     setProblem(undefined);
     const input = credentialInput.current;
-    props.onAdd(name.trim(), decoded.right, {
+    props.onAdd(name.trim(), decoded.success, {
       value: key === undefined ? "" : (input?.value ?? ""),
       clear: () => {
         if (input !== null) input.value = "";

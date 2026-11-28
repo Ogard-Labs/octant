@@ -417,7 +417,8 @@ export function makePiNativeSessions(options: {
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.try({
             try: () => {
-              if (!SESSION_ID.test(input.nativeSessionId)) return { status: "read", messages: [] };
+              if (!SESSION_ID.test(input.nativeSessionId))
+                return { status: "read" as const, messages: [] };
               const source = personSessionFile(
                 personDirectory,
                 input.projectRoot,

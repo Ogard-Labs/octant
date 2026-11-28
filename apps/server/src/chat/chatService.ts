@@ -5966,7 +5966,7 @@ export class ChatService {
             await tools?.close?.();
           }).pipe(
             Effect.timeout("2 seconds"),
-            Effect.catchAllCause(() => Effect.logWarning("Prepared Chat tool cleanup failed.")),
+            Effect.catchCause(() => Effect.logWarning("Prepared Chat tool cleanup failed.")),
           ),
         );
     }

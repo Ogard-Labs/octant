@@ -1,27 +1,26 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { DirectoryIssuer, DirectoryIssuerClientId, DirectoryResourceScope } from "./providers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Public host-driven sign-in shapes. Token material is not representable here:
  * excess fields are rejected, and no property carries an access or refresh token.
  */
 const DescriptorId = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
   Schema.brand("HostOAuthDescriptorId"),
 );
 const TermsId = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
   Schema.brand("HostOAuthTermsId"),
 );
-const ClientId = Schema.String.pipe(Schema.pattern(/^[^\s/?#]{1,256}$/));
+const ClientId = Schema.String.check(Schema.isPattern(/^[^\s/?#]{1,256}$/));
 // RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or backslash.
-const Scope = Schema.String.pipe(Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/));
+const Scope = Schema.String.check(Schema.isPattern(/^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/));
 
-const Endpoint = Schema.String.pipe(
-  Schema.filter((value) => {
+const Endpoint = Schema.String.check(
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       if (url.username !== "" || url.password !== "") return false;
@@ -35,8 +34,8 @@ const Endpoint = Schema.String.pipe(
   }),
 );
 
-const MetadataClientId = Schema.String.pipe(
-  Schema.filter((value) => {
+const MetadataClientId = Schema.String.check(
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return (
@@ -55,50 +54,48 @@ const MetadataClientId = Schema.String.pipe(
 
 /** A reference in the broker's MCP credential namespace, never the client secret itself. */
 export const McpOAuthClientAuthentication = Schema.Struct({
-  method: Schema.Literal("client_secret_post", "client_secret_basic"),
-  secretRef: Schema.UUID,
+  method: Schema.Literals(["client_secret_post", "client_secret_basic"]),
+  secretRef: GuidString,
   tokenEndpoint: Endpoint,
-}).annotations(strict);
+});
 export type McpOAuthClientAuthentication = typeof McpOAuthClientAuthentication.Type;
 
 /** Application setup is reusable independently of a person's account grant. */
 export const McpOAuthClientRegistration = Schema.Struct({
-  kind: Schema.Literal("registered", "metadata-document"),
+  kind: Schema.Literals(["registered", "metadata-document"]),
   resource: Endpoint,
   issuer: Endpoint,
-  clientId: Schema.Union(ClientId, MetadataClientId),
+  clientId: Schema.Union([ClientId, MetadataClientId]),
   /** Exact retained loopback callback; localhost is an explicit closed Slack choice. */
-  redirectPort: Schema.Int.pipe(Schema.between(1024, 65535)),
+  redirectPort: Schema.Int.check(Schema.isBetween({ minimum: 1024, maximum: 65535 })),
   redirectHostname: Schema.optional(Schema.Literal("localhost")),
   clientAuthentication: Schema.optional(McpOAuthClientAuthentication),
-})
-  .pipe(
-    Schema.filter((value) => {
-      const issuer = new URL(value.issuer);
-      const resource = new URL(value.resource);
-      if (
-        issuer.protocol !== "https:" ||
-        issuer.search !== "" ||
-        issuer.hash !== "" ||
-        resource.protocol !== "https:" ||
-        resource.hash !== ""
-      )
-        return false;
-      if (
-        value.redirectHostname !== undefined &&
-        (value.resource !== "https://mcp.slack.com" ||
-          value.issuer !== "https://mcp.slack.com" ||
-          value.kind !== "registered" ||
-          value.clientAuthentication?.method !== "client_secret_post" ||
-          value.clientAuthentication.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access")
-      )
-        return false;
-      return value.kind === "metadata-document"
-        ? Schema.is(MetadataClientId)(value.clientId) && value.clientAuthentication === undefined
-        : Schema.is(ClientId)(value.clientId);
-    }),
-  )
-  .annotations(strict);
+}).check(
+  Schema.makeFilter((value) => {
+    const issuer = new URL(value.issuer);
+    const resource = new URL(value.resource);
+    if (
+      issuer.protocol !== "https:" ||
+      issuer.search !== "" ||
+      issuer.hash !== "" ||
+      resource.protocol !== "https:" ||
+      resource.hash !== ""
+    )
+      return false;
+    if (
+      value.redirectHostname !== undefined &&
+      (value.resource !== "https://mcp.slack.com" ||
+        value.issuer !== "https://mcp.slack.com" ||
+        value.kind !== "registered" ||
+        value.clientAuthentication?.method !== "client_secret_post" ||
+        value.clientAuthentication.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access")
+    )
+      return false;
+    return value.kind === "metadata-document"
+      ? Schema.is(MetadataClientId)(value.clientId) && value.clientAuthentication === undefined
+      : Schema.is(ClientId)(value.clientId);
+  }),
+);
 export type McpOAuthClientRegistration = typeof McpOAuthClientRegistration.Type;
 export const decodeMcpOAuthClientRegistration = Schema.decodeUnknownSync(
   McpOAuthClientRegistration,
@@ -107,17 +104,19 @@ export const decodeMcpOAuthClientRegistration = Schema.decodeUnknownSync(
   },
 );
 
-export const HostOAuthFlow = Schema.Literal("authorization-code-pkce", "device-code");
+export const HostOAuthFlow = Schema.Literals(["authorization-code-pkce", "device-code"]);
 export type HostOAuthFlow = typeof HostOAuthFlow.Type;
 
-export const HostOAuthJournalFlow = Schema.Literal(
+export const HostOAuthJournalFlow = Schema.Literals([
   "authorization-code-pkce",
   "device-code",
   "relay",
-);
+]);
 export type HostOAuthJournalFlow = typeof HostOAuthJournalFlow.Type;
 
-const VerificationHost = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$/));
+const VerificationHost = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$/),
+);
 const GOOGLE_WORKSPACE_MCP_RESOURCES: ReadonlySet<string> = new Set([
   "https://gmailmcp.googleapis.com/mcp/v1",
   "https://drivemcp.googleapis.com/mcp/v1",
@@ -140,7 +139,7 @@ const GOOGLE_WORKSPACE_MCP_RESOURCES: ReadonlySet<string> = new Set([
  * its own model gateway: the broker reads the issuer's endpoints from its
  * discovery document, so the descriptor names the issuer and no URL.
  */
-export const HostOAuthDialect = Schema.Literal(
+export const HostOAuthDialect = Schema.Literals([
   "openrouter-pkce",
   "chatgpt-plan-siwc",
   "mcp-authorization",
@@ -148,7 +147,7 @@ export const HostOAuthDialect = Schema.Literal(
   "github-mcp-oauth-app",
   "directory-oidc",
   "issuer-oidc",
-);
+]);
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
 
 /** Closed host-selected GitHub permission policy; omission retains profile-read. */
@@ -161,21 +160,21 @@ export type GithubMcpPermissionProfile = typeof GithubMcpPermissionProfile.Type;
  * kept for the life of the registration; `urn:uuid:<uuid>` is an accepted
  * form.
  */
-const ExtAgentHostId = Schema.String.pipe(Schema.pattern(/^urn:[a-z0-9][a-z0-9.:-]{0,127}$/));
+const ExtAgentHostId = Schema.String.check(Schema.isPattern(/^urn:[a-z0-9][a-z0-9.:-]{0,127}$/));
 
 /**
  * The application name a ChatGPT plan sign-in registers under. Sent as
  * `agent_name_hint` on the first (registration) sign-in only.
  */
-const AgentNameHint = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
+const AgentNameHint = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64));
 
 /** A directory tenant or application id: a lowercase GUID, never a multi-tenant alias. */
 const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const DirectoryGuid = Schema.String.pipe(Schema.pattern(DIRECTORY_GUID));
+const DirectoryGuid = Schema.String.check(Schema.isPattern(DIRECTORY_GUID));
 
 /** An https origin and nothing after it: the endpoint a directory grant is signed in for. */
-const HttpsOrigin = Schema.String.pipe(
-  Schema.filter((value) => {
+const HttpsOrigin = Schema.String.check(
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return url.protocol === "https:" && url.origin === value;
@@ -188,7 +187,7 @@ const HttpsOrigin = Schema.String.pipe(
 export const HostOAuthDescriptor = Schema.Struct({
   descriptorId: DescriptorId,
   /** Absent only for a dialect that sends no `client_id`. */
-  clientId: Schema.optional(Schema.Union(ClientId, MetadataClientId)),
+  clientId: Schema.optional(Schema.Union([ClientId, MetadataClientId])),
   clientAuthentication: Schema.optional(McpOAuthClientAuthentication),
   /** A vendor wire dialect. Absent means the standard OAuth runner path. */
   dialect: Schema.optional(HostOAuthDialect),
@@ -199,9 +198,9 @@ export const HostOAuthDescriptor = Schema.Struct({
   deviceAuthorizationEndpoint: Schema.optional(Endpoint),
   /** MCP device-code flow only: hosts from the issuer's metadata allowed in verification URIs. */
   verificationHosts: Schema.optional(
-    Schema.Array(VerificationHost).pipe(Schema.minItems(1), Schema.maxItems(16)),
+    Schema.Array(VerificationHost).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
   ),
-  scopes: Schema.Array(Scope).pipe(Schema.maxItems(16)),
+  scopes: Schema.Array(Scope).check(Schema.isMaxLength(16)),
   termsId: TermsId,
   /**
    * ChatGPT plan dialect only: the stable host id sent as
@@ -223,7 +222,9 @@ export const HostOAuthDescriptor = Schema.Struct({
    * MCP authorization dialect only: the loopback port the callback listens
    * on, chosen before the flow so the client registration could name it.
    */
-  redirectPort: Schema.optional(Schema.Int.pipe(Schema.between(1024, 65535))),
+  redirectPort: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1024, maximum: 65535 })),
+  ),
   /** Only the closed Slack profile may explicitly retain a localhost callback. */
   redirectHostname: Schema.optional(Schema.Literal("localhost")),
   /** Directory dialect only: the organization's tenant. */
@@ -234,199 +235,196 @@ export const HostOAuthDescriptor = Schema.Struct({
   endpointOrigin: Schema.optional(HttpsOrigin),
   /** Issuer dialect only: the organization's own OpenID Connect issuer. */
   issuer: Schema.optional(DirectoryIssuer),
-})
-  .pipe(
-    Schema.filter(
-      (descriptor) => {
-        if (
-          descriptor.mcpPermissionProfile !== undefined &&
-          descriptor.dialect !== "github-mcp-oauth-app"
-        )
-          return false;
-        if (
-          descriptor.dialect !== "mcp-authorization" &&
-          descriptor.dialect !== "slack-mcp-user" &&
-          descriptor.dialect !== "github-mcp-oauth-app" &&
-          (descriptor.clientAuthentication !== undefined ||
-            (descriptor.clientId !== undefined && !Schema.is(ClientId)(descriptor.clientId)))
-        )
-          return false;
-        if (
-          descriptor.dialect !== "slack-mcp-user" &&
-          descriptor.dialect !== "github-mcp-oauth-app" &&
-          (descriptor.redirectHostname !== undefined ||
-            descriptor.mcpTransportUrl !== undefined ||
-            descriptor.mcpIssuer !== undefined ||
-            descriptor.resource === "https://mcp.slack.com" ||
-            descriptor.authorizationEndpoint === "https://slack.com/oauth/v2_user/authorize" ||
-            descriptor.tokenEndpoint === "https://slack.com/api/oauth.v2.user.access" ||
-            descriptor.resource === "https://api.githubcopilot.com/mcp/" ||
-            descriptor.authorizationEndpoint === "https://github.com/login/oauth/authorize" ||
-            descriptor.tokenEndpoint === "https://github.com/login/oauth/access_token")
-        )
-          return false;
-        if (
-          descriptor.verificationHosts !== undefined &&
-          (descriptor.dialect !== "mcp-authorization" || descriptor.flow !== "device-code")
-        ) {
-          return false;
-        }
-        // The directory dialect and generic MCP authorization speak standard
-        // RFC 8628 device authorization; closed vendor dialects (Google
-        // Workspace, Slack, GitHub, OpenRouter, ChatGPT plan, issuer-oidc)
-        // exclude device authorization and keep their PKCE profiles.
-        if (
-          descriptor.dialect !== undefined &&
-          descriptor.dialect !== "directory-oidc" &&
-          !(
-            descriptor.dialect === "mcp-authorization" &&
-            (descriptor.resource === undefined ||
-              !GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource))
-          ) &&
-          descriptor.flow !== "authorization-code-pkce"
-        ) {
-          return false;
-        }
-        // The directory dialect names its tenant, the organization's own
-        // public client, the audience, and the endpoint, and nothing the
-        // broker builds itself: no URL and no scope.
-        if (descriptor.dialect === "directory-oidc") {
-          return (
-            descriptor.clientId !== undefined &&
-            DIRECTORY_GUID.test(descriptor.clientId) &&
-            descriptor.tenantId !== undefined &&
-            descriptor.audience !== undefined &&
-            descriptor.endpointOrigin !== undefined &&
-            descriptor.scopes.length === 0 &&
-            descriptor.authorizationEndpoint === undefined &&
-            descriptor.tokenEndpoint === undefined &&
-            descriptor.deviceAuthorizationEndpoint === undefined &&
-            descriptor.resource === undefined &&
-            descriptor.redirectPort === undefined &&
-            descriptor.extAgentHostId === undefined &&
-            descriptor.agentNameHint === undefined &&
-            descriptor.issuer === undefined
-          );
-        }
-        // The issuer dialect names the organization's issuer, its public
-        // client, the one scope its gateway requires, and the endpoint; the
-        // broker discovers every URL from the issuer itself.
-        if (descriptor.dialect === "issuer-oidc") {
-          const [scope, ...more] = descriptor.scopes;
-          return (
-            descriptor.issuer !== undefined &&
-            descriptor.clientId !== undefined &&
-            Schema.is(DirectoryIssuerClientId)(descriptor.clientId) &&
-            scope !== undefined &&
-            more.length === 0 &&
-            Schema.is(DirectoryResourceScope)(scope) &&
-            descriptor.endpointOrigin !== undefined &&
-            descriptor.tenantId === undefined &&
-            descriptor.audience === undefined &&
-            descriptor.authorizationEndpoint === undefined &&
-            descriptor.tokenEndpoint === undefined &&
-            descriptor.deviceAuthorizationEndpoint === undefined &&
-            descriptor.resource === undefined &&
-            descriptor.redirectPort === undefined &&
-            descriptor.extAgentHostId === undefined &&
-            descriptor.agentNameHint === undefined
-          );
-        }
-        if (
-          descriptor.tokenEndpoint === undefined ||
-          descriptor.tenantId !== undefined ||
-          descriptor.audience !== undefined ||
-          descriptor.endpointOrigin !== undefined ||
-          descriptor.issuer !== undefined
-        ) {
-          return false;
-        }
-        // The MCP authorization dialect registers its client before the flow,
-        // so it names a client id; a server may grant without any scope.
-        if (
-          descriptor.dialect === "mcp-authorization" ||
-          descriptor.dialect === "slack-mcp-user" ||
-          descriptor.dialect === "github-mcp-oauth-app"
-        ) {
-          if (
-            descriptor.dialect === "github-mcp-oauth-app" &&
-            (!Schema.is(ClientId)(descriptor.clientId) ||
-              descriptor.redirectHostname !== undefined ||
-              descriptor.redirectPort === undefined ||
-              descriptor.resource !== "https://api.githubcopilot.com/mcp/" ||
-              descriptor.mcpTransportUrl !== "https://api.githubcopilot.com/mcp/" ||
-              descriptor.mcpIssuer !== "https://github.com/login/oauth" ||
-              descriptor.authorizationEndpoint !== "https://github.com/login/oauth/authorize" ||
-              descriptor.tokenEndpoint !== "https://github.com/login/oauth/access_token" ||
-              descriptor.clientAuthentication?.method !== "client_secret_post" ||
-              descriptor.scopes.length !==
-                (descriptor.mcpPermissionProfile === undefined ? 2 : 3) ||
-              (descriptor.mcpPermissionProfile !== undefined &&
-                !descriptor.scopes.includes("repo")) ||
-              !descriptor.scopes.includes("read:user") ||
-              !descriptor.scopes.includes("offline_access"))
-          )
-            return false;
-          if (
-            descriptor.dialect === "slack-mcp-user" &&
-            (descriptor.redirectHostname !== "localhost" ||
-              descriptor.redirectPort === undefined ||
-              descriptor.resource !== "https://mcp.slack.com" ||
-              descriptor.mcpIssuer !== "https://mcp.slack.com" ||
-              descriptor.mcpTransportUrl !== "https://mcp.slack.com/mcp" ||
-              descriptor.authorizationEndpoint !== "https://slack.com/oauth/v2_user/authorize" ||
-              descriptor.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access" ||
-              descriptor.clientAuthentication?.method !== "client_secret_post" ||
-              descriptor.scopes.length !== 1 ||
-              descriptor.scopes[0] !== "search:read.public")
-          )
-            return false;
-          if (
-            descriptor.dialect === "mcp-authorization" &&
-            descriptor.flow === "device-code" &&
-            (descriptor.deviceAuthorizationEndpoint === undefined ||
-              descriptor.redirectPort !== undefined ||
-              descriptor.redirectHostname !== undefined ||
-              (descriptor.resource !== undefined &&
-                GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource)))
-          )
-            return false;
-          return (
-            descriptor.clientId !== undefined &&
-            descriptor.resource !== undefined &&
-            (descriptor.clientAuthentication === undefined ||
-              descriptor.clientAuthentication.tokenEndpoint === descriptor.tokenEndpoint)
-          );
-        }
-        // A dialect entry declares its own wire shape; every other flow needs
-        // a client identity and at least one scope. The ChatGPT plan dialect
-        // registers its client during the first sign-in, so it declares no
-        // client id but does declare scopes; the stable host id is bound by
-        // the host process when a flow begins (see the runtime's descriptor
-        // validation), not by the catalog entry.
-        if (descriptor.dialect === "chatgpt-plan-siwc") {
-          return descriptor.scopes.length >= 1;
-        }
+}).check(
+  Schema.makeFilter(
+    (descriptor) => {
+      if (
+        descriptor.mcpPermissionProfile !== undefined &&
+        descriptor.dialect !== "github-mcp-oauth-app"
+      )
+        return false;
+      if (
+        descriptor.dialect !== "mcp-authorization" &&
+        descriptor.dialect !== "slack-mcp-user" &&
+        descriptor.dialect !== "github-mcp-oauth-app" &&
+        (descriptor.clientAuthentication !== undefined ||
+          (descriptor.clientId !== undefined && !Schema.is(ClientId)(descriptor.clientId)))
+      )
+        return false;
+      if (
+        descriptor.dialect !== "slack-mcp-user" &&
+        descriptor.dialect !== "github-mcp-oauth-app" &&
+        (descriptor.redirectHostname !== undefined ||
+          descriptor.mcpTransportUrl !== undefined ||
+          descriptor.mcpIssuer !== undefined ||
+          descriptor.resource === "https://mcp.slack.com" ||
+          descriptor.authorizationEndpoint === "https://slack.com/oauth/v2_user/authorize" ||
+          descriptor.tokenEndpoint === "https://slack.com/api/oauth.v2.user.access" ||
+          descriptor.resource === "https://api.githubcopilot.com/mcp/" ||
+          descriptor.authorizationEndpoint === "https://github.com/login/oauth/authorize" ||
+          descriptor.tokenEndpoint === "https://github.com/login/oauth/access_token")
+      )
+        return false;
+      if (
+        descriptor.verificationHosts !== undefined &&
+        (descriptor.dialect !== "mcp-authorization" || descriptor.flow !== "device-code")
+      ) {
+        return false;
+      }
+      // The directory dialect and generic MCP authorization speak standard
+      // RFC 8628 device authorization; closed vendor dialects (Google
+      // Workspace, Slack, GitHub, OpenRouter, ChatGPT plan, issuer-oidc)
+      // exclude device authorization and keep their PKCE profiles.
+      if (
+        descriptor.dialect !== undefined &&
+        descriptor.dialect !== "directory-oidc" &&
+        !(
+          descriptor.dialect === "mcp-authorization" &&
+          (descriptor.resource === undefined ||
+            !GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource))
+        ) &&
+        descriptor.flow !== "authorization-code-pkce"
+      ) {
+        return false;
+      }
+      // The directory dialect names its tenant, the organization's own
+      // public client, the audience, and the endpoint, and nothing the
+      // broker builds itself: no URL and no scope.
+      if (descriptor.dialect === "directory-oidc") {
         return (
-          descriptor.dialect !== undefined ||
-          (descriptor.clientId !== undefined && descriptor.scopes.length >= 1)
+          descriptor.clientId !== undefined &&
+          DIRECTORY_GUID.test(descriptor.clientId) &&
+          descriptor.tenantId !== undefined &&
+          descriptor.audience !== undefined &&
+          descriptor.endpointOrigin !== undefined &&
+          descriptor.scopes.length === 0 &&
+          descriptor.authorizationEndpoint === undefined &&
+          descriptor.tokenEndpoint === undefined &&
+          descriptor.deviceAuthorizationEndpoint === undefined &&
+          descriptor.resource === undefined &&
+          descriptor.redirectPort === undefined &&
+          descriptor.extAgentHostId === undefined &&
+          descriptor.agentNameHint === undefined &&
+          descriptor.issuer === undefined
         );
-      },
-      {
-        description:
-          "a standard flow requires a client ID and at least one scope; only the directory dialect pairs with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory and issuer dialects omit the token endpoint: the directory dialect names its tenant, client, audience, and endpoint and no URL or scope, and the issuer dialect names its issuer, client, one resource scope, and endpoint and no URL",
-      },
-    ),
-  )
-  .annotations(strict);
+      }
+      // The issuer dialect names the organization's issuer, its public
+      // client, the one scope its gateway requires, and the endpoint; the
+      // broker discovers every URL from the issuer itself.
+      if (descriptor.dialect === "issuer-oidc") {
+        const [scope, ...more] = descriptor.scopes;
+        return (
+          descriptor.issuer !== undefined &&
+          descriptor.clientId !== undefined &&
+          Schema.is(DirectoryIssuerClientId)(descriptor.clientId) &&
+          scope !== undefined &&
+          more.length === 0 &&
+          Schema.is(DirectoryResourceScope)(scope) &&
+          descriptor.endpointOrigin !== undefined &&
+          descriptor.tenantId === undefined &&
+          descriptor.audience === undefined &&
+          descriptor.authorizationEndpoint === undefined &&
+          descriptor.tokenEndpoint === undefined &&
+          descriptor.deviceAuthorizationEndpoint === undefined &&
+          descriptor.resource === undefined &&
+          descriptor.redirectPort === undefined &&
+          descriptor.extAgentHostId === undefined &&
+          descriptor.agentNameHint === undefined
+        );
+      }
+      if (
+        descriptor.tokenEndpoint === undefined ||
+        descriptor.tenantId !== undefined ||
+        descriptor.audience !== undefined ||
+        descriptor.endpointOrigin !== undefined ||
+        descriptor.issuer !== undefined
+      ) {
+        return false;
+      }
+      // The MCP authorization dialect registers its client before the flow,
+      // so it names a client id; a server may grant without any scope.
+      if (
+        descriptor.dialect === "mcp-authorization" ||
+        descriptor.dialect === "slack-mcp-user" ||
+        descriptor.dialect === "github-mcp-oauth-app"
+      ) {
+        if (
+          descriptor.dialect === "github-mcp-oauth-app" &&
+          (!Schema.is(ClientId)(descriptor.clientId) ||
+            descriptor.redirectHostname !== undefined ||
+            descriptor.redirectPort === undefined ||
+            descriptor.resource !== "https://api.githubcopilot.com/mcp/" ||
+            descriptor.mcpTransportUrl !== "https://api.githubcopilot.com/mcp/" ||
+            descriptor.mcpIssuer !== "https://github.com/login/oauth" ||
+            descriptor.authorizationEndpoint !== "https://github.com/login/oauth/authorize" ||
+            descriptor.tokenEndpoint !== "https://github.com/login/oauth/access_token" ||
+            descriptor.clientAuthentication?.method !== "client_secret_post" ||
+            descriptor.scopes.length !== (descriptor.mcpPermissionProfile === undefined ? 2 : 3) ||
+            (descriptor.mcpPermissionProfile !== undefined &&
+              !descriptor.scopes.includes("repo")) ||
+            !descriptor.scopes.includes("read:user") ||
+            !descriptor.scopes.includes("offline_access"))
+        )
+          return false;
+        if (
+          descriptor.dialect === "slack-mcp-user" &&
+          (descriptor.redirectHostname !== "localhost" ||
+            descriptor.redirectPort === undefined ||
+            descriptor.resource !== "https://mcp.slack.com" ||
+            descriptor.mcpIssuer !== "https://mcp.slack.com" ||
+            descriptor.mcpTransportUrl !== "https://mcp.slack.com/mcp" ||
+            descriptor.authorizationEndpoint !== "https://slack.com/oauth/v2_user/authorize" ||
+            descriptor.tokenEndpoint !== "https://slack.com/api/oauth.v2.user.access" ||
+            descriptor.clientAuthentication?.method !== "client_secret_post" ||
+            descriptor.scopes.length !== 1 ||
+            descriptor.scopes[0] !== "search:read.public")
+        )
+          return false;
+        if (
+          descriptor.dialect === "mcp-authorization" &&
+          descriptor.flow === "device-code" &&
+          (descriptor.deviceAuthorizationEndpoint === undefined ||
+            descriptor.redirectPort !== undefined ||
+            descriptor.redirectHostname !== undefined ||
+            (descriptor.resource !== undefined &&
+              GOOGLE_WORKSPACE_MCP_RESOURCES.has(descriptor.resource)))
+        )
+          return false;
+        return (
+          descriptor.clientId !== undefined &&
+          descriptor.resource !== undefined &&
+          (descriptor.clientAuthentication === undefined ||
+            descriptor.clientAuthentication.tokenEndpoint === descriptor.tokenEndpoint)
+        );
+      }
+      // A dialect entry declares its own wire shape; every other flow needs
+      // a client identity and at least one scope. The ChatGPT plan dialect
+      // registers its client during the first sign-in, so it declares no
+      // client id but does declare scopes; the stable host id is bound by
+      // the host process when a flow begins (see the runtime's descriptor
+      // validation), not by the catalog entry.
+      if (descriptor.dialect === "chatgpt-plan-siwc") {
+        return descriptor.scopes.length >= 1;
+      }
+      return (
+        descriptor.dialect !== undefined ||
+        (descriptor.clientId !== undefined && descriptor.scopes.length >= 1)
+      );
+    },
+    {
+      description:
+        "a standard flow requires a client ID and at least one scope; only the directory dialect pairs with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory and issuer dialects omit the token endpoint: the directory dialect names its tenant, client, audience, and endpoint and no URL or scope, and the issuer dialect names its issuer, client, one resource scope, and endpoint and no URL",
+    },
+  ),
+);
 export type HostOAuthDescriptor = typeof HostOAuthDescriptor.Type;
 
 export const HostOAuthTermsAcknowledgment = Schema.Struct({
   descriptorId: DescriptorId,
   termsId: TermsId,
-  actorId: Schema.UUID,
+  actorId: GuidString,
   acknowledgedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HostOAuthTermsAcknowledgment = typeof HostOAuthTermsAcknowledgment.Type;
 
 /**
@@ -435,7 +433,7 @@ export type HostOAuthTermsAcknowledgment = typeof HostOAuthTermsAcknowledgment.T
  * that grant, since a later refresh can pass once the person has met the
  * prompt elsewhere; a new sign-in replaces it with a new grant.
  */
-export const HostOAuthSignInAgainReason = Schema.Literal(
+export const HostOAuthSignInAgainReason = Schema.Literals([
   "revoked",
   "expired",
   "refresh-reused",
@@ -444,17 +442,17 @@ export const HostOAuthSignInAgainReason = Schema.Literal(
   "permission-missing",
   "permission-mismatch",
   "identity-unavailable",
-);
+]);
 export type HostOAuthSignInAgainReason = typeof HostOAuthSignInAgainReason.Type;
 
-const AttemptId = Schema.UUID;
+const AttemptId = GuidString;
 /** The broker's own label pattern; the directory may name a person with an apostrophe. */
-const SignedInAccountLabel = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/),
+const SignedInAccountLabel = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/),
 );
-const CredentialRef = Schema.UUID;
+const CredentialRef = GuidString;
 
-export const HostOAuthSignInState = Schema.Union(
+export const HostOAuthSignInState = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
     attemptId: AttemptId,
@@ -462,7 +460,7 @@ export const HostOAuthSignInState = Schema.Union(
     flow: Schema.Literal("authorization-code-pkce"),
     authorizationUrl: Endpoint,
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
     attemptId: AttemptId,
@@ -470,9 +468,9 @@ export const HostOAuthSignInState = Schema.Union(
     flow: Schema.Literal("device-code"),
     verificationUri: Endpoint,
     verificationUriComplete: Schema.optional(Endpoint),
-    userCode: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9-]{1,64}$/)),
+    userCode: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9-]{1,64}$/)),
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("signed-in"),
     attemptId: AttemptId,
@@ -483,17 +481,17 @@ export const HostOAuthSignInState = Schema.Union(
      * named one in plain text. A display label, never a token or a claim set.
      */
     accountLabel: Schema.optional(SignedInAccountLabel),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),
     credentialRef: CredentialRef,
     reason: HostOAuthSignInAgainReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     attemptId: Schema.optional(AttemptId),
     descriptorId: Schema.optional(DescriptorId),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "state-mismatch",
       "verifier-mismatch",
       "denied",
@@ -503,80 +501,93 @@ export const HostOAuthSignInState = Schema.Union(
       "terms-required",
       "invalid",
       "local-host-required",
-    ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unknown") }).annotations(strict),
-);
+    ]),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unknown") }),
+]);
 export type HostOAuthSignInState = typeof HostOAuthSignInState.Type;
 
 export const HostOAuthSignInOffer = Schema.Struct({
   oauth: Schema.Struct({
     available: Schema.Literal(true),
     termsRequired: Schema.Boolean,
-  }).annotations(strict),
+  }),
   apiKey: Schema.Struct({
     available: Schema.Literal(true),
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type HostOAuthSignInOffer = typeof HostOAuthSignInOffer.Type;
 
-export const HostOAuthJournalRecord = Schema.Union(
+export const HostOAuthJournalRecord = Schema.Union([
   Schema.Struct({
     name: Schema.Literal("host-oauth.terms-acknowledged"),
     descriptorId: DescriptorId,
     termsId: TermsId,
-    actorId: Schema.UUID,
+    actorId: GuidString,
     acknowledgedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-started"),
     descriptorId: DescriptorId,
     attemptId: AttemptId,
     flow: HostOAuthJournalFlow,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-completed"),
     descriptorId: DescriptorId,
     attemptId: AttemptId,
     credentialRef: CredentialRef,
     flow: Schema.optional(HostOAuthJournalFlow),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-again"),
     descriptorId: DescriptorId,
     credentialRef: CredentialRef,
     reason: HostOAuthSignInAgainReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-refused"),
     descriptorId: DescriptorId,
     attemptId: Schema.optional(AttemptId),
-    reason: Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/)),
+    reason: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,63}$/)),
     flow: Schema.optional(HostOAuthJournalFlow),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.sign-in-cancelled"),
     descriptorId: DescriptorId,
     attemptId: AttemptId,
     flow: Schema.optional(HostOAuthJournalFlow),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("host-oauth.signed-out"),
     descriptorId: DescriptorId,
     credentialRef: CredentialRef,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostOAuthJournalRecord = typeof HostOAuthJournalRecord.Type;
 
-export const decodeHostOAuthDescriptor = Schema.decodeUnknownSync(HostOAuthDescriptor);
-export const decodeHostOAuthSignInState = Schema.decodeUnknownSync(HostOAuthSignInState);
-export const decodeHostOAuthSignInOffer = Schema.decodeUnknownSync(HostOAuthSignInOffer);
-export const decodeHostOAuthJournalRecord = Schema.decodeUnknownSync(HostOAuthJournalRecord);
+export const decodeHostOAuthDescriptor = Schema.decodeUnknownSync(
+  HostOAuthDescriptor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostOAuthSignInState = Schema.decodeUnknownSync(
+  HostOAuthSignInState,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostOAuthSignInOffer = Schema.decodeUnknownSync(
+  HostOAuthSignInOffer,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostOAuthJournalRecord = Schema.decodeUnknownSync(
+  HostOAuthJournalRecord,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeHostOAuthTermsAcknowledgment = Schema.decodeUnknownSync(
   HostOAuthTermsAcknowledgment,
+  STRICT_DECODE_OPTIONS,
 );
 
-const AccountLabel = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 .@_-]{0,63}$/));
+const AccountLabel = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9 .@_-]{0,63}$/));
 
 /**
  * A descriptor that offers host-driven sign-in beside an API key.
@@ -586,10 +597,10 @@ const AccountLabel = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 .
 export const SubscriptionOAuthOffer = Schema.Struct({
   descriptor: HostOAuthDescriptor,
   accountLabel: AccountLabel,
-  termsSummary: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(280)),
-  driverKinds: Schema.Array(Schema.Literal("openai-compatible", "anthropic-compatible")).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(2),
+  termsSummary: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(280)),
+  driverKinds: Schema.Array(Schema.Literals(["openai-compatible", "anthropic-compatible"])).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
   ),
   /**
    * The only provider endpoint this sign-in may attach to. Compared by
@@ -598,7 +609,10 @@ export const SubscriptionOAuthOffer = Schema.Struct({
    * sign-in cannot be attached to an arbitrary endpoint.
    */
   allowedEndpoint: Endpoint,
-}).annotations(strict);
+});
 export type SubscriptionOAuthOffer = typeof SubscriptionOAuthOffer.Type;
 
-export const decodeSubscriptionOAuthOffer = Schema.decodeUnknownSync(SubscriptionOAuthOffer);
+export const decodeSubscriptionOAuthOffer = Schema.decodeUnknownSync(
+  SubscriptionOAuthOffer,
+  STRICT_DECODE_OPTIONS,
+);

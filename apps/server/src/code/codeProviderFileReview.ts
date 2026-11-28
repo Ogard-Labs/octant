@@ -277,7 +277,7 @@ export async function readCodeProviderFileReviewSession(
     yield* Effect.addFinalizer(() =>
       connection.stop(input.resume.sessionId).pipe(
         Effect.timeoutOption(3_000),
-        Effect.catchAllCause(() => Effect.void),
+        Effect.catchCause(() => Effect.void),
       ),
     );
     if (!current()) return stale();
@@ -301,7 +301,7 @@ export async function readCodeProviderFileReviewSession(
           projectCode: false,
         },
       })
-      .pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+      .pipe(Effect.catch(() => Effect.succeed(undefined)));
     if (!current()) return stale();
     if (resumed === undefined || String(resumed.sessionId) !== String(input.resume.sessionId))
       return { status: "refused", reason: "cold-unavailable" } as const;
@@ -318,10 +318,10 @@ export async function readCodeProviderFileReviewSession(
     return await Effect.runPromise(
       program.pipe(
         Effect.timeout(12_000),
-        Effect.catchTag("TimeoutException", () => {
+        Effect.catchTag("TimeoutError", () => {
           return Effect.succeed({ status: "refused", reason: "timeout" } as const);
         }),
-        Effect.catchAllCause(() =>
+        Effect.catchCause(() =>
           Effect.succeed(
             signal?.aborted
               ? ({ status: "refused", reason: "cancelled" } as const)

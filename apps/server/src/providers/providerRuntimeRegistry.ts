@@ -80,7 +80,10 @@ export function trackProviderProcess<
       await registry.trackProcess(instanceId, process);
       return process;
     },
-    catch: () => ({ category: "unavailable", message: "Provider process receipt is unavailable." }),
+    catch: () => ({
+      category: "unavailable" as const,
+      message: "Provider process receipt is unavailable.",
+    }),
   });
 }
 

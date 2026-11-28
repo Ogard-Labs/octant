@@ -96,16 +96,15 @@ export function createListenerCertificateSink(
 
 const SUBDIR = "hub";
 const FILE = "tailscale-certificate.json";
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 const CertificateSetting = Schema.Struct({
   enabled: Schema.Boolean,
   acknowledgedAt: Schema.optional(Schema.Number),
   /** When the certificate last installed stops being valid. The certificate itself is not kept here. */
   notAfter: Schema.optional(Schema.Number),
-}).annotations(strict);
+});
 type CertificateSetting = typeof CertificateSetting.Type;
-const decodeSetting = Schema.decodeUnknownSync(CertificateSetting);
+const decodeSetting = Schema.decodeUnknownSync(CertificateSetting, { onExcessProperty: "error" });
 
 export interface TailscaleCertificateSettingPort {
   readonly load: () => CertificateSetting;

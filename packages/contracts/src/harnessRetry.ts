@@ -1,13 +1,17 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 const retryFields = {
-  attempt: Schema.Int.pipe(Schema.between(2, 16)),
-  maxAttempts: Schema.Int.pipe(Schema.between(2, 16)),
-  delayMs: Schema.Int.pipe(Schema.between(0, 3_600_000)),
-  reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  attempt: Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 16 })),
+  maxAttempts: Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 16 })),
+  delayMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3_600_000 })),
+  reason: Schema.Literals([
+    "rate-limited",
+    "unavailable",
+    "stream-interrupted",
+    "empty-completion",
+  ]),
   announcedAt: UtcTimestamp,
 } as const;
 
@@ -19,9 +23,9 @@ const retryFields = {
  * call, or the turn settling, clears it. A Chat attempt and a Code operation journal it
  * with the turn; the harness session view holds it only in memory.
  */
-export const HarnessRetryNotice = Schema.Struct(retryFields)
-  .annotations(strict)
-  .pipe(Schema.filter((notice) => notice.attempt <= notice.maxAttempts));
+export const HarnessRetryNotice = Schema.Struct(retryFields).check(
+  Schema.makeFilter((notice) => notice.attempt <= notice.maxAttempts),
+);
 export type HarnessRetryNotice = typeof HarnessRetryNotice.Type;
 
 /** The same notice, as one operation or stream event. */
@@ -30,4 +34,7 @@ export const HarnessRetryEventFields = {
   ...retryFields,
 } as const;
 
-export const decodeHarnessRetryNotice = Schema.decodeUnknownSync(HarnessRetryNotice);
+export const decodeHarnessRetryNotice = Schema.decodeUnknownSync(
+  HarnessRetryNotice,
+  STRICT_DECODE_OPTIONS,
+);

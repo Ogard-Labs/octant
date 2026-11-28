@@ -1,4 +1,5 @@
 import { ConversationInputPolicy } from "./conversationInputs";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeReviewFindingReferences } from "./codeOperations";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { Schema } from "effect";
@@ -13,28 +14,31 @@ import { ProviderExecutionPolicy } from "./providers";
 import { MentionableThreadId, MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 import { StartWorkThreadTurnCommand } from "./workTurns";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const MAX_THREAD_MESSAGE_QUEUE_ITEMS = 32;
 export const MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS = 200_000;
 export const MAX_THREAD_MESSAGE_QUEUE_ITEM_BYTES = 1024 * 1024;
 export const MAX_THREAD_MESSAGE_QUEUE_BYTES = 4 * 1024 * 1024;
-export const ThreadQueueMessageId = Schema.UUID.pipe(Schema.brand("ThreadQueueMessageId"));
+export const ThreadQueueMessageId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ThreadQueueMessageId"),
+);
 export type ThreadQueueMessageId = typeof ThreadQueueMessageId.Type;
-export const ThreadMessageQueueRequestId = Schema.UUID.pipe(
+export const ThreadMessageQueueRequestId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
   Schema.brand("ThreadMessageQueueRequestId"),
 );
 export type ThreadMessageQueueRequestId = typeof ThreadMessageQueueRequestId.Type;
 export const ThreadMessageQueueScope = Schema.Struct({
   mode: OctantMode,
   threadId: MentionableThreadId,
-}).annotations(strict);
+});
 export type ThreadMessageQueueScope = typeof ThreadMessageQueueScope.Type;
-export const ThreadMessageQueuePrompt = Schema.String.pipe(
-  Schema.maxLength(MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS),
+export const ThreadMessageQueuePrompt = Schema.String.check(
+  Schema.isMaxLength(MAX_THREAD_MESSAGE_QUEUE_PROMPT_CHARACTERS),
 );
 const chat = SendChatTurnCommand.fields;
 const work = StartWorkThreadTurnCommand.fields;
-export const ThreadMessageQueuePayload = Schema.Union(
+export const ThreadMessageQueuePayload = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("chat"),
     contextInputPolicy: chat.contextInputPolicy,
@@ -46,7 +50,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     extensionSelections: chat.extensionSelections,
     threadMentionIds: chat.threadMentionIds,
     sideChatReturns: chat.sideChatReturns,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("work"),
     contextInputPolicy: work.contextInputPolicy,
@@ -58,7 +62,7 @@ export const ThreadMessageQueuePayload = Schema.Union(
     threadMentionIds: work.threadMentionIds,
     sideChatReturns: work.sideChatReturns,
     fileMentionPaths: work.fileMentionPaths,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("code"),
     contextInputPolicy: Schema.optional(ConversationInputPolicy),
@@ -67,35 +71,35 @@ export const ThreadMessageQueuePayload = Schema.Union(
     prompt: ThreadMessageQueuePrompt,
     typedByPerson: Schema.optional(Schema.Literal(true)),
     attachmentIds: Schema.optional(
-      Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+      Schema.Array(CodeAttachmentId).check(Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
     ),
     extensionSelections: Schema.optional(
-      Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32)),
+      Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
     ),
     computerUseSelection: Schema.optional(ExtensionSelection),
     computerUseDestination: Schema.optional(ComputerUseDestinationSelection),
     threadMentionIds: Schema.optional(
-      Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
+      Schema.Array(MentionableThreadId).check(Schema.isMaxLength(MAX_THREAD_MENTIONS_PER_TURN)),
     ),
     fileMentionPaths: Schema.optional(
-      Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+      Schema.Array(FileMentionPathInput).check(Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN)),
     ),
     executionPolicy: Schema.optional(ProviderExecutionPolicy),
-  }).annotations(strict),
-).pipe(
-  Schema.filter(
+  }),
+]).check(
+  Schema.makeFilter(
     (value) =>
       value.prompt.trim().length > 0 ||
       (value.mode === "chat" && (value.attachmentIds?.length ?? 0) > 0),
   ),
-  Schema.filter(
+  Schema.makeFilter(
     (value) =>
       new TextEncoder().encode(JSON.stringify(value)).byteLength <=
       MAX_THREAD_MESSAGE_QUEUE_ITEM_BYTES,
   ),
 );
 export type ThreadMessageQueuePayload = typeof ThreadMessageQueuePayload.Type;
-export const ThreadMessageQueueHoldReason = Schema.Literal(
+export const ThreadMessageQueueHoldReason = Schema.Literals([
   "paused",
   "host-restart",
   "delivery-unknown",
@@ -106,11 +110,11 @@ export const ThreadMessageQueueHoldReason = Schema.Literal(
   "thread-unavailable",
   "content-unavailable",
   "admission-refused",
-);
+]);
 export type ThreadMessageQueueHoldReason = typeof ThreadMessageQueueHoldReason.Type;
-export const ThreadMessageQueueRefusalReason = Schema.Union(
+export const ThreadMessageQueueRefusalReason = Schema.Union([
   ThreadMessageQueueHoldReason,
-  Schema.Literal(
+  Schema.Literals([
     "unauthorized",
     "not-found",
     "not-editable",
@@ -118,12 +122,12 @@ export const ThreadMessageQueueRefusalReason = Schema.Union(
     "queue-full",
     "invalid-payload",
     "storage-unavailable",
-  ),
-);
+  ]),
+]);
 export type ThreadMessageQueueRefusalReason = typeof ThreadMessageQueueRefusalReason.Type;
 export const ThreadMessageQueueItem = Schema.Struct({
   messageId: ThreadQueueMessageId,
-  status: Schema.Literal("queued", "dispatching", "accepted"),
+  status: Schema.Literals(["queued", "dispatching", "accepted"]),
   revision: AggregateVersion,
   createdAt: UtcTimestamp,
   /** Missing private content is explicit; metadata cannot recreate it. */
@@ -139,22 +143,24 @@ export const ThreadMessageQueueItem = Schema.Struct({
    * that is running and waits for the next one, until they choose Send now.
    */
   waitsForNextTurn: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type ThreadMessageQueueItem = typeof ThreadMessageQueueItem.Type;
 export const ThreadMessageQueueSnapshot = Schema.Struct({
   scope: ThreadMessageQueueScope,
   version: AggregateVersion,
   paused: Schema.Boolean,
   holdReason: Schema.optional(ThreadMessageQueueHoldReason),
-  items: Schema.Array(ThreadMessageQueueItem).pipe(Schema.maxItems(MAX_THREAD_MESSAGE_QUEUE_ITEMS)),
-}).annotations(strict);
+  items: Schema.Array(ThreadMessageQueueItem).check(
+    Schema.isMaxLength(MAX_THREAD_MESSAGE_QUEUE_ITEMS),
+  ),
+});
 export type ThreadMessageQueueSnapshot = typeof ThreadMessageQueueSnapshot.Type;
 const command = {
   scope: ThreadMessageQueueScope,
   requestId: ThreadMessageQueueRequestId,
   expectedVersion: AggregateVersion,
 };
-export const ThreadMessageQueueCommand = Schema.Union(
+export const ThreadMessageQueueCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("enqueue"),
     ...command,
@@ -162,71 +168,87 @@ export const ThreadMessageQueueCommand = Schema.Union(
     payload: ThreadMessageQueuePayload,
     /** Absent: steer where the running turn's runtime steers. */
     timing: Schema.optional(Schema.Literal("next-turn")),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("edit"),
     ...command,
     messageId: ThreadQueueMessageId,
     prompt: ThreadMessageQueuePrompt,
     typedByPerson: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reorder"),
     ...command,
-    messageIds: Schema.Array(ThreadQueueMessageId).pipe(
-      Schema.maxItems(MAX_THREAD_MESSAGE_QUEUE_ITEMS),
+    messageIds: Schema.Array(ThreadQueueMessageId).check(
+      Schema.isMaxLength(MAX_THREAD_MESSAGE_QUEUE_ITEMS),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remove"),
     ...command,
     messageId: ThreadQueueMessageId,
-  }).annotations(strict),
-  /** Moves a waiting message to the front and lets it steer the running turn. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("send-now"),
     ...command,
     messageId: ThreadQueueMessageId,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("pause", "resume"), ...command }).annotations(strict),
-).pipe(
-  Schema.filter((value) => value.kind !== "enqueue" || value.scope.mode === value.payload.mode),
+  }),
+  Schema.Struct({ kind: Schema.Literals(["pause", "resume"]), ...command }),
+]).check(
+  Schema.makeFilter((value) => value.kind !== "enqueue" || value.scope.mode === value.payload.mode),
 );
 export type ThreadMessageQueueCommand = typeof ThreadMessageQueueCommand.Type;
-export const ThreadMessageQueueResult = Schema.Union(
+export const ThreadMessageQueueResult = Schema.Union([
   Schema.Struct({
-    status: Schema.Literal("applied", "duplicate", "conflict"),
+    status: Schema.Literals(["applied", "duplicate", "conflict"]),
     requestId: ThreadMessageQueueRequestId,
     snapshot: ThreadMessageQueueSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     requestId: ThreadMessageQueueRequestId,
     reason: ThreadMessageQueueRefusalReason,
     /** What the host tells the person when the reason alone would not: the thread's worktree was cleaned up. */
-    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-  }).annotations(strict),
-);
+    message: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+  }),
+]);
 export type ThreadMessageQueueResult = typeof ThreadMessageQueueResult.Type;
-export const ThreadMessageQueueReadResult = Schema.Union(
+export const ThreadMessageQueueReadResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("ready"),
     snapshot: ThreadMessageQueueSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: ThreadMessageQueueRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadMessageQueueReadResult = typeof ThreadMessageQueueReadResult.Type;
-export const decodeThreadQueueMessageId = Schema.decodeUnknownSync(ThreadQueueMessageId);
-export const decodeThreadMessageQueueScope = Schema.decodeUnknownSync(ThreadMessageQueueScope);
-export const decodeThreadMessageQueuePayload = Schema.decodeUnknownSync(ThreadMessageQueuePayload);
-export const decodeThreadMessageQueueCommand = Schema.decodeUnknownSync(ThreadMessageQueueCommand);
+export const decodeThreadQueueMessageId = Schema.decodeUnknownSync(
+  ThreadQueueMessageId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMessageQueueScope = Schema.decodeUnknownSync(
+  ThreadMessageQueueScope,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMessageQueuePayload = Schema.decodeUnknownSync(
+  ThreadMessageQueuePayload,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMessageQueueCommand = Schema.decodeUnknownSync(
+  ThreadMessageQueueCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMessageQueueSnapshot = Schema.decodeUnknownSync(
   ThreadMessageQueueSnapshot,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadMessageQueueResult = Schema.decodeUnknownSync(ThreadMessageQueueResult);
+export const decodeThreadMessageQueueResult = Schema.decodeUnknownSync(
+  ThreadMessageQueueResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMessageQueueReadResult = Schema.decodeUnknownSync(
   ThreadMessageQueueReadResult,
+  STRICT_DECODE_OPTIONS,
 );

@@ -62,10 +62,10 @@ function holdsTag(state: CanvasTagState, tag: CanvasTagName): boolean {
  */
 export function admitCanvasTagCommand(input: unknown, state: CanvasTagState): CanvasTagAdmitResult {
   const decoded = decodeCanvasTagCommand(input);
-  if (decoded._tag === "Left") {
+  if (decoded._tag === "Failure") {
     return reject("malformed-request", "Canvas tag command is malformed.");
   }
-  const command = decoded.right;
+  const command = decoded.success;
   if (command.tag.length > CANVAS_TAG_MAX_CHARS) {
     return reject("oversized-payload", "Canvas tag exceeds the allowed length.");
   }

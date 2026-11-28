@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   AgentRunResultEvidence,
   AgentRunReviewMetadata,
@@ -13,11 +14,10 @@ import { OctantMode } from "./modes";
 import { UtcTimestamp } from "./events";
 import { ProviderChildObservation, ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const AgentObservedChild = Schema.Struct({
   ...ProviderChildObservation.fields,
   kind: Schema.Literal("observed"),
-  observationId: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+  observationId: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
   mode: OctantMode,
@@ -26,26 +26,30 @@ export const AgentObservedChild = Schema.Struct({
    * stop this one child without stopping the turn, and the child has not
    * finished; everything else is read-only.
    */
-  control: Schema.Literal("unavailable", "stop"),
+  control: Schema.Literals(["unavailable", "stop"]),
   /**
    * The further controls the thread's running turn offers for this running
    * child: `background` sends it to the background so the turn goes on, and
    * `message` queues a note it reads with its next tool call. Absent or
    * empty, only `control` applies.
    */
-  steering: Schema.optional(Schema.Array(Schema.Literal("background", "message"))),
-}).annotations(strict);
+  steering: Schema.optional(Schema.Array(Schema.Literals(["background", "message"]))),
+});
 export type AgentObservedChild = typeof AgentObservedChild.Type;
-export const decodeAgentObservedChild = Schema.decodeUnknownSync(AgentObservedChild);
+export const decodeAgentObservedChild = Schema.decodeUnknownSync(
+  AgentObservedChild,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Asks the thread's running turn to stop one subagent its runtime started. */
 export const AgentObservedChildStopRequest = Schema.Struct({
   parentThreadId: AgentRunParentThreadId,
   observationId: AgentObservedChild.fields.observationId,
-}).annotations(strict);
+});
 export type AgentObservedChildStopRequest = typeof AgentObservedChildStopRequest.Type;
 export const decodeAgentObservedChildStopRequest = Schema.decodeUnknownSync(
   AgentObservedChildStopRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -56,16 +60,17 @@ export const decodeAgentObservedChildStopRequest = Schema.decodeUnknownSync(
  * `not-found` when no running child matches, and `unauthorized` when the
  * window does not hold the thread.
  */
-export const AgentObservedChildStopResponse = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("stop-requested") }).annotations(strict),
+export const AgentObservedChildStopResponse = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("stop-requested") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unsupported", "not-live", "unauthorized"]),
+  }),
+]);
 export type AgentObservedChildStopResponse = typeof AgentObservedChildStopResponse.Type;
 export const decodeAgentObservedChildStopResponse = Schema.decodeUnknownSync(
   AgentObservedChildStopResponse,
+  STRICT_DECODE_OPTIONS,
 );
 /** Asks the thread's running turn to send one subagent its runtime started to the background. */
 export const AgentObservedChildBackgroundRequest = AgentObservedChildStopRequest;
@@ -73,16 +78,17 @@ export type AgentObservedChildBackgroundRequest = AgentObservedChildStopRequest;
 export const decodeAgentObservedChildBackgroundRequest = decodeAgentObservedChildStopRequest;
 
 /** How a background request settled; the refusals read as a stop's do. */
-export const AgentObservedChildBackgroundResponse = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("backgrounded") }).annotations(strict),
+export const AgentObservedChildBackgroundResponse = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("backgrounded") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unsupported", "not-live", "unauthorized"]),
+  }),
+]);
 export type AgentObservedChildBackgroundResponse = typeof AgentObservedChildBackgroundResponse.Type;
 export const decodeAgentObservedChildBackgroundResponse = Schema.decodeUnknownSync(
   AgentObservedChildBackgroundResponse,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const MAX_AGENT_OBSERVED_CHILD_MESSAGE_CHARACTERS = 4096;
@@ -90,39 +96,41 @@ export const MAX_AGENT_OBSERVED_CHILD_MESSAGE_CHARACTERS = 4096;
 export const AgentObservedChildMessageRequest = Schema.Struct({
   parentThreadId: AgentRunParentThreadId,
   observationId: AgentObservedChild.fields.observationId,
-  message: Schema.String.pipe(
-    Schema.filter(
+  message: Schema.String.check(
+    Schema.makeFilter(
       (value) =>
         value.trim().length > 0 && value.length <= MAX_AGENT_OBSERVED_CHILD_MESSAGE_CHARACTERS,
     ),
   ),
-}).annotations(strict);
+});
 export type AgentObservedChildMessageRequest = typeof AgentObservedChildMessageRequest.Type;
 export const decodeAgentObservedChildMessageRequest = Schema.decodeUnknownSync(
   AgentObservedChildMessageRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
  * How a message settled. `queued` means the subagent reads it with its next
  * tool call; one that makes none before it finishes never does.
  */
-export const AgentObservedChildMessageResponse = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("queued") }).annotations(strict),
+export const AgentObservedChildMessageResponse = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("queued") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unsupported", "not-live", "unauthorized"]),
+  }),
+]);
 export type AgentObservedChildMessageResponse = typeof AgentObservedChildMessageResponse.Type;
 export const decodeAgentObservedChildMessageResponse = Schema.decodeUnknownSync(
   AgentObservedChildMessageResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const MAX_AGENT_RESULT_PACKETS = 16;
 export const MAX_AGENT_RESULT_SUMMARY_CHARACTERS = 4096;
 export const AgentRunResultPacket = Schema.Struct({
   runId: AgentRunId,
   parentThreadId: AgentRunParentThreadId,
-  generation: Schema.Int.pipe(Schema.positive()),
+  generation: PositiveInt,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   executionKind: AgentRunExecutionKind,
@@ -130,49 +138,55 @@ export const AgentRunResultPacket = Schema.Struct({
   lifecycleStatus: AgentRunLifecycleStatus,
   occurredAt: UtcTimestamp,
   reportedSummary: Schema.Struct({
-    status: Schema.Literal("available", "unavailable"),
-    reference: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(2048))),
+    status: Schema.Literals(["available", "unavailable"]),
+    reference: Schema.optional(Schema.NonEmptyString.check(Schema.isMaxLength(2048))),
     text: Schema.optional(
-      Schema.String.pipe(Schema.maxLength(MAX_AGENT_RESULT_SUMMARY_CHARACTERS)),
+      Schema.String.check(Schema.isMaxLength(MAX_AGENT_RESULT_SUMMARY_CHARACTERS)),
     ),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   workingTime: AgentRunResultEvidence.fields.workingTime,
   files: AgentRunResultEvidence.fields.files,
   checks: AgentRunResultEvidence.fields.checks,
   review: Schema.optional(AgentRunReviewMetadata),
   blockers: Schema.Struct({
-    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    status: Schema.Literals(["recorded", "unavailable", "truncated"]),
     items: Schema.Array(
       Schema.Struct({
-        text: Schema.NonEmptyString.pipe(Schema.maxLength(1024)),
-        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        text: Schema.NonEmptyString.check(Schema.isMaxLength(1024)),
+        reference: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
         source: Schema.Literal("lifecycle"),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
-}).annotations(strict);
+      }),
+    ).check(Schema.isMaxLength(32)),
+  }),
+});
 export type AgentRunResultPacket = typeof AgentRunResultPacket.Type;
 export const AgentRunResultsResponse = Schema.Struct({
   runId: AgentRunId,
-  packets: Schema.Array(AgentRunResultPacket).pipe(Schema.maxItems(MAX_AGENT_RESULT_PACKETS)),
+  packets: Schema.Array(AgentRunResultPacket).check(Schema.isMaxLength(MAX_AGENT_RESULT_PACKETS)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type AgentRunResultsResponse = typeof AgentRunResultsResponse.Type;
-export const decodeAgentRunResultsResponse = Schema.decodeUnknownSync(AgentRunResultsResponse);
+export const decodeAgentRunResultsResponse = Schema.decodeUnknownSync(
+  AgentRunResultsResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 const reviewIdentity = {
   runId: AgentRunId,
   parentThreadId: AgentRunParentThreadId,
-  generation: Schema.Int.pipe(Schema.positive()),
+  generation: PositiveInt,
 };
-export const AgentRunReviewResponse = Schema.Union(
+export const AgentRunReviewResponse = Schema.Union([
   Schema.Struct({
     ...reviewIdentity,
     status: Schema.Literal("available"),
     snapshot: AgentRunReviewSnapshot,
-  }).annotations(strict),
-  Schema.Struct({ ...reviewIdentity, status: Schema.Literal("unavailable") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ ...reviewIdentity, status: Schema.Literal("unavailable") }),
+]);
 export type AgentRunReviewResponse = typeof AgentRunReviewResponse.Type;
-export const decodeAgentRunReviewResponse = Schema.decodeUnknownSync(AgentRunReviewResponse);
+export const decodeAgentRunReviewResponse = Schema.decodeUnknownSync(
+  AgentRunReviewResponse,
+  STRICT_DECODE_OPTIONS,
+);

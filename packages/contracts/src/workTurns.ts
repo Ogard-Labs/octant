@@ -1,5 +1,11 @@
 import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./attachmentMediaType";
 import {
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
+import {
   ConversationInputReceipt,
   ConversationInputPolicy,
   ConversationInputReference,
@@ -7,7 +13,7 @@ import {
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { AgentResultsSteeredIntoTurn } from "./agentRun";
 import { ThreadDeliveryMark } from "./sideTasks";
 import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
@@ -48,14 +54,17 @@ import {
   TurnStallNotice,
 } from "./turnLoopNotice";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
@@ -99,7 +108,7 @@ export type WorkAttachmentMediaType = typeof WorkAttachmentMediaType.Type;
 export const MAX_WORK_ATTACHMENT_BYTES = 10_485_760;
 export const MAX_WORK_TURN_ATTACHMENTS = 8;
 export const MAX_WORK_ATTACHMENT_DISPLAY_NAME_LENGTH = 255;
-const WorkAttachmentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const WorkAttachmentDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 
 /**
  * What the host kept for one image: the id the renderer chose, and the name,
@@ -107,14 +116,17 @@ const WorkAttachmentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)
  */
 export const WorkAttachmentReference = Schema.Struct({
   attachmentId: WorkAttachmentId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(MAX_WORK_ATTACHMENT_DISPLAY_NAME_LENGTH),
+  displayName: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_WORK_ATTACHMENT_DISPLAY_NAME_LENGTH),
   ),
   mediaType: WorkAttachmentMediaType,
-  byteLength: Schema.Int.pipe(Schema.between(1, MAX_WORK_ATTACHMENT_BYTES)),
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_WORK_ATTACHMENT_BYTES }),
+  ),
   digest: WorkAttachmentDigest,
   source: Schema.optional(ConversationInputReference.fields.source),
-}).annotations(strict);
+});
 export type WorkAttachmentReference = typeof WorkAttachmentReference.Type;
 
 /**
@@ -132,7 +144,7 @@ export const WorkTurnAuthority = Schema.Struct({
   confinementPosture: Schema.Literal("project-root-confined"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type WorkTurnAuthority = typeof WorkTurnAuthority.Type;
 
 /**
@@ -140,7 +152,7 @@ export type WorkTurnAuthority = typeof WorkTurnAuthority.Type;
  * before Work shared Code's capability set, otherwise the guardrail level the
  * turn ran at, which decides who approved each command.
  */
-export const WorkTurnShellAuthority = Schema.Union(Schema.Literal("denied"), GuardrailLevel);
+export const WorkTurnShellAuthority = Schema.Union([Schema.Literal("denied"), GuardrailLevel]);
 export type WorkTurnShellAuthority = typeof WorkTurnShellAuthority.Type;
 
 /**
@@ -151,27 +163,27 @@ export type WorkTurnShellAuthority = typeof WorkTurnShellAuthority.Type;
  */
 export const WorkTurnCapabilityFacts = Schema.Struct({
   workspace: Schema.Literal("project-backed"),
-  confinement: Schema.Literal("project-root-confined", "unconfined"),
+  confinement: Schema.Literals(["project-root-confined", "unconfined"]),
   shell: WorkTurnShellAuthority,
   git: WorkTurnShellAuthority,
   worktree: Schema.Literal("denied"),
   pullRequest: Schema.Literal("denied"),
   code: Schema.Literal("denied"),
-}).annotations(strict);
+});
 export type WorkTurnCapabilityFacts = typeof WorkTurnCapabilityFacts.Type;
 
-export const WorkTurnLifecycleStatus = Schema.Literal(
+export const WorkTurnLifecycleStatus = Schema.Literals([
   "accepted",
   "running",
   "completed",
   "cancelled",
   "failed",
   "waiting",
-);
+]);
 export type WorkTurnLifecycleStatus = typeof WorkTurnLifecycleStatus.Type;
 
 export const WorkTurnFailure = Schema.Struct({
-  category: Schema.Literal(
+  category: Schema.Literals([
     "invalid",
     "unauthorized",
     "unavailable",
@@ -181,7 +193,7 @@ export const WorkTurnFailure = Schema.Struct({
     "failed",
     "stale",
     "rate-limited",
-  ),
+  ]),
   message: boundedNonEmptyText(MAX_WORK_TURN_FAILURE_BYTES),
   /**
    * The provider's own usage-limit signal, when stopping this turn was one.
@@ -189,7 +201,7 @@ export const WorkTurnFailure = Schema.Struct({
    * the category's coarse vocabulary.
    */
   usageLimit: Schema.optional(ProviderUsageLimit),
-}).annotations(strict);
+});
 export type WorkTurnFailure = typeof WorkTurnFailure.Type;
 
 /**
@@ -198,12 +210,12 @@ export type WorkTurnFailure = typeof WorkTurnFailure.Type;
  * assistant entries when the turn is non-completed.
  */
 export const WorkTranscriptEntry = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+  role: Schema.Literals(["user", "assistant"]),
   text: boundedText(MAX_WORK_TURN_RESPONSE_BYTES),
   status: Schema.optional(
-    Schema.Literal("running", "waiting", "completed", "cancelled", "failed", "interrupted"),
+    Schema.Literals(["running", "waiting", "completed", "cancelled", "failed", "interrupted"]),
   ),
-}).annotations(strict);
+});
 export type WorkTranscriptEntry = typeof WorkTranscriptEntry.Type;
 
 /**
@@ -227,11 +239,9 @@ export const MAX_WORK_TURN_WRITTEN_PATHS = 32;
  * partial list as everything that happened.
  */
 export const WorkTurnWrittenFiles = Schema.Struct({
-  paths: Schema.Array(Schema.NonEmptyTrimmedString).pipe(
-    Schema.maxItems(MAX_WORK_TURN_WRITTEN_PATHS),
-  ),
+  paths: Schema.Array(NonEmptyTrimmedString).check(Schema.isMaxLength(MAX_WORK_TURN_WRITTEN_PATHS)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type WorkTurnWrittenFiles = typeof WorkTurnWrittenFiles.Type;
 
 /**
@@ -248,16 +258,16 @@ export const WorkForkConversationHandoff = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 export type WorkForkConversationHandoff = typeof WorkForkConversationHandoff.Type;
 
 /** What a Work turn started its session with that it did not write itself, by cause. */
-export const WorkTurnHandoff = Schema.Union(
+export const WorkTurnHandoff = Schema.Union([
   ProviderSwitchConversationHandoff,
   AccountMoveSessionHandoff,
   RewindConversationHandoff,
   WorkForkConversationHandoff,
-);
+]);
 export type WorkTurnHandoff = typeof WorkTurnHandoff.Type;
 
 /**
@@ -267,14 +277,14 @@ export type WorkTurnHandoff = typeof WorkTurnHandoff.Type;
 export const WorkTurnCarriedFrom = Schema.Struct({
   threadId: WorkThreadId,
   requestId: WorkTurnRequestId,
-}).annotations(strict);
+});
 export type WorkTurnCarriedFrom = typeof WorkTurnCarriedFrom.Type;
 
 /** Host-computed framed input accepted with this turn, never a public start-command claim. */
 export const WorkExternalInputReceipt = Schema.Struct({
-  referenceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-}).annotations(strict);
+  referenceId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+});
 export type WorkExternalInputReceipt = typeof WorkExternalInputReceipt.Type;
 
 export const WorkTurnState = Schema.Struct({
@@ -306,12 +316,14 @@ export const WorkTurnState = Schema.Struct({
   /** Present on a fork's copy of one of its source's turns. */
   carriedFrom: Schema.optional(WorkTurnCarriedFrom),
   status: WorkTurnLifecycleStatus,
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   response: Schema.optional(boundedText(MAX_WORK_TURN_RESPONSE_BYTES)),
-  transcript: Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8)),
+  transcript: Schema.Array(WorkTranscriptEntry).check(Schema.isMaxLength(8)),
   attachments: Schema.optional(
-    Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+    Schema.Array(WorkAttachmentReference).check(Schema.isMaxLength(MAX_WORK_TURN_ATTACHMENTS)),
   ),
   /** The attached images a Sees images model described, and which model. */
   describedImages: Schema.optional(DescribedTurnImages),
@@ -333,7 +345,7 @@ export const WorkTurnState = Schema.Struct({
    * provider's own event stamps and restated as the running total. A re-read
    * never sees reasoning text — only the number.
    */
-  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningMs: Schema.optional(NonNegativeInt),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * Set only on a turn the host started to deliver owed reports — a finished
@@ -354,7 +366,7 @@ export const WorkTurnState = Schema.Struct({
   version: AggregateVersion,
   acceptedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnState = typeof WorkTurnState.Type;
 
 export const StartWorkThreadTurnCommand = Schema.Struct({
@@ -364,7 +376,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+  prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
   /**
    * The person typed (pasted, or dictated) this message into a composer. Only
    * a composer sets it; a button, template, routine, side task, delivery, or
@@ -373,7 +385,9 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    */
   typedByPerson: Schema.optional(Schema.Literal(true)),
   computerUseSelection: Schema.optional(ExtensionSelection),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   authority: WorkTurnAuthority,
   /**
    * Images already staged for this thread. Ids only: the host reads the bytes
@@ -383,7 +397,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    */
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   attachmentIds: Schema.optional(
-    Schema.Array(WorkAttachmentId).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+    Schema.Array(WorkAttachmentId).check(Schema.isMaxLength(MAX_WORK_TURN_ATTACHMENTS)),
   ),
   /**
    * `#thread` mentions this turn points at. Ids only: the host re-derives the
@@ -400,7 +414,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * the file itself. A path that escapes is refused before any read.
    */
   fileMentionPaths: Schema.optional(
-    Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    Schema.Array(FileMentionPathInput).check(Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN)),
   ),
   /**
    * Set only by the host's own delivery of owed reports — a finished
@@ -410,48 +424,48 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * journal does not record.
    */
   delivery: Schema.optional(ThreadDeliveryMark),
-}).annotations(strict);
+});
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 
 export const CancelWorkTurnCommand = Schema.Struct({
-  kind: Schema.Literal("cancel-work-turn", "force-stop-work-turn"),
+  kind: Schema.Literals(["cancel-work-turn", "force-stop-work-turn"]),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
-}).annotations(strict);
+});
 export type CancelWorkTurnCommand = typeof CancelWorkTurnCommand.Type;
 
-export const WorkTurnLookupResult = Schema.Union(
+export const WorkTurnLookupResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     turn: WorkTurnState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("ambiguous"),
     requestId: WorkTurnRequestId,
     threadId: WorkThreadId,
     turnId: WorkTurnId,
-    prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+    prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
     capabilities: WorkTurnCapabilityFacts,
-    message: Schema.NonEmptyTrimmedString,
+    message: NonEmptyTrimmedString,
     acceptedAt: UtcTimestamp,
     updatedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("not-created"),
     requestId: WorkTurnRequestId,
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type WorkTurnLookupResult = typeof WorkTurnLookupResult.Type;
 
 export const WorkTurnCancelResult = Schema.Struct({
-  kind: Schema.Literal("turn-cancelled", "turn-already-terminal", "stop-requested"),
+  kind: Schema.Literals(["turn-cancelled", "turn-already-terminal", "stop-requested"]),
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
   status: WorkTurnLifecycleStatus,
-}).annotations(strict);
+});
 export type WorkTurnCancelResult = typeof WorkTurnCancelResult.Type;
 
 /**
@@ -468,9 +482,12 @@ export const MAX_WORK_TRANSCRIPT_TURNS = 64;
  */
 export const WorkThreadTranscript = Schema.Struct({
   threadId: WorkThreadId,
-  turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(MAX_WORK_TRANSCRIPT_TURNS)),
-  liveCursor: Schema.optionalWith(Schema.Int.pipe(Schema.nonNegative()), { default: () => 0 }),
-}).annotations(strict);
+  turns: Schema.Array(WorkTurnState).check(Schema.isMaxLength(MAX_WORK_TRANSCRIPT_TURNS)),
+  liveCursor: Schema.Int.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+    Schema.withDecodingDefaultType(Effect.succeed(0)),
+  ),
+});
 export type WorkThreadTranscript = typeof WorkThreadTranscript.Type;
 
 /**
@@ -484,122 +501,104 @@ export type WorkThreadTranscript = typeof WorkThreadTranscript.Type;
 export const WorkThreadTranscriptWindow = Schema.Struct({
   version: Schema.Literal(1),
   threadId: WorkThreadId,
-  turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(MAX_WORK_TRANSCRIPT_TURNS)),
-  liveCursor: Schema.Int.pipe(Schema.nonNegative()),
+  turns: Schema.Array(WorkTurnState).check(Schema.isMaxLength(MAX_WORK_TRANSCRIPT_TURNS)),
+  liveCursor: NonNegativeInt,
   ...ThreadWindowBoundsFields,
-}).annotations(strict);
+});
 export type WorkThreadTranscriptWindow = typeof WorkThreadTranscriptWindow.Type;
 
 /** What a window read asks for: a page size and at most one anchor turn. */
 export const WorkThreadTranscriptWindowRequest = Schema.Struct({
-  limit: Schema.Int.pipe(Schema.between(1, MAX_WORK_TRANSCRIPT_TURNS)),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_WORK_TRANSCRIPT_TURNS })),
   before: Schema.optional(WorkTurnRequestId),
-}).annotations(strict);
+});
 export type WorkThreadTranscriptWindowRequest = typeof WorkThreadTranscriptWindowRequest.Type;
 
 /** Process-local Work response updates after a durable transcript snapshot. */
-export const WorkTurnStreamFrame = Schema.Union(
+export const WorkTurnStreamFrame = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("response-delta"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     text: boundedText(MAX_WORK_TURN_RESPONSE_BYTES),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-tasks"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     tasks: ThreadTaskProgressList,
-  }).annotations(strict),
-  /**
-   * The turn's whole tool-step list. A host that streams each step as a
-   * change no longer sends it; it stays so a client still reads a host that
-   * does.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-tools"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     toolSteps: ThreadToolStepList,
     toolStepsTruncated: Schema.Boolean,
-  }).annotations(strict),
-  /**
-   * One tool step that started, moved or ended, to put in the turn's list by
-   * its tool call id; absent when the list only became truncated. Restating
-   * the whole list at each tool event cost bytes that grew with the square of
-   * the turn's step limit.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-tool-step"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     toolStep: Schema.optional(ThreadToolStep),
     toolStepsTruncated: Schema.Boolean,
     /** The turn's cumulative reasoning total, restated; never reasoning text. */
-    reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  }).annotations(strict),
+    reasoningMs: Schema.optional(NonNegativeInt),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-settled"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     turn: WorkTurnState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...HarnessRetryEventFields,
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.attempt <= frame.maxAttempts)),
-  /**
-   * The provider answered the retried request. Sent once per retry, because a
-   * response that only calls a tool streams no text to clear it.
-   */
+  }).check(Schema.makeFilter((frame) => frame.attempt <= frame.maxAttempts)),
   Schema.Struct({
     kind: Schema.Literal("provider-retry-cleared"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
-  }).annotations(strict),
-  /** A compaction of the thread's session ended, with its receipt or its failure. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("compaction-settled"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     compaction: ContextCompactionSettledRecord,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-loop-noticed"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     notice: TurnLoopNotice,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-loop-stopped"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     notice: TurnLoopNotice,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-stall-noticed"),
-    sequence: Schema.Int.pipe(Schema.positive()),
+    sequence: PositiveInt,
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
     notice: TurnStallNotice,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
-    sequence: Schema.Int.pipe(Schema.nonNegative()),
+    sequence: NonNegativeInt,
     threadId: WorkThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkTurnStreamFrame = typeof WorkTurnStreamFrame.Type;
 
 export const WorkTurnAccepted = Schema.Struct({
@@ -621,13 +620,15 @@ export const WorkTurnAccepted = Schema.Struct({
   threadMentionIds: Schema.optional(ThreadMentionIds),
   /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
   trackerMentions: Schema.optional(TrackerMentions),
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+  prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
   attachments: Schema.optional(
-    Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+    Schema.Array(WorkAttachmentReference).check(Schema.isMaxLength(MAX_WORK_TURN_ATTACHMENTS)),
   ),
   /** The attached images a Sees images model described, and which model. */
   describedImages: Schema.optional(DescribedTurnImages),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   capabilities: WorkTurnCapabilityFacts,
   /**
    * Present only on a turn the host itself accepted to deliver owed reports —
@@ -636,7 +637,7 @@ export const WorkTurnAccepted = Schema.Struct({
    */
   delivery: Schema.optional(ThreadDeliveryMark),
   acceptedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnAccepted = typeof WorkTurnAccepted.Type;
 
 export const WorkTurnUpdated = Schema.Struct({
@@ -651,21 +652,21 @@ export const WorkTurnUpdated = Schema.Struct({
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
-  status: Schema.Literal("running", "completed", "cancelled", "failed", "waiting"),
+  status: Schema.Literals(["running", "completed", "cancelled", "failed", "waiting"]),
   response: Schema.optional(boundedText(MAX_WORK_TURN_RESPONSE_BYTES)),
-  transcript: Schema.optional(Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8))),
+  transcript: Schema.optional(Schema.Array(WorkTranscriptEntry).check(Schema.isMaxLength(8))),
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   failure: Schema.optional(WorkTurnFailure),
   tasks: Schema.optional(ThreadTaskProgressList),
   toolSteps: Schema.optional(ThreadToolStepList),
   toolStepsTruncated: Schema.optional(Schema.Boolean),
   /** The turn's cumulative reasoning total, restated; never reasoning text. */
-  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningMs: Schema.optional(NonNegativeInt),
   childObservations: Schema.optional(ProviderChildObservationState),
   /** What Strict kept for this turn's launch; journaled once, as the launch starts. */
   strictKept: Schema.optional(StrictKeptProtections),
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnUpdated = typeof WorkTurnUpdated.Type;
 
 /**
@@ -679,7 +680,7 @@ export const RewindWorkThreadCommand = Schema.Struct({
   threadId: WorkThreadId,
   /** The first turn the rewind removes; every later turn goes with it. */
   fromRequestId: WorkTurnRequestId,
-}).annotations(strict);
+});
 export type RewindWorkThreadCommand = typeof RewindWorkThreadCommand.Type;
 
 /** The most turns one rewind names; a longer tail is refused rather than half removed. */
@@ -695,11 +696,11 @@ export const WorkThreadRewound = Schema.Struct({
   rewindId: WorkTurnRequestId,
   threadId: WorkThreadId,
   fromRequestId: WorkTurnRequestId,
-  removedRequestIds: Schema.NonEmptyArray(WorkTurnRequestId).pipe(
-    Schema.maxItems(MAX_WORK_REWOUND_TURNS),
+  removedRequestIds: Schema.NonEmptyArray(WorkTurnRequestId).check(
+    Schema.isMaxLength(MAX_WORK_REWOUND_TURNS),
   ),
   rewoundAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkThreadRewound = typeof WorkThreadRewound.Type;
 
 /** What a rewind did; the first removed turn's prompt goes back to the composer. */
@@ -707,9 +708,9 @@ export const WorkThreadRewindResult = Schema.Struct({
   kind: Schema.Literal("thread-rewound"),
   threadId: WorkThreadId,
   fromRequestId: WorkTurnRequestId,
-  removedTurns: Schema.Int.pipe(Schema.positive()),
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
-}).annotations(strict);
+  removedTurns: PositiveInt,
+  prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200_000)),
+});
 export type WorkThreadRewindResult = typeof WorkThreadRewindResult.Type;
 
 export const WorkTurnLoopNoticed = Schema.Struct({
@@ -720,7 +721,7 @@ export const WorkTurnLoopNoticed = Schema.Struct({
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnLoopNoticed = typeof WorkTurnLoopNoticed.Type;
 
 export const WorkTurnLoopStopped = Schema.Struct({
@@ -731,7 +732,7 @@ export const WorkTurnLoopStopped = Schema.Struct({
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnLoopStopped = typeof WorkTurnLoopStopped.Type;
 
 export const WorkTurnStallNoticed = Schema.Struct({
@@ -739,9 +740,9 @@ export const WorkTurnStallNoticed = Schema.Struct({
   requestId: WorkTurnRequestId,
   threadId: WorkThreadId,
   turnId: WorkTurnId,
-  idleMs: Schema.Int.pipe(Schema.positive()),
+  idleMs: PositiveInt,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkTurnStallNoticed = typeof WorkTurnStallNoticed.Type;
 
 export const WORK_TURN_EVENT_NAMES = [
@@ -768,38 +769,110 @@ export const WORK_TURN_CAPABILITIES: WorkTurnCapabilityFacts = {
   code: "denied",
 };
 
-export const decodeWorkTurnRequestId = Schema.decodeUnknownSync(WorkTurnRequestId);
-export const decodeWorkTurnId = Schema.decodeUnknownSync(WorkTurnId);
-export const decodeWorkAttachmentId = Schema.decodeUnknownSync(WorkAttachmentId);
-export const decodeWorkAttachmentMediaType = Schema.decodeUnknownSync(WorkAttachmentMediaType);
-export const decodeWorkAttachmentReference = Schema.decodeUnknownSync(WorkAttachmentReference);
-export const decodeWorkTurnAuthority = Schema.decodeUnknownSync(WorkTurnAuthority);
-export const decodeWorkTurnCapabilityFacts = Schema.decodeUnknownSync(WorkTurnCapabilityFacts);
-export const decodeWorkTurnFailure = Schema.decodeUnknownSync(WorkTurnFailure);
-export const decodeWorkTranscriptEntry = Schema.decodeUnknownSync(WorkTranscriptEntry);
-export const decodeWorkTurnState = Schema.decodeUnknownSync(WorkTurnState);
+export const decodeWorkTurnRequestId = Schema.decodeUnknownSync(
+  WorkTurnRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnId = Schema.decodeUnknownSync(WorkTurnId, STRICT_DECODE_OPTIONS);
+export const decodeWorkAttachmentId = Schema.decodeUnknownSync(
+  WorkAttachmentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkAttachmentMediaType = Schema.decodeUnknownSync(
+  WorkAttachmentMediaType,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkAttachmentReference = Schema.decodeUnknownSync(
+  WorkAttachmentReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnAuthority = Schema.decodeUnknownSync(
+  WorkTurnAuthority,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnCapabilityFacts = Schema.decodeUnknownSync(
+  WorkTurnCapabilityFacts,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnFailure = Schema.decodeUnknownSync(
+  WorkTurnFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTranscriptEntry = Schema.decodeUnknownSync(
+  WorkTranscriptEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnState = Schema.decodeUnknownSync(WorkTurnState, STRICT_DECODE_OPTIONS);
 export const decodeStartWorkThreadTurnCommand = Schema.decodeUnknownSync(
   StartWorkThreadTurnCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCancelWorkTurnCommand = Schema.decodeUnknownSync(CancelWorkTurnCommand);
-export const decodeWorkTurnLookupResult = Schema.decodeUnknownSync(WorkTurnLookupResult);
-export const decodeWorkTurnCancelResult = Schema.decodeUnknownSync(WorkTurnCancelResult);
-export const decodeWorkThreadTranscript = Schema.decodeUnknownSync(WorkThreadTranscript);
+export const decodeCancelWorkTurnCommand = Schema.decodeUnknownSync(
+  CancelWorkTurnCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnLookupResult = Schema.decodeUnknownSync(
+  WorkTurnLookupResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnCancelResult = Schema.decodeUnknownSync(
+  WorkTurnCancelResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadTranscript = Schema.decodeUnknownSync(
+  WorkThreadTranscript,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkThreadTranscriptWindow = Schema.decodeUnknownSync(
   WorkThreadTranscriptWindow,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeWorkThreadTranscriptWindowRequest = Schema.decodeUnknownSync(
   WorkThreadTranscriptWindowRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
-export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
-export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);
-export const decodeWorkTurnLoopNoticed = Schema.decodeUnknownSync(WorkTurnLoopNoticed);
-export const decodeWorkTurnLoopStopped = Schema.decodeUnknownSync(WorkTurnLoopStopped);
-export const decodeWorkTurnStallNoticed = Schema.decodeUnknownSync(WorkTurnStallNoticed);
-export const decodeRewindWorkThreadCommand = Schema.decodeUnknownSync(RewindWorkThreadCommand);
-export const decodeWorkThreadRewound = Schema.decodeUnknownSync(WorkThreadRewound);
-export const decodeWorkThreadRewindResult = Schema.decodeUnknownSync(WorkThreadRewindResult);
-export const decodeWorkTurnWrittenFiles = Schema.decodeUnknownSync(WorkTurnWrittenFiles);
+export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(
+  WorkTurnStreamFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(
+  WorkTurnAccepted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(
+  WorkTurnUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnLoopNoticed = Schema.decodeUnknownSync(
+  WorkTurnLoopNoticed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnLoopStopped = Schema.decodeUnknownSync(
+  WorkTurnLoopStopped,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnStallNoticed = Schema.decodeUnknownSync(
+  WorkTurnStallNoticed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRewindWorkThreadCommand = Schema.decodeUnknownSync(
+  RewindWorkThreadCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadRewound = Schema.decodeUnknownSync(
+  WorkThreadRewound,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadRewindResult = Schema.decodeUnknownSync(
+  WorkThreadRewindResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkTurnWrittenFiles = Schema.decodeUnknownSync(
+  WorkTurnWrittenFiles,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeWorkExternalInputReceipt = Schema.decodeUnknownSync(WorkExternalInputReceipt);
+export const decodeWorkExternalInputReceipt = Schema.decodeUnknownSync(
+  WorkExternalInputReceipt,
+  STRICT_DECODE_OPTIONS,
+);

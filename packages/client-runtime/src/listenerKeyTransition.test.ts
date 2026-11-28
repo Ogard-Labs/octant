@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { listenerKeyTransitionPayload, LISTENER_KEY_TRANSITION_WINDOW_MS } from "@octant/domain";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { ListenerKeyTransition } from "@octant/contracts";
 import { listenerTrustAfterResponse, stageListenerKeyTransition } from "./listenerKeyTransition";
 import { judgeListenerCertificate, type ListenerOriginTrust } from "./remoteListenerTrust";
@@ -18,7 +18,9 @@ function fixture() {
   const newPin = `sha256-${createHash("sha256")
     .update(next.publicKey.export({ type: "spki", format: "der" }))
     .digest("base64url")}`;
-  const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+  const unsigned = Schema.decodeUnknownSync(
+    ListenerKeyTransition.mapFields(Struct.omit(["signature"])),
+  )({
     version: 1,
     hostId,
     origin,

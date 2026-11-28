@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { WindowId } from "./shell";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Opaque, single-use, short-lived token that bootstraps a browser client
@@ -11,7 +10,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * in a URL fragment so it never reaches the server access log.
  */
 export const LaunchSessionToken = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/)),
   Schema.brand("LaunchSessionToken"),
 );
 export type LaunchSessionToken = typeof LaunchSessionToken.Type;
@@ -30,51 +29,64 @@ export function isCanonicalLaunchSessionToken(value: unknown): value is string {
  */
 export const LaunchSessionRequest = Schema.Struct({
   windowId: WindowId,
-  capability: Schema.String.pipe(Schema.pattern(LAUNCH_SESSION_TOKEN_PATTERN)),
-  origin: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  capability: Schema.String.check(Schema.isPattern(LAUNCH_SESSION_TOKEN_PATTERN)),
+  origin: NonEmptyTrimmedString,
+});
 export type LaunchSessionRequest = typeof LaunchSessionRequest.Type;
 
 /** Admin response body: the single-use token and its absolute expiry epoch milliseconds. */
 export const LaunchSessionReceipt = Schema.Struct({
   launchToken: LaunchSessionToken,
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  expiresAt: PositiveInt,
+});
 export type LaunchSessionReceipt = typeof LaunchSessionReceipt.Type;
 
 /** Renderer request body: exchange a single-use token for the window capability. */
 export const LaunchSessionExchangeRequest = Schema.Struct({
   launchToken: LaunchSessionToken,
-}).annotations(strict);
+});
 export type LaunchSessionExchangeRequest = typeof LaunchSessionExchangeRequest.Type;
 
 /** Renderer response body: the authenticated window identity and capability. */
 export const LaunchSessionExchange = Schema.Struct({
   windowId: WindowId,
-  capability: Schema.String.pipe(Schema.pattern(LAUNCH_SESSION_TOKEN_PATTERN)),
-}).annotations(strict);
+  capability: Schema.String.check(Schema.isPattern(LAUNCH_SESSION_TOKEN_PATTERN)),
+});
 export type LaunchSessionExchange = typeof LaunchSessionExchange.Type;
 
-export const LaunchSessionFailure = Schema.Union(
+export const LaunchSessionFailure = Schema.Union([
   Schema.Struct({
     category: Schema.Literal("invalid"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unauthorized"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unavailable"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type LaunchSessionFailure = typeof LaunchSessionFailure.Type;
 
-export const decodeLaunchSessionRequest = Schema.decodeUnknownSync(LaunchSessionRequest);
-export const decodeLaunchSessionReceipt = Schema.decodeUnknownSync(LaunchSessionReceipt);
+export const decodeLaunchSessionRequest = Schema.decodeUnknownSync(
+  LaunchSessionRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLaunchSessionReceipt = Schema.decodeUnknownSync(
+  LaunchSessionReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeLaunchSessionExchangeRequest = Schema.decodeUnknownSync(
   LaunchSessionExchangeRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeLaunchSessionExchange = Schema.decodeUnknownSync(LaunchSessionExchange);
-export const decodeLaunchSessionFailure = Schema.decodeUnknownSync(LaunchSessionFailure);
+export const decodeLaunchSessionExchange = Schema.decodeUnknownSync(
+  LaunchSessionExchange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLaunchSessionFailure = Schema.decodeUnknownSync(
+  LaunchSessionFailure,
+  STRICT_DECODE_OPTIONS,
+);

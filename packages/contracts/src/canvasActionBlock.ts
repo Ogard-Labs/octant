@@ -9,6 +9,7 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasBlockId, CanvasSchemaVersion, CanvasSourceId } from "./canvasIdentity";
 
 // A Canvas action block is a *declarative reference* to a registered Octant
@@ -22,7 +23,6 @@ import { CanvasBlockId, CanvasSchemaVersion, CanvasSourceId } from "./canvasIden
 // Canvas refresh (C2) and skill (C3) contracts. Folding the action block into
 // the first-party definition catalog union is a later Canvas D increment; D1
 // establishes the schema and the command allowlist only.
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CANVAS_ACTION_LABEL_MAX_CHARS = 256;
 export const CANVAS_ACTION_DESCRIPTION_MAX_CHARS = 1_024;
@@ -31,27 +31,31 @@ export const CANVAS_ACTION_MAX_FILTERS = 16;
 export const CANVAS_ACTION_MAX_SELECTION_REFS = 64;
 export const CANVAS_ACTION_TEXT_VALUE_MAX_CHARS = 512;
 
-const boundedText = (maximum: number) => Schema.String.pipe(Schema.maxLength(maximum));
+const boundedText = (maximum: number) => Schema.String.check(Schema.isMaxLength(maximum));
 const boundedNonEmptyText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 
-const FiniteNumber = Schema.Number.pipe(
-  Schema.filter(Number.isFinite, { message: () => "Canvas action numbers must be finite." }),
+const FiniteNumber = Schema.Number.check(
+  Schema.makeFilter(Number.isFinite, { message: "Canvas action numbers must be finite." }),
 );
 
 // External entities (threads, pull requests) are addressed only through
 // host-owned opaque references. Free-form text, file URLs, credential-bearing
 // URLs, and path traversal are rejected so a stored action can never leak a
 // path or resolve to an arbitrary network location.
-export const CanvasActionReference = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.pattern(/^(?:opaque|ref):[A-Za-z0-9._:-]+$/),
+export const CanvasActionReference = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.isPattern(/^(?:opaque|ref):[A-Za-z0-9._:-]+$/),
 );
 export type CanvasActionReference = typeof CanvasActionReference.Type;
 
@@ -73,20 +77,20 @@ export const CANVAS_COMMAND_IDS = [
   "canvas.propose-thread",
 ] as const;
 
-export const CanvasCommandId = Schema.Literal(...CANVAS_COMMAND_IDS);
+export const CanvasCommandId = Schema.Literals(CANVAS_COMMAND_IDS);
 export type CanvasCommandId = typeof CanvasCommandId.Type;
 
 // ── Declarative command parameters ──────────────────────────────────────────
 
-export const CanvasActionScalar = Schema.Union(
+export const CanvasActionScalar = Schema.Union([
   boundedText(CANVAS_ACTION_TEXT_VALUE_MAX_CHARS),
   FiniteNumber,
   Schema.Boolean,
   Schema.Null,
-);
+]);
 export type CanvasActionScalar = typeof CanvasActionScalar.Type;
 
-export const CanvasActionFilterOperator = Schema.Literal(
+export const CanvasActionFilterOperator = Schema.Literals([
   "eq",
   "neq",
   "lt",
@@ -94,21 +98,21 @@ export const CanvasActionFilterOperator = Schema.Literal(
   "gt",
   "gte",
   "contains",
-);
+]);
 export type CanvasActionFilterOperator = typeof CanvasActionFilterOperator.Type;
 
 export const CanvasActionFilter = Schema.Struct({
   column: boundedToken("CanvasActionFilterColumn"),
   operator: CanvasActionFilterOperator,
   value: CanvasActionScalar,
-}).annotations(strict);
+});
 export type CanvasActionFilter = typeof CanvasActionFilter.Type;
 
-export const CanvasActionSelectionRef = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("canvas") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("block"), blockId: CanvasBlockId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("source"), sourceId: CanvasSourceId }).annotations(strict),
-);
+export const CanvasActionSelectionRef = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("canvas") }),
+  Schema.Struct({ kind: Schema.Literal("block"), blockId: CanvasBlockId }),
+  Schema.Struct({ kind: Schema.Literal("source"), sourceId: CanvasSourceId }),
+]);
 export type CanvasActionSelectionRef = typeof CanvasActionSelectionRef.Type;
 
 // ── Typed command references ─────────────────────────────────────────────────
@@ -116,52 +120,52 @@ export type CanvasActionSelectionRef = typeof CanvasActionSelectionRef.Type;
 export const CanvasOpenSourceCommand = Schema.Struct({
   command: Schema.Literal("canvas.open-source"),
   sourceId: CanvasSourceId,
-}).annotations(strict);
+});
 export type CanvasOpenSourceCommand = typeof CanvasOpenSourceCommand.Type;
 
 export const CanvasFilterDataCommand = Schema.Struct({
   command: Schema.Literal("canvas.filter-data"),
   target: CanvasBlockId,
-  filters: Schema.Array(CanvasActionFilter).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_ACTION_MAX_FILTERS),
+  filters: Schema.Array(CanvasActionFilter).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_ACTION_MAX_FILTERS),
   ),
-}).annotations(strict);
+});
 export type CanvasFilterDataCommand = typeof CanvasFilterDataCommand.Type;
 
 export const CanvasAttachSelectionCommand = Schema.Struct({
   command: Schema.Literal("canvas.attach-selection"),
-  selection: Schema.Array(CanvasActionSelectionRef).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_ACTION_MAX_SELECTION_REFS),
+  selection: Schema.Array(CanvasActionSelectionRef).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_ACTION_MAX_SELECTION_REFS),
   ),
-}).annotations(strict);
+});
 export type CanvasAttachSelectionCommand = typeof CanvasAttachSelectionCommand.Type;
 
 export const CanvasOpenThreadCommand = Schema.Struct({
   command: Schema.Literal("canvas.open-thread"),
   threadRef: CanvasActionReference,
-}).annotations(strict);
+});
 export type CanvasOpenThreadCommand = typeof CanvasOpenThreadCommand.Type;
 
 export const CanvasOpenPullRequestCommand = Schema.Struct({
   command: Schema.Literal("canvas.open-pull-request"),
   pullRequestRef: CanvasActionReference,
-}).annotations(strict);
+});
 export type CanvasOpenPullRequestCommand = typeof CanvasOpenPullRequestCommand.Type;
 
 export const CanvasRequestRefreshCommand = Schema.Struct({
   command: Schema.Literal("canvas.request-refresh"),
-}).annotations(strict);
+});
 export type CanvasRequestRefreshCommand = typeof CanvasRequestRefreshCommand.Type;
 
 export const CanvasProposeThreadCommand = Schema.Struct({
   command: Schema.Literal("canvas.propose-thread"),
   prompt: Schema.optional(boundedNonEmptyText(CANVAS_ACTION_PROMPT_MAX_CHARS)),
-}).annotations(strict);
+});
 export type CanvasProposeThreadCommand = typeof CanvasProposeThreadCommand.Type;
 
-export const CanvasActionCommand = Schema.Union(
+export const CanvasActionCommand = Schema.Union([
   CanvasOpenSourceCommand,
   CanvasFilterDataCommand,
   CanvasAttachSelectionCommand,
@@ -169,7 +173,7 @@ export const CanvasActionCommand = Schema.Union(
   CanvasOpenPullRequestCommand,
   CanvasRequestRefreshCommand,
   CanvasProposeThreadCommand,
-);
+]);
 export type CanvasActionCommand = typeof CanvasActionCommand.Type;
 
 // ── Action block ────────────────────────────────────────────────────────────
@@ -181,13 +185,28 @@ export const CanvasActionBlock = Schema.Struct({
   label: boundedNonEmptyText(CANVAS_ACTION_LABEL_MAX_CHARS),
   description: Schema.optional(boundedText(CANVAS_ACTION_DESCRIPTION_MAX_CHARS)),
   command: CanvasActionCommand,
-}).annotations(strict);
+});
 export type CanvasActionBlock = typeof CanvasActionBlock.Type;
 
 // ── Decoders ────────────────────────────────────────────────────────────────
 
-export const decodeCanvasCommandId = Schema.decodeUnknownSync(CanvasCommandId);
-export const decodeCanvasActionFilter = Schema.decodeUnknownSync(CanvasActionFilter);
-export const decodeCanvasActionSelectionRef = Schema.decodeUnknownSync(CanvasActionSelectionRef);
-export const decodeCanvasActionCommand = Schema.decodeUnknownSync(CanvasActionCommand);
-export const decodeCanvasActionBlock = Schema.decodeUnknownSync(CanvasActionBlock);
+export const decodeCanvasCommandId = Schema.decodeUnknownSync(
+  CanvasCommandId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasActionFilter = Schema.decodeUnknownSync(
+  CanvasActionFilter,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasActionSelectionRef = Schema.decodeUnknownSync(
+  CanvasActionSelectionRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasActionCommand = Schema.decodeUnknownSync(
+  CanvasActionCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasActionBlock = Schema.decodeUnknownSync(
+  CanvasActionBlock,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,8 +1,7 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderUsageLimit } from "./providers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The durable opt-in record a thread carries when a person asks the host to
@@ -39,10 +38,13 @@ export const UsageResumeRecord = Schema.Struct({
    * chose it on this stop. Either way it fires through ordinary admission.
    */
   origin: Schema.optional(Schema.Literal("default")),
-}).annotations(strict);
+});
 export type UsageResumeRecord = typeof UsageResumeRecord.Type;
 
-export const decodeUsageResumeRecord = Schema.decodeUnknownSync(UsageResumeRecord);
+export const decodeUsageResumeRecord = Schema.decodeUnknownSync(
+  UsageResumeRecord,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The latest recovery a thread opted into, as its projection last settled it.
@@ -52,22 +54,25 @@ export const decodeUsageResumeRecord = Schema.decodeUnknownSync(UsageResumeRecor
  * carries the honest reason whenever the host can name one. A cancelled opt-in
  * leaves no state: withdrawing it is not a fact a surface needs to report.
  */
-export const UsageResumeThreadStatus = Schema.Literal(
+export const UsageResumeThreadStatus = Schema.Literals([
   "scheduled",
   "dispatched",
   "invalidated",
   "failed",
-);
+]);
 export type UsageResumeThreadStatus = typeof UsageResumeThreadStatus.Type;
 
 export const UsageResumeThreadState = Schema.Struct({
   record: UsageResumeRecord,
   status: UsageResumeThreadStatus,
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+});
 export type UsageResumeThreadState = typeof UsageResumeThreadState.Type;
 
-export const decodeUsageResumeThreadState = Schema.decodeUnknownSync(UsageResumeThreadState);
+export const decodeUsageResumeThreadState = Schema.decodeUnknownSync(
+  UsageResumeThreadState,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const USAGE_RESUME_SCHEDULED = "usage-resume.scheduled@1" as const;
 export const USAGE_RESUME_CANCELLED = "usage-resume.cancelled@1" as const;
@@ -75,7 +80,7 @@ export const USAGE_RESUME_SETTLED = "usage-resume.settled@1" as const;
 
 export const UsageResumeScheduled = Schema.Struct({
   resume: UsageResumeRecord,
-}).annotations(strict);
+});
 export type UsageResumeScheduled = typeof UsageResumeScheduled.Type;
 
 /**
@@ -84,7 +89,7 @@ export type UsageResumeScheduled = typeof UsageResumeScheduled.Type;
  */
 export const UsageResumeCancelled = Schema.Struct({
   resume: UsageResumeRecord,
-}).annotations(strict);
+});
 export type UsageResumeCancelled = typeof UsageResumeCancelled.Type;
 
 /**
@@ -95,11 +100,20 @@ export type UsageResumeCancelled = typeof UsageResumeCancelled.Type;
  */
 export const UsageResumeSettled = Schema.Struct({
   resume: UsageResumeRecord,
-  outcome: Schema.Literal("dispatched", "invalidated", "failed"),
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  outcome: Schema.Literals(["dispatched", "invalidated", "failed"]),
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+});
 export type UsageResumeSettled = typeof UsageResumeSettled.Type;
 
-export const decodeUsageResumeScheduled = Schema.decodeUnknownSync(UsageResumeScheduled);
-export const decodeUsageResumeCancelled = Schema.decodeUnknownSync(UsageResumeCancelled);
-export const decodeUsageResumeSettled = Schema.decodeUnknownSync(UsageResumeSettled);
+export const decodeUsageResumeScheduled = Schema.decodeUnknownSync(
+  UsageResumeScheduled,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUsageResumeCancelled = Schema.decodeUnknownSync(
+  UsageResumeCancelled,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUsageResumeSettled = Schema.decodeUnknownSync(
+  UsageResumeSettled,
+  STRICT_DECODE_OPTIONS,
+);

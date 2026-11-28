@@ -1746,7 +1746,7 @@ interface SessionState {
   readonly expectedClaudeSessionId?: string;
   readonly expectedRuntimeVersion: string;
   readonly correlationId: CorrelationId;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly query: ClaudeQueryPort;
   readonly initialized: DeferredValue<string>;
   terminalResult: DeferredValue<void>;
@@ -1809,7 +1809,7 @@ interface SessionState {
   planModeSwitched: boolean;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
-  collector?: Fiber.RuntimeFiber<void, never>;
+  collector?: Fiber.Fiber<void, never>;
   outputAccepted: boolean;
   pendingTurns: number;
   /**
@@ -2088,7 +2088,7 @@ async function runSetupEffect<A>(
     }
     if (signal.aborted) throw connectionClosingFailure();
     throw (
-      Option.getOrUndefined(Cause.failureOption(exit.cause)) ??
+      Option.getOrUndefined(Cause.findErrorOption(exit.cause)) ??
       failure("provider-failed", "Claude request failed.")
     );
   } finally {
@@ -2673,8 +2673,8 @@ function makeProbe(
           );
         }
       } else {
-        const presence = yield* Effect.either(brokerHas(options));
-        if (presence._tag === "Left") {
+        const presence = yield* Effect.result(brokerHas(options));
+        if (presence._tag === "Failure") {
           return observation(
             options,
             {
@@ -2686,7 +2686,7 @@ function makeProbe(
             clock,
           );
         }
-        if (!presence.right) {
+        if (!presence.success) {
           return observation(
             options,
             {
@@ -2698,11 +2698,11 @@ function makeProbe(
             clock,
           );
         }
-        const resolved = yield* Effect.either(brokerResolve(options));
-        if (resolved._tag === "Left") {
+        const resolved = yield* Effect.result(brokerResolve(options));
+        if (resolved._tag === "Failure") {
           return observation(
             options,
-            resolved.left.category === "unauthenticated"
+            resolved.failure.category === "unauthenticated"
               ? {
                   readiness: "unauthenticated",
                   version,
@@ -2718,7 +2718,7 @@ function makeProbe(
             clock,
           );
         }
-        apiKey = resolved.right;
+        apiKey = resolved.success;
       }
       const sdkResult = yield* probeSdk(options, environmentFactory, {
         ...(apiKey === undefined ? {} : { apiKey }),
@@ -2729,7 +2729,7 @@ function makeProbe(
         ...(strict ? {} : { strict: false }),
       }).pipe(
         Effect.map((probed) => ({ kind: "ready" as const, ...probed })),
-        Effect.catchAll((providerFailure) =>
+        Effect.catch((providerFailure) =>
           providerFailure.category === "protocol" || providerFailure.category === "unsupported"
             ? Effect.succeed({
                 kind: "incompatible" as const,
@@ -3051,7 +3051,7 @@ function makeClaudeNativeSessions(
                 status: "carried",
                 discard: () =>
                   Effect.promise(() => copied.discard()).pipe(
-                    Effect.catchAllDefect(() => Effect.void),
+                    Effect.catchDefect(() => Effect.void),
                   ),
               },
       ),
@@ -3964,7 +3964,7 @@ function makeConnection(
         terminal(state, {
           kind: "failed",
           failure: Option.getOrElse(
-            Option.filter(Cause.failureOption(exit.cause), isSanitizedFailure),
+            Option.filter(Cause.findErrorOption(exit.cause), isSanitizedFailure),
             () => failure("provider-failed", "Claude message stream failed."),
           ),
         });
@@ -4082,7 +4082,7 @@ function makeConnection(
       }
 
       let apiKey: string | undefined;
-      let scope: Scope.CloseableScope | undefined;
+      let scope: Scope.Closeable | undefined;
       let state: SessionState | undefined;
       try {
         // On a server Claude Code signs in as that server's login; no
@@ -5435,9 +5435,10 @@ function makeConnection(
               preToolUse,
             })
             .pipe(
-              Effect.timeoutFail({
+              Effect.timeoutOrElse({
                 duration: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
-                onTimeout: () => failure("unavailable", "Claude session startup timed out."),
+                orElse: () =>
+                  Effect.fail(failure("unavailable", "Claude session startup timed out.")),
               }),
               Effect.provideService(Scope.Scope, scope),
             ),
@@ -5514,9 +5515,10 @@ function makeConnection(
         startCollector(state);
         const claudeSessionId = await runSetupEffect(
           query.sessionId.pipe(
-            Effect.timeoutFail({
+            Effect.timeoutOrElse({
               duration: options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
-              onTimeout: () => failure("unavailable", "Claude session startup timed out."),
+              orElse: () =>
+                Effect.fail(failure("unavailable", "Claude session startup timed out.")),
             }),
           ),
           signal,
@@ -5566,7 +5568,7 @@ function makeConnection(
     );
 
     return {
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
+      subscribe: Effect.map(PubSub.subscribe(events), Stream.fromSubscription),
       start: (input) =>
         withSessionReservation(input.sessionId, (signal) => open(input, signal)).pipe(
           Effect.map((state) =>
@@ -5830,7 +5832,7 @@ function makeConnection(
           state.hookDeliveries.push(delivery);
           reportBackgroundWork(state);
         }).pipe(
-          Effect.zipRight(
+          Effect.andThen(
             state.query.send({
               ...withImages,
               ...(delivery.viaHook
@@ -5903,7 +5905,7 @@ function makeConnection(
             }),
           ),
           Effect.tap(() => Effect.sync(() => (state.outputAccepted = true))),
-          Effect.catchAll((providerFailure) => {
+          Effect.catch((providerFailure) => {
             if (state.outputAccepted) {
               terminal(state, {
                 kind: "failed",
@@ -5935,7 +5937,7 @@ function makeConnection(
             reason: "runtime-version-unsupported",
           });
         }
-        return Effect.async<ProviderSessionCompaction>((resume) => {
+        return Effect.callback<ProviderSessionCompaction>((resume) => {
           const pending: ClaudePendingCompaction = {
             succeeded: false,
             settle: (outcome) => resume(Effect.succeed(outcome)),
@@ -5956,7 +5958,7 @@ function makeConnection(
           Effect.runFork(
             state.query.requestCompaction().pipe(
               // The command never reached the runtime's input, so nothing ran.
-              Effect.catchAll(() =>
+              Effect.catch(() =>
                 Effect.sync(() => {
                   if (state.compaction !== pending) return;
                   state.compaction = undefined;
@@ -6011,7 +6013,7 @@ function makeConnection(
               state.planModeSwitched = true;
               return { status: "applied" as const };
             }),
-            Effect.catchAll(() =>
+            Effect.catch(() =>
               Effect.succeed({
                 status: "failed" as const,
                 reason: "Claude did not switch to plan mode.",
@@ -6110,7 +6112,7 @@ function makeConnection(
               catch: () => failure("interrupted", "Claude interruption cleanup did not complete."),
             }),
           ),
-          Effect.catchAll((providerFailure) => {
+          Effect.catch((providerFailure) => {
             terminal(state, {
               kind: "interrupted",
               message: "Claude execution was interrupted.",
@@ -6177,7 +6179,7 @@ function makeConnection(
               closeAfterPublishedTerminal(state);
               await release(state);
             }).pipe(
-              Effect.zipRight(
+              Effect.andThen(
                 Effect.fail(
                   failure(
                     "protocol",

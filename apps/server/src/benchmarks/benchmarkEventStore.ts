@@ -21,7 +21,7 @@ import {
   EventActor,
   EventId,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
@@ -33,21 +33,27 @@ const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 
-const PersistedBenchmarkSuiteSavedV1 = Schema.transform(
-  BenchmarkSuiteSavedV1,
-  BenchmarkSuiteSavedV2,
-  {
-    strict: true,
-    decode: ({ suite }) => ({
-      suite: { ...suite, kind: "chat" as const, passThreshold: DEFAULT_BENCHMARK_PASS_THRESHOLD },
+const PersistedBenchmarkSuiteSavedV1 = BenchmarkSuiteSavedV1.pipe(
+  Schema.decodeTo(
+    Schema.toType(BenchmarkSuiteSavedV2),
+    SchemaTransformation.transform<
+      typeof BenchmarkSuiteSavedV2.Type,
+      typeof BenchmarkSuiteSavedV1.Type
+    >({
+      decode: ({ suite }) => ({
+        suite: {
+          ...suite,
+          kind: "chat" as const,
+          passThreshold: DEFAULT_BENCHMARK_PASS_THRESHOLD,
+        },
+      }),
+      encode: ({
+        suite: { kind: _kind, passThreshold: _threshold, projectId: _project, ...suite },
+      }) => ({
+        suite,
+      }),
     }),
-    encode: (
-      _encoded,
-      { suite: { kind: _kind, passThreshold: _threshold, projectId: _project, ...suite } },
-    ) => ({
-      suite,
-    }),
-  },
+  ),
 );
 
 export function registerBenchmarkEvents(registry: EventRegistry): EventRegistry {

@@ -1,5 +1,5 @@
 import type { OpenAiCompatibleProviderConfiguration, ProviderFailure } from "@octant/contracts";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { type CompatibleFetch, makeOpenAiCompatibleEndpoint } from "./openAiCompatibleEndpoint";
 import {
@@ -48,11 +48,11 @@ function realResponsesAttempt(
         metadata = value;
       },
     });
-    const either = await Effect.runPromise(Effect.either(effect));
-    if (Either.isRight(either)) return { ok: true, value: either.right };
+    const either = await Effect.runPromise(Effect.result(effect));
+    if (Result.isSuccess(either)) return { ok: true, value: either.success };
     return {
       ok: false,
-      failure: either.left,
+      failure: either.failure,
       accepted: metadata?.accepted ?? false,
       outputStarted: metadata?.outputStarted ?? false,
       ...(metadata?.httpStatus === undefined ? {} : { httpStatus: metadata.httpStatus }),

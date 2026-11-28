@@ -21,6 +21,7 @@ import {
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
 import type { AutomationFileActivityPorts } from "./automationFileSourceActivity";
 import { isDeepStrictEqual } from "node:util";
+import { Schema } from "effect";
 import {
   admittedDeviceAuthorityKind,
   AutomationPolicyRejected,
@@ -917,12 +918,7 @@ function mapCommandError(error: unknown, automationId: AutomationId): Automation
 }
 
 function isSchemaParseError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    (error as { readonly name?: unknown }).name === "ParseError"
-  );
+  return Schema.isSchemaError(error);
 }
 
 /**

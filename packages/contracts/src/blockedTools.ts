@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The providers whose tools a person may block in Settings › Permissions ›
@@ -11,7 +10,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * A provider with no such way is not offered, rather than listed and left
  * unenforced.
  */
-export const BlockableToolProvider = Schema.Literal("claude", "codex", "opencode", "pi");
+export const BlockableToolProvider = Schema.Literals(["claude", "codex", "opencode", "pi"]);
 export type BlockableToolProvider = typeof BlockableToolProvider.Type;
 
 /**
@@ -19,10 +18,10 @@ export type BlockableToolProvider = typeof BlockableToolProvider.Type;
  * `webfetch`, `bash`), or `server__tool` for a tool of one of the provider's
  * own MCP servers. Matched exactly when a session starts.
  */
-export const BlockedToolName = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(160),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+export const BlockedToolName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(160),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
 );
 export type BlockedToolName = typeof BlockedToolName.Type;
 
@@ -30,15 +29,15 @@ export type BlockedToolName = typeof BlockedToolName.Type;
 export const BlockedTool = Schema.Struct({
   provider: BlockableToolProvider,
   tool: BlockedToolName,
-}).annotations(strict);
+});
 export type BlockedTool = typeof BlockedTool.Type;
 
 export const BlockedToolsSettings = Schema.Struct({
   kind: Schema.Literal("blocked-tools-settings"),
-  tools: Schema.Array(BlockedTool).pipe(Schema.maxItems(256)),
+  tools: Schema.Array(BlockedTool).check(Schema.isMaxLength(256)),
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type BlockedToolsSettings = typeof BlockedToolsSettings.Type;
 
 /** Blocking or unblocking one tool, made from the version the person read. */
@@ -48,26 +47,26 @@ export const BlockedToolsCommand = Schema.Struct({
   tool: BlockedToolName,
   blocked: Schema.Boolean,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type BlockedToolsCommand = typeof BlockedToolsCommand.Type;
 
-export const BlockedToolsResult = Schema.Union(
+export const BlockedToolsResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("blocked-tools-settings"),
     settings: BlockedToolsSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("blocked-tools-refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "malformed",
       "stale-version",
       "unauthorized",
       "no-change",
       "unsupported",
-    ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    ]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type BlockedToolsResult = typeof BlockedToolsResult.Type;
 
 export const BLOCKED_TOOLS_AGGREGATE_TYPE = "blocked-tools";
@@ -78,9 +77,18 @@ export const ProviderToolBlockedSet = Schema.Struct({
   provider: BlockableToolProvider,
   tool: BlockedToolName,
   blocked: Schema.Boolean,
-}).annotations(strict);
+});
 export type ProviderToolBlockedSet = typeof ProviderToolBlockedSet.Type;
 
-export const decodeBlockedToolsSettings = Schema.decodeUnknownSync(BlockedToolsSettings);
-export const decodeBlockedToolsCommand = Schema.decodeUnknownSync(BlockedToolsCommand);
-export const decodeBlockedToolsResult = Schema.decodeUnknownSync(BlockedToolsResult);
+export const decodeBlockedToolsSettings = Schema.decodeUnknownSync(
+  BlockedToolsSettings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBlockedToolsCommand = Schema.decodeUnknownSync(
+  BlockedToolsCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBlockedToolsResult = Schema.decodeUnknownSync(
+  BlockedToolsResult,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { decodeHostDisplayRequest, decodeHostDisplayScope } from "@octant/contracts";
-import { ParseResult } from "effect";
+import { Schema } from "effect";
 import {
   decodeComputerControlCommand,
   decodeComputerHostTypeSecretRequest,
@@ -93,7 +93,7 @@ export function computerUseBrokerHandler(service: ComputerUseBrokerService, toke
         );
       return failure(400);
     } catch (error) {
-      return failure(ParseResult.isParseError(error) || error instanceof SyntaxError ? 400 : 503);
+      return failure(Schema.isSchemaError(error) || error instanceof SyntaxError ? 400 : 503);
     }
   };
 }

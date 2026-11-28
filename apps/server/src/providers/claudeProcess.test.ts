@@ -23,7 +23,7 @@ import type { ProviderFailure } from "@octant/contracts";
 import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compileSandboxLaunchPolicy } from "../process/sandboxLaunchPolicy";
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Either, Fiber } from "effect";
+import { Effect, Result, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
@@ -130,10 +130,10 @@ function waitForExit(process: SpawnedProcess): Promise<void> {
 }
 
 async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 function makePort(
@@ -336,7 +336,7 @@ describe("ClaudeProcessPort probes", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(port.probeVersion(target.binaryPath));
+          const fiber = yield* Effect.forkChild(port.probeVersion(target.binaryPath));
           const processIds = yield* Effect.promise(() => waitForPids(target.root, 2));
           const rootPid = processIds[0];
           if (rootPid === undefined) throw new Error("Expected the probe root process ID.");

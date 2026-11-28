@@ -9,14 +9,13 @@
  */
 
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-const TranscriptText = Schema.String.pipe(Schema.maxLength(1_000_000));
-const TranscriptJson = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(1_000_000));
-const TranscriptId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const TranscriptText = Schema.String.check(Schema.isMaxLength(1_000_000));
+const TranscriptJson = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_000_000));
+const TranscriptId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
 
 export const NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE = "native-harness-transcript";
 export const NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES = {
@@ -30,16 +29,16 @@ export const NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES = {
 export const NativeHarnessTranscriptBinding = Schema.Struct({
   instanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  projectRoot: Schema.NonEmptyTrimmedString,
+  projectRoot: NonEmptyTrimmedString,
   mode: OctantMode,
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptBinding = typeof NativeHarnessTranscriptBinding.Type;
 
 export const NativeHarnessTranscriptToolCall = Schema.Struct({
   toolCallId: TranscriptId,
   toolName: TranscriptId,
   argumentsJson: TranscriptJson,
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptToolCall = typeof NativeHarnessTranscriptToolCall.Type;
 
 /**
@@ -50,16 +49,16 @@ export const NativeHarnessTranscriptToolResult = Schema.Struct({
   toolCallId: TranscriptId,
   resultJson: TranscriptJson,
   isError: Schema.Boolean,
-  imagesOmitted: Schema.optional(Schema.Int.pipe(Schema.positive())),
-}).annotations(strict);
+  imagesOmitted: Schema.optional(PositiveInt),
+});
 export type NativeHarnessTranscriptToolResult = typeof NativeHarnessTranscriptToolResult.Type;
 
 export const NativeHarnessTranscriptMessage = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+  role: Schema.Literals(["user", "assistant"]),
   text: TranscriptText,
   toolCalls: Schema.optional(Schema.Array(NativeHarnessTranscriptToolCall)),
   toolResults: Schema.optional(Schema.Array(NativeHarnessTranscriptToolResult)),
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptMessage = typeof NativeHarnessTranscriptMessage.Type;
 
 /**
@@ -69,28 +68,28 @@ export type NativeHarnessTranscriptMessage = typeof NativeHarnessTranscriptMessa
  */
 export const NativeHarnessTranscriptForkOrigin = Schema.Struct({
   sessionId: ProviderSessionId,
-  turns: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  turns: PositiveInt,
+});
 export type NativeHarnessTranscriptForkOrigin = typeof NativeHarnessTranscriptForkOrigin.Type;
 
 export const NativeHarnessTranscriptOpened = Schema.Struct({
   sessionId: ProviderSessionId,
   binding: NativeHarnessTranscriptBinding,
   forkedFrom: Schema.optional(NativeHarnessTranscriptForkOrigin),
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptOpened = typeof NativeHarnessTranscriptOpened.Type;
 
 export const NativeHarnessTranscriptMessageAppended = Schema.Struct({
   sessionId: ProviderSessionId,
   message: NativeHarnessTranscriptMessage,
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptMessageAppended =
   typeof NativeHarnessTranscriptMessageAppended.Type;
 
 export const NativeHarnessTranscriptToolSettled = Schema.Struct({
   sessionId: ProviderSessionId,
   result: NativeHarnessTranscriptToolResult,
-}).annotations(strict);
+});
 export type NativeHarnessTranscriptToolSettled = typeof NativeHarnessTranscriptToolSettled.Type;
 
 /**
@@ -105,23 +104,25 @@ export type NativeHarnessTranscriptToolSettled = typeof NativeHarnessTranscriptT
  */
 export const NativeHarnessTranscriptCompacted = Schema.Struct({
   sessionId: ProviderSessionId,
-  summary: TranscriptText.pipe(Schema.minLength(1)),
-  turns: Schema.Int.pipe(Schema.positive()),
-  afterTurns: Schema.Int.pipe(Schema.positive()),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((compacted) => compacted.turns <= compacted.afterTurns));
+  summary: TranscriptText.check(Schema.isMinLength(1)),
+  turns: PositiveInt,
+  afterTurns: PositiveInt,
+}).check(Schema.makeFilter((compacted) => compacted.turns <= compacted.afterTurns));
 export type NativeHarnessTranscriptCompacted = typeof NativeHarnessTranscriptCompacted.Type;
 
 export const decodeNativeHarnessTranscriptOpened = Schema.decodeUnknownSync(
   NativeHarnessTranscriptOpened,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessTranscriptMessageAppended = Schema.decodeUnknownSync(
   NativeHarnessTranscriptMessageAppended,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessTranscriptToolSettled = Schema.decodeUnknownSync(
   NativeHarnessTranscriptToolSettled,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessTranscriptCompacted = Schema.decodeUnknownSync(
   NativeHarnessTranscriptCompacted,
+  STRICT_DECODE_OPTIONS,
 );

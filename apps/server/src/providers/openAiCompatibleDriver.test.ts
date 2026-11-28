@@ -8,7 +8,7 @@ import {
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
-import { Effect, Either, Fiber, Stream } from "effect";
+import { Effect, Result, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import type { ModelContextWindowMemory } from "./modelContextWindowFacts";
@@ -123,19 +123,19 @@ describe("makeOpenAiCompatibleDriver", () => {
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
 
-          const firstEvents = yield* Effect.fork(
+          const firstEvents = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(firstEvents)).at(-1)?.kind).toBe("completed");
 
-          const failedEvents = yield* Effect.fork(
+          const failedEvents = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "second", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(failedEvents)).at(-1)?.kind).toBe("failed");
 
-          const thirdEvents = yield* Effect.fork(
+          const thirdEvents = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "third", attachments: [], tools: [] });
@@ -179,7 +179,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
@@ -187,7 +187,7 @@ describe("makeOpenAiCompatibleDriver", () => {
               ),
             ),
           );
-          const second = yield* Effect.fork(
+          const second = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
@@ -225,17 +225,17 @@ describe("makeOpenAiCompatibleDriver", () => {
             executionPolicy: "approval-gated",
           });
           const firstSubscribers = [
-            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, sessionId)),
-            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, sessionId)),
+            yield* Effect.forkChild(firstSessionEvent(yield* connection.subscribe, sessionId)),
+            yield* Effect.forkChild(firstSessionEvent(yield* connection.subscribe, sessionId)),
           ];
           const secondSubscribers = [
-            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
-            yield* Effect.fork(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
+            yield* Effect.forkChild(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
+            yield* Effect.forkChild(firstSessionEvent(yield* connection.subscribe, otherSessionId)),
           ];
-          const firstTerminal = yield* Effect.fork(
+          const firstTerminal = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
-          const secondTerminal = yield* Effect.fork(
+          const secondTerminal = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, otherSessionId),
           );
           yield* Effect.all([
@@ -260,10 +260,10 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* Fiber.join(firstTerminal);
           yield* Fiber.join(secondTerminal);
 
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
-          const second = yield* Effect.fork(
+          const second = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, otherSessionId),
           );
           yield* Effect.all([
@@ -318,7 +318,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             }),
           );
           expect(String(rejected)).toContain("invalid-configuration");
-          const accepted = yield* Effect.fork(
+          const accepted = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "small", attachments: [], tools: [] });
@@ -333,9 +333,11 @@ describe("makeOpenAiCompatibleDriver", () => {
 
   it("enforces one in-flight turn, orders abort before interrupted, and clears scope state", async () => {
     let requestSignal: AbortSignal | undefined;
+    const requestStarted = Promise.withResolvers<void>();
     const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       if (String(url).endsWith("/models")) return modelsResponse(url);
       requestSignal = init?.signal ?? undefined;
+      requestStarted.resolve();
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
@@ -357,10 +359,11 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+          yield* Effect.promise(() => requestStarted.promise);
           const duplicate = yield* Effect.exit(
             connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
           );
@@ -414,7 +417,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({
@@ -427,7 +430,7 @@ describe("makeOpenAiCompatibleDriver", () => {
           yield* connection.stop(sessionId);
 
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const second = yield* Effect.fork(
+          const second = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "fresh prompt", attachments: [], tools: [] });
@@ -436,7 +439,7 @@ describe("makeOpenAiCompatibleDriver", () => {
 
           hanging = true;
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const interrupted = yield* Effect.fork(
+          const interrupted = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({
@@ -492,7 +495,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
@@ -580,7 +583,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "limits", attachments: [], tools: [] });
@@ -633,7 +636,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "cache", attachments: [], tools: [] });
@@ -671,7 +674,7 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "hi", attachments: [], tools: [] });
@@ -748,12 +751,12 @@ describe("makeOpenAiCompatibleDriver", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "hi", attachments: [], tools: [] });
           expect(Array.from(yield* Fiber.join(first)).at(-1)?.kind).toBe("completed");
-          const second = yield* Effect.fork(
+          const second = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({
@@ -947,7 +950,7 @@ function runTurns(
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         const outcomes: Array<string | undefined> = [];
         for (const prompt of prompts) {
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
@@ -989,7 +992,7 @@ describe("OpenCode Go request headers", () => {
           const start = { modelId, executionPolicy: "approval-gated" } as const;
           const send = (id: typeof sessionId, prompt: string) =>
             Effect.gen(function* () {
-              const done = yield* Effect.fork(
+              const done = yield* Effect.forkChild(
                 collectSessionEvents(yield* connection.subscribe, id),
               );
               yield* connection.send({ sessionId: id, prompt, attachments: [], tools: [] });
@@ -1156,10 +1159,10 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
       return answer;
     });
     const either = await Effect.runPromise(
-      Effect.either(Effect.scoped(planDriver({ fetch, manualModelIds }).probe({ instanceId }))),
+      Effect.result(Effect.scoped(planDriver({ fetch, manualModelIds }).probe({ instanceId }))),
     );
-    const decoded = Either.isRight(either)
-      ? decodeProviderProbeResult(JSON.parse(JSON.stringify(either.right)))
+    const decoded = Result.isSuccess(either)
+      ? decodeProviderProbeResult(JSON.parse(JSON.stringify(either.success)))
       : undefined;
     return { either, decoded, calls };
   }
@@ -1195,7 +1198,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     // Before the plan profile read this shape, the probe failed with a
     // protocol category and the renderer said "Provider returned an invalid
     // response."
-    expect(Either.isRight(either)).toBe(true);
+    expect(Result.isSuccess(either)).toBe(true);
     expect(decoded).toMatchObject({
       readiness: "ready",
       credentialStatus: "stored",
@@ -1277,7 +1280,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     const { either, decoded } = await checkPlanConnection(
       Response.json({ models: [{ label: "secret-label", tier: "secret-tier" }, { label: "x" }] }),
     );
-    expect(Either.isRight(either)).toBe(true);
+    expect(Result.isSuccess(either)).toBe(true);
     expect(decoded).toMatchObject({
       readiness: "degraded",
       credentialStatus: "stored",
@@ -1394,9 +1397,9 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
         { status: 401 },
       ),
     );
-    expect(Either.isLeft(rejected.either)).toBe(true);
-    if (Either.isRight(rejected.either)) throw new Error("expected a typed failure");
-    expect(rejected.either.left.category).toBe("unauthenticated");
+    expect(Result.isFailure(rejected.either)).toBe(true);
+    if (Result.isSuccess(rejected.either)) throw new Error("expected a typed failure");
+    expect(rejected.either.failure.category).toBe("unauthenticated");
 
     const limited = await checkPlanConnection(
       Response.json(
@@ -1404,10 +1407,10 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
         { status: 429 },
       ),
     );
-    expect(Either.isLeft(limited.either)).toBe(true);
-    if (Either.isRight(limited.either)) throw new Error("expected a typed failure");
-    expect(limited.either.left.category).toBe("rate-limited");
-    expect(limited.either.left.message).toContain("https://chatgpt.com/settings/usage");
+    expect(Result.isFailure(limited.either)).toBe(true);
+    if (Result.isSuccess(limited.either)) throw new Error("expected a typed failure");
+    expect(limited.either.failure.category).toBe("rate-limited");
+    expect(limited.either.failure.message).toContain("https://chatgpt.com/settings/usage");
   });
 
   it("runs a Responses turn on a manual model after the plan could not list models", async () => {
@@ -1431,7 +1434,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
@@ -1460,7 +1463,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
@@ -1494,7 +1497,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionEvents(yield* connection.subscribe, sessionId),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
@@ -1522,12 +1525,12 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     }
 
     const either = await Effect.runPromise(
-      Effect.either(Effect.scoped(driver.verifyToolCapability({ instanceId, modelId }))),
+      Effect.result(Effect.scoped(driver.verifyToolCapability({ instanceId, modelId }))),
     );
-    expect(Either.isLeft(either)).toBe(true);
-    if (Either.isRight(either)) throw new Error("expected a typed provider failure");
-    expect(either.left.category).toBe("unsupported");
-    expect(either.left.message).toContain("Responses API");
+    expect(Result.isFailure(either)).toBe(true);
+    if (Result.isSuccess(either)) throw new Error("expected a typed provider failure");
+    expect(either.failure.category).toBe("unsupported");
+    expect(either.failure.message).toContain("Responses API");
     expect(fetch).not.toHaveBeenCalled();
   });
 });

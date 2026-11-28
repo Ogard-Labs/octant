@@ -1113,7 +1113,7 @@ describe("ProviderService", () => {
       probe: async () => {
         const exit = await Effect.runPromiseExit(Effect.scoped(proxy.probe({ instanceId })));
         if (Exit.isSuccess(exit)) return exit.value;
-        const refused = Cause.failureOption(exit.cause);
+        const refused = Cause.findErrorOption(exit.cause);
         throw Option.isSome(refused) ? refused.value : Cause.squash(exit.cause);
       },
     });

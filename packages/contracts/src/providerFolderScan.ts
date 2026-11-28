@@ -1,9 +1,10 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Opaque handle for one discovered provider folder during first run.
@@ -19,9 +20,10 @@ export type DiscoveredProviderFolderId = typeof DiscoveredProviderFolderId.Type;
  * discovery adapter (for example `"claude"`, `"codex"`, or a plugin's own
  * slug). Never carries paths or whitespace.
  */
-export const DiscoveredFolderProvider = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(/^[a-z0-9][a-z0-9._-]*$/),
+export const DiscoveredFolderProvider = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/),
 );
 export type DiscoveredFolderProvider = typeof DiscoveredFolderProvider.Type;
 
@@ -29,9 +31,10 @@ export type DiscoveredFolderProvider = typeof DiscoveredFolderProvider.Type;
  * A single safe directory name for display, never an absolute or multi-segment
  * host path.
  */
-export const SafeDiscoveredFolderName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter(
+export const SafeDiscoveredFolderName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.makeFilter(
     (value) =>
       value !== "." &&
       value !== ".." &&
@@ -46,10 +49,11 @@ export type SafeDiscoveredFolderName = typeof SafeDiscoveredFolderName.Type;
  * Credential-free `owner/name` repository identifier extracted from a Git
  * remote. Never carries a URL, host, scheme, userinfo, or local path.
  */
-export const DiscoveredRepositorySlug = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(200),
-  Schema.pattern(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/),
-  Schema.filter((value) => {
+export const DiscoveredRepositorySlug = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200),
+  Schema.isPattern(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/),
+  Schema.makeFilter((value) => {
     const [owner, name] = value.split("/");
     return (
       owner !== undefined &&
@@ -68,40 +72,40 @@ export type DiscoveredRepositorySlug = typeof DiscoveredRepositorySlug.Type;
 export const DiscoveredProviderFolder = Schema.Struct({
   id: DiscoveredProviderFolderId,
   folderName: SafeDiscoveredFolderName,
-  providers: Schema.NonEmptyArray(DiscoveredFolderProvider).pipe(
-    Schema.filter((providers) => new Set(providers).size === providers.length),
+  providers: Schema.NonEmptyArray(DiscoveredFolderProvider).check(
+    Schema.makeFilter((providers) => new Set(providers).size === providers.length),
   ),
-  sessionCount: Schema.Int.pipe(Schema.positive()),
+  sessionCount: PositiveInt,
   lastActivityAt: UtcTimestamp,
   isGitRepository: Schema.Boolean,
   alreadyImported: Schema.Boolean,
-}).annotations(strict);
+});
 export type DiscoveredProviderFolder = typeof DiscoveredProviderFolder.Type;
 
 export const DiscoveredProviderFolderGroup = Schema.Struct({
   repository: Schema.optional(DiscoveredRepositorySlug),
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200)),
-  providers: Schema.NonEmptyArray(DiscoveredFolderProvider).pipe(
-    Schema.filter((providers) => new Set(providers).size === providers.length),
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  providers: Schema.NonEmptyArray(DiscoveredFolderProvider).check(
+    Schema.makeFilter((providers) => new Set(providers).size === providers.length),
   ),
-  sessionCount: Schema.Int.pipe(Schema.positive()),
+  sessionCount: PositiveInt,
   lastActivityAt: UtcTimestamp,
   folders: Schema.NonEmptyArray(DiscoveredProviderFolder),
-}).annotations(strict);
+});
 export type DiscoveredProviderFolderGroup = typeof DiscoveredProviderFolderGroup.Type;
 
-export const ProviderFolderScanStopReason = Schema.Literal(
+export const ProviderFolderScanStopReason = Schema.Literals([
   "file-limit",
   "entry-limit",
   "time-limit",
-);
+]);
 export type ProviderFolderScanStopReason = typeof ProviderFolderScanStopReason.Type;
 
-export const ProviderFolderScanResult = Schema.Union(
+export const ProviderFolderScanResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("hidden"),
     reason: Schema.Literal("strict"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("ready"),
     groups: Schema.Array(DiscoveredProviderFolderGroup),
@@ -109,64 +113,70 @@ export const ProviderFolderScanResult = Schema.Union(
     stoppedEarly: Schema.Boolean,
     stoppedEarlyReason: Schema.optional(ProviderFolderScanStopReason),
     scannedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ProviderFolderScanResult = typeof ProviderFolderScanResult.Type;
 
 export const MAX_IMPORTED_PROVIDER_FOLDERS = 64;
 
 export const ImportProviderFoldersRequest = Schema.Struct({
-  folderIds: Schema.NonEmptyArray(DiscoveredProviderFolderId).pipe(
-    Schema.filter(
+  folderIds: Schema.NonEmptyArray(DiscoveredProviderFolderId).check(
+    Schema.makeFilter(
       (ids) =>
         ids.length <= MAX_IMPORTED_PROVIDER_FOLDERS && new Set(ids.map(String)).size === ids.length,
     ),
   ),
-}).annotations(strict);
+});
 export type ImportProviderFoldersRequest = typeof ImportProviderFoldersRequest.Type;
 
-export const ImportedProviderFolderOutcome = Schema.Union(
+export const ImportedProviderFolderOutcome = Schema.Union([
   Schema.Struct({
     folderId: DiscoveredProviderFolderId,
     status: Schema.Literal("created"),
     projectId: ProjectId,
-    name: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    name: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     folderId: DiscoveredProviderFolderId,
     status: Schema.Literal("already-imported"),
     projectId: ProjectId,
-    name: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    name: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     folderId: DiscoveredProviderFolderId,
     status: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unavailable", "excluded", "requires-git", "strict"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unavailable", "excluded", "requires-git", "strict"]),
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type ImportedProviderFolderOutcome = typeof ImportedProviderFolderOutcome.Type;
 
-export const ImportProviderFoldersResult = Schema.Union(
+export const ImportProviderFoldersResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: Schema.Literal("strict"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     status: Schema.Literal("completed"),
     results: Schema.Array(ImportedProviderFolderOutcome),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ImportProviderFoldersResult = typeof ImportProviderFoldersResult.Type;
 
 export const decodeDiscoveredProviderFolderId = Schema.decodeUnknownSync(
   DiscoveredProviderFolderId,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeProviderFolderScanResult = Schema.decodeUnknownSync(ProviderFolderScanResult);
+export const decodeProviderFolderScanResult = Schema.decodeUnknownSync(
+  ProviderFolderScanResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeImportProviderFoldersRequest = Schema.decodeUnknownSync(
   ImportProviderFoldersRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImportProviderFoldersResult = Schema.decodeUnknownSync(
   ImportProviderFoldersResult,
+  STRICT_DECODE_OPTIONS,
 );

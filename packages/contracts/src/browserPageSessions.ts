@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   BrowserAccountProfileId,
   BrowserContextId,
@@ -8,8 +9,6 @@ import {
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { WindowId } from "./shell";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * A Browser session is the person's open page in a thread's Browser pane. The
@@ -27,7 +26,12 @@ export const BROWSER_PAGE_OPENED = "browser.page-opened@1";
 export const BROWSER_PAGE_CLOSED = "browser.page-closed@1";
 
 /** The kind of profile the page lived in; a Private page is recorded as this and nothing more. */
-export const BrowserPageProfileKind = Schema.Literal("private", "project", "personal", "account");
+export const BrowserPageProfileKind = Schema.Literals([
+  "private",
+  "project",
+  "personal",
+  "account",
+]);
 export type BrowserPageProfileKind = typeof BrowserPageProfileKind.Type;
 
 export const BrowserPageOpened = Schema.Struct({
@@ -35,29 +39,30 @@ export const BrowserPageOpened = Schema.Struct({
   pageId: BrowserContextId,
   threadId: BrowserThreadId,
   windowId: WindowId,
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   profileKind: BrowserPageProfileKind,
   /** The Project of the thread: what a Project erase takes, and what a Project profile means. */
   projectId: ProjectId,
   /** Present only for the named account profile the page lived in. */
   accountId: Schema.optional(BrowserAccountProfileId),
   openedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (opened) => (opened.profileKind === "account") === (opened.accountId !== undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (opened) => (opened.profileKind === "account") === (opened.accountId !== undefined),
+  ),
+);
 export type BrowserPageOpened = typeof BrowserPageOpened.Type;
-export const decodeBrowserPageOpened = Schema.decodeUnknownSync(BrowserPageOpened);
+export const decodeBrowserPageOpened = Schema.decodeUnknownSync(
+  BrowserPageOpened,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Why a page's record ended. Every reason but the last three is the page
  * ending by an ordinary act; `reopened`, `dismissed`, and `superseded` end the
  * offer that a restart left, never a live page.
  */
-export const BrowserPageCloseReason = Schema.Literal(
+export const BrowserPageCloseReason = Schema.Literals([
   "closed-by-person",
   "closed-by-agent",
   "expired",
@@ -68,7 +73,7 @@ export const BrowserPageCloseReason = Schema.Literal(
   "reopened",
   "dismissed",
   "superseded",
-);
+]);
 export type BrowserPageCloseReason = typeof BrowserPageCloseReason.Type;
 
 export const BrowserPageClosed = Schema.Struct({
@@ -77,9 +82,12 @@ export const BrowserPageClosed = Schema.Struct({
   threadId: BrowserThreadId,
   reason: BrowserPageCloseReason,
   closedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BrowserPageClosed = typeof BrowserPageClosed.Type;
-export const decodeBrowserPageClosed = Schema.decodeUnknownSync(BrowserPageClosed);
+export const decodeBrowserPageClosed = Schema.decodeUnknownSync(
+  BrowserPageClosed,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The offer on the thread's Browser read. `offered` carries the profile the
@@ -90,53 +98,61 @@ export const decodeBrowserPageClosed = Schema.decodeUnknownSync(BrowserPageClose
  */
 export const BrowserPageReopenOffer = Schema.Struct({
   pageId: BrowserContextId,
-  status: Schema.Literal("offered", "profile-gone", "profile-unchecked"),
+  status: Schema.Literals(["offered", "profile-gone", "profile-unchecked"]),
   profile: BrowserProfile,
-}).annotations(strict);
+});
 export type BrowserPageReopenOffer = typeof BrowserPageReopenOffer.Type;
 
 export const BrowserPageOfferCommand = Schema.Struct({
   threadId: BrowserThreadId,
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   pageId: BrowserContextId,
-}).annotations(strict);
+});
 export type BrowserPageOfferCommand = typeof BrowserPageOfferCommand.Type;
-export const decodeBrowserPageOfferCommand = Schema.decodeUnknownSync(BrowserPageOfferCommand);
+export const decodeBrowserPageOfferCommand = Schema.decodeUnknownSync(
+  BrowserPageOfferCommand,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const BrowserPageOfferRefusalReason = Schema.Literal(
-  /** Another window holds it, it was reopened or dismissed, or the restart did not take that page. */
+export const BrowserPageOfferRefusalReason = Schema.Literals([
   "not-offered",
   "profile-gone",
   "not-allowed",
-);
+]);
 export type BrowserPageOfferRefusalReason = typeof BrowserPageOfferRefusalReason.Type;
 
-export const BrowserPageClaimResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("claimed"), profile: BrowserProfile }).annotations(strict),
+export const BrowserPageClaimResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("claimed"), profile: BrowserProfile }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: BrowserPageOfferRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type BrowserPageClaimResult = typeof BrowserPageClaimResult.Type;
-export const decodeBrowserPageClaimResult = Schema.decodeUnknownSync(BrowserPageClaimResult);
+export const decodeBrowserPageClaimResult = Schema.decodeUnknownSync(
+  BrowserPageClaimResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Gives a reservation back: the open it was for failed, was declined, or was abandoned. */
-export const BrowserPageReleaseResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("released") }).annotations(strict),
+export const BrowserPageReleaseResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("released") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: BrowserPageOfferRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type BrowserPageReleaseResult = typeof BrowserPageReleaseResult.Type;
 
-export const BrowserPageDismissResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("dismissed") }).annotations(strict),
+export const BrowserPageDismissResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("dismissed") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: BrowserPageOfferRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type BrowserPageDismissResult = typeof BrowserPageDismissResult.Type;
-export const decodeBrowserPageDismissResult = Schema.decodeUnknownSync(BrowserPageDismissResult);
+export const decodeBrowserPageDismissResult = Schema.decodeUnknownSync(
+  BrowserPageDismissResult,
+  STRICT_DECODE_OPTIONS,
+);

@@ -17,7 +17,7 @@ export const MAX_DESIGN_SYSTEMS_PER_PROJECT = 64;
 /** How deep below a folder's root a `DESIGN.md` is looked for. */
 export const MAX_DESIGN_SYSTEM_SEARCH_DEPTH = 4;
 
-export const DesignSystemTokenGroup = Schema.Literal("color", "font", "radius", "space");
+export const DesignSystemTokenGroup = Schema.Literals(["color", "font", "radius", "space"]);
 export type DesignSystemTokenGroup = typeof DesignSystemTokenGroup.Type;
 
 /**
@@ -25,7 +25,7 @@ export type DesignSystemTokenGroup = typeof DesignSystemTokenGroup.Type;
  * `carried` as written, `adjusted` (a font stack with the faces Canvas cannot
  * draw left out), or `refused` with the reason.
  */
-export const DesignSystemTokenStatus = Schema.Literal("carried", "adjusted", "refused");
+export const DesignSystemTokenStatus = Schema.Literals(["carried", "adjusted", "refused"]);
 export type DesignSystemTokenStatus = typeof DesignSystemTokenStatus.Type;
 
 export const DesignSystemToken = Schema.Struct({
@@ -43,7 +43,7 @@ export const DesignSystemToken = Schema.Struct({
 export type DesignSystemToken = typeof DesignSystemToken.Type;
 
 /** `absent`: no front matter; `invalid`: front matter that is not a mapping. */
-export const DesignSystemFrontMatterState = Schema.Literal("absent", "parsed", "invalid");
+export const DesignSystemFrontMatterState = Schema.Literals(["absent", "parsed", "invalid"]);
 export type DesignSystemFrontMatterState = typeof DesignSystemFrontMatterState.Type;
 
 export const DesignSystemReading = Schema.Struct({
@@ -63,8 +63,8 @@ export const DesignSystemReading = Schema.Struct({
 export type DesignSystemReading = typeof DesignSystemReading.Type;
 
 /** A path relative to its folder, with `/` separators and no `.` or `..` segment. */
-export const DesignSystemRelativePath = Schema.String.pipe(
-  Schema.filter(
+export const DesignSystemRelativePath = Schema.String.check(
+  Schema.makeFilter(
     (path) =>
       path.length > 0 &&
       path.length <= 1024 &&
@@ -73,7 +73,7 @@ export const DesignSystemRelativePath = Schema.String.pipe(
       !path.includes("\u0000") &&
       path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..") &&
       path.split("/").at(-1) === DESIGN_SYSTEM_FILE_NAME,
-    { message: () => `A design system path ends in ${DESIGN_SYSTEM_FILE_NAME} inside its folder.` },
+    { message: `A design system path ends in ${DESIGN_SYSTEM_FILE_NAME} inside its folder.` },
   ),
 );
 
@@ -90,10 +90,10 @@ export type DesignSystemLocation = typeof DesignSystemLocation.Type;
  * Absent on the Project record means the automatic rule: the top-level file,
  * else the only one.
  */
-export const DesignSystemChoice = Schema.Union(
+export const DesignSystemChoice = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("file"), ...DesignSystemLocation.fields }),
   Schema.Struct({ kind: Schema.Literal("none") }),
-);
+]);
 export type DesignSystemChoice = typeof DesignSystemChoice.Type;
 
 export const DesignSystemListing = Schema.Struct({
@@ -128,17 +128,17 @@ export type DesignSystemDocument = typeof DesignSystemDocument.Type;
 export const DesignSystemWriteRequest = Schema.Struct({
   projectId: Schema.String,
   ...DesignSystemLocation.fields,
-  text: Schema.String.pipe(Schema.maxLength(MAX_DESIGN_SYSTEM_FILE_BYTES)),
+  text: Schema.String.check(Schema.isMaxLength(MAX_DESIGN_SYSTEM_FILE_BYTES)),
   /** Absent creates the file and refuses if it exists; present replaces exactly that revision. */
   baseRevision: Schema.optional(Schema.String),
 });
 export type DesignSystemWriteRequest = typeof DesignSystemWriteRequest.Type;
 
-export const DesignSystemWriteResult = Schema.Union(
+export const DesignSystemWriteResult = Schema.Union([
   Schema.Struct({ status: Schema.Literal("saved"), document: DesignSystemDocument }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "exists",
       "stale",
       "missing",
@@ -146,9 +146,9 @@ export const DesignSystemWriteResult = Schema.Union(
       "not-a-file",
       "folder-unavailable",
       "unwritable",
-    ),
+    ]),
   }),
-);
+]);
 export type DesignSystemWriteResult = typeof DesignSystemWriteResult.Type;
 
 export const decodeDesignSystemLocation = Schema.decodeUnknownSync(DesignSystemLocation);

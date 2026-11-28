@@ -467,17 +467,17 @@ describe("outside provider driver signature format", () => {
       publicKey: `${"A".repeat(43)}=`,
       signature: `${"A".repeat(86)}==`,
     };
-    expect(decodeOutsideProviderDriverSignatureDocument(document)._tag).toBe("Right");
+    expect(decodeOutsideProviderDriverSignatureDocument(document)._tag).toBe("Success");
     for (const path of ["a\nfile x", "../driver.mjs", "/driver.mjs", "lib//x.mjs", "a\\b"]) {
       expect(
         decodeOutsideProviderDriverSignatureDocument({
           ...document,
           files: [{ path, sha256: "a".repeat(64) }],
         })._tag,
-      ).toBe("Left");
+      ).toBe("Failure");
     }
     expect(
       decodeOutsideProviderDriverSignatureDocument({ ...document, privateKey: "x" })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
   });
 });

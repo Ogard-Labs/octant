@@ -3,7 +3,7 @@ import {
   CloudIamSourceIdentity,
   type ProviderFailure,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 
 /**
  * Host-driven cloud-IAM signing for a direct HTTP endpoint that authorizes
@@ -326,8 +326,8 @@ function isSignature(headers: unknown): headers is Readonly<Record<string, strin
   );
 }
 
-function isStrict<A, I>(schema: Schema.Schema<A, I>, value: unknown): value is A {
-  return Schema.is(schema)(value, { onExcessProperty: "error" });
+function isStrict<A, I>(schema: Schema.Codec<A, I>, value: unknown): value is A {
+  return Result.isSuccess(Schema.decodeUnknownResult(schema, { onExcessProperty: "error" })(value));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

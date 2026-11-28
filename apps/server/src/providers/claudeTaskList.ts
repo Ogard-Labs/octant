@@ -285,12 +285,12 @@ const StoredTask = Schema.Struct({
   description: Schema.String,
   activeForm: Schema.optional(Schema.String),
   owner: Schema.optional(Schema.String),
-  status: Schema.Literal("pending", "in_progress", "completed"),
+  status: Schema.Literals(["pending", "in_progress", "completed"]),
   blocks: Schema.Array(Schema.String),
   blockedBy: Schema.Array(Schema.String),
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
-const decodeStoredTask = Schema.decodeUnknownEither(StoredTask);
+const decodeStoredTask = Schema.decodeUnknownResult(StoredTask);
 
 /** One task file larger than this is not one Claude wrote for a checklist. */
 const MAX_STORED_TASK_BYTES = 65_536;
@@ -394,8 +394,8 @@ export async function readClaudeStoredTaskList(
       return refused("task file is not JSON");
     }
     const decoded = decodeStoredTask(parsed);
-    if (decoded._tag === "Left") return refused("task file does not match Claude's schema");
-    const task = decoded.right;
+    if (decoded._tag === "Failure") return refused("task file does not match Claude's schema");
+    const task = decoded.success;
     const stem = STORED_TASK_FILE.exec(name)?.[1];
     if (task.id !== stem || task.subject.length > MAX_SUBJECT_CHARACTERS) {
       return refused("task file does not match Claude's schema");

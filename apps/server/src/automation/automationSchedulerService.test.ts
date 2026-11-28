@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Duration, Effect, Fiber, Schema, TestClock, TestContext } from "effect";
+import { Duration, Effect, Fiber, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   deriveAutomationOccurrenceKey,
@@ -914,7 +915,7 @@ describe("automation scheduler effect loop", () => {
 
     await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(handle.scheduler.loop());
+        const fiber = yield* Effect.forkChild(handle.scheduler.loop());
         yield* TestClock.adjust(Duration.millis(1));
         expect(handle.offers).toHaveLength(0);
         // The loop armed its timer for the 13:00 due instant.
@@ -922,7 +923,7 @@ describe("automation scheduler effect loop", () => {
         yield* TestClock.adjust(Duration.seconds(61));
         expect(handle.offers).toHaveLength(1);
         yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide(TestContext.TestContext)),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
     const occurrenceKey = deriveAutomationOccurrenceKey(
       scheduledOccurrence(definition, INTERVAL_ANCHOR),
@@ -939,7 +940,7 @@ describe("automation scheduler effect loop", () => {
 
     await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(handle.scheduler.loop());
+        const fiber = yield* Effect.forkChild(handle.scheduler.loop());
         yield* TestClock.adjust(Duration.millis(1));
         expect(handle.offers).toHaveLength(0);
         // A command made the occurrence due right now; poke instead of waiting
@@ -949,7 +950,7 @@ describe("automation scheduler effect loop", () => {
         yield* TestClock.adjust(Duration.millis(1));
         expect(handle.offers).toHaveLength(1);
         yield* Fiber.interrupt(fiber);
-      }).pipe(Effect.provide(TestContext.TestContext)),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
     session.connection.close();
   });
@@ -962,14 +963,14 @@ describe("automation scheduler effect loop", () => {
 
     await Effect.runPromise(
       Effect.gen(function* () {
-        const fiber = yield* Effect.fork(handle.scheduler.loop());
+        const fiber = yield* Effect.forkChild(handle.scheduler.loop());
         yield* TestClock.adjust(Duration.millis(1));
         yield* Fiber.interrupt(fiber);
         // The due instant passes after shutdown: nothing runs.
         handle.setNow("2026-08-10T13:00:10.000Z");
         yield* TestClock.adjust(Duration.minutes(30));
         expect(handle.offers).toHaveLength(0);
-      }).pipe(Effect.provide(TestContext.TestContext)),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
     const occurrenceKey = deriveAutomationOccurrenceKey(
       scheduledOccurrence(definition, INTERVAL_ANCHOR),

@@ -103,7 +103,7 @@ const LEASE_DEADLINE_MS = 60_000;
 interface Kept {
   readonly key: string;
   readonly connection: ProviderConnection;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   /** The folder, folders, and permission setting the connection was acquired for. */
   readonly acquiredFor: string;
   /** The thread's terms (see {@link OutlivingSessionsOptions.currentTerms}) its last turn ran on. */
@@ -158,7 +158,7 @@ export class OutlivingSessions {
     /** The launch's posture; absent is Strict, which reads the let-through list. */
     posture: CredentialLaunchPosture = STRICT_POSTURE,
   ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
-    return Effect.gen(this, function* () {
+    return Effect.gen({ self: this }, function* () {
       if (this.#closed) {
         return yield* Effect.fail<ProviderFailure>({
           category: "unavailable",
@@ -191,7 +191,7 @@ export class OutlivingSessions {
       }
       if (kept === undefined) {
         const scope = yield* Scope.make();
-        const connection = yield* Scope.extend(open, scope).pipe(
+        const connection = yield* Scope.provide(open, scope).pipe(
           Effect.tapError(() => Scope.close(scope, Exit.void)),
         ) as Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope>>;
         kept = {
@@ -323,7 +323,7 @@ export class OutlivingSessions {
         withOutlive: ProviderSessionStart | ProviderSessionResume,
       ) => Effect.Effect<ProviderSessionHandle, ProviderFailure>,
     ) =>
-      Effect.gen(this, function* () {
+      Effect.gen({ self: this }, function* () {
         const startedAs = sessionShape(input);
         const live = kept.session;
         if (
@@ -475,7 +475,7 @@ export class OutlivingSessions {
     kept.work = undefined;
     session.unwatch?.();
     await Effect.runPromise(
-      kept.connection.stop(session.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+      kept.connection.stop(session.sessionId).pipe(Effect.catch(() => Effect.void)),
     );
   }
 

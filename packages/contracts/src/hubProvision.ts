@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AppReleaseRing, AppUpdateFeed } from "./appUpdates";
 import { AutomationThreadMode, AutomationTrigger } from "./automation";
 import { UtcTimestamp } from "./events";
@@ -13,8 +14,6 @@ import {
   ProviderModelId,
   AnthropicCompatibleProtocol,
 } from "./providers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Text that looks like a credential: a provider key prefix, a bearer header, or
@@ -31,10 +30,11 @@ export function looksLikeSecret(text: string): boolean {
 }
 
 const offeredText = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maxLength),
-    Schema.filter((value) => !looksLikeSecret(value), {
-      message: () => "An offer carries no secret.",
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maxLength),
+    Schema.makeFilter((value) => !looksLikeSecret(value), {
+      message: "An offer carries no secret.",
     }),
   );
 
@@ -42,9 +42,9 @@ const offeredText = (maxLength: number) =>
  * An endpoint address the offer may name: https, a host, and nothing a key
  * could ride in (no user, password, query, or fragment).
  */
-export const OfferedEndpointUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+export const OfferedEndpointUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -60,12 +60,15 @@ export const OfferedEndpointUrl = Schema.String.pipe(
         return false;
       }
     },
-    { message: () => "An offered endpoint is an https address with no credentials in it." },
+    { message: "An offered endpoint is an https address with no credentials in it." },
   ),
 );
 
 /** One offer the hub made; the spoke's proposal and the hub's record share its id. */
-export const HubOfferId = Schema.UUID.pipe(Schema.brand("HubOfferId"));
+export const HubOfferId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("HubOfferId"),
+);
 export type HubOfferId = typeof HubOfferId.Type;
 
 export const HUB_OFFER_KINDS = [
@@ -75,7 +78,7 @@ export const HUB_OFFER_KINDS = [
   "model-endpoint",
   "routine",
 ] as const;
-export const HubOfferKind = Schema.Literal(...HUB_OFFER_KINDS);
+export const HubOfferKind = Schema.Literals(HUB_OFFER_KINDS);
 export type HubOfferKind = typeof HubOfferKind.Type;
 
 /**
@@ -83,7 +86,7 @@ export type HubOfferKind = typeof HubOfferKind.Type;
  * routine and an endpoint row always ask.
  */
 export const HUB_AUTO_APPLY_KINDS = ["update-channel", "plugin", "agent-profile"] as const;
-export const HubAutoApplyKind = Schema.Literal(...HUB_AUTO_APPLY_KINDS);
+export const HubAutoApplyKind = Schema.Literals(HUB_AUTO_APPLY_KINDS);
 export type HubAutoApplyKind = typeof HubAutoApplyKind.Type;
 
 /**
@@ -95,7 +98,7 @@ export const UpdateChannelOffer = Schema.Struct({
   kind: Schema.Literal("update-channel"),
   channel: AppReleaseRing,
   mirror: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type UpdateChannelOffer = typeof UpdateChannelOffer.Type;
 
 /** A package from the catalog the spoke already lists, by reference; its bytes come the ordinary way. */
@@ -104,7 +107,7 @@ export const PluginOffer = Schema.Struct({
   catalogId: ExtensionCatalogId,
   entryId: ExtensionCatalogEntryId,
   expectedDigest: ExtensionContentDigest,
-}).annotations(strict);
+});
 export type PluginOffer = typeof PluginOffer.Type;
 
 /** A profile without an id, a scope, or a secret: the spoke makes the id and owns the scope. */
@@ -114,19 +117,19 @@ export const AgentProfileOffer = Schema.Struct({
   description: Schema.optional(offeredText(2_048)),
   // Smaller than a profile a person writes: an offer travels in one member-link body.
   instructions: Schema.optional(offeredText(16_384)),
-  approvedSkillIds: Schema.Array(offeredText(128)).pipe(Schema.maxItems(64)),
-  toolConstraints: Schema.Array(offeredText(128)).pipe(Schema.maxItems(64)),
-  modelConstraints: Schema.Array(ProviderModelId).pipe(Schema.maxItems(64)),
+  approvedSkillIds: Schema.Array(offeredText(128)).check(Schema.isMaxLength(64)),
+  toolConstraints: Schema.Array(offeredText(128)).check(Schema.isMaxLength(64)),
+  modelConstraints: Schema.Array(ProviderModelId).check(Schema.isMaxLength(64)),
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
-  compatibleModes: Schema.Array(OctantMode).pipe(Schema.maxItems(8)),
-}).annotations(strict);
+  compatibleModes: Schema.Array(OctantMode).check(Schema.isMaxLength(8)),
+});
 export type AgentProfileOffer = typeof AgentProfileOffer.Type;
 
-const manualModelIds = Schema.Array(ProviderModelId).pipe(
-  Schema.maxItems(64),
-  Schema.filter((ids) => new Set(ids).size === ids.length, {
-    message: () => "Model ids do not repeat.",
+const manualModelIds = Schema.Array(ProviderModelId).check(
+  Schema.isMaxLength(64),
+  Schema.makeFilter((ids) => new Set(ids).size === ids.length, {
+    message: "Model ids do not repeat.",
   }),
 );
 
@@ -135,26 +138,26 @@ const manualModelIds = Schema.Array(ProviderModelId).pipe(
  * there is nowhere for a secret to ride; `authentication: "key"` says the row
  * will want a key the person adds on the spoke, and `"none"` that it takes none.
  */
-export const ModelEndpointOffer = Schema.Union(
+export const ModelEndpointOffer = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("model-endpoint"),
     family: Schema.Literal("openai-compatible"),
     displayName: offeredText(255),
     baseUrl: OfferedEndpointUrl,
     protocol: OpenAiCompatibleProtocol,
-    authentication: Schema.Literal("key", "none"),
+    authentication: Schema.Literals(["key", "none"]),
     manualModelIds,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("model-endpoint"),
     family: Schema.Literal("anthropic-compatible"),
     displayName: offeredText(255),
     baseUrl: OfferedEndpointUrl,
     protocol: AnthropicCompatibleProtocol,
-    authentication: Schema.Literal("key", "none"),
+    authentication: Schema.Literals(["key", "none"]),
     manualModelIds,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ModelEndpointOffer = typeof ModelEndpointOffer.Type;
 
 /**
@@ -168,37 +171,43 @@ export const RoutineOffer = Schema.Struct({
   taskPrompt: offeredText(16_384),
   mode: AutomationThreadMode,
   trigger: AutomationTrigger,
-}).annotations(strict);
+});
 export type RoutineOffer = typeof RoutineOffer.Type;
 
-export const HubOfferBody = Schema.Union(
+export const HubOfferBody = Schema.Union([
   UpdateChannelOffer,
   PluginOffer,
   AgentProfileOffer,
   ModelEndpointOffer,
   RoutineOffer,
-);
+]);
 export type HubOfferBody = typeof HubOfferBody.Type;
-export const decodeHubOfferBody = Schema.decodeUnknownSync(HubOfferBody);
+export const decodeHubOfferBody = Schema.decodeUnknownSync(HubOfferBody, STRICT_DECODE_OPTIONS);
 
 /** What the hub sends a spoke: the offer, with the id both sides keep it under. */
 export const HubOfferDelivery = Schema.Struct({
   offerId: HubOfferId,
   offer: HubOfferBody,
-}).annotations(strict);
+});
 export type HubOfferDelivery = typeof HubOfferDelivery.Type;
-export const decodeHubOfferDelivery = Schema.decodeUnknownSync(HubOfferDelivery);
+export const decodeHubOfferDelivery = Schema.decodeUnknownSync(
+  HubOfferDelivery,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** What the spoke asks the hub for when an update-channel offer says it has a mirror. */
-export const HubMirrorRequest = Schema.Struct({ offerId: HubOfferId }).annotations(strict);
+export const HubMirrorRequest = Schema.Struct({ offerId: HubOfferId });
 export type HubMirrorRequest = typeof HubMirrorRequest.Type;
-export const decodeHubMirrorRequest = Schema.decodeUnknownSync(HubMirrorRequest);
+export const decodeHubMirrorRequest = Schema.decodeUnknownSync(
+  HubMirrorRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Why an offer, a proposal, or an apply came to nothing. The journal keeps this
  * word, never an offer's text.
  */
-export const HubProvisionReason = Schema.Literal(
+export const HubProvisionReason = Schema.Literals([
   "provision-service-off",
   "hub-role-off",
   "provision-not-granted",
@@ -216,53 +225,64 @@ export const HubProvisionReason = Schema.Literal(
   "mirror-unverifiable",
   "apply-failed",
   "answer-refused",
-);
+]);
 export type HubProvisionReason = typeof HubProvisionReason.Type;
 
-export const HubProvisionMode = Schema.Literal("manual", "auto");
+export const HubProvisionMode = Schema.Literals(["manual", "auto"]);
 export type HubProvisionMode = typeof HubProvisionMode.Type;
 
 /** How the hub's last attempt to hand one spoke one offer ended. */
-export const HubOfferDeliveryResult = Schema.Literal("proposed", "refused", "unreachable");
+export const HubOfferDeliveryResult = Schema.Literals(["proposed", "refused", "unreachable"]);
 export type HubOfferDeliveryResult = typeof HubOfferDeliveryResult.Type;
 
 /** The person on the hub turning the offer switch on or off. */
-export const HubProvisionSwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
-  strict,
-);
+export const HubProvisionSwitchRequest = Schema.Struct({ enabled: Schema.Boolean });
 export type HubProvisionSwitchRequest = typeof HubProvisionSwitchRequest.Type;
-export const decodeHubProvisionSwitchRequest = Schema.decodeUnknownSync(HubProvisionSwitchRequest);
+export const decodeHubProvisionSwitchRequest = Schema.decodeUnknownSync(
+  HubProvisionSwitchRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The person on the hub making an offer; `memberIds` names the spokes, and absent means every spoke. */
 export const HubOfferRequest = Schema.Struct({
   offer: HubOfferBody,
   /** The signed update feed document to mirror; only for an update-channel offer that says `mirror`. */
   mirrorFeed: Schema.optional(AppUpdateFeed),
-  memberIds: Schema.optional(Schema.Array(HubMemberId).pipe(Schema.maxItems(256))),
-}).annotations(strict);
+  memberIds: Schema.optional(Schema.Array(HubMemberId).check(Schema.isMaxLength(256))),
+});
 export type HubOfferRequest = typeof HubOfferRequest.Type;
-export const decodeHubOfferRequest = Schema.decodeUnknownSync(HubOfferRequest);
+export const decodeHubOfferRequest = Schema.decodeUnknownSync(
+  HubOfferRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const HubOfferWithdrawRequest = Schema.Struct({ offerId: HubOfferId }).annotations(strict);
+export const HubOfferWithdrawRequest = Schema.Struct({ offerId: HubOfferId });
 export type HubOfferWithdrawRequest = typeof HubOfferWithdrawRequest.Type;
-export const decodeHubOfferWithdrawRequest = Schema.decodeUnknownSync(HubOfferWithdrawRequest);
+export const decodeHubOfferWithdrawRequest = Schema.decodeUnknownSync(
+  HubOfferWithdrawRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The person on a spoke applying or dismissing one proposal. A routine names the Project it binds to. */
 export const HubProposalDecisionRequest = Schema.Struct({
   offerId: HubOfferId,
-  projectId: Schema.optional(Schema.UUID),
-}).annotations(strict);
+  projectId: Schema.optional(GuidString),
+});
 export type HubProposalDecisionRequest = typeof HubProposalDecisionRequest.Type;
 export const decodeHubProposalDecisionRequest = Schema.decodeUnknownSync(
   HubProposalDecisionRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const HubAutoApplyRequest = Schema.Struct({
   kind: HubAutoApplyKind,
   enabled: Schema.Boolean,
-}).annotations(strict);
+});
 export type HubAutoApplyRequest = typeof HubAutoApplyRequest.Type;
-export const decodeHubAutoApplyRequest = Schema.decodeUnknownSync(HubAutoApplyRequest);
+export const decodeHubAutoApplyRequest = Schema.decodeUnknownSync(
+  HubAutoApplyRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A proposal as Settings shows it. */
 export const HubProposalView = Schema.Struct({
@@ -270,5 +290,5 @@ export const HubProposalView = Schema.Struct({
   offer: HubOfferBody,
   receivedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HubProposalView = typeof HubProposalView.Type;

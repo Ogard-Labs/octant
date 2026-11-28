@@ -1,10 +1,10 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { AggregateVersion, UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const PROVIDER_CLOUD_USAGE_AGGREGATE_TYPE = "provider-cloud-usage";
 export const PROVIDER_CLOUD_EVENT_NAMES = {
   jobChanged: "provider-cloud.job-changed@1",
@@ -14,29 +14,32 @@ export const PROVIDER_CLOUD_EVENT_NAMES_V2 = {
   jobChanged: "provider-cloud.job-changed@2",
   optInChanged: "provider-cloud.opt-in-changed@2",
 } as const;
-export const ProviderCloudEventPrincipal = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+export const ProviderCloudEventPrincipal = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("local-window") }),
   Schema.Struct({
     kind: Schema.Literal("person-paired-device"),
-    credentialGeneration: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
-);
+    credentialGeneration: PositiveInt,
+  }),
+]);
 export type ProviderCloudEventPrincipal = typeof ProviderCloudEventPrincipal.Type;
-export const ProviderCloudJobId = Schema.UUID.pipe(Schema.brand("ProviderCloudJobId"));
+export const ProviderCloudJobId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ProviderCloudJobId"),
+);
 export type ProviderCloudJobId = typeof ProviderCloudJobId.Type;
 export const ProviderCloudRemoteId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{1,128}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/)),
   Schema.brand("ProviderCloudRemoteId"),
 );
 export type ProviderCloudRemoteId = typeof ProviderCloudRemoteId.Type;
 export const ProviderCloudInputDigest = Schema.String.pipe(
-  Schema.pattern(/^[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   Schema.brand("ProviderCloudInputDigest"),
 );
 export type ProviderCloudInputDigest = typeof ProviderCloudInputDigest.Type;
 export const MAX_PROVIDER_CLOUD_INPUT = 16_000;
 export const MAX_PROVIDER_CLOUD_OUTPUT = 32_000;
-export const ProviderCloudJobState = Schema.Literal(
+export const ProviderCloudJobState = Schema.Literals([
   "submitting",
   "submission-uncertain",
   "running",
@@ -45,7 +48,7 @@ export const ProviderCloudJobState = Schema.Literal(
   "cancel-requested",
   "cancelled",
   "unavailable",
-);
+]);
 export type ProviderCloudJobState = typeof ProviderCloudJobState.Type;
 export const ProviderCloudJob = Schema.Struct({
   id: ProviderCloudJobId,
@@ -55,34 +58,34 @@ export const ProviderCloudJob = Schema.Struct({
   instanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   inputDigest: ProviderCloudInputDigest,
-  input: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_CLOUD_INPUT)),
+  input: Schema.String.check(Schema.isMaxLength(MAX_PROVIDER_CLOUD_INPUT)),
   state: ProviderCloudJobState,
   remoteId: Schema.optional(ProviderCloudRemoteId),
-  output: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_CLOUD_OUTPUT)),
+  output: Schema.String.check(Schema.isMaxLength(MAX_PROVIDER_CLOUD_OUTPUT)),
   truncated: Schema.Boolean,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   uncertaintyAcknowledgedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type ProviderCloudJob = typeof ProviderCloudJob.Type;
 
 // The person reviews and consents to the exact text, and its digest covers
 // every byte; trimming here would refuse ordinary pasted prompts (a trailing
 // newline, leading indentation) that review already accepted.
-const ProviderCloudTaskText = Schema.String.pipe(
-  Schema.maxLength(MAX_PROVIDER_CLOUD_INPUT),
-  Schema.filter((value) => value.trim().length > 0, {
-    message: () => "Cloud task text must not be blank.",
+const ProviderCloudTaskText = Schema.String.check(
+  Schema.isMaxLength(MAX_PROVIDER_CLOUD_INPUT),
+  Schema.makeFilter((value) => value.trim().length > 0, {
+    message: "Cloud task text must not be blank.",
   }),
 );
-export const ProviderCloudRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("profiles") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("list"), threadId: CodeThreadId }).annotations(strict),
+export const ProviderCloudRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("profiles") }),
+  Schema.Struct({ kind: Schema.Literal("list"), threadId: CodeThreadId }),
   Schema.Struct({
     kind: Schema.Literal("opt-in"),
     instanceId: ProviderInstanceId,
     enabled: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("start"),
     jobId: ProviderCloudJobId,
@@ -94,33 +97,29 @@ export const ProviderCloudRequest = Schema.Union(
     cloudExecutionConsent: Schema.Literal(true),
     acknowledgedUnknownJobs: Schema.optional(
       Schema.Array(
-        Schema.Struct({ jobId: ProviderCloudJobId, expectedVersion: AggregateVersion }).annotations(
-          strict,
-        ),
-      ).pipe(Schema.maxItems(16)),
+        Schema.Struct({ jobId: ProviderCloudJobId, expectedVersion: AggregateVersion }),
+      ).check(Schema.isMaxLength(16)),
     ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("read", "cancel"), jobId: ProviderCloudJobId }).annotations(
-    strict,
-  ),
-).annotations(strict);
+  }),
+  Schema.Struct({ kind: Schema.Literals(["read", "cancel"]), jobId: ProviderCloudJobId }),
+]);
 export type ProviderCloudRequest = typeof ProviderCloudRequest.Type;
 export const ProviderCloudProfile = Schema.Struct({
   instanceId: ProviderInstanceId,
-  label: Schema.String.pipe(Schema.maxLength(200)),
+  label: Schema.String.check(Schema.isMaxLength(200)),
   supported: Schema.Boolean,
   enabled: Schema.Boolean,
-  models: Schema.Array(ProviderModelId).pipe(Schema.maxItems(256)),
-}).annotations(strict);
-export const ProviderCloudResponse = Schema.Union(
+  models: Schema.Array(ProviderModelId).check(Schema.isMaxLength(256)),
+});
+export const ProviderCloudResponse = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("ready"),
-    profiles: Schema.Array(ProviderCloudProfile).pipe(Schema.maxItems(128)),
-    jobs: Schema.Array(ProviderCloudJob).pipe(Schema.maxItems(100)),
-  }).annotations(strict),
+    profiles: Schema.Array(ProviderCloudProfile).check(Schema.isMaxLength(128)),
+    jobs: Schema.Array(ProviderCloudJob).check(Schema.isMaxLength(100)),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "unavailable",
       "unauthorized",
       "plan",
@@ -131,67 +130,87 @@ export const ProviderCloudResponse = Schema.Union(
       "busy",
       "unknown-job",
       "journal-unavailable",
-    ),
-  }).annotations(strict),
-).annotations(strict);
+    ]),
+  }),
+]);
 export type ProviderCloudResponse = typeof ProviderCloudResponse.Type;
 export const ProviderCloudJobChangedV1Payload = Schema.Struct({
   threadId: ProviderCloudJob.fields.threadId,
   job: ProviderCloudJob,
-}).annotations(strict);
+});
 export type ProviderCloudJobChangedV1Payload = typeof ProviderCloudJobChangedV1Payload.Type;
 export const ProviderCloudOptInChangedV1Payload = Schema.Struct({
   instanceId: ProviderCloudJob.fields.instanceId,
   enabled: Schema.Boolean,
-}).annotations(strict);
+});
 export type ProviderCloudOptInChangedV1Payload = typeof ProviderCloudOptInChangedV1Payload.Type;
 export const ProviderCloudJobChangedV2Payload = Schema.Struct({
   threadId: ProviderCloudJob.fields.threadId,
   job: ProviderCloudJob,
   principal: ProviderCloudEventPrincipal,
-}).annotations(strict);
+});
 export type ProviderCloudJobChangedV2Payload = typeof ProviderCloudJobChangedV2Payload.Type;
 export const ProviderCloudOptInChangedV2Payload = Schema.Struct({
   instanceId: ProviderCloudJob.fields.instanceId,
   enabled: Schema.Boolean,
   principal: ProviderCloudEventPrincipal,
-}).annotations(strict);
+});
 export type ProviderCloudOptInChangedV2Payload = typeof ProviderCloudOptInChangedV2Payload.Type;
 export const decodeProviderCloudJobChangedV1Payload = Schema.decodeUnknownSync(
   ProviderCloudJobChangedV1Payload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderCloudOptInChangedV1Payload = Schema.decodeUnknownSync(
   ProviderCloudOptInChangedV1Payload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderCloudJobChangedV2Payload = Schema.decodeUnknownSync(
   ProviderCloudJobChangedV2Payload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderCloudOptInChangedV2Payload = Schema.decodeUnknownSync(
   ProviderCloudOptInChangedV2Payload,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeProviderCloudRequest = Schema.decodeUnknownSync(ProviderCloudRequest);
-export const decodeProviderCloudResponse = Schema.decodeUnknownSync(ProviderCloudResponse);
-export const decodeProviderCloudJob = Schema.decodeUnknownSync(ProviderCloudJob);
-export const decodeProviderCloudJobId = Schema.decodeUnknownSync(ProviderCloudJobId);
-export const decodeProviderCloudRemoteId = Schema.decodeUnknownSync(ProviderCloudRemoteId);
-export const decodeProviderCloudInputDigest = Schema.decodeUnknownSync(ProviderCloudInputDigest);
+export const decodeProviderCloudRequest = Schema.decodeUnknownSync(
+  ProviderCloudRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderCloudResponse = Schema.decodeUnknownSync(
+  ProviderCloudResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderCloudJob = Schema.decodeUnknownSync(
+  ProviderCloudJob,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderCloudJobId = Schema.decodeUnknownSync(
+  ProviderCloudJobId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderCloudRemoteId = Schema.decodeUnknownSync(
+  ProviderCloudRemoteId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderCloudInputDigest = Schema.decodeUnknownSync(
+  ProviderCloudInputDigest,
+  STRICT_DECODE_OPTIONS,
+);
 export const ProviderCloudCreateInput = Schema.Struct({
   jobId: ProviderCloudJobId,
   modelId: ProviderModelId,
   text: ProviderCloudTaskText,
-}).annotations(strict);
-export const ProviderCloudObservation = Schema.Union(
+});
+export const ProviderCloudObservation = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("observed"),
     remoteId: ProviderCloudRemoteId,
-    state: Schema.Literal("running", "completed", "failed", "cancelled"),
-    output: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_CLOUD_OUTPUT)),
+    state: Schema.Literals(["running", "completed", "failed", "cancelled"]),
+    output: Schema.String.check(Schema.isMaxLength(MAX_PROVIDER_CLOUD_OUTPUT)),
     truncated: Schema.Boolean,
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("unavailable", "uncertain", "unsupported") }).annotations(
-    strict,
-  ),
-).annotations(strict);
+  }),
+  Schema.Struct({ status: Schema.Literals(["unavailable", "uncertain", "unsupported"]) }),
+]);
 export const ProviderCloudCancelResult = Schema.Struct({
-  status: Schema.Literal("requested", "uncertain", "unavailable"),
-}).annotations(strict);
+  status: Schema.Literals(["requested", "uncertain", "unavailable"]),
+});

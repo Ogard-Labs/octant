@@ -807,7 +807,7 @@ async function probeToolCapabilityForModel(
           if (Exit.isSuccess(exit)) {
             return { ok: true, value: exit.value };
           }
-          const typedFailure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+          const typedFailure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
           return protocolFailure(typedFailure ?? exit.cause);
         }
         // Capture attempt metadata (httpStatus, accepted, outputStarted) via
@@ -834,7 +834,7 @@ async function probeToolCapabilityForModel(
         if (Exit.isSuccess(exit)) {
           return { ok: true, value: exit.value };
         }
-        const typedFailure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+        const typedFailure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
         return protocolFailure(typedFailure ?? exit.cause, metadata);
       },
     });

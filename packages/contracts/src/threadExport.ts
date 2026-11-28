@@ -8,6 +8,7 @@
  */
 
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { BrowserCaptureId } from "./browserAutomation";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -18,9 +19,8 @@ import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ThreadExportToolCall } from "./threadToolCallRecords";
 import { VideoClipRecord, VideoJobId } from "./videoGeneration";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const THREAD_EXPORT_FORMAT = "octant.thread-bundle/1" as const;
 export const ThreadExportFormat = Schema.Literal(THREAD_EXPORT_FORMAT);
@@ -32,21 +32,22 @@ export type ThreadExportFormat = typeof ThreadExportFormat.Type;
  * ways. Path separators and schemes are refused so a host path cannot ride
  * this field.
  */
-export const ThreadExportId = Schema.UUID.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+export const ThreadExportId = Schema.String.check(
+  Schema.isGUID(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
 );
 export type ThreadExportId = typeof ThreadExportId.Type;
 
 export const ThreadExportRequest = Schema.Struct({
   mode: OctantMode,
   threadId: ThreadExportId,
-}).annotations(strict);
+});
 export type ThreadExportRequest = typeof ThreadExportRequest.Type;
 
-export const ThreadExportTranscriptRole = Schema.Literal("user", "assistant");
+export const ThreadExportTranscriptRole = Schema.Literals(["user", "assistant"]);
 export type ThreadExportTranscriptRole = typeof ThreadExportTranscriptRole.Type;
 
-export const ThreadExportTranscriptStatus = Schema.Literal(
+export const ThreadExportTranscriptStatus = Schema.Literals([
   "completed",
   "running",
   "waiting",
@@ -54,42 +55,42 @@ export const ThreadExportTranscriptStatus = Schema.Literal(
   "failed",
   "cancelled",
   "unreadable",
-);
+]);
 export type ThreadExportTranscriptStatus = typeof ThreadExportTranscriptStatus.Type;
 
 export const ThreadExportTranscriptEntry = Schema.Struct({
   role: ThreadExportTranscriptRole,
-  text: Schema.String.pipe(Schema.maxLength(1_000_000)),
+  text: Schema.String.check(Schema.isMaxLength(1_000_000)),
   occurredAt: UtcTimestamp,
   status: ThreadExportTranscriptStatus,
-}).annotations(strict);
+});
 export type ThreadExportTranscriptEntry = typeof ThreadExportTranscriptEntry.Type;
 
 export const ThreadExportTranscript = Schema.Struct({
   entries: Schema.Array(ThreadExportTranscriptEntry),
   activeCount: NonNegativeInt,
   revisedCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type ThreadExportTranscript = typeof ThreadExportTranscript.Type;
 
 export const ThreadExportArtifact = Schema.Struct({
-  canvasId: Schema.NonEmptyTrimmedString,
-  versionId: Schema.NonEmptyTrimmedString,
+  canvasId: NonEmptyTrimmedString,
+  versionId: NonEmptyTrimmedString,
   sequence: PositiveInt,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  kind: Schema.Literal("document", "diagram", "chart", "table", "code", "mixed"),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  kind: Schema.Literals(["document", "diagram", "chart", "table", "code", "mixed"]),
   updatedAt: UtcTimestamp,
   definition: Schema.Unknown,
-}).annotations(strict);
+});
 export type ThreadExportArtifact = typeof ThreadExportArtifact.Type;
 
 export const ThreadExportAttachmentGeneration = Schema.Struct({
   jobId: ImageJobId,
   profileInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  promptHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  promptHash: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   parentAttachmentId: Schema.optional(ImageArtifactId),
-}).annotations(strict);
+});
 export type ThreadExportAttachmentGeneration = typeof ThreadExportAttachmentGeneration.Type;
 
 /**
@@ -99,34 +100,34 @@ export type ThreadExportAttachmentGeneration = typeof ThreadExportAttachmentGene
  */
 export const ThreadExportAttachmentCapture = Schema.Struct({
   captureId: BrowserCaptureId,
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  url: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  title: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
   capturedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadExportAttachmentCapture = typeof ThreadExportAttachmentCapture.Type;
 
 export const ThreadExportAttachment = Schema.Struct({
-  displayName: Schema.NonEmptyTrimmedString,
-  mediaType: Schema.NonEmptyTrimmedString,
+  displayName: NonEmptyTrimmedString,
+  mediaType: NonEmptyTrimmedString,
   byteLength: NonNegativeInt,
-  status: Schema.NonEmptyTrimmedString,
+  status: NonEmptyTrimmedString,
   generation: Schema.optional(ThreadExportAttachmentGeneration),
   capture: Schema.optional(ThreadExportAttachmentCapture),
-}).annotations(strict);
+});
 export type ThreadExportAttachment = typeof ThreadExportAttachment.Type;
 
 export const ThreadExportCitation = Schema.Struct({
-  sourceTitle: Schema.NonEmptyTrimmedString,
-  sourceUrl: Schema.NonEmptyTrimmedString,
+  sourceTitle: NonEmptyTrimmedString,
+  sourceUrl: NonEmptyTrimmedString,
   retrievedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadExportCitation = typeof ThreadExportCitation.Type;
 
 export const ThreadExportCompletion = Schema.Struct({
-  deliveryTarget: Schema.NonEmptyTrimmedString,
-  satisfactionEvidence: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-}).annotations(strict);
+  deliveryTarget: NonEmptyTrimmedString,
+  satisfactionEvidence: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+});
 export type ThreadExportCompletion = typeof ThreadExportCompletion.Type;
 
 export const ThreadExportEvidence = Schema.Struct({
@@ -140,15 +141,15 @@ export const ThreadExportEvidence = Schema.Struct({
    * paired device asked for.
    */
   toolCalls: Schema.optional(Schema.Array(ThreadExportToolCall)),
-}).annotations(strict);
+});
 export type ThreadExportEvidence = typeof ThreadExportEvidence.Type;
 
 export const ThreadExportBranchOrigin = Schema.Struct({
-  threadId: Schema.NonEmptyTrimmedString,
+  threadId: NonEmptyTrimmedString,
   sourceVersion: NonNegativeInt,
   carriedTurnCount: NonNegativeInt,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadExportBranchOrigin = typeof ThreadExportBranchOrigin.Type;
 
 export const ThreadExportProvenance = Schema.Struct({
@@ -161,36 +162,36 @@ export const ThreadExportProvenance = Schema.Struct({
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   branchedFrom: Schema.optional(ThreadExportBranchOrigin),
-}).annotations(strict);
+});
 export type ThreadExportProvenance = typeof ThreadExportProvenance.Type;
 
-export const ThreadExportOmissionKind = Schema.Literal(
+export const ThreadExportOmissionKind = Schema.Literals([
   "attachment-bytes",
   "superseded-turns",
   "in-progress",
   "unreadable-content",
   "truncated-conversation",
   "bulk-outside-journal",
-);
+]);
 export type ThreadExportOmissionKind = typeof ThreadExportOmissionKind.Type;
 
 export const ThreadExportOmission = Schema.Struct({
   kind: ThreadExportOmissionKind,
   count: PositiveInt,
-}).annotations(strict);
+});
 export type ThreadExportOmission = typeof ThreadExportOmission.Type;
 
 export const ThreadExportHeader = Schema.Struct({
   format: ThreadExportFormat,
   threadId: ThreadExportId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
   projectId: Schema.optional(ProjectId),
   hostId: HostId,
   version: NonNegativeInt,
   sequence: NonNegativeInt,
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadExportHeader = typeof ThreadExportHeader.Type;
 
 /**
@@ -206,19 +207,19 @@ export const ThreadExportBundle = Schema.Struct({
   evidence: ThreadExportEvidence,
   provenance: ThreadExportProvenance,
   omissions: Schema.Array(ThreadExportOmission),
-}).annotations(strict);
+});
 export type ThreadExportBundle = typeof ThreadExportBundle.Type;
 
-export const ThreadExportOutcome = Schema.Union(
+export const ThreadExportOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("exported"),
     bundle: ThreadExportBundle,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unauthorized"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unauthorized"]),
+  }),
+]);
 export type ThreadExportOutcome = typeof ThreadExportOutcome.Type;
 
 export const THREAD_EXPORT_PATH = "/api/threads/export";
@@ -235,31 +236,44 @@ export const ThreadVideoArchiveManifest = Schema.Struct({
       jobId: VideoJobId,
       size: VideoClipRecord.fields.size,
       hash: VideoClipRecord.fields.hash,
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type ThreadVideoArchiveManifest = typeof ThreadVideoArchiveManifest.Type;
 
 export const ThreadVideoArchiveDownload = Schema.Struct({
   kind: Schema.Literal("archive-ready"),
-  url: Schema.String.pipe(
-    Schema.pattern(/^\/api\/threads\/export\/video-archive\?ticket=[A-Za-z0-9_-]{43}$/),
+  url: Schema.String.check(
+    Schema.isPattern(/^\/api\/threads\/export\/video-archive\?ticket=[A-Za-z0-9_-]{43}$/),
   ),
   size: PositiveInt,
   clipCount: PositiveInt,
-}).annotations(strict);
+});
 export type ThreadVideoArchiveDownload = typeof ThreadVideoArchiveDownload.Type;
 
-export const ThreadVideoArchiveOffer = Schema.Union(
+export const ThreadVideoArchiveOffer = Schema.Union([
   ThreadVideoArchiveDownload,
   ThreadExportOutcome,
-);
+]);
 export type ThreadVideoArchiveOffer = typeof ThreadVideoArchiveOffer.Type;
 
-export const decodeThreadExportRequest = Schema.decodeUnknownSync(ThreadExportRequest);
-export const decodeThreadExportBundle = Schema.decodeUnknownSync(ThreadExportBundle);
-export const decodeThreadExportOutcome = Schema.decodeUnknownSync(ThreadExportOutcome);
+export const decodeThreadExportRequest = Schema.decodeUnknownSync(
+  ThreadExportRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadExportBundle = Schema.decodeUnknownSync(
+  ThreadExportBundle,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadExportOutcome = Schema.decodeUnknownSync(
+  ThreadExportOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadVideoArchiveManifest = Schema.decodeUnknownSync(
   ThreadVideoArchiveManifest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadVideoArchiveOffer = Schema.decodeUnknownSync(ThreadVideoArchiveOffer);
+export const decodeThreadVideoArchiveOffer = Schema.decodeUnknownSync(
+  ThreadVideoArchiveOffer,
+  STRICT_DECODE_OPTIONS,
+);

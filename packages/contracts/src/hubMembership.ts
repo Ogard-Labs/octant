@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AuditActingPrincipal } from "./auditEvents";
 import { HubGrantItem, HubMemberId, RosterMember, SignedHubRoster } from "./hubAndSpokes";
 import { HubPushReason } from "./hubPush";
@@ -10,20 +11,20 @@ import { HUB_WAKE_MAX_SPOKES, HubWakeSpokeTimes } from "./hubWake";
 import { ProviderExecutionPolicy } from "./providers";
 import { WorkAccess } from "./workThreads";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+const digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 const base64Url = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maxLength),
-    Schema.pattern(/^[A-Za-z0-9_-]+$/),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maxLength),
+    Schema.isPattern(/^[A-Za-z0-9_-]+$/),
   );
 const bounded = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
 
 /** Every change to who a host's hub or hub-role membership is is journaled as one of these. */
 export const HUB_MEMBERSHIP_CHANGED = "hub-and-spokes.membership-changed@1" as const;
 
-export const HubMembershipChange = Schema.Literal(
+export const HubMembershipChange = Schema.Literals([
   "hub-role-enabled",
   "hub-role-disabled",
   "member-added",
@@ -116,14 +117,14 @@ export const HubMembershipChange = Schema.Literal(
   "credential-copy-sent",
   "credential-copy-received",
   "credential-copy-refused",
-);
+]);
 export type HubMembershipChange = typeof HubMembershipChange.Type;
 
 /**
  * Why a wake nudge came to nothing. The journal keeps this word and never a
  * routine's id, name, Project, or schedule.
  */
-export const HubWakeReason = Schema.Literal(
+export const HubWakeReason = Schema.Literals([
   "unknown-routine",
   "too-early",
   "time-mismatch",
@@ -131,7 +132,7 @@ export const HubWakeReason = Schema.Literal(
   "standby-not-granted",
   "hub-reachable",
   "answer-refused",
-);
+]);
 export type HubWakeReason = typeof HubWakeReason.Type;
 
 /**
@@ -151,19 +152,19 @@ export const HubMembershipChangedPayload = Schema.Struct({
   actingPrincipal: AuditActingPrincipal,
   memberId: Schema.optional(HubMemberId),
   /** The members a change names together, such as the standby order in its order. */
-  memberIds: Schema.optional(Schema.Array(HubMemberId).pipe(Schema.maxItems(256))),
-  sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  memberIds: Schema.optional(Schema.Array(HubMemberId).check(Schema.isMaxLength(256))),
+  sequence: Schema.optional(PositiveInt),
   items: Schema.optional(Schema.Array(HubGrantItem)),
   /** For a wake change: how many routine times a report or a merge carried. */
-  wakeCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  wakeCount: Schema.optional(NonNegativeInt),
   /** For a wake change: why a nudge came to nothing. */
   wakeReason: Schema.optional(HubWakeReason),
   /** For a new hub accepted without a person: why. */
   followReason: Schema.optional(HubFollowReason),
   /** For a webhook change: how many endpoints or deliveries it concerned, never a payload or a secret. */
-  webhookCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  webhookCount: Schema.optional(NonNegativeInt),
   /** For a push forward or refusal: the size of the delivery request in bytes, never its content. */
-  pushBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  pushBytes: Schema.optional(NonNegativeInt),
   /** For a push refusal: why. */
   pushReason: Schema.optional(HubPushReason),
   /** For a direct-sending credential change: which phone platform it concerned, never the credential. */
@@ -183,13 +184,14 @@ export const HubMembershipChangedPayload = Schema.Struct({
    * sign-in copy: the name of the sign-in, never its value, and why one was
    * refused.
    */
-  posture: Schema.optional(Schema.Union(ProviderExecutionPolicy, WorkAccess)),
+  posture: Schema.optional(Schema.Union([ProviderExecutionPolicy, WorkAccess])),
   credentialName: Schema.optional(bounded(128)),
   credentialReason: Schema.optional(bounded(64)),
-}).annotations(strict);
+});
 export type HubMembershipChangedPayload = typeof HubMembershipChangedPayload.Type;
 export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
   HubMembershipChangedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -198,11 +200,9 @@ export const decodeHubMembershipChangedPayload = Schema.decodeUnknownSync(
  * key signs the request, which proves the member holds it.
  */
 export const HubJoinRequest = Schema.Struct({
-  ticketId: Schema.UUID,
+  ticketId: GuidString,
   ticketProof: bounded(256),
-  member: RosterMember.pipe(Schema.omit("role", "owner", "ownerUnlockPublicKey")).annotations(
-    strict,
-  ),
+  member: RosterMember.mapFields(Struct.omit(["role", "owner", "ownerUnlockPublicKey"])),
   identityPublicKey: base64Url(512),
   /** Absent for a guest, which runs no listener. */
   listenerOrigin: Schema.optional(bounded(300)),
@@ -217,9 +217,9 @@ export const HubJoinRequest = Schema.Struct({
    * only when the join code was an owner code; any other code ignores it.
    */
   ownerUnlockPublicKey: Schema.optional(base64Url(512)),
-}).annotations(strict);
+});
 export type HubJoinRequest = typeof HubJoinRequest.Type;
-export const decodeHubJoinRequest = Schema.decodeUnknownSync(HubJoinRequest);
+export const decodeHubJoinRequest = Schema.decodeUnknownSync(HubJoinRequest, STRICT_DECODE_OPTIONS);
 
 export const HubIdentityFacts = Schema.Struct({
   memberId: HubMemberId,
@@ -228,7 +228,7 @@ export const HubIdentityFacts = Schema.Struct({
   identityKeyFingerprint: digest,
   rosterSigningPublicKey: base64Url(512),
   listenerPin: digest,
-}).annotations(strict);
+});
 export type HubIdentityFacts = typeof HubIdentityFacts.Type;
 
 export const HubJoinResponse = Schema.Struct({
@@ -240,36 +240,41 @@ export const HubJoinResponse = Schema.Struct({
    * and the hub-signed roster that names the standby travels beside it with the
    * hub's origin, so the new member can reach the hub when it returns.
    */
-  standIn: Schema.optional(
-    Schema.Struct({ hubOrigin: bounded(300), hubRoster: SignedHubRoster }).annotations(strict),
-  ),
-}).annotations(strict);
+  standIn: Schema.optional(Schema.Struct({ hubOrigin: bounded(300), hubRoster: SignedHubRoster })),
+});
 export type HubJoinResponse = typeof HubJoinResponse.Type;
-export const decodeHubJoinResponse = Schema.decodeUnknownSync(HubJoinResponse);
+export const decodeHubJoinResponse = Schema.decodeUnknownSync(
+  HubJoinResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const HubLeaveRequest = Schema.Struct({ memberId: HubMemberId }).annotations(strict);
+export const HubLeaveRequest = Schema.Struct({ memberId: HubMemberId });
 export type HubLeaveRequest = typeof HubLeaveRequest.Type;
-export const decodeHubLeaveRequest = Schema.decodeUnknownSync(HubLeaveRequest);
+export const decodeHubLeaveRequest = Schema.decodeUnknownSync(
+  HubLeaveRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The status read a hub with the Status item may make of a spoke. */
 export const HubSpokeStatus = Schema.Struct({
   memberId: HubMemberId,
   name: bounded(128),
   serverBuildVersion: bounded(128),
-  rosterSequence: Schema.Int.pipe(Schema.positive()),
+  rosterSequence: PositiveInt,
   /** How busy the spoke is, changed only once a new level has held. Absent from a spoke before load levels. */
-  load: Schema.optional(Schema.Literal("light", "busy", "heavy")),
+  load: Schema.optional(Schema.Literals(["light", "busy", "heavy"])),
   /** False once the spoke's person stopped accepting delegated work. */
   acceptingDelegatedWork: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type HubSpokeStatus = typeof HubSpokeStatus.Type;
 
 /** What a guest reads from the hub: the current signed roster, nothing beside it. */
-export const HubGuestRosterResponse = Schema.Struct({ roster: SignedHubRoster }).annotations(
-  strict,
-);
+export const HubGuestRosterResponse = Schema.Struct({ roster: SignedHubRoster });
 export type HubGuestRosterResponse = typeof HubGuestRosterResponse.Type;
-export const decodeHubGuestRosterResponse = Schema.decodeUnknownSync(HubGuestRosterResponse);
+export const decodeHubGuestRosterResponse = Schema.decodeUnknownSync(
+  HubGuestRosterResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A guest asking a spoke to admit it as a paired device. It presents the
@@ -280,16 +285,22 @@ export const HubGuestAdmissionRequest = Schema.Struct({
   memberId: HubMemberId,
   devicePublicKey: base64Url(512),
   deviceLabel: bounded(128),
-}).annotations(strict);
+});
 export type HubGuestAdmissionRequest = typeof HubGuestAdmissionRequest.Type;
-export const decodeHubGuestAdmissionRequest = Schema.decodeUnknownSync(HubGuestAdmissionRequest);
+export const decodeHubGuestAdmissionRequest = Schema.decodeUnknownSync(
+  HubGuestAdmissionRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const HubGuestAdmissionResponse = Schema.Struct({
   spokeMemberId: HubMemberId,
-  deviceId: Schema.UUID,
-}).annotations(strict);
+  deviceId: GuidString,
+});
 export type HubGuestAdmissionResponse = typeof HubGuestAdmissionResponse.Type;
-export const decodeHubGuestAdmissionResponse = Schema.decodeUnknownSync(HubGuestAdmissionResponse);
+export const decodeHubGuestAdmissionResponse = Schema.decodeUnknownSync(
+  HubGuestAdmissionResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A desktop window asking its own host to have the hub introduce it as a
@@ -300,9 +311,12 @@ export const HubWindowGuestRequest = Schema.Struct({
   memberId: HubMemberId,
   devicePublicKey: base64Url(512),
   deviceLabel: bounded(128),
-}).annotations(strict);
+});
 export type HubWindowGuestRequest = typeof HubWindowGuestRequest.Type;
-export const decodeHubWindowGuestRequest = Schema.decodeUnknownSync(HubWindowGuestRequest);
+export const decodeHubWindowGuestRequest = Schema.decodeUnknownSync(
+  HubWindowGuestRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A member of the hub as a window on another member reaches it: the address
@@ -314,14 +328,14 @@ export const HubWindowComputer = Schema.Struct({
   name: bounded(128),
   origin: bounded(300),
   /** The listener's certificate pin, `sha256-` and base64url. */
-  pin: Schema.String.pipe(Schema.pattern(/^sha256-[A-Za-z0-9_-]{43}$/)),
+  pin: Schema.String.check(Schema.isPattern(/^sha256-[A-Za-z0-9_-]{43}$/)),
   identityKeyFingerprint: digest,
   /**
    * `hub` for the hub itself, which holds a member's window to its own Act
    * list; absent for a spoke or standby, which holds it to its Act item.
    */
   role: Schema.optional(Schema.Literal("hub")),
-}).annotations(strict);
+});
 export type HubWindowComputer = typeof HubWindowComputer.Type;
 
 /**
@@ -329,17 +343,20 @@ export type HubWindowComputer = typeof HubWindowComputer.Type;
  * members the window may reach directly, and how the introduction went. A
  * member the window cannot reach on a private address is not listed.
  */
-export const HubWindowComputers = Schema.Union(
-  Schema.Struct({ membership: Schema.Literal("none") }).annotations(strict),
+export const HubWindowComputers = Schema.Union([
+  Schema.Struct({ membership: Schema.Literal("none") }),
   Schema.Struct({
     membership: Schema.Literal("member"),
-    introduction: Schema.Literal("introduced", "unchanged", "refused", "hub-unreachable"),
+    introduction: Schema.Literals(["introduced", "unchanged", "refused", "hub-unreachable"]),
     hubMemberId: HubMemberId,
     members: Schema.Array(HubWindowComputer),
-  }).annotations(strict),
-);
+  }),
+]);
 export type HubWindowComputers = typeof HubWindowComputers.Type;
-export const decodeHubWindowComputers = Schema.decodeUnknownSync(HubWindowComputers);
+export const decodeHubWindowComputers = Schema.decodeUnknownSync(
+  HubWindowComputers,
+  STRICT_DECODE_OPTIONS,
+);
 
 const uniqueIds = <A>(items: ReadonlyArray<A>) => new Set(items.map(String)).size === items.length;
 
@@ -349,42 +366,53 @@ const uniqueIds = <A>(items: ReadonlyArray<A>) => new Set(items.map(String)).siz
  * empty names none.
  */
 export const HubActProjectsRequest = Schema.Struct({
-  actProjects: Schema.Array(ProjectId).pipe(
-    Schema.maxItems(1_024),
-    Schema.filter(uniqueIds, { message: () => "Entries must not repeat." }),
+  actProjects: Schema.Array(ProjectId).check(
+    Schema.isMaxLength(1_024),
+    Schema.makeFilter(uniqueIds, { message: "Entries must not repeat." }),
   ),
-}).annotations(strict);
+});
 export type HubActProjectsRequest = typeof HubActProjectsRequest.Type;
-export const decodeHubActProjectsRequest = Schema.decodeUnknownSync(HubActProjectsRequest);
+export const decodeHubActProjectsRequest = Schema.decodeUnknownSync(
+  HubActProjectsRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The standby hubs the person names on the hub, in the order members try them. Empty clears them. */
 export const HubStandbyOrderRequest = Schema.Struct({
-  memberIds: Schema.Array(HubMemberId).pipe(
-    Schema.maxItems(16),
-    Schema.filter(uniqueIds, { message: () => "Entries must not repeat." }),
+  memberIds: Schema.Array(HubMemberId).check(
+    Schema.isMaxLength(16),
+    Schema.makeFilter(uniqueIds, { message: "Entries must not repeat." }),
   ),
-}).annotations(strict);
+});
 export type HubStandbyOrderRequest = typeof HubStandbyOrderRequest.Type;
-export const decodeHubStandbyOrderRequest = Schema.decodeUnknownSync(HubStandbyOrderRequest);
+export const decodeHubStandbyOrderRequest = Schema.decodeUnknownSync(
+  HubStandbyOrderRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The person's confirmation, in the standby's own window, that it becomes the hub for good. */
-export const HubPromoteRequest = Schema.Struct({ confirmed: Schema.Literal(true) }).annotations(
-  strict,
-);
+export const HubPromoteRequest = Schema.Struct({ confirmed: Schema.Literal(true) });
 export type HubPromoteRequest = typeof HubPromoteRequest.Type;
-export const decodeHubPromoteRequest = Schema.decodeUnknownSync(HubPromoteRequest);
+export const decodeHubPromoteRequest = Schema.decodeUnknownSync(
+  HubPromoteRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A spoke's person accepting the named standby that was promoted to hub. */
-export const HubAcceptNewHubRequest = Schema.Struct({ hubMemberId: HubMemberId }).annotations(
-  strict,
-);
+export const HubAcceptNewHubRequest = Schema.Struct({ hubMemberId: HubMemberId });
 export type HubAcceptNewHubRequest = typeof HubAcceptNewHubRequest.Type;
-export const decodeHubAcceptNewHubRequest = Schema.decodeUnknownSync(HubAcceptNewHubRequest);
+export const decodeHubAcceptNewHubRequest = Schema.decodeUnknownSync(
+  HubAcceptNewHubRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A member of the roster named by id: removing one while a standby stands in. */
-export const HubMemberReference = Schema.Struct({ memberId: HubMemberId }).annotations(strict);
+export const HubMemberReference = Schema.Struct({ memberId: HubMemberId });
 export type HubMemberReference = typeof HubMemberReference.Type;
-export const decodeHubMemberReference = Schema.decodeUnknownSync(HubMemberReference);
+export const decodeHubMemberReference = Schema.decodeUnknownSync(
+  HubMemberReference,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * What a member learns when it asks the hub, or a standby that is standing in,
@@ -404,16 +432,19 @@ export const HubHeartbeatResponse = Schema.Struct({
    * again. Absent from a standby.
    */
   wakeGeneration: Schema.optional(Schema.Int),
-}).annotations(strict);
+});
 export type HubHeartbeatResponse = typeof HubHeartbeatResponse.Type;
-export const decodeHubHeartbeatResponse = Schema.decodeUnknownSync(HubHeartbeatResponse);
+export const decodeHubHeartbeatResponse = Schema.decodeUnknownSync(
+  HubHeartbeatResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A member a standby added while standing in, with what the hub needs to hold it. */
 export const StandInAddedMember = Schema.Struct({
   member: RosterMember,
   identityPublicKey: base64Url(512),
   listenerOrigin: bounded(300),
-}).annotations(strict);
+});
 export type StandInAddedMember = typeof StandInAddedMember.Type;
 
 /**
@@ -424,7 +455,7 @@ export type StandInAddedMember = typeof StandInAddedMember.Type;
 export const HubHandbackWakeTimes = Schema.Struct({
   ...HubWakeSpokeTimes.fields,
   reportedAt: Schema.optional(Schema.Int),
-}).annotations(strict);
+});
 export type HubHandbackWakeTimes = typeof HubHandbackWakeTimes.Type;
 
 /**
@@ -433,19 +464,21 @@ export type HubHandbackWakeTimes = typeof HubHandbackWakeTimes.Type;
  * for the spokes it still lists.
  */
 export const HubStandInHandback = Schema.Struct({
-  baseSequence: Schema.Int.pipe(Schema.positive()),
-  sequence: Schema.Int.pipe(Schema.positive()),
-  added: Schema.Array(StandInAddedMember).pipe(Schema.maxItems(64)),
-  removed: Schema.Array(HubMemberId).pipe(Schema.maxItems(256)),
-  wakeTimes: Schema.Array(HubHandbackWakeTimes).pipe(Schema.maxItems(HUB_WAKE_MAX_SPOKES)),
-}).annotations(strict);
+  baseSequence: PositiveInt,
+  sequence: PositiveInt,
+  added: Schema.Array(StandInAddedMember).check(Schema.isMaxLength(64)),
+  removed: Schema.Array(HubMemberId).check(Schema.isMaxLength(256)),
+  wakeTimes: Schema.Array(HubHandbackWakeTimes).check(Schema.isMaxLength(HUB_WAKE_MAX_SPOKES)),
+});
 export type HubStandInHandback = typeof HubStandInHandback.Type;
-export const decodeHubStandInHandback = Schema.decodeUnknownSync(HubStandInHandback);
-
-export const HubStandInHandbackResponse = Schema.Struct({ roster: SignedHubRoster }).annotations(
-  strict,
+export const decodeHubStandInHandback = Schema.decodeUnknownSync(
+  HubStandInHandback,
+  STRICT_DECODE_OPTIONS,
 );
+
+export const HubStandInHandbackResponse = Schema.Struct({ roster: SignedHubRoster });
 export type HubStandInHandbackResponse = typeof HubStandInHandbackResponse.Type;
 export const decodeHubStandInHandbackResponse = Schema.decodeUnknownSync(
   HubStandInHandbackResponse,
+  STRICT_DECODE_OPTIONS,
 );

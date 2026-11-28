@@ -1,16 +1,16 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const text = (max: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(max));
+const text = (max: number) => Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(max));
 
-export const ManagedToolUpdateState = Schema.Literal(
+export const ManagedToolUpdateState = Schema.Literals([
   "idle",
   "checking",
   "downloading",
   "staged",
   "current",
   "failed",
-);
+]);
 export type ManagedToolUpdateState = typeof ManagedToolUpdateState.Type;
 
 export const ManagedToolStatus = Schema.Struct({
@@ -29,20 +29,26 @@ export const ManagedToolStatus = Schema.Struct({
   managedDirectory: Schema.optional(text(4_096)),
   /** Stable path of the managed executable, when one is installed. */
   executablePath: Schema.optional(text(4_096)),
-}).annotations(strict);
+});
 export type ManagedToolStatus = typeof ManagedToolStatus.Type;
 
 export const ManagedToolsSettings = Schema.Struct({
-  automaticUpdates: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-}).annotations(strict);
+  automaticUpdates: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+});
 export type ManagedToolsSettings = typeof ManagedToolsSettings.Type;
-export const decodeManagedToolsSettings = Schema.decodeUnknownSync(ManagedToolsSettings);
+export const decodeManagedToolsSettings = Schema.decodeUnknownSync(
+  ManagedToolsSettings,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const ManagedToolsStatus = Schema.Struct({
   supported: Schema.Boolean,
   automaticUpdates: Schema.Boolean,
   tools: Schema.Array(ManagedToolStatus),
   message: Schema.optional(text(1_024)),
-}).annotations(strict);
+});
 export type ManagedToolsStatus = typeof ManagedToolsStatus.Type;
-export const decodeManagedToolsStatus = Schema.decodeUnknownSync(ManagedToolsStatus);
+export const decodeManagedToolsStatus = Schema.decodeUnknownSync(
+  ManagedToolsStatus,
+  STRICT_DECODE_OPTIONS,
+);

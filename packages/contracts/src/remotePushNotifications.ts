@@ -1,21 +1,24 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { DeviceId, StableHostId } from "./remoteAccess";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /** Opaque provider token; never logged by Octant hosts. */
 export const RemotePushToken = boundedNonEmptyText(4_096);
 export type RemotePushToken = typeof RemotePushToken.Type;
 
-export const RemotePushPlatform = Schema.Literal("ios", "android");
+export const RemotePushPlatform = Schema.Literals(["ios", "android"]);
 export type RemotePushPlatform = typeof RemotePushPlatform.Type;
 
 /**
@@ -25,8 +28,8 @@ export type RemotePushPlatform = typeof RemotePushPlatform.Type;
  * can read it. Kept beside the token in the owner-only registration file, never
  * journaled or logged.
  */
-export const RemotePushNotificationPublicKey = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{43}$/),
+export const RemotePushNotificationPublicKey = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{43}$/),
 );
 export type RemotePushNotificationPublicKey = typeof RemotePushNotificationPublicKey.Type;
 
@@ -47,7 +50,7 @@ export const RemotePushPreferencesV1 = Schema.Struct({
    * sends none and is told (maintainer decision, 2026-11-19).
    */
   newDevices: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type RemotePushPreferencesV1 = typeof RemotePushPreferencesV1.Type;
 
 export const RemotePushTokenRegistrationV1 = Schema.Struct({
@@ -55,16 +58,16 @@ export const RemotePushTokenRegistrationV1 = Schema.Struct({
   token: RemotePushToken,
   notificationPublicKey: RemotePushNotificationPublicKey,
   preferences: RemotePushPreferencesV1,
-}).annotations(strict);
+});
 export type RemotePushTokenRegistrationV1 = typeof RemotePushTokenRegistrationV1.Type;
 
-export const RemotePushTokenClearV1 = Schema.Struct({}).annotations(strict);
+export const RemotePushTokenClearV1 = Schema.Struct({});
 export type RemotePushTokenClearV1 = typeof RemotePushTokenClearV1.Type;
 
 export const RemotePushTokenReceiptV1 = Schema.Struct({
-  result: Schema.Literal("registered", "already-registered", "cleared", "already-cleared"),
+  result: Schema.Literals(["registered", "already-registered", "cleared", "already-cleared"]),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushTokenReceiptV1 = typeof RemotePushTokenReceiptV1.Type;
 
 /**
@@ -81,9 +84,9 @@ export const RemotePushRegistrationRecordedV1 = Schema.Struct({
   hostId: StableHostId,
   deviceId: DeviceId,
   platform: RemotePushPlatform,
-  change: Schema.Literal("added", "changed"),
+  change: Schema.Literals(["added", "changed"]),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushRegistrationRecordedV1 = typeof RemotePushRegistrationRecordedV1.Type;
 
 /**
@@ -92,7 +95,7 @@ export type RemotePushRegistrationRecordedV1 = typeof RemotePushRegistrationReco
  * mid-pairing, expired, or found without an active device record at startup),
  * or the delivery path refused the destination as gone.
  */
-export const RemotePushRegistrationClearReason = Schema.Literal(
+export const RemotePushRegistrationClearReason = Schema.Literals([
   "device-cleared",
   "signed-out",
   "self-revoked",
@@ -101,7 +104,7 @@ export const RemotePushRegistrationClearReason = Schema.Literal(
   "credential-expired",
   "device-without-standing",
   "destination-gone",
-);
+]);
 export type RemotePushRegistrationClearReason = typeof RemotePushRegistrationClearReason.Type;
 
 export const RemotePushRegistrationClearedV1 = Schema.Struct({
@@ -109,18 +112,18 @@ export const RemotePushRegistrationClearedV1 = Schema.Struct({
   deviceId: DeviceId,
   reason: RemotePushRegistrationClearReason,
   clearedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushRegistrationClearedV1 = typeof RemotePushRegistrationClearedV1.Type;
 
-export const RemotePushNotificationKind = Schema.Literal(
+export const RemotePushNotificationKind = Schema.Literals([
   "completion",
   "waiting",
   "failure",
   "approval-needed",
-);
+]);
 export type RemotePushNotificationKind = typeof RemotePushNotificationKind.Type;
 
-export const RemotePushNotificationMode = Schema.Literal("chat", "work", "code");
+export const RemotePushNotificationMode = Schema.Literals(["chat", "work", "code"]);
 export type RemotePushNotificationMode = typeof RemotePushNotificationMode.Type;
 
 /**
@@ -134,7 +137,7 @@ export const RemotePushNotificationPayloadV1 = Schema.Struct({
   mode: Schema.optional(RemotePushNotificationMode),
   title: boundedNonEmptyText(80),
   body: boundedText(120),
-}).annotations(strict);
+});
 export type RemotePushNotificationPayloadV1 = typeof RemotePushNotificationPayloadV1.Type;
 
 /**
@@ -155,7 +158,7 @@ export const RemotePushMoveWaitingPayloadV1 = Schema.Struct({
   hostId: StableHostId,
   title: boundedNonEmptyText(80),
   body: boundedText(120),
-}).annotations(strict);
+});
 export type RemotePushMoveWaitingPayloadV1 = typeof RemotePushMoveWaitingPayloadV1.Type;
 
 /**
@@ -177,10 +180,10 @@ export const RemotePushDeviceJoinedPayloadV1 = Schema.Struct({
    * The alert this notice is for. Two guests with the same name and no address
    * read alike, so a phone tells their notices apart by the alert, not the text.
    */
-  alertId: Schema.UUID,
+  alertId: GuidString,
   title: boundedNonEmptyText(80),
   body: boundedText(120),
-}).annotations(strict);
+});
 export type RemotePushDeviceJoinedPayloadV1 = typeof RemotePushDeviceJoinedPayloadV1.Type;
 
 /** The most content a notification seals for the phone, before encryption. */
@@ -196,10 +199,10 @@ export const REMOTE_PUSH_PLACEHOLDER_ALERT = {
 } as const;
 
 const unpaddedBase64Url = (minimum: number, maximum: number) =>
-  Schema.String.pipe(
-    Schema.pattern(/^[A-Za-z0-9_-]+$/),
-    Schema.minLength(minimum),
-    Schema.maxLength(maximum),
+  Schema.String.check(
+    Schema.isPattern(/^[A-Za-z0-9_-]+$/),
+    Schema.isMinLength(minimum),
+    Schema.isMaxLength(maximum),
   );
 
 /**
@@ -213,7 +216,7 @@ export const RemotePushSealedContentV1 = Schema.Struct({
     22,
     Math.ceil(((REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES + 16) * 4) / 3),
   ),
-}).annotations(strict);
+});
 export type RemotePushSealedContentV1 = typeof RemotePushSealedContentV1.Type;
 
 /**
@@ -225,11 +228,11 @@ export const RemotePushEnvelopeV1 = Schema.Struct({
   alert: Schema.Struct({
     title: Schema.Literal(REMOTE_PUSH_PLACEHOLDER_ALERT.title),
     body: Schema.Literal(REMOTE_PUSH_PLACEHOLDER_ALERT.body),
-  }).annotations(strict),
+  }),
   collapseId: unpaddedBase64Url(22, 22),
-  urgency: Schema.Literal("high", "normal"),
+  urgency: Schema.Literals(["high", "normal"]),
   sealed: RemotePushSealedContentV1,
-}).annotations(strict);
+});
 export type RemotePushEnvelopeV1 = typeof RemotePushEnvelopeV1.Type;
 
 /**
@@ -240,12 +243,12 @@ export const REMOTE_PUSH_DELIVERY_EVENT_NAMES = {
   recorded: "remote.push-delivery-recorded@1",
 } as const;
 
-export const RemotePushDeliveryOutcome = Schema.Literal(
+export const RemotePushDeliveryOutcome = Schema.Literals([
   "delivered",
   "failed",
   "rate-limited",
   "destination-gone",
-);
+]);
 export type RemotePushDeliveryOutcome = typeof RemotePushDeliveryOutcome.Type;
 
 export const RemotePushDeliveryRecordedV1 = Schema.Struct({
@@ -255,9 +258,9 @@ export const RemotePushDeliveryRecordedV1 = Schema.Struct({
   kind: RemotePushNotificationKind,
   outcome: RemotePushDeliveryOutcome,
   /** A bounded slug such as `provider-unavailable`; never a provider's message. */
-  failureCategory: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/))),
+  failureCategory: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,64}$/))),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushDeliveryRecordedV1 = typeof RemotePushDeliveryRecordedV1.Type;
 
 /**
@@ -273,9 +276,9 @@ export const RemotePushMoveWaitingDeliveryRecordedV1 = Schema.Struct({
   hostId: StableHostId,
   deviceId: DeviceId,
   outcome: RemotePushDeliveryOutcome,
-  failureCategory: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/))),
+  failureCategory: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,64}$/))),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushMoveWaitingDeliveryRecordedV1 =
   typeof RemotePushMoveWaitingDeliveryRecordedV1.Type;
 
@@ -291,11 +294,11 @@ export const REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES = {
 export const RemotePushDeviceJoinedDeliveryRecordedV1 = Schema.Struct({
   hostId: StableHostId,
   deviceId: DeviceId,
-  alertId: Schema.UUID,
+  alertId: GuidString,
   outcome: RemotePushDeliveryOutcome,
-  failureCategory: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/))),
+  failureCategory: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,64}$/))),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemotePushDeviceJoinedDeliveryRecordedV1 =
   typeof RemotePushDeviceJoinedDeliveryRecordedV1.Type;
 
@@ -309,9 +312,9 @@ export type RemotePushDeviceJoinedDeliveryRecordedV1 =
 export const REMOTE_PUSH_GATEWAY_DEFAULT_URL = "https://push.octant.sh";
 
 /** An https gateway address, or http on this computer's loopback address for a local gateway. */
-export const RemotePushGatewayUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+export const RemotePushGatewayUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -328,10 +331,7 @@ export const RemotePushGatewayUrl = Schema.String.pipe(
         return false;
       }
     },
-    {
-      message: () =>
-        "A push gateway address is https, or http on this computer's loopback address.",
-    },
+    { message: "A push gateway address is https, or http on this computer's loopback address." },
   ),
 );
 export type RemotePushGatewayUrl = typeof RemotePushGatewayUrl.Type;
@@ -342,19 +342,19 @@ export const RemotePushGatewaySettingsV1 = Schema.Struct({
   enabled: Schema.Boolean,
   gatewayUrl: RemotePushGatewayUrl,
   /** Bumped on every change, so a save from a stale read is refused. */
-  version: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-}).annotations(strict);
+  version: NonNegativeInt,
+});
 export type RemotePushGatewaySettingsV1 = typeof RemotePushGatewaySettingsV1.Type;
 
 export const SetRemotePushGatewaySettingsV1 = Schema.Struct({
   enabled: Schema.Boolean,
   gatewayUrl: RemotePushGatewayUrl,
-  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-}).annotations(strict);
+  expectedVersion: NonNegativeInt,
+});
 export type SetRemotePushGatewaySettingsV1 = typeof SetRemotePushGatewaySettingsV1.Type;
 
 /** SHA-256 of the host listener key's SPKI DER, lowercase hex: what the phone saw at pairing. */
-export const RemotePushHostKeyFingerprint = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+export const RemotePushHostKeyFingerprint = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 export type RemotePushHostKeyFingerprint = typeof RemotePushHostKeyFingerprint.Type;
 
 /** Phone to gateway: trade a platform token for a capability bound to one host's key. */
@@ -362,7 +362,7 @@ export const RemotePushCapabilityRequestV1 = Schema.Struct({
   platform: RemotePushPlatform,
   token: RemotePushToken,
   hostKeyFingerprint: RemotePushHostKeyFingerprint,
-}).annotations(strict);
+});
 export type RemotePushCapabilityRequestV1 = typeof RemotePushCapabilityRequestV1.Type;
 
 /**
@@ -370,21 +370,21 @@ export type RemotePushCapabilityRequestV1 = typeof RemotePushCapabilityRequestV1
  * sealed under a key only the issuing gateway holds. The phone registers it
  * with the host in place of the platform token.
  */
-export const RemotePushCapability = Schema.String.pipe(
-  Schema.pattern(/^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{40,4000}$/),
+export const RemotePushCapability = Schema.String.check(
+  Schema.isPattern(/^v1\.[a-z0-9-]{1,32}\.[A-Za-z0-9_-]{40,4000}$/),
 );
 export type RemotePushCapability = typeof RemotePushCapability.Type;
 
 export const RemotePushCapabilityResponseV1 = Schema.Struct({
   capability: RemotePushCapability,
-}).annotations(strict);
+});
 export type RemotePushCapabilityResponseV1 = typeof RemotePushCapabilityResponseV1.Type;
 
 /** Host to gateway: one sealed envelope for the destination the capability names. */
 export const RemotePushDeliveryRequestV1 = Schema.Struct({
   capability: RemotePushCapability,
   envelope: RemotePushEnvelopeV1,
-}).annotations(strict);
+});
 export type RemotePushDeliveryRequestV1 = typeof RemotePushDeliveryRequestV1.Type;
 
 /**
@@ -404,7 +404,7 @@ export const REMOTE_PUSH_DELIVERY_HEADERS = {
 export const REMOTE_PUSH_DELIVERY_SKEW_MS = 300_000;
 
 /** Why a gateway refused a request; never a platform's own message. */
-export const RemotePushGatewayRefusalCode = Schema.Literal(
+export const RemotePushGatewayRefusalCode = Schema.Literals([
   "malformed",
   "capability-not-issued-here",
   "host-key-mismatch",
@@ -413,61 +413,85 @@ export const RemotePushGatewayRefusalCode = Schema.Literal(
   "destination-gone",
   "platform-failed",
   "unavailable",
-);
+]);
 export type RemotePushGatewayRefusalCode = typeof RemotePushGatewayRefusalCode.Type;
 
 export const RemotePushGatewayRefusalV1 = Schema.Struct({
   code: RemotePushGatewayRefusalCode,
-}).annotations(strict);
+});
 export type RemotePushGatewayRefusalV1 = typeof RemotePushGatewayRefusalV1.Type;
 
 export const decodeRemotePushTokenRegistrationV1 = Schema.decodeUnknownSync(
   RemotePushTokenRegistrationV1,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeRemotePushTokenClearV1 = Schema.decodeUnknownSync(RemotePushTokenClearV1);
-export const decodeRemotePushTokenReceiptV1 = Schema.decodeUnknownSync(RemotePushTokenReceiptV1);
+export const decodeRemotePushTokenClearV1 = Schema.decodeUnknownSync(
+  RemotePushTokenClearV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemotePushTokenReceiptV1 = Schema.decodeUnknownSync(
+  RemotePushTokenReceiptV1,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRemotePushRegistrationRecordedV1 = Schema.decodeUnknownSync(
   RemotePushRegistrationRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushRegistrationClearedV1 = Schema.decodeUnknownSync(
   RemotePushRegistrationClearedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushNotificationPayloadV1 = Schema.decodeUnknownSync(
   RemotePushNotificationPayloadV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushDeviceJoinedPayloadV1 = Schema.decodeUnknownSync(
   RemotePushDeviceJoinedPayloadV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushDeviceJoinedDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushDeviceJoinedDeliveryRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushMoveWaitingPayloadV1 = Schema.decodeUnknownSync(
   RemotePushMoveWaitingPayloadV1,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeRemotePushEnvelopeV1 = Schema.decodeUnknownSync(RemotePushEnvelopeV1);
+export const decodeRemotePushEnvelopeV1 = Schema.decodeUnknownSync(
+  RemotePushEnvelopeV1,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRemotePushMoveWaitingDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushMoveWaitingDeliveryRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushDeliveryRecordedV1 = Schema.decodeUnknownSync(
   RemotePushDeliveryRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushGatewaySettingsV1 = Schema.decodeUnknownSync(
   RemotePushGatewaySettingsV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeSetRemotePushGatewaySettingsV1 = Schema.decodeUnknownSync(
   SetRemotePushGatewaySettingsV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushCapabilityRequestV1 = Schema.decodeUnknownSync(
   RemotePushCapabilityRequestV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushCapabilityResponseV1 = Schema.decodeUnknownSync(
   RemotePushCapabilityResponseV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushDeliveryRequestV1 = Schema.decodeUnknownSync(
   RemotePushDeliveryRequestV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePushGatewayRefusalV1 = Schema.decodeUnknownSync(
   RemotePushGatewayRefusalV1,
+  STRICT_DECODE_OPTIONS,
 );
 
 // Re-export DeviceId usage for registration stores (host-scoped).

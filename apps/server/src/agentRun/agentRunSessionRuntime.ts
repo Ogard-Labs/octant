@@ -1952,14 +1952,14 @@ function runSessionTurn(
         mode: input.run.routingReceipt.mode,
       })
       .pipe(
-        Effect.timeoutFail({
+        Effect.timeoutOrElse({
           duration: "2 minutes",
-          onTimeout: () =>
-            ({
+          orElse: () =>
+            Effect.fail({
               category: "provider-failed",
               message:
                 "The child provider did not become ready within 2 minutes. Retry after checking the provider.",
-            }) satisfies ProviderFailure,
+            } satisfies ProviderFailure),
         }),
       );
     state.acquired = true;
@@ -2012,14 +2012,14 @@ function runSessionTurn(
             tools: input.appManagedTools?.definitions ?? [],
           });
     const handle = yield* startup.pipe(
-      Effect.timeoutFail({
+      Effect.timeoutOrElse({
         duration: "2 minutes",
-        onTimeout: () =>
-          ({
+        orElse: () =>
+          Effect.fail({
             category: "provider-failed",
             message:
               "The child provider did not start within 2 minutes. Retry after checking the provider.",
-          }) satisfies ProviderFailure,
+          } satisfies ProviderFailure),
       }),
     );
     if (
@@ -2119,7 +2119,7 @@ function shutdownProviderSession(
 ): Effect.Effect<void> {
   const attempt = Effect.gen(function* () {
     if (state.outcome === undefined) {
-      yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+      yield* connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void));
     }
     yield* connection.stop(input.sessionId);
   }).pipe(
@@ -2129,12 +2129,14 @@ function shutdownProviderSession(
     // turn was already interrupted, so re-opening the region here abandons the
     // wedged call rather than the teardown.
     Effect.interruptible,
-    Effect.timeoutFail({
+    Effect.timeoutOrElse({
       duration: input.shutdownTimeoutMs,
-      onTimeout: (): ProviderFailure => ({
-        category: "unavailable",
-        message: "The provider did not confirm the session shutdown before the teardown deadline.",
-      }),
+      orElse: () =>
+        Effect.fail<ProviderFailure>({
+          category: "unavailable",
+          message:
+            "The provider did not confirm the session shutdown before the teardown deadline.",
+        }),
     }),
   );
   const record = (): Effect.Effect<void> =>
@@ -2178,7 +2180,8 @@ function collectSessionEvents(
       const interactionFailure = yield* Deferred.make<never, ProviderFailure>();
       const forkInteraction = (effect: Effect.Effect<void, ProviderFailure>) =>
         Effect.forkScoped(
-          effect.pipe(Effect.catchAll((failure) => Deferred.fail(interactionFailure, failure))),
+          effect.pipe(Effect.catch((failure) => Deferred.fail(interactionFailure, failure))),
+          { startImmediately: true },
         );
       // A step's finish names only its call, so the name its start gave is kept.
       const toolNames = new Map<string, string>();
@@ -2294,6 +2297,16 @@ function collectSessionEvents(
             if (event.kind === "approval-request") {
               if (answeredApprovalRequestIds.has(event.requestId)) return;
               answeredApprovalRequestIds.add(event.requestId);
+              if (input.interactions?.approve === undefined) {
+                yield* connection.answerApproval({
+                  sessionId: input.sessionId,
+                  requestId: event.requestId,
+                  approved: false,
+                  ...(input.strict ? { scope: "once" as const } : {}),
+                });
+                return;
+              }
+              const approve = input.interactions.approve;
               yield* forkInteraction(
                 Effect.gen(function* () {
                   let interactionSignal: AbortSignal | undefined;
@@ -2303,7 +2316,7 @@ function collectSessionEvents(
                       const resumeDeadline = state.awaitPerson();
                       try {
                         return (
-                          (await input.interactions?.approve?.({
+                          (await approve({
                             run: input.run,
                             event,
                             call: connection.approvalCall?.({
@@ -2567,9 +2580,9 @@ function outcomeFromExit(
   exit: Exit.Exit<AgentRunSessionOutcome, ProviderFailure>,
 ): AgentRunSessionOutcome {
   if (Exit.isSuccess(exit)) return exit.value;
-  const failure = Cause.failureOption(exit.cause);
+  const failure = Cause.findErrorOption(exit.cause);
   if (Option.isSome(failure)) return { kind: "failed", failure: failure.value };
-  if (Cause.isInterruptedOnly(exit.cause)) return { kind: "cancelled" };
+  if (Cause.hasInterruptsOnly(exit.cause)) return { kind: "cancelled" };
   return {
     kind: "interrupted",
     reason: boundedReason(Cause.pretty(exit.cause)),

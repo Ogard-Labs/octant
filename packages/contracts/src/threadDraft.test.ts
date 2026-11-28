@@ -4,13 +4,15 @@ import { Schema } from "effect";
 
 describe("ThreadCreationContext", () => {
   it("decodes a minimal context with only mode", () => {
-    const result = Schema.decodeUnknownSync(ThreadCreationContext)({ mode: "chat" });
+    const result = Schema.decodeUnknownSync(ThreadCreationContext, { onExcessProperty: "error" })({
+      mode: "chat",
+    });
     expect(result.mode).toBe("chat");
     expect(result.projectId).toBeUndefined();
   });
 
   it("decodes a full context with project and provider", () => {
-    const result = Schema.decodeUnknownSync(ThreadCreationContext)({
+    const result = Schema.decodeUnknownSync(ThreadCreationContext, { onExcessProperty: "error" })({
       mode: "code",
       projectId: "20000000-0000-4000-8000-000000000001",
       providerInstanceId: "50000000-0000-4000-8000-000000000001",
@@ -24,7 +26,7 @@ describe("ThreadCreationContext", () => {
 
   it("rejects excess properties", () => {
     expect(() =>
-      Schema.decodeUnknownSync(ThreadCreationContext)({
+      Schema.decodeUnknownSync(ThreadCreationContext, { onExcessProperty: "error" })({
         mode: "chat",
         unexpected: true,
       }),
@@ -34,13 +36,15 @@ describe("ThreadCreationContext", () => {
 
 describe("NewThreadDraft", () => {
   it("decodes a minimal draft with only mode", () => {
-    const result = Schema.decodeUnknownSync(NewThreadDraft)({ mode: "work" });
+    const result = Schema.decodeUnknownSync(NewThreadDraft, { onExcessProperty: "error" })({
+      mode: "work",
+    });
     expect(result.mode).toBe("work");
     expect(result.promptText).toBeUndefined();
   });
 
   it("decodes a draft with prompt text", () => {
-    const result = Schema.decodeUnknownSync(NewThreadDraft)({
+    const result = Schema.decodeUnknownSync(NewThreadDraft, { onExcessProperty: "error" })({
       mode: "code",
       promptText: "Fix the login bug",
     });
@@ -49,7 +53,7 @@ describe("NewThreadDraft", () => {
 
   it("rejects prompt text exceeding the maximum length", () => {
     expect(() =>
-      Schema.decodeUnknownSync(NewThreadDraft)({
+      Schema.decodeUnknownSync(NewThreadDraft, { onExcessProperty: "error" })({
         mode: "chat",
         promptText: "x".repeat(100_001),
       }),

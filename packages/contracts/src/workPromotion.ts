@@ -1,4 +1,5 @@
 import { personDecides } from "./hostAnswer";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
@@ -6,8 +7,8 @@ import { PermissionPersistence, ProviderInstanceId, ProviderModelId } from "./pr
 import { WorkArtifactRef } from "./workArtifacts";
 import { CodeDeliveryTarget, CodeThreadId } from "./code";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Branded identity for a Work-to-Code promotion proposal. One proposal
@@ -25,9 +26,12 @@ export type WorkPromotionProposalId = typeof WorkPromotionProposalId.Type;
  * through the summary. Mirrors `WorkSafeDiagnostic` so the renderer reuses
  * one sanitized-text presentation across Work surfaces.
  */
-const WorkPromotionSummaryText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(8_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
+const WorkPromotionSummaryText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(8_000),
+  Schema.makeFilter(
+    (value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value),
+  ),
 );
 
 /**
@@ -40,13 +44,16 @@ const WorkPromotionSummaryText = Schema.NonEmptyTrimmedString.pipe(
  */
 export const WorkPromotionContextSelection = Schema.Struct({
   summary: WorkPromotionSummaryText,
-  artifactRefs: Schema.Array(WorkArtifactRef).pipe(Schema.maxItems(32)),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((selection) => selection.artifactRefs.length > 0, { jsonSchema: {} }));
+  artifactRefs: Schema.Array(WorkArtifactRef).check(Schema.isMaxLength(32)),
+}).check(Schema.makeFilter((selection) => selection.artifactRefs.length > 0, { jsonSchema: {} }));
 export type WorkPromotionContextSelection = typeof WorkPromotionContextSelection.Type;
 
-export const WorkPromotionStatus = Schema.Literal("proposed", "approved", "dismissed", "expired");
+export const WorkPromotionStatus = Schema.Literals([
+  "proposed",
+  "approved",
+  "dismissed",
+  "expired",
+]);
 export type WorkPromotionStatus = typeof WorkPromotionStatus.Type;
 
 /**
@@ -84,9 +91,8 @@ export const WorkPromotionProposal = Schema.Struct({
   linkedCodeThreadId: Schema.optional(CodeThreadId),
   version: AggregateVersion,
 })
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (proposal) => {
         if (proposal.originProjectId === proposal.targetCodeProjectId) return false;
         if (proposal.status === "proposed") {
@@ -98,7 +104,7 @@ export const WorkPromotionProposal = Schema.Struct({
       { jsonSchema: {} },
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type WorkPromotionProposal = typeof WorkPromotionProposal.Type;
 
 const ProposalTransitionFields = {
@@ -118,7 +124,7 @@ const ProposalTransitionFields = {
  * authenticated actor and clock so callers cannot forge audit identity or
  * backdate transitions.
  */
-export const WorkPromotionCommand = Schema.Union(
+export const WorkPromotionCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("propose-work-promotion"),
     proposalId: WorkPromotionProposalId,
@@ -126,62 +132,58 @@ export const WorkPromotionCommand = Schema.Union(
     targetCodeProjectId: ProjectId,
     selectedContext: WorkPromotionContextSelection,
     proposedCodePermissionPersistence: PermissionPersistence,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("approve-work-promotion"),
     ...ProposalTransitionFields,
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     deliveryTarget: CodeDeliveryTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("dismiss-work-promotion"),
     ...ProposalTransitionFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("expire-work-promotion"),
     ...ProposalTransitionFields,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkPromotionCommand = typeof WorkPromotionCommand.Type;
 
-export const WorkPromotionCommandResult = Schema.Union(
+export const WorkPromotionCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("work-promotion-proposed"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((result) => result.proposal.status === "proposed", { jsonSchema: {} })),
+  }).check(
+    Schema.makeFilter((result) => result.proposal.status === "proposed", { jsonSchema: {} }),
+  ),
   Schema.Struct({
     kind: Schema.Literal("work-promotion-approved"),
     proposal: WorkPromotionProposal,
     linkedCodeThreadId: CodeThreadId,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (result) =>
-          result.proposal.status === "approved" &&
-          result.proposal.linkedCodeThreadId === result.linkedCodeThreadId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (result) =>
+        result.proposal.status === "approved" &&
+        result.proposal.linkedCodeThreadId === result.linkedCodeThreadId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("work-promotion-dismissed"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((result) => result.proposal.status === "dismissed", { jsonSchema: {} })),
+  }).check(
+    Schema.makeFilter((result) => result.proposal.status === "dismissed", { jsonSchema: {} }),
+  ),
   Schema.Struct({
     kind: Schema.Literal("work-promotion-expired"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((result) => result.proposal.status === "expired", { jsonSchema: {} })),
-);
+  }).check(Schema.makeFilter((result) => result.proposal.status === "expired", { jsonSchema: {} })),
+]);
 export type WorkPromotionCommandResult = typeof WorkPromotionCommandResult.Type;
 
-export const WorkPromotionFailureCode = Schema.Literal(
+export const WorkPromotionFailureCode = Schema.Literals([
   "invalid",
   "unauthorized",
   "stale",
@@ -190,14 +192,14 @@ export const WorkPromotionFailureCode = Schema.Literal(
   "conflict",
   "unavailable",
   "interrupted",
-);
+]);
 export type WorkPromotionFailureCode = typeof WorkPromotionFailureCode.Type;
 
 export const WorkPromotionFailure = Schema.Struct({
   code: WorkPromotionFailureCode,
-  message: Schema.NonEmptyTrimmedString,
-  retryAfterMs: Schema.optional(Schema.Int.pipe(Schema.positive())),
-}).annotations(strict);
+  message: NonEmptyTrimmedString,
+  retryAfterMs: Schema.optional(PositiveInt),
+});
 export type WorkPromotionFailure = typeof WorkPromotionFailure.Type;
 
 /**
@@ -207,14 +209,14 @@ export type WorkPromotionFailure = typeof WorkPromotionFailure.Type;
  */
 export const WorkPromotionList = Schema.Struct({
   proposals: Schema.Array(WorkPromotionProposal),
-  artifactRefs: Schema.Array(WorkArtifactRef).pipe(Schema.maxItems(32)),
+  artifactRefs: Schema.Array(WorkArtifactRef).check(Schema.isMaxLength(32)),
   deliveryTargets: Schema.Array(
     Schema.Struct({
       projectId: ProjectId,
       deliveryTarget: CodeDeliveryTarget,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(64)),
+});
 export type WorkPromotionList = typeof WorkPromotionList.Type;
 
 /**
@@ -228,57 +230,69 @@ export type WorkPromotionList = typeof WorkPromotionList.Type;
  * `linkedCodeThreadId` and require `status === "approved"`. Projections replay
  * frames to rebuild proposal state idempotently.
  */
-export const WorkPromotionFrame = Schema.Union(
+export const WorkPromotionFrame = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("proposed"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.proposal.status === "proposed", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((frame) => frame.proposal.status === "proposed", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("approved"),
     proposal: WorkPromotionProposal,
     linkedCodeThreadId: CodeThreadId,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (frame) =>
-          frame.proposal.status === "approved" &&
-          frame.proposal.linkedCodeThreadId === frame.linkedCodeThreadId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (frame) =>
+        frame.proposal.status === "approved" &&
+        frame.proposal.linkedCodeThreadId === frame.linkedCodeThreadId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("dismissed"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.proposal.status === "dismissed", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((frame) => frame.proposal.status === "dismissed", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("expired"),
     proposal: WorkPromotionProposal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.proposal.status === "expired", { jsonSchema: {} })),
-);
+  }).check(Schema.makeFilter((frame) => frame.proposal.status === "expired", { jsonSchema: {} })),
+]);
 export type WorkPromotionFrame = typeof WorkPromotionFrame.Type;
 
 export const WORK_PROMOTION_EVENT_NAMES = ["work.promotion-recorded@1"] as const;
 export type WorkPromotionEventName = (typeof WORK_PROMOTION_EVENT_NAMES)[number];
 
-export const decodeWorkPromotionProposalId = Schema.decodeUnknownSync(WorkPromotionProposalId);
-export const decodeWorkPromotionProposal = Schema.decodeUnknownSync(WorkPromotionProposal);
+export const decodeWorkPromotionProposalId = Schema.decodeUnknownSync(
+  WorkPromotionProposalId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkPromotionProposal = Schema.decodeUnknownSync(
+  WorkPromotionProposal,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkPromotionContextSelection = Schema.decodeUnknownSync(
   WorkPromotionContextSelection,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkPromotionCommand = Schema.decodeUnknownSync(WorkPromotionCommand);
+export const decodeWorkPromotionCommand = Schema.decodeUnknownSync(
+  WorkPromotionCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkPromotionCommandResult = Schema.decodeUnknownSync(
   WorkPromotionCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkPromotionFailure = Schema.decodeUnknownSync(WorkPromotionFailure);
-export const decodeWorkPromotionList = Schema.decodeUnknownSync(WorkPromotionList);
-export const decodeWorkPromotionFrame = Schema.decodeUnknownSync(WorkPromotionFrame);
+export const decodeWorkPromotionFailure = Schema.decodeUnknownSync(
+  WorkPromotionFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkPromotionList = Schema.decodeUnknownSync(
+  WorkPromotionList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkPromotionFrame = Schema.decodeUnknownSync(
+  WorkPromotionFrame,
+  STRICT_DECODE_OPTIONS,
+);
 
 export function decodeWorkPromotionEventPayload(
   eventName: WorkPromotionEventName | string,

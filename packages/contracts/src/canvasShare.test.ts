@@ -30,8 +30,7 @@ function fieldPathsByKind(union: SchemaAST.AST): ReadonlyMap<string, ReadonlySet
 }
 
 function blockKind(ast: SchemaAST.AST): string {
-  if (ast._tag === "Refinement") return blockKind(ast.from);
-  if (ast._tag !== "TypeLiteral") throw new Error(`A block schema is a struct, not ${ast._tag}.`);
+  if (ast._tag !== "Objects") throw new Error(`A block schema is a struct, not ${ast._tag}.`);
   const kind = ast.propertySignatures.find((signature) => signature.name === "kind");
   if (kind === undefined || kind.type._tag !== "Literal") {
     throw new Error("A block schema names its kind as a literal.");
@@ -41,19 +40,15 @@ function blockKind(ast: SchemaAST.AST): string {
 
 function collectFieldPaths(ast: SchemaAST.AST, prefix: string, paths: Set<string>): void {
   switch (ast._tag) {
-    case "Refinement":
-      return collectFieldPaths(ast.from, prefix, paths);
-    case "Transformation":
-      return collectFieldPaths(ast.to, prefix, paths);
     case "Union":
       for (const member of ast.types) collectFieldPaths(member, prefix, paths);
       return;
-    case "TupleType":
+    case "Arrays":
       for (const element of [...ast.elements, ...ast.rest]) {
-        collectFieldPaths(element.type, `${prefix}[]`, paths);
+        collectFieldPaths(element, `${prefix}[]`, paths);
       }
       return;
-    case "TypeLiteral":
+    case "Objects":
       for (const signature of ast.propertySignatures) {
         const path = prefix === "" ? String(signature.name) : `${prefix}.${String(signature.name)}`;
         paths.add(path);

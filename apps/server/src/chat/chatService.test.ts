@@ -6035,7 +6035,7 @@ describe("ChatService", () => {
           Effect.succeed({
             // A provider streaming as fast as it can: every pull is answered at once.
             subscribe: Effect.succeed(
-              Stream.repeatEffect(
+              Stream.fromEffectRepeat(
                 Effect.sync(() => {
                   streamed += 1;
                   return { kind: "text-delta", sessionId, text: "x" } as never;

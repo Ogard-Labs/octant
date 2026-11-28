@@ -200,13 +200,13 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
       { timeoutMs: limits.callTimeoutMs },
     );
     const decoded = decodeOutsideDriverInitializeResult(await settled);
-    if (decoded._tag === "Left") throw stopped();
-    if (!HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS.includes(decoded.right.protocolVersion)) {
+    if (decoded._tag === "Failure") throw stopped();
+    if (!HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS.includes(decoded.success.protocolVersion)) {
       link.stop(outsideDriverNoAgreedProtocol());
       throw link.stopped ?? outsideDriverNoAgreedProtocol();
     }
     // Cloud sessions belong to the harness endpoint family alone.
-    if (decoded.right.cloudSessions !== undefined) throw stopped();
+    if (decoded.success.cloudSessions !== undefined) throw stopped();
   };
   const ensureInitialized = async () => {
     if (link.stopped !== undefined) throw link.stopped;
@@ -359,8 +359,8 @@ export function makeOutsideImageGenerationProxy(options: OutsideImageGenerationP
         throw error;
       }
       const decoded = decodeOutsideDriverImageGenerateResult(settled);
-      if (decoded._tag === "Left") throw stopped();
-      const result = decoded.right;
+      if (decoded._tag === "Failure") throw stopped();
+      const result = decoded.success;
       if (result.status === "refused") return { status: "refused", safetyRefusal: SAFETY_REFUSAL };
       if (result.images.length > variantCount) throw tooManyImages();
       const images: Array<ImageAdapterImage> = [];

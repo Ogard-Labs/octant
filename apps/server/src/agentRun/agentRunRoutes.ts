@@ -1409,7 +1409,7 @@ async function handleObservedStop(
   const outcome = await Effect.runPromise(
     stopChild({ sessionId: found.live.sessionId, childAgentId: found.childAgentId }).pipe(
       Effect.map((value) => ({ kind: "settled" as const, value })),
-      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+      Effect.catch(() => Effect.succeed({ kind: "failed" as const })),
     ),
   );
   if (outcome.kind === "failed") {
@@ -1447,7 +1447,7 @@ async function handleObservedBackground(
   const outcome = await Effect.runPromise(
     backgroundChild({ sessionId: found.live.sessionId, childAgentId: found.childAgentId }).pipe(
       Effect.map((value) => ({ kind: "settled" as const, value })),
-      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+      Effect.catch(() => Effect.succeed({ kind: "failed" as const })),
     ),
   );
   if (outcome.kind === "failed") {
@@ -1493,7 +1493,7 @@ async function handleObservedMessage(
       message: messageRequest.message.trim(),
     }).pipe(
       Effect.map((value) => ({ kind: "settled" as const, value })),
-      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+      Effect.catch(() => Effect.succeed({ kind: "failed" as const })),
     ),
   );
   if (outcome.kind === "failed") {

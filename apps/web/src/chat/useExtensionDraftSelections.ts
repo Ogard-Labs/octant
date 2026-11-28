@@ -216,7 +216,7 @@ export function useExtensionDraftSelections(options: {
 function decodeScopeUuid(value: string | null): string | null {
   if (value === null) return null;
   try {
-    return Schema.decodeUnknownSync(Schema.UUID)(String(value));
+    return Schema.decodeUnknownSync(Schema.String.check(Schema.isGUID()))(String(value));
   } catch {
     return null;
   }

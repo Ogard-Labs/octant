@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
-import { Effect, Either, Fiber } from "effect";
+import { Effect, Result, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   WINDOWS_KEPT_SANDBOX_REFUSAL,
@@ -151,10 +151,10 @@ async function waitForPids(root: string, count: number): Promise<number[]> {
 }
 
 async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 beforeAll(() => {
@@ -2538,7 +2538,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=ready '${fakeCliPath}' "$@"
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
+          const fiber = yield* Effect.forkChild(
             makePort({ startupTimeoutMs: 10_000 }).start({ binaryPath: fakeCliPath, cwd: root }),
           );
           yield* Effect.promise(() => waitForPids(root, 2));
@@ -2554,7 +2554,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=ready '${fakeCliPath}' "$@"
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
+          const fiber = yield* Effect.forkChild(
             makePort({ startupTimeoutMs: 10_000, shutdownTimeoutMs: 100 }).start({
               binaryPath: fakeCliPath,
               cwd: root,

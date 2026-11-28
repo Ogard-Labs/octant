@@ -155,7 +155,9 @@ describe("installed Pi runtime", () => {
                 modelId,
                 executionPolicy: "full-access",
               });
-              const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
+              const completion = yield* Effect.forkChild(
+                collectTerminal(yield* connection.subscribe),
+              );
               yield* connection.send({
                 sessionId,
                 prompt: `Remember this exact marker for the next message: ${marker}. Reply only OK. Do not use tools.`,
@@ -185,7 +187,9 @@ describe("installed Pi runtime", () => {
                 executionPolicy: "full-access",
                 tools: [],
               });
-              const completion = yield* Effect.fork(collectTerminal(yield* connection.subscribe));
+              const completion = yield* Effect.forkChild(
+                collectTerminal(yield* connection.subscribe),
+              );
               yield* connection.send({
                 sessionId,
                 prompt:
@@ -237,7 +241,7 @@ describe("installed Pi runtime", () => {
                   });
                 }),
               );
-              const completion = yield* Effect.fork(collectTerminal(stream));
+              const completion = yield* Effect.forkChild(collectTerminal(stream));
               yield* connection.send({
                 sessionId,
                 prompt:
@@ -286,7 +290,7 @@ describe("installed Pi runtime", () => {
                   });
                 }),
               );
-              const completion = yield* Effect.fork(collectTerminal(stream));
+              const completion = yield* Effect.forkChild(collectTerminal(stream));
               yield* connection.send({
                 sessionId,
                 prompt:

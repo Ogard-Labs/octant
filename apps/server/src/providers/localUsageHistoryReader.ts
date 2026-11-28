@@ -693,18 +693,18 @@ const CursorSnapshot = Schema.Struct({
 });
 const CheckpointSnapshot = Schema.Struct({
   version: Schema.Literal(1),
-  offsets: Schema.Array(Schema.Tuple(Schema.String, CursorSnapshot)),
-  identities: Schema.Array(Schema.Tuple(Schema.String, CursorSnapshot)),
+  offsets: Schema.Array(Schema.Tuple([Schema.String, CursorSnapshot])),
+  identities: Schema.Array(Schema.Tuple([Schema.String, CursorSnapshot])),
   cursor: Schema.optional(Schema.String),
   seen: Schema.Array(Schema.String),
   qualities: Schema.Array(
-    Schema.Tuple(
+    Schema.Tuple([
       Schema.String,
       Schema.Struct({ omittedRecordCount: Schema.Number, failed: Schema.Boolean }),
-    ),
+    ]),
   ),
   records: Schema.Array(Schema.Unknown),
-  owners: Schema.Array(Schema.Tuple(Schema.String, Schema.Array(Schema.String))),
+  owners: Schema.Array(Schema.Tuple([Schema.String, Schema.Array(Schema.String)])),
   truncated: Schema.Boolean,
   parser: Schema.optional(Schema.String),
 });

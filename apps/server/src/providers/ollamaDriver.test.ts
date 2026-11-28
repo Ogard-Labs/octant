@@ -174,7 +174,7 @@ describe("Ollama provider driver", () => {
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     expect(handle.resumeCursor).toEqual({ driverKind: "ollama", value: sessionId });
-    const first = terminal(Stream.unwrapScoped(connection.subscribe));
+    const first = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
@@ -204,7 +204,7 @@ describe("Ollama provider driver", () => {
         executionPolicy: "plan",
       }),
     );
-    const second = terminal(Stream.unwrapScoped(restartedConnection.subscribe));
+    const second = terminal(Stream.unwrap(restartedConnection.subscribe));
     await Effect.runPromise(
       restartedConnection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
@@ -253,7 +253,7 @@ describe("Ollama provider driver", () => {
       },
       { prompt: "again", attachments: [] },
     ]) {
-      const events = terminal(Stream.unwrapScoped(connection.subscribe));
+      const events = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(connection.send({ sessionId, ...turn, tools: [] }));
       expect((await events).at(-1)?.kind).toBe("completed");
     }
@@ -298,7 +298,7 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const events = terminal(Stream.unwrapScoped(connection.subscribe));
+    const events = terminal(Stream.unwrap(connection.subscribe));
     // Ollama reads the photo as an image embedding; counting its bytes as
     // text tokens read as over a million and refused the turn.
     await Effect.runPromise(
@@ -359,9 +359,9 @@ describe("Ollama provider driver", () => {
       await Effect.runPromise(
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
       );
-      const events = terminal(Stream.unwrapScoped(connection.subscribe));
+      const events = terminal(Stream.unwrap(connection.subscribe));
       const sent = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           connection.send({
             sessionId,
             prompt: "x".repeat(promptLength),
@@ -370,7 +370,7 @@ describe("Ollama provider driver", () => {
           }),
         ),
       );
-      const outcome = sent._tag === "Left" ? sent.left.message : (await events).at(-1)?.kind;
+      const outcome = sent._tag === "Failure" ? sent.failure.message : (await events).at(-1)?.kind;
       await Effect.runPromise(connection.stop(sessionId));
       await Effect.runPromise(Scope.close(scope, Exit.void));
       return { outcome, numCtx: bodies.map((body) => record(body.options)?.num_ctx) };
@@ -455,7 +455,7 @@ describe("Ollama provider driver", () => {
       );
       const events = Effect.runPromise(
         Stream.runCollect(
-          Stream.unwrapScoped(connection.subscribe).pipe(
+          Stream.unwrap(connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === turn.id),
             Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),
           ),
@@ -485,17 +485,18 @@ describe("Ollama provider driver", () => {
         .acquire({ instanceId, projectRoot: root, mode: "code" })
         .pipe(Effect.provideService(Scope.Scope, scope)),
     );
-    await expect(
-      Effect.runPromise(
+    const stale = await Effect.runPromise(
+      Effect.result(
         connection.resume({
           sessionId,
           resumeCursor: { driverKind: "ollama", value: "unknown" },
           executionPolicy: "plan",
         }),
       ),
-    ).rejects.toThrow(/stale-resume/);
+    );
+    expect(stale).toMatchObject({ _tag: "Failure", failure: { category: "stale-resume" } });
     await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy: "plan" }));
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "wait", attachments: [], tools: [] }),
     );
@@ -562,10 +563,9 @@ describe("Ollama Verify tools", () => {
       throw new TypeError("connection refused");
     });
     const fixture = driver(fetch);
-    await expect(
-      Effect.runPromise(
-        Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId })),
-      ),
-    ).rejects.toThrow(/unavailable/);
+    const unreachable = await Effect.runPromise(
+      Effect.result(Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId }))),
+    );
+    expect(unreachable).toMatchObject({ _tag: "Failure", failure: { category: "unavailable" } });
   });
 });

@@ -1,21 +1,20 @@
-import { Schema } from "effect";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
+import { Effect, Schema, SchemaTransformation } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
 const StoredComputerUseSettings = Schema.Struct({
   setupPending: Schema.optional(Schema.Boolean),
-  enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   automaticUpdates: Schema.optional(Schema.Boolean),
   /** Written only when the person sets the switch, so their choice outlives a default change. */
   automaticUpdatesChosen: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 
 const DecodedComputerUseSettings = Schema.Struct({
   setupPending: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
   automaticUpdates: Schema.Boolean,
   automaticUpdatesChosen: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 
 /**
  * The driver updates itself unless the person turned that off (maintainer
@@ -24,17 +23,24 @@ const DecodedComputerUseSettings = Schema.Struct({
  * old default was saved with every settings write; only a recorded choice
  * keeps updates off.
  */
-export const ComputerUseSettings = Schema.transform(
-  StoredComputerUseSettings,
-  DecodedComputerUseSettings,
-  {
-    strict: true,
-    decode: ({ automaticUpdates, automaticUpdatesChosen, ...rest }) =>
-      automaticUpdatesChosen === true
-        ? { ...rest, automaticUpdates: automaticUpdates ?? true, automaticUpdatesChosen }
-        : { ...rest, automaticUpdates: true },
-    encode: (settings) => settings,
-  },
+export const ComputerUseSettings = StoredComputerUseSettings.pipe(
+  Schema.decodeTo(
+    DecodedComputerUseSettings,
+    SchemaTransformation.transform({
+      decode: ({
+        automaticUpdates,
+        automaticUpdatesChosen,
+        ...rest
+      }): typeof DecodedComputerUseSettings.Type =>
+        automaticUpdatesChosen === true
+          ? { ...rest, automaticUpdates: automaticUpdates ?? true, automaticUpdatesChosen }
+          : { ...rest, automaticUpdates: true },
+      encode: (settings) => settings,
+    }),
+  ),
 );
 export type ComputerUseSettings = typeof ComputerUseSettings.Type;
-export const decodeComputerUseSettings = Schema.decodeUnknownSync(ComputerUseSettings);
+export const decodeComputerUseSettings = Schema.decodeUnknownSync(
+  ComputerUseSettings,
+  STRICT_DECODE_OPTIONS,
+);

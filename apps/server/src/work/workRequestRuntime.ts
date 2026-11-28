@@ -471,7 +471,7 @@ export class WorkRequestRuntime {
     } catch {
       return Effect.void;
     }
-    return connection.interrupt(sessionId).pipe(Effect.catchAll(() => Effect.void));
+    return connection.interrupt(sessionId).pipe(Effect.catch(() => Effect.void));
   }
 
   #forgetOwnerRequests(sessionId: ProviderSessionId): void {

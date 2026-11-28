@@ -6,10 +6,8 @@ import {
 } from "./authoredPackageManifest";
 
 export const CANVAS_EXPORT_PACKAGE_DOCUMENT_PATH = "octant-canvas-export.json";
-const shape = Schema.Struct({ manifest: AuthoredPackageManifest }).annotations({
-  parseOptions: { onExcessProperty: "error" as const },
-});
-const decodeShape = Schema.decodeUnknownEither(shape);
+const shape = Schema.Struct({ manifest: AuthoredPackageManifest });
+const decodeShape = Schema.decodeUnknownResult(shape, { onExcessProperty: "error" });
 export type CanvasExportPackageRefusalReason =
   | "document-invalid"
   | "host-assigned-field"
@@ -28,8 +26,8 @@ export function readCanvasExportPackageDocument(
   | { readonly status: "refused"; readonly reason: CanvasExportPackageRefusalReason } {
   if (writesHostAssignedField(value)) return { status: "refused", reason: "host-assigned-field" };
   const decoded = decodeShape(value);
-  if (decoded._tag === "Left") return { status: "refused", reason: "document-invalid" };
-  const manifest = decoded.right.manifest;
+  if (decoded._tag === "Failure") return { status: "refused", reason: "document-invalid" };
+  const manifest = decoded.success.manifest;
   const [component, ...others] = manifest.components;
   if (
     component?.kind !== "canvas-export-target" ||
@@ -56,5 +54,5 @@ export function readCanvasExportPackageDocument(
     !/\.m?js$/.test(component.entryPoint ?? "")
   )
     return { status: "refused", reason: "entry-point-invalid" };
-  return { status: "accepted", document: decoded.right };
+  return { status: "accepted", document: decoded.success };
 }

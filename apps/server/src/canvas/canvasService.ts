@@ -90,7 +90,7 @@ import {
   type CanvasActionCapability,
   type CanvasBoardRejectionCode,
 } from "@octant/domain";
-import { ParseResult } from "effect";
+import { Schema } from "effect";
 import type { CanvasProjection } from "./canvasProjection";
 import {
   CanvasEventStore,
@@ -897,7 +897,7 @@ export class CanvasService {
       if (isUnreadableMark(error)) {
         return { kind: "denied", message: UNREADABLE_MARK_MESSAGE };
       }
-      if (error instanceof CanvasEventStoreError || error instanceof ParseResult.ParseError) {
+      if (error instanceof CanvasEventStoreError || Schema.isSchemaError(error)) {
         return { kind: "denied", message: "The version could not be recorded here." };
       }
       throw error;

@@ -6,25 +6,25 @@ import { LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS } from "./linuxMediationBroker";
 
 export const MEDIATION_CONFIG_BYTES = 262_144;
 const path = Schema.String.pipe(
-  Schema.maxLength(8_192),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+  Schema.check(Schema.isMaxLength(8_192)),
+  Schema.check(Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0"))),
 );
-const text = Schema.String.pipe(Schema.filter((value) => !value.includes("\0")));
-const optionalPaths = Schema.optionalWith(Schema.Array(path), { exact: true });
-const optionalBoolean = Schema.optionalWith(Schema.Boolean, { exact: true });
-const port = Schema.Int.pipe(Schema.between(1, 65_535));
+const text = Schema.String.pipe(Schema.check(Schema.makeFilter((value) => !value.includes("\0"))));
+const optionalPaths = Schema.optionalKey(Schema.Array(path));
+const optionalBoolean = Schema.optionalKey(Schema.Boolean);
+const port = Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 65_535 })));
 const rootIdentity = Schema.Struct({
   path,
-  identity: Schema.String.pipe(Schema.pattern(/^\d+:\d+$/)),
+  identity: Schema.String.pipe(Schema.check(Schema.isPattern(/^\d+:\d+$/))),
 });
 const meta = {
-  ruleId: Schema.Union(BuiltInProtectedFilesId, Schema.Literal("added")),
+  ruleId: Schema.Union([BuiltInProtectedFilesId, Schema.Literal("added")]),
   label: Schema.String,
   channel: ProtectedFilesChannel,
   ownAccountExempt: Schema.Boolean,
 };
 
-export const LinuxMediationLaunchConfig: Schema.Schema<ProcessConfinementPrepareInput> =
+export const LinuxMediationLaunchConfig: Schema.Codec<ProcessConfinementPrepareInput> =
   Schema.Struct({
     sandboxProviderChannel: optionalBoolean,
     policyBlockHostServices: optionalBoolean,
@@ -34,23 +34,21 @@ export const LinuxMediationLaunchConfig: Schema.Schema<ProcessConfinementPrepare
     args: Schema.Array(text),
     boundRoot: path,
     temporaryDirectory: path,
-    networkEgress: Schema.Union(
-      Schema.Literal("none", "allow"),
+    networkEgress: Schema.Union([
+      Schema.Literals(["none", "allow"]),
       Schema.Struct({
         kind: Schema.Literal("proxied"),
-        endpoint: Schema.Union(
+        endpoint: Schema.Union([
           Schema.Struct({ kind: Schema.Literal("loopback"), port }),
           Schema.Struct({ kind: Schema.Literal("unix-socket"), path }),
-        ),
+        ]),
       }),
-    ),
-    recipientAdmission: Schema.optionalWith(Schema.Struct({ digest: text, identity: text }), {
-      exact: true,
-    }),
+    ]),
+    recipientAdmission: Schema.optionalKey(Schema.Struct({ digest: text, identity: text })),
     extraBoundRoots: optionalPaths,
     additionalWriteRoots: optionalPaths,
     readRoots: optionalPaths,
-    interpreterSearchPath: Schema.optionalWith(text, { exact: true }),
+    interpreterSearchPath: Schema.optionalKey(text),
     allowProcessExec: optionalBoolean,
     allowProcessFork: optionalBoolean,
     startsNestedCapsules: optionalBoolean,
@@ -63,53 +61,47 @@ export const LinuxMediationLaunchConfig: Schema.Schema<ProcessConfinementPrepare
     isolatedRoots: optionalPaths,
     privateHomeAllowPaths: optionalPaths,
     ownAccountPaths: optionalPaths,
-    ownAccountAccess: Schema.optionalWith(Schema.Literal("none"), {
-      exact: true,
-    }),
-    protectedFiles: Schema.optionalWith(Schema.Literal("provider-sign-ins"), {
-      exact: true,
-    }),
-    extraRules: Schema.optionalWith(Schema.Array(text), { exact: true }),
-    terminal: Schema.optionalWith(Schema.Struct({ shellStateDirectory: path }), { exact: true }),
-    inboundRelay: Schema.optionalWith(Schema.Struct({ socketPath: path, port }), { exact: true }),
-    loopbackRelayPorts: Schema.optionalWith(Schema.Array(port), {
-      exact: true,
-    }),
-    serverRelays: Schema.optionalWith(Schema.Array(Schema.Struct({ socketPath: path, port })), {
-      exact: true,
-    }),
+    ownAccountAccess: Schema.optionalKey(Schema.Literal("none")),
+    protectedFiles: Schema.optionalKey(Schema.Literal("provider-sign-ins")),
+    extraRules: Schema.optionalKey(Schema.Array(text)),
+    terminal: Schema.optionalKey(Schema.Struct({ shellStateDirectory: path })),
+    inboundRelay: Schema.optionalKey(Schema.Struct({ socketPath: path, port })),
+    loopbackRelayPorts: Schema.optionalKey(Schema.Array(port)),
+    serverRelays: Schema.optionalKey(Schema.Array(Schema.Struct({ socketPath: path, port }))),
   });
 
 export const LinuxMediationPolicyConfig = Schema.Struct({
   entries: Schema.Array(
-    Schema.Union(
+    Schema.Union([
       Schema.Struct({ ...meta, kind: Schema.Literal("path"), path }),
       Schema.Struct({
         ...meta,
         kind: Schema.Literal("names"),
         directory: path,
         name: Schema.String,
-        depth: Schema.Number.pipe(Schema.int(), Schema.between(0, 64)),
-        except: Schema.optionalWith(Schema.String, { exact: true }),
+        depth: Schema.Number.pipe(
+          Schema.check(Schema.isInt()),
+          Schema.check(Schema.isBetween({ minimum: 0, maximum: 64 })),
+        ),
+        except: Schema.optionalKey(Schema.String),
       }),
-    ),
-  ).pipe(Schema.maxItems(1_024)),
-  ownAccountPaths: Schema.Array(path).pipe(Schema.maxItems(1_024)),
+    ]),
+  ).pipe(Schema.check(Schema.isMaxLength(1_024))),
+  ownAccountPaths: Schema.Array(path).pipe(Schema.check(Schema.isMaxLength(1_024))),
   sshCompanionDirectory: Schema.optional(path),
-  readOnlyRoots: Schema.optionalWith(Schema.Array(path).pipe(Schema.maxItems(1_024)), {
-    exact: true,
-  }),
-  protectedPaths: Schema.optionalWith(
-    Schema.Array(Schema.Struct({ path, mode: Schema.Literal("read-only", "deny") })).pipe(
-      Schema.maxItems(1_024),
+  readOnlyRoots: Schema.optionalKey(
+    Schema.Array(path).pipe(Schema.check(Schema.isMaxLength(1_024))),
+  ),
+  protectedPaths: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ path, mode: Schema.Literals(["read-only", "deny"]) })).pipe(
+      Schema.check(Schema.isMaxLength(1_024)),
     ),
-    { exact: true },
   ),
 });
 
 export const LinuxMediationLaunchPinConfig = Schema.Struct({
   helper: path,
-  rootIdentities: Schema.Array(rootIdentity).pipe(Schema.maxItems(256)),
+  rootIdentities: Schema.Array(rootIdentity).pipe(Schema.check(Schema.isMaxLength(256))),
 });
 export type LinuxMediationLaunchPinConfig = typeof LinuxMediationLaunchPinConfig.Type;
 
@@ -125,21 +117,28 @@ export type LinuxMediationSecretGuardConfig = typeof LinuxMediationSecretGuardCo
 
 export const LinuxMediationWorkerConfig = Schema.Struct({
   nativeExecutable: path,
-  production: Schema.optionalWith(Schema.Boolean, { exact: true }),
-  maximumMs: Schema.Int.pipe(Schema.between(1, LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS)),
-  inheritStdio: Schema.optionalWith(Schema.Boolean, { exact: true }),
+  production: Schema.optionalKey(Schema.Boolean),
+  maximumMs: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS })),
+  ),
+  inheritStdio: Schema.optionalKey(Schema.Boolean),
   launch: LinuxMediationLaunchConfig,
-  launchPin: Schema.optionalWith(LinuxMediationLaunchPinConfig, { exact: true }),
+  launchPin: Schema.optionalKey(LinuxMediationLaunchPinConfig),
   receiptDirectory: path,
-  environment: Schema.Record({ key: text, value: text }),
+  environment: Schema.Record(text, text),
   secretGuard: LinuxMediationSecretGuardConfig,
   policy: LinuxMediationPolicyConfig,
 });
 export type LinuxMediationWorkerConfig = typeof LinuxMediationWorkerConfig.Type;
 
 export const LinuxMediationSupervisorConfig = Schema.Struct({
-  ownerId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  maximumMs: Schema.Int.pipe(Schema.between(1, LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS)),
+  ownerId: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(256)),
+  ),
+  maximumMs: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS })),
+  ),
   receiptDirectory: path,
   workerScript: path,
   nativeExecutable: path,

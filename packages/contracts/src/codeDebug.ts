@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeProjectFilePath, CodeThreadId } from "./code";
 import {
   ExtensionComponentId,
@@ -22,7 +23,6 @@ import type { ProviderToolDefinition } from "./providers";
  * resolved when the configuration is confirmed and at every start.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const textEncoder = new TextEncoder();
 
 export const MAX_CODE_DEBUG_CONFIGURATION_NAME_LENGTH = 128;
@@ -70,8 +70,8 @@ export const HOST_CREDENTIAL_ENVIRONMENT_KEYS = [
 const hostCredentialKeys: ReadonlySet<string> = new Set(HOST_CREDENTIAL_ENVIRONMENT_KEYS);
 
 const boundedBytes = (maximumBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) => !value.includes("\0") && textEncoder.encode(value).byteLength <= maximumBytes,
     ),
   );
@@ -81,9 +81,12 @@ const boundedBytes = (maximumBytes: number) =>
  * any case, are Octant's own and never reach a session.
  */
 export const CodeDebugEnvironmentKey = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/),
-  Schema.filter(
-    (key) => !key.toUpperCase().startsWith("OCTANT_") && !hostCredentialKeys.has(key.toUpperCase()),
+  Schema.check(
+    Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/),
+    Schema.makeFilter(
+      (key) =>
+        !key.toUpperCase().startsWith("OCTANT_") && !hostCredentialKeys.has(key.toUpperCase()),
+    ),
   ),
   Schema.brand("CodeDebugEnvironmentKey"),
 );
@@ -92,11 +95,12 @@ export type CodeDebugEnvironmentKey = typeof CodeDebugEnvironmentKey.Type;
 export const CodeDebugEnvironmentEntry = Schema.Struct({
   key: CodeDebugEnvironmentKey,
   value: boundedBytes(MAX_CODE_DEBUG_ENVIRONMENT_VALUE_BYTES),
-}).annotations(strict);
+});
 export type CodeDebugEnvironmentEntry = typeof CodeDebugEnvironmentEntry.Type;
 
-export const CodeDebugConfigurationName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_CODE_DEBUG_CONFIGURATION_NAME_LENGTH),
+export const CodeDebugConfigurationName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_CODE_DEBUG_CONFIGURATION_NAME_LENGTH),
 );
 export type CodeDebugConfigurationName = typeof CodeDebugConfigurationName.Type;
 
@@ -110,21 +114,23 @@ export const CodeDebugConfiguration = Schema.Struct({
   name: CodeDebugConfigurationName,
   adapter: ExtensionComponentQualifiedId,
   program: CodeProjectFilePath,
-  args: Schema.Array(boundedBytes(MAX_CODE_DEBUG_ARGUMENT_BYTES)).pipe(
-    Schema.maxItems(MAX_CODE_DEBUG_ARGUMENTS),
+  args: Schema.Array(boundedBytes(MAX_CODE_DEBUG_ARGUMENT_BYTES)).check(
+    Schema.isMaxLength(MAX_CODE_DEBUG_ARGUMENTS),
   ),
   cwd: Schema.optional(CodeProjectFilePath),
-  env: Schema.Array(CodeDebugEnvironmentEntry).pipe(
-    Schema.maxItems(MAX_CODE_DEBUG_ENVIRONMENT_ENTRIES),
-    Schema.filter((entries) => new Set(entries.map((entry) => entry.key)).size === entries.length),
+  env: Schema.Array(CodeDebugEnvironmentEntry).check(
+    Schema.isMaxLength(MAX_CODE_DEBUG_ENVIRONMENT_ENTRIES),
+    Schema.makeFilter(
+      (entries) => new Set(entries.map((entry) => entry.key)).size === entries.length,
+    ),
   ),
   stopOnEntry: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeDebugConfiguration = typeof CodeDebugConfiguration.Type;
 
 /** The SHA-256 digest of one confirmed configuration, which its approval covers. */
 export const CodeDebugConfigurationDigest = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
   Schema.brand("CodeDebugConfigurationDigest"),
 );
 export type CodeDebugConfigurationDigest = typeof CodeDebugConfigurationDigest.Type;
@@ -138,7 +144,7 @@ export type CodeDebugConfigurationDigest = typeof CodeDebugConfigurationDigest.T
  * unchanged; `confinement-unavailable` is last, so nothing launches until all
  * pass.
  */
-export const CodeDebugStartRefusalReason = Schema.Literal(
+export const CodeDebugStartRefusalReason = Schema.Literals([
   "no-reach",
   "thread-inactive",
   "checkout-mismatch",
@@ -151,7 +157,7 @@ export const CodeDebugStartRefusalReason = Schema.Literal(
   "approval-required",
   "configuration-invalid",
   "confinement-unavailable",
-);
+]);
 export type CodeDebugStartRefusalReason = typeof CodeDebugStartRefusalReason.Type;
 
 /**
@@ -163,7 +169,7 @@ export type CodeDebugStartRefusalReason = typeof CodeDebugStartRefusalReason.Typ
  * folder resolves outside the checkout. `invalid`: a mapped value is missing,
  * of the wrong type, or out of bounds.
  */
-export const CodeDebugImportUnmappableReason = Schema.Literal(
+export const CodeDebugImportUnmappableReason = Schema.Literals([
   "not-launch",
   "no-adapter",
   "adapter-ambiguous",
@@ -171,7 +177,7 @@ export const CodeDebugImportUnmappableReason = Schema.Literal(
   "needs-open-file",
   "outside-checkout",
   "invalid",
-);
+]);
 export type CodeDebugImportUnmappableReason = typeof CodeDebugImportUnmappableReason.Type;
 
 /**
@@ -180,25 +186,32 @@ export type CodeDebugImportUnmappableReason = typeof CodeDebugImportUnmappableRe
  * the entry holds that Octant does not use, so the person sees what the file
  * asked for and Octant will not do.
  */
-export const CodeDebugConfigurationProposal = Schema.Union(
+export const CodeDebugConfigurationProposal = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("proposed"),
     configuration: CodeDebugConfiguration,
     unusedFields: Schema.Array(
-      Schema.String.pipe(Schema.minLength(1), Schema.maxLength(MAX_CODE_DEBUG_UNUSED_FIELD_LENGTH)),
-    ).pipe(Schema.maxItems(MAX_CODE_DEBUG_UNUSED_FIELDS)),
-  }).annotations(strict),
+      Schema.String.check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(MAX_CODE_DEBUG_UNUSED_FIELD_LENGTH),
+      ),
+    ).check(Schema.isMaxLength(MAX_CODE_DEBUG_UNUSED_FIELDS)),
+  }),
   Schema.Struct({
     status: Schema.Literal("unmappable"),
     name: Schema.optional(CodeDebugConfigurationName),
     reason: CodeDebugImportUnmappableReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeDebugConfigurationProposal = typeof CodeDebugConfigurationProposal.Type;
 
-export const decodeCodeDebugConfiguration = Schema.decodeUnknownSync(CodeDebugConfiguration);
+export const decodeCodeDebugConfiguration = Schema.decodeUnknownSync(
+  CodeDebugConfiguration,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeDebugConfigurationProposal = Schema.decodeUnknownSync(
   CodeDebugConfigurationProposal,
+  STRICT_DECODE_OPTIONS,
 );
 
 /*
@@ -232,16 +245,19 @@ const MAX_LINE = 2_147_483_647;
 /** DAP references and identifiers are non-negative 32-bit integers. */
 const MAX_REFERENCE = 2_147_483_647;
 
-const boundedText = (maximum: number) => Schema.String.pipe(Schema.maxLength(maximum));
-const DebugReference = Schema.Int.pipe(Schema.between(0, MAX_REFERENCE));
-const DebugLine = Schema.Int.pipe(Schema.between(1, MAX_LINE));
+const boundedText = (maximum: number) => Schema.String.check(Schema.isMaxLength(maximum));
+const DebugReference = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_REFERENCE }));
+const DebugLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_LINE }));
 
 /** Where a confirmation applies: this checkout, or every checkout of the thread's Project. */
-export const CodeDebugApprovalScope = Schema.Literal("checkout", "project");
+export const CodeDebugApprovalScope = Schema.Literals(["checkout", "project"]);
 export type CodeDebugApprovalScope = typeof CodeDebugApprovalScope.Type;
 
 /** Names one debug session, and its egress launch, across the journal. */
-export const CodeDebugSessionId = Schema.UUID.pipe(Schema.brand("CodeDebugSessionId"));
+export const CodeDebugSessionId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CodeDebugSessionId"),
+);
 export type CodeDebugSessionId = typeof CodeDebugSessionId.Type;
 
 /**
@@ -250,7 +266,7 @@ export type CodeDebugSessionId = typeof CodeDebugSessionId.Type;
  * docs/design/language-services.md § Child processes.
  */
 export const CodeDebugChildId = Schema.Int.pipe(
-  Schema.between(1, MAX_CODE_DEBUG_CHILDREN_PER_SESSION),
+  Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_CODE_DEBUG_CHILDREN_PER_SESSION })),
   Schema.brand("CodeDebugChildId"),
 );
 export type CodeDebugChildId = typeof CodeDebugChildId.Type;
@@ -264,7 +280,7 @@ export type CodeDebugChildId = typeof CodeDebugChildId.Type;
  * stop: `host-shutdown` when it stops cleanly, `host-restarted` for a session
  * a previous run left open.
  */
-export const CodeDebugSessionEndReason = Schema.Literal(
+export const CodeDebugSessionEndReason = Schema.Literals([
   "stopped",
   "program-exited",
   "adapter-exited",
@@ -278,7 +294,7 @@ export const CodeDebugSessionEndReason = Schema.Literal(
   "project-erased",
   "host-shutdown",
   "host-restarted",
-);
+]);
 export type CodeDebugSessionEndReason = typeof CodeDebugSessionEndReason.Type;
 
 /**
@@ -304,8 +320,8 @@ export const CodeDebugAdapterPackageState = Schema.Struct({
   extensionId: ToolExtensionId,
   componentId: ExtensionComponentId,
   packageDigest: ExtensionContentDigest,
-  lifecycleVersion: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  lifecycleVersion: NonNegativeInt,
+});
 export type CodeDebugAdapterPackageState = typeof CodeDebugAdapterPackageState.Type;
 
 /**
@@ -315,19 +331,17 @@ export type CodeDebugAdapterPackageState = typeof CodeDebugAdapterPackageState.T
  * purge leaves it and a Project erase removes it.
  */
 export const CodeDebugConfigurationApproved = Schema.Struct({
-  approvalId: Schema.UUID,
+  approvalId: GuidString,
   projectId: ProjectId,
   approvalClass: Schema.Literal("shell-commands"),
   configurationDigest: CodeDebugConfigurationDigest,
   configuration: CodeDebugConfiguration,
   adapter: CodeDebugAdapterPackageState,
-  scope: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("checkout"), checkoutId: CodeCheckoutId }).annotations(
-      strict,
-    ),
-    Schema.Struct({ kind: Schema.Literal("project") }).annotations(strict),
-  ),
-}).annotations(strict);
+  scope: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("checkout"), checkoutId: CodeCheckoutId }),
+    Schema.Struct({ kind: Schema.Literal("project") }),
+  ]),
+});
 export type CodeDebugConfigurationApproved = typeof CodeDebugConfigurationApproved.Type;
 
 /** A session's lifecycle names its Project, thread, and configuration, and nothing it showed. */
@@ -337,8 +351,8 @@ export const CodeDebugSessionStarted = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   configurationDigest: CodeDebugConfigurationDigest,
-  network: Schema.Literal("proxied", "allow"),
-}).annotations(strict);
+  network: Schema.Literals(["proxied", "allow"]),
+});
 export type CodeDebugSessionStarted = typeof CodeDebugSessionStarted.Type;
 
 export const CodeDebugSessionEnded = Schema.Struct({
@@ -349,9 +363,11 @@ export const CodeDebugSessionEnded = Schema.Struct({
   endReason: CodeDebugSessionEndReason,
   /** How many child processes the session attached over its life, as a count only. */
   childSessions: Schema.optional(
-    Schema.Int.pipe(Schema.between(0, MAX_CODE_DEBUG_CHILDREN_PER_SESSION)),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 0, maximum: MAX_CODE_DEBUG_CHILDREN_PER_SESSION }),
+    ),
   ),
-}).annotations(strict);
+});
 export type CodeDebugSessionEnded = typeof CodeDebugSessionEnded.Type;
 
 const threadScope = { threadId: CodeThreadId, checkoutId: CodeCheckoutId };
@@ -366,67 +382,65 @@ export const CodeDebugConfigurationsRequest = Schema.Struct({
   ...threadScope,
   /** The editor's current file, which a launch file's current-file variables name. */
   currentFile: Schema.optional(CodeProjectFilePath),
-}).annotations(strict);
+});
 export type CodeDebugConfigurationsRequest = typeof CodeDebugConfigurationsRequest.Type;
 
 export const CodeDebugAdapterSummary = Schema.Struct({
   adapter: ExtensionComponentQualifiedId,
   displayName: boundedText(128),
-  runtimes: Schema.Array(ExtensionDebugRuntimeId).pipe(Schema.maxItems(8)),
+  runtimes: Schema.Array(ExtensionDebugRuntimeId).check(Schema.isMaxLength(8)),
   /**
    * The installed package as Settings names it, and its version, so the
    * confirmation card says which adapter it allows when two share a name.
    */
   packageName: boundedText(128),
   packageVersion: ExtensionPackageVersion,
-}).annotations(strict);
+});
 export type CodeDebugAdapterSummary = typeof CodeDebugAdapterSummary.Type;
 
 export const CodeDebugApprovedConfiguration = Schema.Struct({
   configurationDigest: CodeDebugConfigurationDigest,
   configuration: CodeDebugConfiguration,
   scope: CodeDebugApprovalScope,
-}).annotations(strict);
+});
 export type CodeDebugApprovedConfiguration = typeof CodeDebugApprovedConfiguration.Type;
 
-export const CodeDebugLaunchFileReading = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("absent") }).annotations(strict),
-  /** Not JSON with comments, past 256 KiB, or holding no configuration list. */
-  Schema.Struct({ status: Schema.Literal("unreadable") }).annotations(strict),
+export const CodeDebugLaunchFileReading = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("absent") }),
+  Schema.Struct({ status: Schema.Literal("unreadable") }),
   Schema.Struct({
     status: Schema.Literal("read"),
-    proposals: Schema.Array(CodeDebugConfigurationProposal).pipe(Schema.maxItems(64)),
+    proposals: Schema.Array(CodeDebugConfigurationProposal).check(Schema.isMaxLength(64)),
     truncated: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeDebugLaunchFileReading = typeof CodeDebugLaunchFileReading.Type;
 
 /** Every refusal a debug request can answer, in the order the host checks. */
-export const CodeDebugRefusalReason = Schema.Union(
+export const CodeDebugRefusalReason = Schema.Union([
   CodeDebugStartRefusalReason,
-  /** The session named is not this thread's running session. */
   Schema.Literal("no-session"),
-);
+]);
 export type CodeDebugRefusalReason = typeof CodeDebugRefusalReason.Type;
 
 const refused = Schema.Struct({
   status: Schema.Literal("refused"),
   reason: CodeDebugRefusalReason,
-}).annotations(strict);
+});
 
 /** A running session as a listing names it: its id and its configuration's name. */
 export const CodeDebugRunningSession = Schema.Struct({
   sessionId: CodeDebugSessionId,
   name: CodeDebugConfigurationName,
-}).annotations(strict);
+});
 export type CodeDebugRunningSession = typeof CodeDebugRunningSession.Type;
 
-export const CodeDebugConfigurationsResult = Schema.Union(
+export const CodeDebugConfigurationsResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("listed"),
-    adapters: Schema.Array(CodeDebugAdapterSummary).pipe(Schema.maxItems(64)),
-    approved: Schema.Array(CodeDebugApprovedConfiguration).pipe(
-      Schema.maxItems(MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS),
+    adapters: Schema.Array(CodeDebugAdapterSummary).check(Schema.isMaxLength(64)),
+    approved: Schema.Array(CodeDebugApprovedConfiguration).check(
+      Schema.isMaxLength(MAX_CODE_DEBUG_APPROVED_CONFIGURATIONS),
     ),
     launchFile: CodeDebugLaunchFileReading,
     /**
@@ -435,9 +449,9 @@ export const CodeDebugConfigurationsResult = Schema.Union(
      * can stop it.
      */
     session: Schema.optional(CodeDebugRunningSession),
-  }).annotations(strict),
+  }),
   refused,
-);
+]);
 export type CodeDebugConfigurationsResult = typeof CodeDebugConfigurationsResult.Type;
 
 /** The person at a local window confirms one configuration for a checkout or a Project. */
@@ -445,121 +459,109 @@ export const CodeDebugApprovalRequest = Schema.Struct({
   ...threadScope,
   configuration: CodeDebugConfiguration,
   scope: CodeDebugApprovalScope,
-}).annotations(strict);
+});
 export type CodeDebugApprovalRequest = typeof CodeDebugApprovalRequest.Type;
 
-export const CodeDebugApprovalResult = Schema.Union(
+export const CodeDebugApprovalResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("approved"),
     configurationDigest: CodeDebugConfigurationDigest,
     scope: CodeDebugApprovalScope,
-  }).annotations(strict),
+  }),
   refused,
-  /** The journal did not take the confirmation, so it is not in force. */
-  Schema.Struct({ status: Schema.Literal("not-recorded") }).annotations(strict),
-);
+  Schema.Struct({ status: Schema.Literal("not-recorded") }),
+]);
 export type CodeDebugApprovalResult = typeof CodeDebugApprovalResult.Type;
 
 export const CodeDebugBreakpoint = Schema.Struct({
   line: DebugLine,
   condition: Schema.optional(boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES)),
-}).annotations(strict);
+});
 export type CodeDebugBreakpoint = typeof CodeDebugBreakpoint.Type;
 
 /** One file's breakpoints, the window's state for the thread. */
 export const CodeDebugFileBreakpoints = Schema.Struct({
   path: CodeProjectFilePath,
-  breakpoints: Schema.Array(CodeDebugBreakpoint).pipe(
-    Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE),
+  breakpoints: Schema.Array(CodeDebugBreakpoint).check(
+    Schema.isMaxLength(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE),
   ),
-}).annotations(strict);
+});
 export type CodeDebugFileBreakpoints = typeof CodeDebugFileBreakpoints.Type;
 
 /** A person's Start, with the window's breakpoints for the thread. */
 export const CodeDebugStartRequest = Schema.Struct({
   ...threadScope,
   configuration: CodeDebugConfiguration,
-  breakpoints: Schema.Array(CodeDebugFileBreakpoints).pipe(
-    Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINT_FILES),
+  breakpoints: Schema.Array(CodeDebugFileBreakpoints).check(
+    Schema.isMaxLength(MAX_CODE_DEBUG_BREAKPOINT_FILES),
   ),
-}).annotations(strict);
+});
 export type CodeDebugStartRequest = typeof CodeDebugStartRequest.Type;
 
-export const CodeDebugStartResult = Schema.Union(
+export const CodeDebugStartResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("started"),
     sessionId: CodeDebugSessionId,
-  }).annotations(strict),
+  }),
   refused,
-  /**
-   * The thread already holds a session (the panel asks to stop it first), or
-   * this host already runs as many sessions as it allows.
-   */
   Schema.Struct({
     status: Schema.Literal("busy"),
-    reason: Schema.Literal("thread-has-session", "host-limit"),
-  }).annotations(strict),
-  /**
-   * Nothing runs. `adapter-unverified`: the stored adapter no longer matches
-   * the digest the person reviewed. `launch-failed`: the capsule, its
-   * receipt, its egress, or its start record could not be made.
-   * `adapter-refused`: the adapter answered `initialize` or `launch` with an
-   * error, or not in time.
-   */
+    reason: Schema.Literals(["thread-has-session", "host-limit"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
-    reason: Schema.Literal("adapter-unverified", "launch-failed", "adapter-refused"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["adapter-unverified", "launch-failed", "adapter-refused"]),
+  }),
+]);
 export type CodeDebugStartResult = typeof CodeDebugStartResult.Type;
 
 const programThread = { programThreadId: DebugReference };
 
 /** What the panel asks a running session. Each maps to one request on Octant's closed list. */
-export const CodeDebugSessionRequest = Schema.Union(
+export const CodeDebugSessionRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("state"),
     /** The last output sequence the window holds; only later output is answered. */
-    afterOutput: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  }).annotations(strict),
+    afterOutput: Schema.optional(NonNegativeInt),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-breakpoints"),
     file: CodeDebugFileBreakpoints,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-exception-breakpoints"),
-    filters: Schema.Array(boundedText(128)).pipe(Schema.maxItems(16)),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("threads") }).annotations(strict),
+    filters: Schema.Array(boundedText(128)).check(Schema.isMaxLength(16)),
+  }),
+  Schema.Struct({ kind: Schema.Literal("threads") }),
   Schema.Struct({
     kind: Schema.Literal("stack-trace"),
     ...programThread,
     startFrame: Schema.optional(DebugReference),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("scopes"), frameId: DebugReference }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("scopes"), frameId: DebugReference }),
   Schema.Struct({
     kind: Schema.Literal("variables"),
     variablesReference: DebugReference,
     start: Schema.optional(DebugReference),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("source"),
     sourceReference: DebugReference,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("exception-info"), ...programThread }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("exception-info"), ...programThread }),
   Schema.Struct({
-    kind: Schema.Literal("continue", "next", "step-in", "step-out", "pause"),
+    kind: Schema.Literals(["continue", "next", "step-in", "step-out", "pause"]),
     ...programThread,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("evaluate"),
     /** Only an expression the person typed, or a watch they added. */
-    expression: boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES).pipe(Schema.minLength(1)),
+    expression: boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES).check(Schema.isMinLength(1)),
     frameId: Schema.optional(DebugReference),
-    context: Schema.Literal("repl", "watch", "hover"),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("stop") }).annotations(strict),
-);
+    context: Schema.Literals(["repl", "watch", "hover"]),
+  }),
+  Schema.Struct({ kind: Schema.Literal("stop") }),
+]);
 export type CodeDebugSessionRequest = typeof CodeDebugSessionRequest.Type;
 
 export const CodeDebugSessionCall = Schema.Struct({
@@ -572,47 +574,47 @@ export const CodeDebugSessionCall = Schema.Struct({
    */
   child: Schema.optional(CodeDebugChildId),
   request: CodeDebugSessionRequest,
-}).annotations(strict);
+});
 export type CodeDebugSessionCall = typeof CodeDebugSessionCall.Type;
 
 export const CodeDebugExceptionFilter = Schema.Struct({
   filter: boundedText(128),
   label: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
   default: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeDebugExceptionFilter = typeof CodeDebugExceptionFilter.Type;
 
-export const CodeDebugSessionState = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("starting") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("running") }).annotations(strict),
+export const CodeDebugSessionState = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("starting") }),
+  Schema.Struct({ status: Schema.Literal("running") }),
   Schema.Struct({
     status: Schema.Literal("stopped"),
     ...programThread,
     reason: boundedText(64),
     description: Schema.optional(boundedText(MAX_CODE_DEBUG_MESSAGE_LENGTH)),
     allThreadsStopped: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("ended"),
     endReason: CodeDebugSessionEndReason,
     exitCode: Schema.optional(Schema.Int),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeDebugSessionState = typeof CodeDebugSessionState.Type;
 
 /** A child process the session debugs now, as the panel lists it under the session. */
 export const CodeDebugChildSummary = Schema.Struct({
   child: CodeDebugChildId,
   name: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
-  status: Schema.Literal("starting", "running", "stopped"),
-}).annotations(strict);
+  status: Schema.Literals(["starting", "running", "stopped"]),
+});
 export type CodeDebugChildSummary = typeof CodeDebugChildSummary.Type;
 
 export const CodeDebugOutputEntry = Schema.Struct({
-  sequence: Schema.Int.pipe(Schema.positive()),
-  category: Schema.Literal("console", "stdout", "stderr", "important"),
+  sequence: PositiveInt,
+  category: Schema.Literals(["console", "stdout", "stderr", "important"]),
   text: boundedText(MAX_CODE_DEBUG_OUTPUT_TEXT_LENGTH),
-}).annotations(strict);
+});
 export type CodeDebugOutputEntry = typeof CodeDebugOutputEntry.Type;
 
 /**
@@ -620,35 +622,35 @@ export type CodeDebugOutputEntry = typeof CodeDebugOutputEntry.Type;
  * label and no path. `adapter-source` is code the adapter can hand over by
  * reference; Octant opens no file outside the checkout itself.
  */
-export const CodeDebugSourceLocation = Schema.Union(
+export const CodeDebugSourceLocation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("checkout"),
     path: CodeProjectFilePath,
     line: DebugLine,
     column: DebugLine,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("outside-checkout"),
-    label: Schema.Literal("elsewhere", "adapter-source"),
+    label: Schema.Literals(["elsewhere", "adapter-source"]),
     sourceReference: Schema.optional(DebugReference),
     line: Schema.optional(DebugLine),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("none") }),
+]);
 export type CodeDebugSourceLocation = typeof CodeDebugSourceLocation.Type;
 
 export const CodeDebugStackFrame = Schema.Struct({
   id: DebugReference,
   name: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
   location: CodeDebugSourceLocation,
-}).annotations(strict);
+});
 export type CodeDebugStackFrame = typeof CodeDebugStackFrame.Type;
 
 export const CodeDebugScope = Schema.Struct({
   name: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
   variablesReference: DebugReference,
   expensive: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeDebugScope = typeof CodeDebugScope.Type;
 
 /** A value cut at 4 KiB says so; `variablesReference` above zero expands it. */
@@ -658,17 +660,19 @@ export const CodeDebugVariable = Schema.Struct({
   truncated: Schema.Boolean,
   type: Schema.optional(boundedText(MAX_CODE_DEBUG_NAME_LENGTH)),
   variablesReference: DebugReference,
-}).annotations(strict);
+});
 export type CodeDebugVariable = typeof CodeDebugVariable.Type;
 
-export const CodeDebugSessionResult = Schema.Union(
+export const CodeDebugSessionResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("state"),
     state: CodeDebugSessionState,
     /** Moves whenever the adapter reports a change the panel should read again. */
-    revision: Schema.Int.pipe(Schema.nonNegative()),
-    exceptionFilters: Schema.Array(CodeDebugExceptionFilter).pipe(Schema.maxItems(16)),
-    output: Schema.Array(CodeDebugOutputEntry).pipe(Schema.maxItems(MAX_CODE_DEBUG_OUTPUT_ENTRIES)),
+    revision: NonNegativeInt,
+    exceptionFilters: Schema.Array(CodeDebugExceptionFilter).check(Schema.isMaxLength(16)),
+    output: Schema.Array(CodeDebugOutputEntry).check(
+      Schema.isMaxLength(MAX_CODE_DEBUG_OUTPUT_ENTRIES),
+    ),
     /** Output past `afterOutput` the ring no longer holds, or more than one answer carries. */
     outputDropped: Schema.Boolean,
     /**
@@ -677,100 +681,130 @@ export const CodeDebugSessionResult = Schema.Union(
      * `exceptionFilters` are those of the child the request named.
      */
     children: Schema.optional(
-      Schema.Array(CodeDebugChildSummary).pipe(Schema.maxItems(MAX_CODE_DEBUG_CHILDREN_AT_ONCE)),
+      Schema.Array(CodeDebugChildSummary).check(
+        Schema.isMaxLength(MAX_CODE_DEBUG_CHILDREN_AT_ONCE),
+      ),
     ),
     /** Children the adapter announced past either bound, which ran undebugged. */
-    undebuggedChildren: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  }).annotations(strict),
+    undebuggedChildren: Schema.optional(NonNegativeInt),
+  }),
   Schema.Struct({
     status: Schema.Literal("breakpoints"),
     breakpoints: Schema.Array(
       Schema.Struct({
         verified: Schema.Boolean,
         line: Schema.optional(DebugLine),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE)),
+  }),
   Schema.Struct({
     status: Schema.Literal("threads"),
     threads: Schema.Array(
       Schema.Struct({
         id: DebugReference,
         name: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(MAX_CODE_DEBUG_FRAMES)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(MAX_CODE_DEBUG_FRAMES)),
+  }),
   Schema.Struct({
     status: Schema.Literal("stack"),
-    frames: Schema.Array(CodeDebugStackFrame).pipe(Schema.maxItems(MAX_CODE_DEBUG_FRAMES)),
+    frames: Schema.Array(CodeDebugStackFrame).check(Schema.isMaxLength(MAX_CODE_DEBUG_FRAMES)),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("scopes"),
-    scopes: Schema.Array(CodeDebugScope).pipe(Schema.maxItems(MAX_CODE_DEBUG_VARIABLES)),
-  }).annotations(strict),
+    scopes: Schema.Array(CodeDebugScope).check(Schema.isMaxLength(MAX_CODE_DEBUG_VARIABLES)),
+  }),
   Schema.Struct({
     status: Schema.Literal("variables"),
-    variables: Schema.Array(CodeDebugVariable).pipe(Schema.maxItems(MAX_CODE_DEBUG_VARIABLES)),
+    variables: Schema.Array(CodeDebugVariable).check(Schema.isMaxLength(MAX_CODE_DEBUG_VARIABLES)),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("source"),
     text: boundedText(MAX_CODE_DEBUG_SOURCE_LENGTH),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("exception"),
     exceptionId: boundedText(MAX_CODE_DEBUG_NAME_LENGTH),
     description: Schema.optional(boundedText(MAX_CODE_DEBUG_MESSAGE_LENGTH)),
     breakMode: boundedText(64),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("evaluated"),
     result: CodeDebugVariable,
-  }).annotations(strict),
-  /** The adapter accepted a step, a continue, a pause, or exception filters. */
-  Schema.Struct({ status: Schema.Literal("done") }).annotations(strict),
+  }),
+  Schema.Struct({ status: Schema.Literal("done") }),
   Schema.Struct({
     status: Schema.Literal("ended"),
     endReason: CodeDebugSessionEndReason,
-  }).annotations(strict),
+  }),
   refused,
-  /**
-   * The adapter did not answer: `timed-out` after the request deadline,
-   * `failed` with its own message (host paths rewritten), `ended` because the
-   * session ended before it answered.
-   */
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("timed-out", "failed", "ended"),
+    reason: Schema.Literals(["timed-out", "failed", "ended"]),
     message: Schema.optional(boundedText(MAX_CODE_DEBUG_MESSAGE_LENGTH)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeDebugSessionResult = typeof CodeDebugSessionResult.Type;
 
 export const decodeCodeDebugConfigurationApproved = Schema.decodeUnknownSync(
   CodeDebugConfigurationApproved,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeDebugSessionStarted = Schema.decodeUnknownSync(CodeDebugSessionStarted);
-export const decodeCodeDebugSessionEnded = Schema.decodeUnknownSync(CodeDebugSessionEnded);
+export const decodeCodeDebugSessionStarted = Schema.decodeUnknownSync(
+  CodeDebugSessionStarted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugSessionEnded = Schema.decodeUnknownSync(
+  CodeDebugSessionEnded,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeDebugConfigurationDigest = Schema.decodeUnknownSync(
   CodeDebugConfigurationDigest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeDebugSessionId = Schema.decodeUnknownSync(CodeDebugSessionId);
-export const decodeCodeDebugChildId = Schema.decodeUnknownSync(CodeDebugChildId);
+export const decodeCodeDebugSessionId = Schema.decodeUnknownSync(
+  CodeDebugSessionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugChildId = Schema.decodeUnknownSync(
+  CodeDebugChildId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeDebugConfigurationsRequest = Schema.decodeUnknownSync(
   CodeDebugConfigurationsRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeDebugConfigurationsResult = Schema.decodeUnknownSync(
   CodeDebugConfigurationsResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeDebugApprovalRequest = Schema.decodeUnknownSync(CodeDebugApprovalRequest);
-export const decodeCodeDebugApprovalResult = Schema.decodeUnknownSync(CodeDebugApprovalResult);
-export const decodeCodeDebugStartRequest = Schema.decodeUnknownSync(CodeDebugStartRequest);
-export const decodeCodeDebugStartResult = Schema.decodeUnknownSync(CodeDebugStartResult);
-export const decodeCodeDebugSessionCall = Schema.decodeUnknownSync(CodeDebugSessionCall);
-export const decodeCodeDebugSessionResult = Schema.decodeUnknownSync(CodeDebugSessionResult);
+export const decodeCodeDebugApprovalRequest = Schema.decodeUnknownSync(
+  CodeDebugApprovalRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugApprovalResult = Schema.decodeUnknownSync(
+  CodeDebugApprovalResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugStartRequest = Schema.decodeUnknownSync(
+  CodeDebugStartRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugStartResult = Schema.decodeUnknownSync(
+  CodeDebugStartResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugSessionCall = Schema.decodeUnknownSync(
+  CodeDebugSessionCall,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDebugSessionResult = Schema.decodeUnknownSync(
+  CodeDebugSessionResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The agent's debug tool, `octant_debug`. Canonical:
@@ -801,72 +835,77 @@ export const MAX_CODE_DEBUG_AGENT_WAIT_SECONDS = 30;
 const AgentFileBreakpoints = {
   path: CodeProjectFilePath,
   /** Every line of the file that holds a breakpoint; an empty list clears the file. */
-  lines: Schema.Array(DebugLine).pipe(Schema.maxItems(MAX_CODE_DEBUG_AGENT_BREAKPOINT_LINES)),
+  lines: Schema.Array(DebugLine).check(Schema.isMaxLength(MAX_CODE_DEBUG_AGENT_BREAKPOINT_LINES)),
 };
 
 /** Every operation but `evaluate`, which runs code the agent wrote and is decided apart. */
-export const CodeDebugSessionToolArguments = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("configurations") }).annotations(strict),
+export const CodeDebugSessionToolArguments = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("configurations") }),
   Schema.Struct({
     operation: Schema.Literal("start"),
     configuration: CodeDebugConfigurationDigest,
     breakpoints: Schema.optional(
-      Schema.Array(Schema.Struct(AgentFileBreakpoints).annotations(strict)).pipe(
-        Schema.maxItems(MAX_CODE_DEBUG_AGENT_BREAKPOINT_FILES),
+      Schema.Array(Schema.Struct(AgentFileBreakpoints)).check(
+        Schema.isMaxLength(MAX_CODE_DEBUG_AGENT_BREAKPOINT_FILES),
       ),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("breakpoints"),
     ...AgentFileBreakpoints,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    operation: Schema.Literal("continue", "step-over", "step-in", "step-out", "pause"),
+    operation: Schema.Literals(["continue", "step-over", "step-in", "step-out", "pause"]),
     /** The program's thread; absent, the one that is stopped. */
     thread: Schema.optional(DebugReference),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("state"),
-    afterOutput: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    afterOutput: Schema.optional(NonNegativeInt),
     waitSeconds: Schema.optional(
-      Schema.Int.pipe(Schema.between(0, MAX_CODE_DEBUG_AGENT_WAIT_SECONDS)),
+      Schema.Int.check(
+        Schema.isBetween({ minimum: 0, maximum: MAX_CODE_DEBUG_AGENT_WAIT_SECONDS }),
+      ),
     ),
-  }).annotations(strict),
-  Schema.Struct({ operation: Schema.Literal("threads") }).annotations(strict),
+  }),
+  Schema.Struct({ operation: Schema.Literal("threads") }),
   Schema.Struct({
     operation: Schema.Literal("stack"),
     thread: Schema.optional(DebugReference),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("scopes"),
     frame: DebugReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("variables"),
     reference: DebugReference,
     start: Schema.optional(DebugReference),
-  }).annotations(strict),
-  Schema.Struct({ operation: Schema.Literal("stop") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ operation: Schema.Literal("stop") }),
+]);
 export type CodeDebugSessionToolArguments = typeof CodeDebugSessionToolArguments.Type;
 
 export const CodeDebugEvaluateToolArguments = Schema.Struct({
   operation: Schema.Literal("evaluate"),
-  expression: boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES).pipe(Schema.minLength(1)),
+  expression: boundedBytes(MAX_CODE_DEBUG_EXPRESSION_BYTES).check(Schema.isMinLength(1)),
   frame: Schema.optional(DebugReference),
-}).annotations(strict);
+});
 export type CodeDebugEvaluateToolArguments = typeof CodeDebugEvaluateToolArguments.Type;
 
 export type CodeDebugToolArguments = CodeDebugSessionToolArguments | CodeDebugEvaluateToolArguments;
 
 export const decodeCodeDebugSessionToolArguments = Schema.decodeUnknownSync(
   CodeDebugSessionToolArguments,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeDebugEvaluateToolArguments = Schema.decodeUnknownSync(
   CodeDebugEvaluateToolArguments,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeDebugToolArguments = Schema.decodeUnknownSync(
-  Schema.Union(CodeDebugSessionToolArguments, CodeDebugEvaluateToolArguments),
+  Schema.Union([CodeDebugSessionToolArguments, CodeDebugEvaluateToolArguments]),
+  STRICT_DECODE_OPTIONS,
 );
 
 export const CODE_DEBUG_TOOL_DEFINITION: ProviderToolDefinition = {

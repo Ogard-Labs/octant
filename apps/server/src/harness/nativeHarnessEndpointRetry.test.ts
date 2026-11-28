@@ -219,7 +219,7 @@ function runTurn(
           .acquire({ instanceId, projectRoot: "/tmp/octant-endpoint-retry", mode: "chat" });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         const events: ProviderRuntimeEvent[] = [];
-        const collected = yield* Effect.fork(
+        const collected = yield* Effect.forkChild(
           Stream.runForEach(
             (yield* connection.subscribe).pipe(
               Stream.filter((event) => event.sessionId === sessionId),

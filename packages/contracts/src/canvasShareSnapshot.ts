@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import {
   CanvasExportId,
@@ -14,33 +15,33 @@ import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
 
 export const CanvasShareSnapshotId = brandedUuid("CanvasShareSnapshotId");
 export type CanvasShareSnapshotId = typeof CanvasShareSnapshotId.Type;
 
 export const CanvasShareAudiencePrincipal = Schema.Struct({
   /** Owner-visible audience label only; never a credential or host path. */
-  label: boundedNonEmptyText(128).pipe(
-    Schema.filter((value) => isCanvasShareSafeText(value), {
-      message: () => "Canvas share audience labels must not contain secrets or host paths.",
+  label: boundedNonEmptyText(128).check(
+    Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+      message: "Canvas share audience labels must not contain secrets or host paths.",
     }),
   ),
-  principalKind: Schema.Literal("local-user", "paired-device"),
-  principalId: Schema.UUID,
-}).annotations(strict);
+  principalKind: Schema.Literals(["local-user", "paired-device"]),
+  principalId: GuidString,
+});
 export type CanvasShareAudiencePrincipal = typeof CanvasShareAudiencePrincipal.Type;
 
 export const CanvasShareAudience = Schema.Struct({
-  ownerActorId: Schema.UUID,
-  principals: Schema.Array(CanvasShareAudiencePrincipal).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  ownerActorId: GuidString,
+  principals: Schema.Array(CanvasShareAudiencePrincipal).check(Schema.isMaxLength(32)),
+});
 export type CanvasShareAudience = typeof CanvasShareAudience.Type;
 
-export const CanvasShareRefreshPolicy = Schema.Literal("manual-only", "owner-reissue");
+export const CanvasShareRefreshPolicy = Schema.Literals(["manual-only", "owner-reissue"]);
 export type CanvasShareRefreshPolicy = typeof CanvasShareRefreshPolicy.Type;
 
 export const CanvasShareSnapshotRequest = Schema.Struct({
@@ -50,7 +51,7 @@ export const CanvasShareSnapshotRequest = Schema.Struct({
   exportId: CanvasExportId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   hostId: HostId,
   projectId: ProjectId,
   audience: CanvasShareAudience,
@@ -66,17 +67,17 @@ export const CanvasShareSnapshotRequest = Schema.Struct({
      * any other image, or any image without it, is refused.
      */
     acknowledgedImages: Schema.optional(
-      Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
-        Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+      Schema.Array(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))).check(
+        Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES),
       ),
     ),
     acknowledgedAt: UtcTimestamp,
     acknowledgedBy: CanvasShareLocalUserActor,
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type CanvasShareSnapshotRequest = typeof CanvasShareSnapshotRequest.Type;
 
-export const CanvasShareSnapshotStatus = Schema.Literal("active", "expired", "revoked");
+export const CanvasShareSnapshotStatus = Schema.Literals(["active", "expired", "revoked"]);
 export type CanvasShareSnapshotStatus = typeof CanvasShareSnapshotStatus.Type;
 
 const CanvasShareSnapshotRecordFields = {
@@ -86,7 +87,7 @@ const CanvasShareSnapshotRecordFields = {
   exportId: CanvasExportId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   hostId: HostId,
   projectId: ProjectId,
   audience: CanvasShareAudience,
@@ -95,7 +96,7 @@ const CanvasShareSnapshotRecordFields = {
   refreshPolicy: CanvasShareRefreshPolicy,
   document: CanvasStaticExportDocument,
   provenance: CanvasRedactedProvenance,
-  sourceManifest: Schema.Array(CanvasStaticExportSourceEntry).pipe(Schema.maxItems(128)),
+  sourceManifest: Schema.Array(CanvasStaticExportSourceEntry).check(Schema.isMaxLength(128)),
 } as const;
 
 function canvasShareSnapshotRecordIdentitiesMatch(record: {
@@ -164,10 +165,10 @@ function canvasShareSnapshotRecordIdentitiesMatch(record: {
   return true;
 }
 
-const CanvasShareSnapshotRecordBase = Schema.Union(
+const CanvasShareSnapshotRecordBase = Schema.Union([
   Schema.Struct({
     ...CanvasShareSnapshotRecordFields,
-    status: Schema.Literal("active", "expired"),
+    status: Schema.Literals(["active", "expired"]),
     /** Validated dual-consent evidence retained with the authenticated snapshot. */
     consent: Schema.Struct({
       acknowledgedAuthenticatedSnapshot: Schema.Literal(true),
@@ -179,14 +180,14 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
        * any other image, or any image without it, is refused.
        */
       acknowledgedImages: Schema.optional(
-        Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
-          Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+        Schema.Array(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))).check(
+          Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES),
         ),
       ),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
-    }).annotations(strict),
-  }).annotations(strict),
+    }),
+  }),
   Schema.Struct({
     ...CanvasShareSnapshotRecordFields,
     status: Schema.Literal("revoked"),
@@ -202,32 +203,29 @@ const CanvasShareSnapshotRecordBase = Schema.Union(
        * any other image, or any image without it, is refused.
        */
       acknowledgedImages: Schema.optional(
-        Schema.Array(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))).pipe(
-          Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+        Schema.Array(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))).check(
+          Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES),
         ),
       ),
       acknowledgedAt: UtcTimestamp,
       acknowledgedBy: CanvasShareLocalUserActor,
-    }).annotations(strict),
-  }).annotations(strict),
-);
+    }),
+  }),
+]);
 
-export const CanvasShareSnapshotRecord = CanvasShareSnapshotRecordBase.pipe(
-  Schema.filter((record) => canvasShareSnapshotRecordIdentitiesMatch(record), {
-    message: () =>
+export const CanvasShareSnapshotRecord = CanvasShareSnapshotRecordBase.check(
+  Schema.makeFilter((record) => canvasShareSnapshotRecordIdentitiesMatch(record), {
+    message:
       "Canvas share snapshot record document, provenance, and source manifest must match the authoritative outer identity.",
   }),
-).pipe(
-  Schema.filter(
+  Schema.makeFilter(
     (record) => {
       if (record.status !== "revoked") return true;
       const revokedAt = Date.parse(String(record.revokedAt));
       const createdAt = Date.parse(String(record.createdAt));
       return Number.isFinite(revokedAt) && Number.isFinite(createdAt) && revokedAt >= createdAt;
     },
-    {
-      message: () => "Canvas share snapshot revokedAt cannot predate createdAt.",
-    },
+    { message: "Canvas share snapshot revokedAt cannot predate createdAt." },
   ),
 );
 export type CanvasShareSnapshotRecord = typeof CanvasShareSnapshotRecord.Type;
@@ -241,7 +239,7 @@ export const CanvasShareSnapshotRevokeRequest = Schema.Struct({
   projectId: ProjectId,
   actor: CanvasShareLocalUserActor,
   revokedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasShareSnapshotRevokeRequest = typeof CanvasShareSnapshotRevokeRequest.Type;
 
 /**
@@ -249,7 +247,7 @@ export type CanvasShareSnapshotRevokeRequest = typeof CanvasShareSnapshotRevokeR
  * for the static-export sanitizer and the authenticated snapshot lifecycle, plus
  * `unavailable` for a Canvas or snapshot the host cannot resolve at all.
  */
-export const CanvasShareDenialCode = Schema.Literal(
+export const CanvasShareDenialCode = Schema.Literals([
   "malformed-request",
   "sharing-disabled",
   "consent-required",
@@ -263,7 +261,7 @@ export const CanvasShareDenialCode = Schema.Literal(
   "unauthorized",
   "public-audience-forbidden",
   "unavailable",
-);
+]);
 export type CanvasShareDenialCode = typeof CanvasShareDenialCode.Type;
 
 /**
@@ -278,7 +276,7 @@ export const CanvasShareSnapshotSummary = Schema.Struct({
   snapshotId: CanvasShareSnapshotId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   hostId: HostId,
   projectId: ProjectId,
   audience: CanvasShareAudience,
@@ -287,33 +285,31 @@ export const CanvasShareSnapshotSummary = Schema.Struct({
   refreshPolicy: CanvasShareRefreshPolicy,
   status: CanvasShareSnapshotStatus,
   revokedAt: Schema.optional(UtcTimestamp),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((summary) => summary.status === "revoked" || summary.revokedAt === undefined, {
-      message: () => "Canvas share summaries may only carry revokedAt when they are revoked.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((summary) => summary.status === "revoked" || summary.revokedAt === undefined, {
+    message: "Canvas share summaries may only carry revokedAt when they are revoked.",
+  }),
+);
 export type CanvasShareSnapshotSummary = typeof CanvasShareSnapshotSummary.Type;
 
 /** Result of an owner-authenticated share create or revoke. */
-export const CanvasShareResult = Schema.Union(
+export const CanvasShareResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     snapshot: CanvasShareSnapshotSummary,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasShareDenialCode,
     message: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasShareResult = typeof CanvasShareResult.Type;
 
 /** Journal frame for an admitted authenticated snapshot. */
 export const CanvasShareSnapshotCreated = Schema.Struct({
   record: CanvasShareSnapshotRecord,
-}).annotations(strict);
+});
 export type CanvasShareSnapshotCreated = typeof CanvasShareSnapshotCreated.Type;
 
 /**
@@ -328,23 +324,34 @@ export const CanvasShareSnapshotRevoked = Schema.Struct({
   projectId: ProjectId,
   revokedAt: UtcTimestamp,
   actor: CanvasShareLocalUserActor,
-}).annotations(strict);
+});
 export type CanvasShareSnapshotRevoked = typeof CanvasShareSnapshotRevoked.Type;
 
 export const decodeCanvasShareSnapshotRequest = Schema.decodeUnknownSync(
   CanvasShareSnapshotRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasShareSnapshotRecord = Schema.decodeUnknownSync(CanvasShareSnapshotRecord);
+export const decodeCanvasShareSnapshotRecord = Schema.decodeUnknownSync(
+  CanvasShareSnapshotRecord,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasShareSnapshotRevokeRequest = Schema.decodeUnknownSync(
   CanvasShareSnapshotRevokeRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasShareSnapshotSummary = Schema.decodeUnknownSync(
   CanvasShareSnapshotSummary,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasShareResult = Schema.decodeUnknownSync(CanvasShareResult);
+export const decodeCanvasShareResult = Schema.decodeUnknownSync(
+  CanvasShareResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasShareSnapshotCreated = Schema.decodeUnknownSync(
   CanvasShareSnapshotCreated,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasShareSnapshotRevoked = Schema.decodeUnknownSync(
   CanvasShareSnapshotRevoked,
+  STRICT_DECODE_OPTIONS,
 );

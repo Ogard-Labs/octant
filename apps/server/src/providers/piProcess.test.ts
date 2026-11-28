@@ -438,7 +438,7 @@ describe("Pi process boundary", () => {
       readonly strict?: boolean;
     }) =>
       Effect.runPromise(
-        Effect.either(
+        Effect.result(
           confinement.prepare({
             binaryPath: f.binary,
             root: f.root,
@@ -459,32 +459,35 @@ describe("Pi process boundary", () => {
       { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       const started = await prepare(level);
-      expect(started).toMatchObject({ _tag: "Right", right: { command: f.binary, cwd: f.root } });
-      if (started._tag === "Right" && "mode" in level)
-        expect(started.right.args).toContain("--no-tools");
+      expect(started).toMatchObject({
+        _tag: "Success",
+        success: { command: f.binary, cwd: f.root },
+      });
+      if (started._tag === "Success" && "mode" in level)
+        expect(started.success.args).toContain("--no-tools");
       // Pi's own approval bridge still asks Octant below Full access.
-      if (started._tag === "Right")
-        expect(started.right.environment.OCTANT_PI_APPROVALS).toBe(
+      if (started._tag === "Success")
+        expect(started.success.environment.OCTANT_PI_APPROVALS).toBe(
           level.executionPolicy === "full-access" ? "disabled" : "enabled",
         );
     }
     expect(await prepare({ executionPolicy: "approval-gated" })).toMatchObject({
-      _tag: "Left",
-      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+      _tag: "Failure",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
     });
     expect(await prepare({ mode: "chat", executionPolicy: "approval-gated" })).toMatchObject({
-      _tag: "Left",
-      left: { category: "incompatible", message: WINDOWS_STRICT_CHAT_REFUSAL },
+      _tag: "Failure",
+      failure: { category: "incompatible", message: WINDOWS_STRICT_CHAT_REFUSAL },
     });
     expect(await prepare({ executionPolicy: "full-access", strict: true })).toMatchObject({
-      _tag: "Left",
-      left: { category: "incompatible", message: windowsStrictRuntimeRefusal("pi") },
+      _tag: "Failure",
+      failure: { category: "incompatible", message: windowsStrictRuntimeRefusal("pi") },
     });
     expect(
       await prepare({ executionPolicy: "full-access", fullAccessSandbox: true, strict: false }),
     ).toMatchObject({
-      _tag: "Left",
-      left: { category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL },
+      _tag: "Failure",
+      failure: { category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL },
     });
   });
 
@@ -498,7 +501,7 @@ describe("Pi process boundary", () => {
       temporaryDirectory: f.base,
     });
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         confinement.prepare({
           binaryPath: f.binary,
           root: f.root,
@@ -512,7 +515,7 @@ describe("Pi process boundary", () => {
         }),
       ),
     );
-    expect(result).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+    expect(result).toMatchObject({ _tag: "Failure", failure: { category: "stale-resume" } });
   });
 
   it("opens the exact native file and refuses a mismatched history header", async () => {
@@ -548,8 +551,8 @@ describe("Pi process boundary", () => {
       path,
       JSON.stringify({ type: "session", id: "session-1", cwd: "/another-project" }) + "\n",
     );
-    const refused = await Effect.runPromise(Effect.either(confinement.prepare(input)));
-    expect(refused).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+    const refused = await Effect.runPromise(Effect.result(confinement.prepare(input)));
+    expect(refused).toMatchObject({ _tag: "Failure", failure: { category: "stale-resume" } });
   });
 
   it("grants a Project's extra folder the root's writes, and none to a Chat launch", async () => {
@@ -1114,8 +1117,8 @@ describe("Pi process boundary", () => {
     const occupied = join(f.home, "auth.json");
     mkdirSync(f.home, { recursive: true });
     symlinkSync(f.binary, occupied);
-    await expect(
-      Effect.runPromise(
+    const prepared = await Effect.runPromise(
+      Effect.result(
         makePiConfinementLive({
           platform: "darwin",
           sandboxPath: f.sandbox,
@@ -1133,13 +1136,17 @@ describe("Pi process boundary", () => {
           environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, f.home),
         }),
       ),
-    ).rejects.toThrow(/invalid-configuration/);
+    );
+    expect(prepared).toMatchObject({
+      _tag: "Failure",
+      failure: { category: "invalid-configuration" },
+    });
 
     const occupiedModels = fixture();
     mkdirSync(occupiedModels.home, { recursive: true });
     writeFileSync(join(occupiedModels.home, "models.json"), "occupied", { mode: 0o600 });
-    await expect(
-      Effect.runPromise(
+    const occupiedPrepared = await Effect.runPromise(
+      Effect.result(
         makePiConfinementLive({
           platform: "darwin",
           sandboxPath: occupiedModels.sandbox,
@@ -1156,7 +1163,11 @@ describe("Pi process boundary", () => {
           environment: sanitizePiEnvironment({ PATH: "/usr/bin" }, occupiedModels.home),
         }),
       ),
-    ).rejects.toThrow(/invalid-configuration/);
+    );
+    expect(occupiedPrepared).toMatchObject({
+      _tag: "Failure",
+      failure: { category: "invalid-configuration" },
+    });
 
     const other = fixture();
     const linux = await Effect.runPromise(

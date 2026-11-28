@@ -424,7 +424,7 @@ function runProbe(
       }
     }
 
-    return Effect.async<string, ProviderFailure>((resume) => {
+    return Effect.callback<string, ProviderFailure>((resume) => {
       const child = spawn(
         launch?.command ?? binaryPath,
         launch === undefined ? args : [...launch.args],

@@ -1,17 +1,16 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { SidebarThreadStatus } from "./sidebarThreadStatus";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * A Project View's lifecycle lens. `all` is a view choice, not a Project
  * lifecycle: Projects remain `active` or `archived` in the journal.
  */
-export const ProjectViewLifecycle = Schema.Literal("active", "archived", "all");
+export const ProjectViewLifecycle = Schema.Literals(["active", "archived", "all"]);
 export type ProjectViewLifecycle = typeof ProjectViewLifecycle.Type;
 
 /** How the Project list is grouped. Mode is never a grouping axis. */
-export const ProjectViewGrouping = Schema.Literal("project", "environment", "status", "none");
+export const ProjectViewGrouping = Schema.Literals(["project", "environment", "status", "none"]);
 export type ProjectViewGrouping = typeof ProjectViewGrouping.Type;
 
 /**
@@ -19,14 +18,14 @@ export type ProjectViewGrouping = typeof ProjectViewGrouping.Type;
  * thread first, so a list too long to read top to bottom still opens on the
  * work that is waiting.
  */
-export const ProjectViewSort = Schema.Literal("recency", "alphabetical", "created", "status");
+export const ProjectViewSort = Schema.Literals(["recency", "alphabetical", "created", "status"]);
 export type ProjectViewSort = typeof ProjectViewSort.Type;
 
 /**
  * Inclusive local-calendar activity windows. `all` means no activity
  * constraint. Custom ranges carry `YYYY-MM-DD` local dates, not timestamps.
  */
-export const ProjectViewActivityPeriod = Schema.Literal(
+export const ProjectViewActivityPeriod = Schema.Literals([
   "all",
   "today",
   "3-days",
@@ -34,16 +33,16 @@ export const ProjectViewActivityPeriod = Schema.Literal(
   "14-days",
   "30-days",
   "custom",
-);
+]);
 export type ProjectViewActivityPeriod = typeof ProjectViewActivityPeriod.Type;
 
-export const ProjectViewLocalDate = Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/));
+export const ProjectViewLocalDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/));
 export type ProjectViewLocalDate = typeof ProjectViewLocalDate.Type;
 
 export const ProjectViewActivityRange = Schema.Struct({
   from: Schema.optional(ProjectViewLocalDate),
   to: Schema.optional(ProjectViewLocalDate),
-}).annotations(strict);
+});
 export type ProjectViewActivityRange = typeof ProjectViewActivityRange.Type;
 
 /**
@@ -59,20 +58,20 @@ export type ProjectViewActivityRange = typeof ProjectViewActivityRange.Type;
  */
 export const ProjectViewFilters = Schema.Struct({
   lifecycle: ProjectViewLifecycle,
-  environmentIds: Schema.Array(Schema.NonEmptyTrimmedString),
+  environmentIds: Schema.Array(NonEmptyTrimmedString),
   showEmptyProjects: Schema.Boolean,
   grouping: ProjectViewGrouping,
   sorting: ProjectViewSort,
   activity: ProjectViewActivityPeriod,
   activityRange: Schema.optional(ProjectViewActivityRange),
   statuses: Schema.optional(Schema.Array(SidebarThreadStatus)),
-}).annotations(strict);
+});
 export type ProjectViewFilters = typeof ProjectViewFilters.Type;
 
 export const ProjectViewEnvironment = Schema.Struct({
-  id: Schema.NonEmptyTrimmedString,
-  name: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  id: NonEmptyTrimmedString,
+  name: NonEmptyTrimmedString,
+});
 export type ProjectViewEnvironment = typeof ProjectViewEnvironment.Type;
 
 /**
@@ -89,11 +88,35 @@ export const DEFAULT_PROJECT_VIEW_FILTERS: ProjectViewFilters = {
   activity: "all",
 };
 
-export const decodeProjectViewLifecycle = Schema.decodeUnknownSync(ProjectViewLifecycle);
-export const decodeProjectViewGrouping = Schema.decodeUnknownSync(ProjectViewGrouping);
-export const decodeProjectViewSort = Schema.decodeUnknownSync(ProjectViewSort);
-export const decodeProjectViewActivityPeriod = Schema.decodeUnknownSync(ProjectViewActivityPeriod);
-export const decodeProjectViewLocalDate = Schema.decodeUnknownSync(ProjectViewLocalDate);
-export const decodeProjectViewActivityRange = Schema.decodeUnknownSync(ProjectViewActivityRange);
-export const decodeProjectViewFilters = Schema.decodeUnknownSync(ProjectViewFilters);
-export const decodeProjectViewEnvironment = Schema.decodeUnknownSync(ProjectViewEnvironment);
+export const decodeProjectViewLifecycle = Schema.decodeUnknownSync(
+  ProjectViewLifecycle,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewGrouping = Schema.decodeUnknownSync(
+  ProjectViewGrouping,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewSort = Schema.decodeUnknownSync(
+  ProjectViewSort,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewActivityPeriod = Schema.decodeUnknownSync(
+  ProjectViewActivityPeriod,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewLocalDate = Schema.decodeUnknownSync(
+  ProjectViewLocalDate,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewActivityRange = Schema.decodeUnknownSync(
+  ProjectViewActivityRange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewFilters = Schema.decodeUnknownSync(
+  ProjectViewFilters,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectViewEnvironment = Schema.decodeUnknownSync(
+  ProjectViewEnvironment,
+  STRICT_DECODE_OPTIONS,
+);

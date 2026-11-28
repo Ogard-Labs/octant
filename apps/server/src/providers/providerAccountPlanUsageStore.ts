@@ -8,7 +8,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
 } from "@octant/contracts";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import { accountPlanUsageKey, type ProviderPlanUsageSource } from "@octant/domain";
 import { canonicalRateLimitWindowId } from "./rateLimitWindowIdentity";
 
@@ -226,7 +226,7 @@ export class ProviderAccountPlanUsageStore {
   }
 }
 
-const decodeStoredWindow = Schema.decodeUnknownEither(ProviderRateLimitWindow);
+const decodeStoredWindow = Schema.decodeUnknownResult(ProviderRateLimitWindow);
 const isStoredTimestamp = Schema.is(UtcTimestamp);
 
 /**
@@ -255,7 +255,7 @@ function readSnapshot(value: unknown): PersistedSnapshot | undefined {
     observedAt: entry.observedAt,
     windows: entry.windows.slice(0, MAX_WINDOWS).flatMap((window) => {
       const decoded = decodeStoredWindow(window);
-      return Either.isRight(decoded) ? [decoded.right] : [];
+      return Result.isSuccess(decoded) ? [decoded.success] : [];
     }),
   };
 }

@@ -454,7 +454,7 @@ describe("ProviderRuntimeRegistry", () => {
           idleMs: 30_000,
           start: async () => ({ value: "leased", close: leasedClose }),
         })
-        .pipe(Scope.extend(leaseScope)),
+        .pipe(Scope.provide(leaseScope)),
     );
     const claim = registry.claimNativeSession(instanceId, "parked");
     if (claim.status !== "claimed") throw new Error("Expected reservation");

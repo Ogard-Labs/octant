@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { NativeHarnessTranscriptToolCall } from "./nativeHarnessTranscript";
 import {
   ProviderCapabilities,
@@ -24,15 +25,15 @@ import { VideoClipOptions } from "./videoGeneration";
  * guessing at one.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * An outside driver wire protocol major version: a harness endpoint
  * (`harness-endpoint/1`), an image generator (`image-generation/1`), or a
  * video generator (`video-generation/1`).
  */
 export const OutsideProviderDriverProtocolVersion = Schema.String.pipe(
-  Schema.pattern(/^(harness-endpoint|image-generation|video-generation)\/[1-9][0-9]{0,3}$/),
+  Schema.check(
+    Schema.isPattern(/^(harness-endpoint|image-generation|video-generation)\/[1-9][0-9]{0,3}$/),
+  ),
   Schema.brand("OutsideProviderDriverProtocolVersion"),
 );
 export type OutsideProviderDriverProtocolVersion = typeof OutsideProviderDriverProtocolVersion.Type;
@@ -96,39 +97,45 @@ export const OUTSIDE_DRIVER_METHODS = {
 
 const JsonRpcVersion = Schema.Literal("2.0");
 /** A JSON-RPC id. Each side numbers the calls it makes. */
-export const OutsideDriverMessageId = Schema.Int.pipe(
-  Schema.positive(),
-  Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+export const OutsideDriverMessageId = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
 );
 export type OutsideDriverMessageId = typeof OutsideDriverMessageId.Type;
 
 /** The host's name for one open session; the driver echoes it and never invents one. */
-export const OutsideDriverSessionRef = Schema.String.pipe(Schema.pattern(/^s[0-9]{1,15}$/));
+export const OutsideDriverSessionRef = Schema.String.check(Schema.isPattern(/^s[0-9]{1,15}$/));
 export type OutsideDriverSessionRef = typeof OutsideDriverSessionRef.Type;
 
-const PositiveCount = Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(100_000_000));
-const TokenCount = Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(1_000_000_000));
-const PositiveTokenCount = Schema.Int.pipe(
-  Schema.positive(),
-  Schema.lessThanOrEqualTo(1_000_000_000),
+const PositiveCount = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(100_000_000),
+);
+const TokenCount = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(1_000_000_000),
+);
+const PositiveTokenCount = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(1_000_000_000),
 );
 
 // ── host → driver ──────────────────────────────────────────────────────────
 
 export const OutsideDriverInitializeParams = Schema.Struct({
-  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(Schema.minItems(1)),
+  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).check(Schema.isMinLength(1)),
   /** Non-secret configuration only: the person's address and listed models. */
   configuration: Schema.Struct({
     baseUrl: Schema.String,
     modelIds: Schema.Array(ProviderModelId),
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type OutsideDriverInitializeParams = typeof OutsideDriverInitializeParams.Type;
 
 export const OutsideDriverSessionOpenParams = Schema.Struct({
   sessionRef: OutsideDriverSessionRef,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type OutsideDriverSessionOpenParams = typeof OutsideDriverSessionOpenParams.Type;
 
 /**
@@ -137,7 +144,7 @@ export type OutsideDriverSessionOpenParams = typeof OutsideDriverSessionOpenPara
  * outside driver's ceiling keeps image input unsupported.
  */
 export const OutsideDriverMessage = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+  role: Schema.Literals(["user", "assistant"]),
   text: Schema.String,
   toolCalls: Schema.optional(Schema.Array(NativeHarnessTranscriptToolCall)),
   toolResults: Schema.optional(
@@ -147,10 +154,10 @@ export const OutsideDriverMessage = Schema.Struct({
         resultJson: Schema.String,
         isError: Schema.Boolean,
         images: Schema.optional(Schema.Array(ProviderToolImage)),
-      }).annotations(strict),
+      }),
     ),
   ),
-}).annotations(strict);
+});
 export type OutsideDriverMessage = typeof OutsideDriverMessage.Type;
 
 export const OutsideDriverRequest = Schema.Struct({
@@ -159,53 +166,53 @@ export const OutsideDriverRequest = Schema.Struct({
   system: Schema.optional(Schema.String),
   history: Schema.Array(OutsideDriverMessage),
   tools: Schema.Array(ProviderToolDefinition),
-}).annotations(strict);
+});
 export type OutsideDriverRequest = typeof OutsideDriverRequest.Type;
 
 export const OutsideDriverSessionSendParams = Schema.Struct({
   sessionRef: OutsideDriverSessionRef,
   request: OutsideDriverRequest,
-}).annotations(strict);
+});
 export type OutsideDriverSessionSendParams = typeof OutsideDriverSessionSendParams.Type;
 
 /** A notification: the host has already answered the send as interrupted. */
 export const OutsideDriverSessionCancelParams = Schema.Struct({
   requestId: OutsideDriverMessageId,
-}).annotations(strict);
+});
 export type OutsideDriverSessionCancelParams = typeof OutsideDriverSessionCancelParams.Type;
 
 /** A notification: the host refuses every later send on this session itself. */
 export const OutsideDriverSessionReleaseParams = Schema.Struct({
   sessionRef: OutsideDriverSessionRef,
-}).annotations(strict);
+});
 export type OutsideDriverSessionReleaseParams = typeof OutsideDriverSessionReleaseParams.Type;
 
 /** Response bytes of a brokered request, as UTF-8 text, in order. */
 export const OutsideDriverHttpChunkParams = Schema.Struct({
   httpId: OutsideDriverMessageId,
   data: Schema.String,
-}).annotations(strict);
+});
 export type OutsideDriverHttpChunkParams = typeof OutsideDriverHttpChunkParams.Type;
 
 /** The end of a brokered response: complete, or cut off with a closed category. */
-export const OutsideDriverHttpEndParams = Schema.Union(
+export const OutsideDriverHttpEndParams = Schema.Union([
   Schema.Struct({
     httpId: OutsideDriverMessageId,
     outcome: Schema.Literal("complete"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     httpId: OutsideDriverMessageId,
     outcome: Schema.Literal("failed"),
     category: ProviderFailureCategory,
-  }).annotations(strict),
-);
+  }),
+]);
 export type OutsideDriverHttpEndParams = typeof OutsideDriverHttpEndParams.Type;
 
 /** The host's answer to `http/request`: the status and headers, without the credential header. */
 export const OutsideDriverHttpResponse = Schema.Struct({
-  status: Schema.Int.pipe(Schema.between(100, 599)),
-  headers: Schema.Array(Schema.Tuple(Schema.String, Schema.String)),
-}).annotations(strict);
+  status: Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 599 })),
+  headers: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
+});
 export type OutsideDriverHttpResponse = typeof OutsideDriverHttpResponse.Type;
 
 // ── driver → host ──────────────────────────────────────────────────────────
@@ -213,7 +220,7 @@ export type OutsideDriverHttpResponse = typeof OutsideDriverHttpResponse.Type;
 export const OutsideDriverInitializeResult = Schema.Struct({
   protocolVersion: OutsideProviderDriverProtocolVersion,
   cloudSessions: Schema.optional(Schema.Literal("openai-agents-v1")),
-}).annotations(strict);
+});
 export type OutsideDriverInitializeResult = typeof OutsideDriverInitializeResult.Type;
 
 const capabilityClaimFields = (() => {
@@ -226,9 +233,9 @@ const capabilityClaimFields = (() => {
  * outside family's ceiling, so a claim can lower a capability but never raise
  * one; compaction is the host's and is not claimable.
  */
-export const OutsideDriverCapabilityClaims = Schema.partial(
-  Schema.Struct(capabilityClaimFields),
-).annotations(strict);
+export const OutsideDriverCapabilityClaims = Schema.Struct(capabilityClaimFields).mapFields(
+  Struct.map(Schema.optional),
+);
 export type OutsideDriverCapabilityClaims = typeof OutsideDriverCapabilityClaims.Type;
 
 /**
@@ -238,20 +245,18 @@ export type OutsideDriverCapabilityClaims = typeof OutsideDriverCapabilityClaims
 export const OutsideDriverProbeResult = Schema.Struct({
   models: Schema.Array(
     Schema.Struct({
-      id: ProviderModelId.pipe(Schema.maxLength(256)),
+      id: ProviderModelId.check(Schema.isMaxLength(256)),
       contextWindowTokens: Schema.optional(PositiveCount),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(256)),
+    }),
+  ).check(Schema.isMaxLength(256)),
   claims: Schema.optional(OutsideDriverCapabilityClaims),
-}).annotations(strict);
+});
 export type OutsideDriverProbeResult = typeof OutsideDriverProbeResult.Type;
 
 /** The bounds `fits` measures a request against; none means every request fits. */
 export const OutsideDriverSessionOpenResult = Schema.Struct({
-  bounds: Schema.optional(
-    Schema.Struct({ contextWindowTokens: Schema.optional(PositiveCount) }).annotations(strict),
-  ),
-}).annotations(strict);
+  bounds: Schema.optional(Schema.Struct({ contextWindowTokens: Schema.optional(PositiveCount) })),
+});
 export type OutsideDriverSessionOpenResult = typeof OutsideDriverSessionOpenResult.Type;
 
 export const OutsideDriverUsage = Schema.Struct({
@@ -260,23 +265,21 @@ export const OutsideDriverUsage = Schema.Struct({
   cacheReadInputTokens: Schema.optional(TokenCount),
   cacheWriteInputTokens: Schema.optional(TokenCount),
   reasoningTokens: Schema.optional(TokenCount),
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.finite(), Schema.between(0, 1_000_000))),
-}).annotations(strict);
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isFinite(), Schema.isBetween({ minimum: 0, maximum: 1_000_000 })),
+  ),
+});
 export type OutsideDriverUsage = typeof OutsideDriverUsage.Type;
 
 /**
  * What a driver streams while it answers a send. Retries are the host's, so a
  * driver never announces one.
  */
-export const OutsideDriverStreamEvent = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("text-delta"), text: Schema.String }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("reasoning-delta"), text: Schema.String }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("usage"), ...OutsideDriverUsage.fields }).annotations(
-    strict,
-  ),
-);
+export const OutsideDriverStreamEvent = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("text-delta"), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("reasoning-delta"), text: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("usage"), ...OutsideDriverUsage.fields }),
+]);
 export type OutsideDriverStreamEvent = typeof OutsideDriverStreamEvent.Type;
 
 /**
@@ -285,10 +288,10 @@ export type OutsideDriverStreamEvent = typeof OutsideDriverStreamEvent.Type;
  */
 export const OutsideDriverSessionSendResult = Schema.Struct({
   text: Schema.String,
-  toolCalls: Schema.Array(NativeHarnessTranscriptToolCall).pipe(Schema.maxItems(64)),
+  toolCalls: Schema.Array(NativeHarnessTranscriptToolCall).check(Schema.isMaxLength(64)),
   usage: Schema.optional(OutsideDriverUsage),
   outputStopReason: Schema.optional(ProviderOutputStopReason),
-}).annotations(strict);
+});
 export type OutsideDriverSessionSendResult = typeof OutsideDriverSessionSendResult.Type;
 
 /**
@@ -300,25 +303,25 @@ export type OutsideDriverSessionSendResult = typeof OutsideDriverSessionSendResu
 export const OutsideDriverFailureData = Schema.Struct({
   category: ProviderFailureCategory,
   retryAfterMs: Schema.optional(
-    Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(3_600_000)),
+    Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(3_600_000)),
   ),
   contextOverflow: Schema.optional(
-    Schema.Struct({ contextWindowTokens: Schema.optional(PositiveCount) }).annotations(strict),
+    Schema.Struct({ contextWindowTokens: Schema.optional(PositiveCount) }),
   ),
-}).annotations(strict);
+});
 export type OutsideDriverFailureData = typeof OutsideDriverFailureData.Type;
 
 export const OutsideDriverSessionEventParams = Schema.Struct({
   requestId: OutsideDriverMessageId,
   event: OutsideDriverStreamEvent,
-}).annotations(strict);
+});
 export type OutsideDriverSessionEventParams = typeof OutsideDriverSessionEventParams.Type;
 
-const HttpHeaderName = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/));
+const HttpHeaderName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/));
 // A value that could end its header line early, or end the string in C code, is refused.
-const HttpHeaderValue = Schema.String.pipe(
-  Schema.maxLength(8_192),
-  Schema.filter(
+const HttpHeaderValue = Schema.String.check(
+  Schema.isMaxLength(8_192),
+  Schema.makeFilter(
     (value) => !value.includes("\r") && !value.includes("\n") && !value.includes("\u0000"),
   ),
 );
@@ -335,39 +338,36 @@ const HttpHeaderValue = Schema.String.pipe(
  */
 export const OutsideDriverHttpRequestParams = Schema.Struct({
   requestId: Schema.optional(OutsideDriverMessageId),
-  url: Schema.String.pipe(Schema.maxLength(8_192)),
+  url: Schema.String.check(Schema.isMaxLength(8_192)),
   /**
    * `PUT` and `DELETE` are for the calls that stop a video job or remove the
    * provider's copy; the host refuses them on any call that is not one of a
    * video driver's own.
    */
-  method: Schema.Literal("GET", "POST", "PUT", "DELETE"),
+  method: Schema.Literals(["GET", "POST", "PUT", "DELETE"]),
   headers: Schema.optional(
-    Schema.Array(Schema.Tuple(HttpHeaderName, HttpHeaderValue)).pipe(Schema.maxItems(64)),
+    Schema.Array(Schema.Tuple([HttpHeaderName, HttpHeaderValue])).check(Schema.isMaxLength(64)),
   ),
   body: Schema.optional(Schema.String),
   auth: Schema.optional(
     Schema.Struct({
       header: HttpHeaderName,
       scheme: Schema.optional(Schema.Literal("Bearer")),
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type OutsideDriverHttpRequestParams = typeof OutsideDriverHttpRequestParams.Type;
 
 /**
  * Every message a driver may write. A result is read against the call it
  * answers; anything else stops the driver.
  */
-export const OutsideDriverToHostMessage = Schema.Union(
-  // `exact`, because a missing key reads as `undefined`, which `Unknown`
-  // accepts: without it a bare `{ jsonrpc, id }` decodes as an answer that has
-  // neither a result nor an error.
+export const OutsideDriverToHostMessage = Schema.Union([
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     id: OutsideDriverMessageId,
     result: Schema.Unknown,
-  }).annotations({ parseOptions: { onExcessProperty: "error", exact: true } }),
+  }),
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     id: OutsideDriverMessageId,
@@ -375,25 +375,25 @@ export const OutsideDriverToHostMessage = Schema.Union(
       code: Schema.Int,
       message: Schema.String,
       data: Schema.optional(Schema.Unknown),
-    }).annotations(strict),
-  }).annotations(strict),
+    }),
+  }),
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     method: Schema.Literal(OUTSIDE_DRIVER_METHODS.sessionEvent),
     params: OutsideDriverSessionEventParams,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     id: OutsideDriverMessageId,
     method: Schema.Literal(OUTSIDE_DRIVER_METHODS.httpRequest),
     params: OutsideDriverHttpRequestParams,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     method: Schema.Literal(OUTSIDE_DRIVER_METHODS.imageChunk),
     params: Schema.suspend(() => OutsideDriverImageChunkParams),
-  }).annotations(strict),
-);
+  }),
+]);
 export type OutsideDriverToHostMessage = typeof OutsideDriverToHostMessage.Type;
 
 // ── image generation ───────────────────────────────────────────────────────
@@ -413,23 +413,23 @@ export const OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES = 2_621_440;
 export const OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS =
   Math.ceil(OUTSIDE_DRIVER_MAX_REFERENCE_IMAGES_BYTES / 3) * 4;
 
-const OutsideDriverImageMediaType = Schema.Literal(
+const OutsideDriverImageMediaType = Schema.Literals([
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
+]);
+
+const Base64Image = Schema.String.check(
+  Schema.isMinLength(4),
+  Schema.isMaxLength(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS),
+  Schema.isPattern(/^[A-Za-z0-9+/]+={0,2}$/),
 );
 
-const Base64Image = Schema.String.pipe(
-  Schema.minLength(4),
-  Schema.maxLength(OUTSIDE_DRIVER_IMAGE_BASE64_CHARACTERS),
-  Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
-);
-
-const Base64ReferenceImage = Schema.String.pipe(
-  Schema.minLength(4),
-  Schema.maxLength(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS),
-  Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+const Base64ReferenceImage = Schema.String.check(
+  Schema.isMinLength(4),
+  Schema.isMaxLength(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS),
+  Schema.isPattern(/^[A-Za-z0-9+/]+={0,2}$/),
 );
 
 /**
@@ -442,24 +442,24 @@ const Base64ReferenceImage = Schema.String.pipe(
 export const OutsideDriverImageGenerateParams = Schema.Struct({
   modelId: ProviderModelId,
   prompt: Schema.String,
-  variantCount: Schema.Int.pipe(Schema.between(1, 16)),
+  variantCount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16 })),
   references: Schema.Array(
     Schema.Struct({
       mediaType: OutsideDriverImageMediaType,
       data: Base64ReferenceImage,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(16)),
+    }),
+  ).check(Schema.isMaxLength(16)),
   quality: Schema.optional(Schema.String),
   size: Schema.optional(Schema.String),
   aspectRatio: Schema.optional(Schema.String),
   resolution: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type OutsideDriverImageGenerateParams = typeof OutsideDriverImageGenerateParams.Type;
 
 /** A notification: the host has already answered the job as interrupted. */
 export const OutsideDriverImageCancelParams = Schema.Struct({
   requestId: OutsideDriverMessageId,
-}).annotations(strict);
+});
 export type OutsideDriverImageCancelParams = typeof OutsideDriverImageCancelParams.Type;
 
 /** The most base64 characters one `image/chunk` may carry, well inside a line. */
@@ -474,14 +474,14 @@ export const OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS = 1_000_000;
  */
 export const OutsideDriverImageChunkParams = Schema.Struct({
   requestId: OutsideDriverMessageId,
-  image: Schema.Int.pipe(Schema.between(0, 15)),
-  data: Schema.String.pipe(
-    Schema.minLength(4),
-    Schema.maxLength(OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS),
-    Schema.filter((data) => data.length % 4 === 0),
-    Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/),
+  image: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 15 })),
+  data: Schema.String.check(
+    Schema.isMinLength(4),
+    Schema.isMaxLength(OUTSIDE_DRIVER_IMAGE_CHUNK_CHARACTERS),
+    Schema.makeFilter((data) => data.length % 4 === 0),
+    Schema.isPattern(/^[A-Za-z0-9+/]+={0,2}$/),
   ),
-}).annotations(strict);
+});
 export type OutsideDriverImageChunkParams = typeof OutsideDriverImageChunkParams.Type;
 
 /**
@@ -491,16 +491,16 @@ export type OutsideDriverImageChunkParams = typeof OutsideDriverImageChunkParams
  * and only when it appeared in a response the host relayed for this job, so
  * a driver cannot point the host at an address the provider never gave.
  */
-export const OutsideDriverGeneratedImage = Schema.Union(
-  Schema.Struct({ mediaType: OutsideDriverImageMediaType, data: Base64Image }).annotations(strict),
+export const OutsideDriverGeneratedImage = Schema.Union([
+  Schema.Struct({ mediaType: OutsideDriverImageMediaType, data: Base64Image }),
   Schema.Struct({
     mediaType: OutsideDriverImageMediaType,
     chunked: Schema.Literal(true),
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
-  }).annotations(strict),
-);
+    url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_192)),
+  }),
+]);
 export type OutsideDriverGeneratedImage = typeof OutsideDriverGeneratedImage.Type;
 
 /**
@@ -508,29 +508,36 @@ export type OutsideDriverGeneratedImage = typeof OutsideDriverGeneratedImage.Typ
  * carries no text: the host writes the sentence a person reads. Usage the
  * driver reports is never a price; the host settles from its own estimate.
  */
-export const OutsideDriverImageGenerateResult = Schema.Union(
+export const OutsideDriverImageGenerateResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("completed"),
-    images: Schema.Array(OutsideDriverGeneratedImage).pipe(Schema.minItems(1), Schema.maxItems(16)),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("refused") }).annotations(strict),
-);
+    images: Schema.Array(OutsideDriverGeneratedImage).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(16),
+    ),
+  }),
+  Schema.Struct({ status: Schema.Literal("refused") }),
+]);
 export type OutsideDriverImageGenerateResult = typeof OutsideDriverImageGenerateResult.Type;
 
-export const decodeOutsideDriverImageGenerateResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverImageGenerateResult = Schema.decodeUnknownResult(
   OutsideDriverImageGenerateResult,
+  STRICT_DECODE_OPTIONS,
 );
 
 // ── video generation ───────────────────────────────────────────────────────
 
 /** The provider's name for one clip, as the driver reported it when the clip started. */
-export const OutsideDriverVideoRemoteId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+export const OutsideDriverVideoRemoteId = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+);
 export type OutsideDriverVideoRemoteId = typeof OutsideDriverVideoRemoteId.Type;
 
 const OutsideDriverVideoImage = Schema.Struct({
   mediaType: OutsideDriverImageMediaType,
   data: Base64ReferenceImage,
-}).annotations(strict);
+});
 
 /**
  * One clip as it crosses to the driver. The host has already checked the
@@ -543,24 +550,24 @@ export const OutsideDriverVideoStartParams = Schema.Struct({
   options: VideoClipOptions,
   firstFrame: Schema.optional(OutsideDriverVideoImage),
   lastFrame: Schema.optional(OutsideDriverVideoImage),
-  references: Schema.Array(OutsideDriverVideoImage).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  references: Schema.Array(OutsideDriverVideoImage).check(Schema.isMaxLength(16)),
+});
 export type OutsideDriverVideoStartParams = typeof OutsideDriverVideoStartParams.Type;
 
 /** `video/poll`, `video/cancel` and `video/forget` each name the clip the start returned. */
 export const OutsideDriverVideoJobParams = Schema.Struct({
   remoteId: OutsideDriverVideoRemoteId,
-}).annotations(strict);
+});
 export type OutsideDriverVideoJobParams = typeof OutsideDriverVideoJobParams.Type;
 
 /** A started clip, or the provider's safety refusal, which carries no text. */
-export const OutsideDriverVideoStartResult = Schema.Union(
+export const OutsideDriverVideoStartResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("started"),
     remoteId: OutsideDriverVideoRemoteId,
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("refused") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("refused") }),
+]);
 export type OutsideDriverVideoStartResult = typeof OutsideDriverVideoStartResult.Type;
 
 /**
@@ -572,9 +579,13 @@ export const OutsideDriverVideoUsage = Schema.Struct({
   inputTokens: Schema.optional(PositiveTokenCount),
   outputTokens: Schema.optional(PositiveTokenCount),
   billedSeconds: Schema.optional(
-    Schema.Number.pipe(Schema.finite(), Schema.positive(), Schema.lessThanOrEqualTo(86_400)),
+    Schema.Number.check(
+      Schema.isFinite(),
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(86_400),
+    ),
   ),
-}).annotations(strict);
+});
 export type OutsideDriverVideoUsage = typeof OutsideDriverVideoUsage.Type;
 
 /**
@@ -583,58 +594,71 @@ export type OutsideDriverVideoUsage = typeof OutsideDriverVideoUsage.Type;
  * key, and only when the provider's own answer named that address. Nothing
  * here carries text: the host writes every sentence a person reads.
  */
-export const OutsideDriverVideoPollResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("running") }).annotations(strict),
+export const OutsideDriverVideoPollResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("running") }),
   Schema.Struct({
     status: Schema.Literal("completed"),
-    url: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_192)),
+    url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_192)),
     usage: Schema.optional(OutsideDriverVideoUsage),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     billed: Schema.optional(Schema.Literal(true)),
     usage: Schema.optional(OutsideDriverVideoUsage),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     category: ProviderFailureCategory,
     billed: Schema.optional(Schema.Literal(true)),
     usage: Schema.optional(OutsideDriverVideoUsage),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("cancelled"),
     usage: Schema.optional(OutsideDriverVideoUsage),
-  }).annotations(strict),
-);
+  }),
+]);
 export type OutsideDriverVideoPollResult = typeof OutsideDriverVideoPollResult.Type;
 
 /** The provider's copy is gone. Anything else is a failure, which the host tries again. */
 export const OutsideDriverVideoForgetResult = Schema.Struct({
   status: Schema.Literal("removed"),
-}).annotations(strict);
+});
 export type OutsideDriverVideoForgetResult = typeof OutsideDriverVideoForgetResult.Type;
 
-export const decodeOutsideDriverVideoStartResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverVideoStartResult = Schema.decodeUnknownResult(
   OutsideDriverVideoStartResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverVideoPollResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverVideoPollResult = Schema.decodeUnknownResult(
   OutsideDriverVideoPollResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverVideoForgetResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverVideoForgetResult = Schema.decodeUnknownResult(
   OutsideDriverVideoForgetResult,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const decodeOutsideDriverToHostMessage = Schema.decodeUnknownEither(
+export const decodeOutsideDriverToHostMessage = Schema.decodeUnknownResult(
   OutsideDriverToHostMessage,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverInitializeResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverInitializeResult = Schema.decodeUnknownResult(
   OutsideDriverInitializeResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverProbeResult = Schema.decodeUnknownEither(OutsideDriverProbeResult);
-export const decodeOutsideDriverSessionOpenResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverProbeResult = Schema.decodeUnknownResult(
+  OutsideDriverProbeResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeOutsideDriverSessionOpenResult = Schema.decodeUnknownResult(
   OutsideDriverSessionOpenResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverSessionSendResult = Schema.decodeUnknownEither(
+export const decodeOutsideDriverSessionSendResult = Schema.decodeUnknownResult(
   OutsideDriverSessionSendResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeOutsideDriverFailureData = Schema.decodeUnknownEither(OutsideDriverFailureData);
+export const decodeOutsideDriverFailureData = Schema.decodeUnknownResult(
+  OutsideDriverFailureData,
+  STRICT_DECODE_OPTIONS,
+);

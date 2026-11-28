@@ -9,23 +9,25 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 
 export const MAX_SCAFFOLD_OUTPUT_BYTES = 256 * 1024;
 export const MAX_SCAFFOLD_DIRECTORY_NAME_LENGTH = 64;
 
 export const ScaffoldId = Schema.String.pipe(
-  Schema.pattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
-  Schema.maxLength(64),
+  Schema.check(Schema.isPattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), Schema.isMaxLength(64)),
   Schema.brand("ScaffoldId"),
 );
 export type ScaffoldId = typeof ScaffoldId.Type;
 
-export const ScaffoldRunId = Schema.UUID.pipe(Schema.brand("ScaffoldRunId"));
+export const ScaffoldRunId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ScaffoldRunId"),
+);
 export type ScaffoldRunId = typeof ScaffoldRunId.Type;
 
 /**
@@ -35,9 +37,9 @@ export type ScaffoldRunId = typeof ScaffoldRunId.Type;
  * always creates its own directory, so a name that could escape the checkout
  * or hide itself is refused before any planning happens.
  */
-export const ScaffoldDirectoryName = Schema.String.pipe(
-  Schema.maxLength(MAX_SCAFFOLD_DIRECTORY_NAME_LENGTH),
-  Schema.filter(
+export const ScaffoldDirectoryName = Schema.String.check(
+  Schema.isMaxLength(MAX_SCAFFOLD_DIRECTORY_NAME_LENGTH),
+  Schema.makeFilter(
     (value) =>
       value.length > 0 &&
       value === value.normalize("NFC") &&
@@ -56,17 +58,18 @@ export const ScaffoldDirectoryName = Schema.String.pipe(
  * refuse them: a token that opens a shell turns a pinned generator back into
  * arbitrary text.
  */
-const ScaffoldArgvToken = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.filter(
+const ScaffoldArgvToken = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.makeFilter(
     (value) =>
       !value.includes("\0") &&
       !["/bin/sh", "sh", "bash", "zsh", "fish", "cmd", "powershell", "-c"].includes(value),
   ),
 );
 
-const ScaffoldPresetArguments = Schema.Array(ScaffoldArgvToken).pipe(
-  Schema.filter((values) => values.length <= 16),
+const ScaffoldPresetArguments = Schema.Array(ScaffoldArgvToken).check(
+  Schema.makeFilter((values) => values.length <= 16),
 );
 
 /**
@@ -77,26 +80,28 @@ const ScaffoldPresetArguments = Schema.Array(ScaffoldArgvToken).pipe(
  * tool the machine already has; there is nothing to pin because nothing is
  * fetched.
  */
-export const ScaffoldGenerator = Schema.Union(
+export const ScaffoldGenerator = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("pinned-package"),
-    runner: Schema.Literal("bun", "npm"),
-    packageName: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(128),
-      Schema.pattern(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/),
+    runner: Schema.Literals(["bun", "npm"]),
+    packageName: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/),
     ),
-    version: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(32),
-      Schema.pattern(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/),
+    version: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(32),
+      Schema.isPattern(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/),
     ),
     presetArguments: ScaffoldPresetArguments,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("toolchain"),
     tool: Schema.Literal("swift"),
     presetArguments: ScaffoldPresetArguments,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ScaffoldGenerator = typeof ScaffoldGenerator.Type;
 
 /**
@@ -108,19 +113,20 @@ export type ScaffoldGenerator = typeof ScaffoldGenerator.Type;
  */
 export const ScaffoldEntry = Schema.Struct({
   id: ScaffoldId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80)),
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
-  target: Schema.Literal("web-app", "cross-platform-app", "native-apple-app"),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(80)),
+  summary: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(240)),
+  target: Schema.Literals(["web-app", "cross-platform-app", "native-apple-app"]),
   generator: ScaffoldGenerator,
-  requiresTool: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(32),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
+  requiresTool: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(32),
+    Schema.isPattern(/^[a-z][a-z0-9-]*$/),
   ),
   /** Notable paths the scaffold writes, shown before anything runs. */
-  produces: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120))).pipe(
-    Schema.filter((paths) => paths.length <= 12),
+  produces: Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(120))).check(
+    Schema.makeFilter((paths) => paths.length <= 12),
   ),
-}).annotations(strict);
+});
 export type ScaffoldEntry = typeof ScaffoldEntry.Type;
 
 /**
@@ -131,19 +137,21 @@ export type ScaffoldEntry = typeof ScaffoldEntry.Type;
  */
 export const ScaffoldCatalogListing = Schema.Struct({
   kind: Schema.Literal("scaffold-catalog-listing"),
-  entries: Schema.Array(ScaffoldEntry).pipe(
-    Schema.filter((entries) => new Set(entries.map((entry) => entry.id)).size === entries.length),
+  entries: Schema.Array(ScaffoldEntry).check(
+    Schema.makeFilter(
+      (entries) => new Set(entries.map((entry) => entry.id)).size === entries.length,
+    ),
   ),
   /** Tools the host found on this machine, out of the ones the entries need. */
-  availableTools: Schema.Array(Schema.String).pipe(
-    Schema.filter((tools) => new Set(tools).size === tools.length),
+  availableTools: Schema.Array(Schema.String).check(
+    Schema.makeFilter((tools) => new Set(tools).size === tools.length),
   ),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ScaffoldCatalogListing = typeof ScaffoldCatalogListing.Type;
 
-const ScaffoldOutput = Schema.String.pipe(
-  Schema.filter((value) => encoder.encode(value).byteLength <= MAX_SCAFFOLD_OUTPUT_BYTES),
+const ScaffoldOutput = Schema.String.check(
+  Schema.makeFilter((value) => encoder.encode(value).byteLength <= MAX_SCAFFOLD_OUTPUT_BYTES),
 );
 
 /** What one scaffold run did, as the host observed it. */
@@ -154,25 +162,28 @@ export const ScaffoldRun = Schema.Struct({
   checkoutId: CodeCheckoutId,
   directoryName: ScaffoldDirectoryName,
   /** The command the host composed, recorded so the run can be read back. */
-  argv: Schema.NonEmptyArray(ScaffoldArgvToken).pipe(Schema.filter((argv) => argv.length <= 32)),
+  argv: Schema.NonEmptyArray(ScaffoldArgvToken).check(
+    Schema.makeFilter((argv) => argv.length <= 32),
+  ),
   startedAt: UtcTimestamp,
   completedAt: UtcTimestamp,
   exitCode: Schema.NullOr(Schema.Int),
-  termination: Schema.Literal("exited", "cancelled", "timed-out", "unavailable"),
+  termination: Schema.Literals(["exited", "cancelled", "timed-out", "unavailable"]),
   output: ScaffoldOutput,
   outputTruncated: Schema.Boolean,
-  outcome: Schema.Literal("created", "failed", "cancelled", "unavailable"),
-})
-  .annotations(strict)
-  .pipe(
-    // A scaffold that never exited cleanly cannot have created anything, and
-    // saying it did is how a half-written directory gets treated as a project.
-    Schema.filter((run) => run.outcome !== "created" || run.exitCode === 0),
-  );
+  outcome: Schema.Literals(["created", "failed", "cancelled", "unavailable"]),
+}).pipe(
+  // A scaffold that never exited cleanly cannot have created anything, and
+  // saying it did is how a half-written directory gets treated as a project.
+  Schema.check(Schema.makeFilter((run) => run.outcome !== "created" || run.exitCode === 0)),
+);
 export type ScaffoldRun = typeof ScaffoldRun.Type;
 
-export const decodeScaffoldId = Schema.decodeUnknownSync(ScaffoldId);
-export const decodeScaffoldRunId = Schema.decodeUnknownSync(ScaffoldRunId);
-export const decodeScaffoldEntry = Schema.decodeUnknownSync(ScaffoldEntry);
-export const decodeScaffoldCatalogListing = Schema.decodeUnknownSync(ScaffoldCatalogListing);
-export const decodeScaffoldRun = Schema.decodeUnknownSync(ScaffoldRun);
+export const decodeScaffoldId = Schema.decodeUnknownSync(ScaffoldId, STRICT_DECODE_OPTIONS);
+export const decodeScaffoldRunId = Schema.decodeUnknownSync(ScaffoldRunId, STRICT_DECODE_OPTIONS);
+export const decodeScaffoldEntry = Schema.decodeUnknownSync(ScaffoldEntry, STRICT_DECODE_OPTIONS);
+export const decodeScaffoldCatalogListing = Schema.decodeUnknownSync(
+  ScaffoldCatalogListing,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeScaffoldRun = Schema.decodeUnknownSync(ScaffoldRun, STRICT_DECODE_OPTIONS);

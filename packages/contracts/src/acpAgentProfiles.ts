@@ -7,12 +7,12 @@ import { Schema } from "effect";
  * project and location the instance names with the host's Application Default
  * Credentials.
  */
-export const AcpAgentAuthentication = Schema.Literal(
+export const AcpAgentAuthentication = Schema.Literals([
   "subscription",
   "provider-owned",
   "api-key",
   "agent-platform",
-);
+]);
 export type AcpAgentAuthentication = typeof AcpAgentAuthentication.Type;
 
 /**

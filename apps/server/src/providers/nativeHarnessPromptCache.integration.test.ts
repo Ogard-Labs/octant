@@ -165,7 +165,7 @@ async function runThreeStepToolTurn(input: {
             executionPolicy: "approval-gated",
           });
           const observed: ProviderRuntimeEvent[] = [];
-          const collector = yield* Effect.fork(
+          const collector = yield* Effect.forkChild(
             (yield* connection.subscribe).pipe(
               Stream.filter((event) => event.sessionId === input.sessionId),
               Stream.takeUntil(

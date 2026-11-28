@@ -391,7 +391,7 @@ export class ProviderService implements ProviderServiceApi {
           Effect.scoped(options.driver!(instance).probe({ instanceId: instance.id })),
         );
         if (Exit.isSuccess(exit)) return exit.value;
-        const refused = Cause.failureOption(exit.cause);
+        const refused = Cause.findErrorOption(exit.cause);
         throw Option.isSome(refused) ? refused.value : Cause.squash(exit.cause);
       };
     } else {
@@ -3248,14 +3248,14 @@ export async function runPackagedProviderSmokeTurn(
             executionPolicy: input.executionPolicy ?? "approval-gated",
           });
           yield* Effect.addFinalizer(() =>
-            connection.stop(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+            connection.stop(input.sessionId).pipe(Effect.catch(() => Effect.void)),
           );
           const events: ProviderRuntimeEvent[] = [];
           let answeredRequestId: string | undefined;
           let matchingRequestCount = 0;
           let interruptedAfterOutput = false;
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             runtimeEvents.pipe(
               Stream.filter((event) => event.sessionId === input.sessionId),
               Stream.take(maxEvents + 1),
@@ -3346,12 +3346,13 @@ export async function runPackagedProviderSmokeTurn(
           return { events };
         }),
       ).pipe(
-        Effect.timeoutFail({
+        Effect.timeoutOrElse({
           duration: timeoutMs,
-          onTimeout: () => ({
-            category: "interrupted" as const,
-            message: "Provider smoke timed out.",
-          }),
+          orElse: () =>
+            Effect.fail({
+              category: "interrupted" as const,
+              message: "Provider smoke timed out.",
+            }),
         }),
       ),
     );
@@ -3625,7 +3626,7 @@ export function isProviderExecutableAvailable(instance: ProviderInstance): boole
 async function runProviderEffect<A>(effect: Effect.Effect<A, ProviderFailure>): Promise<A> {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) return exit.value;
-  const refused = Cause.failureOption(exit.cause);
+  const refused = Cause.findErrorOption(exit.cause);
   if (Option.isSome(refused)) throw refused.value;
   throw Cause.squash(exit.cause);
 }

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, CorrelationId, UtcTimestamp } from "./events";
 import {
   DEFAULT_SIBLING_THREAD_READS_PER_TURN,
@@ -8,8 +9,6 @@ import {
   MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES,
   ThreadMentionTranscriptEntry,
 } from "./threadMention";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The threads tool: a Work or Code turn's view of the other open threads of
@@ -29,7 +28,7 @@ export const SIBLING_THREADS_TOOL_NAME = "octant_threads";
  * operations its mode, access posture, profile, and planner designation allow,
  * and the enum it sees lists only those.
  */
-export const ThreadsToolOperation = Schema.Literal(
+export const ThreadsToolOperation = Schema.Literals([
   "help",
   "list",
   "read",
@@ -40,11 +39,11 @@ export const ThreadsToolOperation = Schema.Literal(
   "board",
   "start",
   "move-to-worktree",
-);
+]);
 export type ThreadsToolOperation = typeof ThreadsToolOperation.Type;
 
 /** The read-only operations that journal or bound per turn. */
-export const SiblingThreadAction = Schema.Literal("list", "read", "wait");
+export const SiblingThreadAction = Schema.Literals(["list", "read", "wait"]);
 export type SiblingThreadAction = typeof SiblingThreadAction.Type;
 
 /**
@@ -64,11 +63,14 @@ export const THREADS_TOOL_BOARD_ALLOWLIST_ENTRY = "octant_threads.board";
  * a question, approval, or limit only a person can clear, or nothing running.
  * `wait` returns only this, so it carries no text another thread wrote.
  */
-export const SiblingThreadState = Schema.Literal("working", "waiting-for-person", "idle");
+export const SiblingThreadState = Schema.Literals(["working", "waiting-for-person", "idle"]);
 export type SiblingThreadState = typeof SiblingThreadState.Type;
 
 /** A Work or Code thread the threads tool names; a Project holds threads of one mode. */
-export const SiblingThreadId = Schema.UUID.pipe(Schema.brand("SiblingThreadId"));
+export const SiblingThreadId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("SiblingThreadId"),
+);
 export type SiblingThreadId = typeof SiblingThreadId.Type;
 
 const uuidPattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
@@ -83,7 +85,7 @@ const uuidPattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}
  * it refuses exactly as a malformed one does.
  */
 export const SiblingThreadReference = Schema.String.pipe(
-  Schema.pattern(new RegExp(`^${uuidPattern}@${uuidPattern}$`)),
+  Schema.check(Schema.isPattern(new RegExp(`^${uuidPattern}@${uuidPattern}$`))),
   Schema.brand("SiblingThreadReference"),
 );
 export type SiblingThreadReference = typeof SiblingThreadReference.Type;
@@ -99,20 +101,22 @@ export const DEFAULT_SIBLING_THREAD_WAIT_MS = 30_000;
 /** The longest one `wait` blocks: the same bound a child-run `wait` has. */
 export const MAX_SIBLING_THREAD_WAIT_MS = 120_000;
 
-const SiblingThreadTitle = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400));
+const SiblingThreadTitle = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400));
 
-export const SiblingThreadsToolInput = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("list") }).annotations(strict),
+export const SiblingThreadsToolInput = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("list") }),
   Schema.Struct({
     operation: Schema.Literal("read"),
-    reference: Schema.String.pipe(Schema.maxLength(128)),
-  }).annotations(strict),
+    reference: Schema.String.check(Schema.isMaxLength(128)),
+  }),
   Schema.Struct({
     operation: Schema.Literal("wait"),
-    reference: Schema.String.pipe(Schema.maxLength(128)),
-    timeoutMs: Schema.optional(Schema.Int.pipe(Schema.between(0, MAX_SIBLING_THREAD_WAIT_MS))),
-  }).annotations(strict),
-);
+    reference: Schema.String.check(Schema.isMaxLength(128)),
+    timeoutMs: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_SIBLING_THREAD_WAIT_MS })),
+    ),
+  }),
+]);
 export type SiblingThreadsToolInput = typeof SiblingThreadsToolInput.Type;
 
 /**
@@ -128,12 +132,12 @@ export type SiblingThreadsToolInput = typeof SiblingThreadsToolInput.Type;
  * host knows. No `policy` case depends on another thread, so it confirms nothing
  * about one.
  */
-export const SiblingThreadRefuseReason = Schema.Literal(
+export const SiblingThreadRefuseReason = Schema.Literals([
   "unauthorized",
   "rate-limited",
   "unavailable",
   "policy",
-);
+]);
 export type SiblingThreadRefuseReason = typeof SiblingThreadRefuseReason.Type;
 
 export const SiblingThreadRow = Schema.Struct({
@@ -141,37 +145,36 @@ export const SiblingThreadRow = Schema.Struct({
   title: SiblingThreadTitle,
   state: SiblingThreadState,
   stateChangedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SiblingThreadRow = typeof SiblingThreadRow.Type;
 
-export const SiblingThreadsToolResult = Schema.Union(
+export const SiblingThreadsToolResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("listed"),
-    threads: Schema.Array(SiblingThreadRow).pipe(Schema.maxItems(MAX_SIBLING_THREAD_LIST_ROWS)),
+    threads: Schema.Array(SiblingThreadRow).check(Schema.isMaxLength(MAX_SIBLING_THREAD_LIST_ROWS)),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("read"),
     reference: SiblingThreadReference,
     title: SiblingThreadTitle,
     state: SiblingThreadState,
-    transcript: Schema.Array(ThreadMentionTranscriptEntry).pipe(
-      Schema.maxItems(MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES),
+    transcript: Schema.Array(ThreadMentionTranscriptEntry).check(
+      Schema.isMaxLength(MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES),
     ),
     truncated: Schema.Boolean,
-  }).annotations(strict),
-  /** `working` here means the bound ran out before the thread stopped. */
+  }),
   Schema.Struct({
     status: Schema.Literal("waited"),
     reference: SiblingThreadReference,
     state: SiblingThreadState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: SiblingThreadRefuseReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type SiblingThreadsToolResult = typeof SiblingThreadsToolResult.Type;
 
 /**
@@ -192,15 +195,30 @@ export const SiblingThreadObserved = Schema.Struct({
   kind: Schema.Literal("sibling-observed"),
   threadId: AggregateId,
   targetThreadId: AggregateId,
-  action: Schema.Literal("read", "wait"),
+  action: Schema.Literals(["read", "wait"]),
   correlationId: CorrelationId,
-  returnedBytes: Schema.Int.pipe(Schema.nonNegative()),
+  returnedBytes: NonNegativeInt,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SiblingThreadObserved = typeof SiblingThreadObserved.Type;
 
-export const decodeSiblingThreadObserved = Schema.decodeUnknownSync(SiblingThreadObserved);
-export const decodeSiblingThreadId = Schema.decodeUnknownSync(SiblingThreadId);
-export const decodeSiblingThreadReference = Schema.decodeUnknownSync(SiblingThreadReference);
-export const decodeSiblingThreadsToolInput = Schema.decodeUnknownSync(SiblingThreadsToolInput);
-export const decodeSiblingThreadsToolResult = Schema.decodeUnknownSync(SiblingThreadsToolResult);
+export const decodeSiblingThreadObserved = Schema.decodeUnknownSync(
+  SiblingThreadObserved,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSiblingThreadId = Schema.decodeUnknownSync(
+  SiblingThreadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSiblingThreadReference = Schema.decodeUnknownSync(
+  SiblingThreadReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSiblingThreadsToolInput = Schema.decodeUnknownSync(
+  SiblingThreadsToolInput,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSiblingThreadsToolResult = Schema.decodeUnknownSync(
+  SiblingThreadsToolResult,
+  STRICT_DECODE_OPTIONS,
+);

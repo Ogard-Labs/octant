@@ -264,7 +264,7 @@ describe("Ollama harness tool round trip", () => {
             executionPolicy: "approval-gated",
           });
           const events: ProviderRuntimeEvent[] = [];
-          const collector = yield* Effect.fork(
+          const collector = yield* Effect.forkChild(
             (yield* connection.subscribe).pipe(
               Stream.takeUntil((event) =>
                 ["completed", "failed", "interrupted"].includes(event.kind),
@@ -282,7 +282,7 @@ describe("Ollama harness tool round trip", () => {
               ),
             ),
           );
-          const sent = yield* Effect.either(
+          const sent = yield* Effect.result(
             connection.send({
               sessionId: toolSessionId,
               prompt: "read a.ts",
@@ -290,7 +290,7 @@ describe("Ollama harness tool round trip", () => {
               tools: [readTool],
             }),
           );
-          if (sent._tag === "Left") {
+          if (sent._tag === "Failure") {
             yield* Fiber.interrupt(collector);
           } else {
             yield* Fiber.join(collector);
@@ -311,7 +311,7 @@ describe("Ollama harness tool round trip", () => {
   it("refuses Octant tools for a model nobody verified, before any request", async () => {
     const fixture = toolService(() => completedChat());
     const { sent } = await codeTurn(fixture, () => ({ resultJson: "{}", isError: false }));
-    expect(sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(sent).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(fixture.chatBodies).toEqual([]);
   });
 
@@ -335,7 +335,7 @@ describe("Ollama harness tool round trip", () => {
         return { resultJson, isError };
       });
 
-      expect(sent._tag).toBe("Right");
+      expect(sent._tag).toBe("Success");
       expect(events.map((event) => event.kind)).toContain("tool-request");
       expect(events.at(-1)?.kind).toBe("completed");
       expect(fixture.chatBodies).toHaveLength(2);

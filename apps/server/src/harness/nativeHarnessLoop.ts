@@ -657,6 +657,10 @@ export function createNativeHarnessConnection(
           const failed = controller.signal.aborted
             ? failure("interrupted", "The provider request was cancelled.")
             : sanitizeFailure(error);
+          if (state.inFlight === step) {
+            state.inFlight = undefined;
+            state.abortController = undefined;
+          }
           emit(
             state,
             failed.category === "interrupted"
@@ -1077,6 +1081,8 @@ export function createNativeHarnessConnection(
         });
       }
       state.acceptingSteering = false;
+      state.inFlight = undefined;
+      state.abortController = undefined;
       emit(state, {
         kind: "completed",
         resumeCursor: cursorFor(state),
@@ -1476,7 +1482,7 @@ export function createNativeHarnessConnection(
       );
 
     return {
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
+      subscribe: Effect.map(PubSub.subscribe(events), Stream.fromSubscription),
       start: (input) =>
         Effect.tryPromise({
           try: async (signal) => {

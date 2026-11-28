@@ -315,8 +315,8 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
             resultJson: '{"echo":"hi"}',
             isError: false,
           };
-          const answerResult = yield* Effect.either(connection.answerTool(answer));
-          expect(answerResult._tag).toBe("Right");
+          const answerResult = yield* Effect.result(connection.answerTool(answer));
+          expect(answerResult._tag).toBe("Success");
           // Wait briefly for the second turn to complete
           yield* Effect.sleep("200 millis");
           yield* connection.stop(sessionId);
@@ -356,8 +356,8 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
             resultJson: '{"echo":"hi"}',
             isError: false,
           };
-          const result = yield* Effect.either(connection.answerTool(answer));
-          expect(result._tag).toBe("Left");
+          const result = yield* Effect.result(connection.answerTool(answer));
+          expect(result._tag).toBe("Failure");
           yield* connection.stop(sessionId);
         }),
       ),
@@ -390,8 +390,8 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
             resultJson: '{"echo":"hi"}',
             isError: false,
           };
-          const result = yield* Effect.either(connection.answerTool(answer));
-          expect(result._tag).toBe("Left");
+          const result = yield* Effect.result(connection.answerTool(answer));
+          expect(result._tag).toBe("Failure");
           yield* connection.stop(sessionId);
         }),
       ),
@@ -777,7 +777,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
             mode: "chat",
           });
           yield* connection.start({ sessionId, modelId: model, executionPolicy: "approval-gated" });
-          const outcome = yield* Effect.either(
+          const outcome = yield* Effect.result(
             connection.send({
               sessionId,
               prompt: "list agents",
@@ -802,7 +802,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 
     const unverified = await sendWithOctantTool(driver, modelId);
-    expect(unverified._tag).toBe("Left");
+    expect(unverified._tag).toBe("Failure");
 
     // A routine probe reports tools unsupported and runs no generating request.
     expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
@@ -811,8 +811,8 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
 
     runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
-    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
-    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Success");
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Failure");
   });
 
   it("keeps Octant tools to the verified model after it calls a tool in a real turn", async () => {
@@ -847,10 +847,10 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
       ),
     );
 
-    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Failure");
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
-    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
+    expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Failure");
+    expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Success");
   });
 
   it("keeps a verification across a routine probe", async () => {

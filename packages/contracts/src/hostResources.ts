@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Read-only load snapshot for one host.
@@ -13,36 +12,36 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * inventing a figure. The same holds for `network`, `diskIo`, `gpu` and
  * `energy`: each is present only when the host could read it.
  */
-const ByteCount = Schema.Int.pipe(Schema.greaterThanOrEqualTo(0));
-const Percent = Schema.Int.pipe(Schema.between(0, 100));
-const CoreCount = Schema.Int.pipe(Schema.between(0, 4_096));
+const ByteCount = NonNegativeInt;
+const Percent = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+const CoreCount = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 4_096 }));
 
 export const HostResourceMemory = Schema.Struct({
   usedBytes: ByteCount,
   totalBytes: ByteCount,
-}).annotations(strict);
+});
 export type HostResourceMemory = typeof HostResourceMemory.Type;
 
 export const HostResourceDisk = Schema.Struct({
   usedBytes: ByteCount,
   freeBytes: ByteCount,
-}).annotations(strict);
+});
 export type HostResourceDisk = typeof HostResourceDisk.Type;
 
 /** Bytes per second averaged between this snapshot's sample and the one before it. */
 export const HostResourceRate = Schema.Struct({
   inBytesPerSecond: ByteCount,
   outBytesPerSecond: ByteCount,
-}).annotations(strict);
+});
 export type HostResourceRate = typeof HostResourceRate.Type;
 
-export const HostResourceGpu = Schema.Struct({ percent: Percent }).annotations(strict);
+export const HostResourceGpu = Schema.Struct({ percent: Percent });
 export type HostResourceGpu = typeof HostResourceGpu.Type;
 
 export const HostResourceEnergy = Schema.Struct({
   batteryPercent: Percent,
   charging: Schema.Boolean,
-}).annotations(strict);
+});
 export type HostResourceEnergy = typeof HostResourceEnergy.Type;
 
 export const HostResourceSnapshot = Schema.Struct({
@@ -59,7 +58,10 @@ export const HostResourceSnapshot = Schema.Struct({
   /** Battery state; absent on a host with no battery, which the tool says plainly. */
   energy: Schema.optional(HostResourceEnergy),
   sampledAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HostResourceSnapshot = typeof HostResourceSnapshot.Type;
 
-export const decodeHostResourceSnapshot = Schema.decodeUnknownSync(HostResourceSnapshot);
+export const decodeHostResourceSnapshot = Schema.decodeUnknownSync(
+  HostResourceSnapshot,
+  STRICT_DECODE_OPTIONS,
+);

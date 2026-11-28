@@ -817,7 +817,7 @@ export function probeCodexBinary(
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
     const { launch } = probe;
 
-    return Effect.async<CodexBinaryProbe, ProviderFailure>((resume) => {
+    return Effect.callback<CodexBinaryProbe, ProviderFailure>((resume) => {
       const child = spawn(launch.command, [...launch.args], {
         cwd: launch.workingDirectory,
         detached: process.platform !== "win32",
@@ -1562,7 +1562,7 @@ function acquireCodexAppServer(
   options: ResolvedCodexProcessOptions,
   onProcessStarted?: ProviderProcessStartedListener,
 ): Effect.Effect<ManagedCodexConnection, ProviderFailure> {
-  return Effect.async<ManagedCodexConnection, ProviderFailure>((resume) => {
+  return Effect.callback<ManagedCodexConnection, ProviderFailure>((resume) => {
     const child = spawn(launch.command, [...launch.args], {
       ...(launch.cwd === undefined ? {} : { cwd: launch.cwd }),
       detached: process.platform !== "win32",
@@ -1841,7 +1841,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             );
           }
         }
-        return Effect.acquireReleaseInterruptible(
+        return Effect.acquireRelease(
           Effect.gen(function* () {
             const probe = yield* probeCodexBinary(binaryPath, {
               ...(launchEnvironment === undefined
@@ -1947,6 +1947,7 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
               : managed.connection;
           }),
           () => (terminate === undefined ? Effect.void : cleanupEffect(terminate)),
+          { interruptible: true },
         );
       }),
   };

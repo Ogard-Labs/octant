@@ -5,16 +5,14 @@ import { CodeRuntimeWork, decodeCodeRuntimeWork } from "./code";
 import { CodeOperationStreamFrame } from "./codeOperations";
 import { decodeHostAnswer } from "./hostAnswer";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 interface Folder {
   readonly name: string;
   readonly children: ReadonlyArray<Folder>;
 }
-const Folder: Schema.Schema<Folder> = Schema.Struct({
+const Folder: Schema.Codec<Folder> = Schema.Struct({
   name: Schema.String,
-  children: Schema.Array(Schema.suspend((): Schema.Schema<Folder> => Folder)),
-}).annotations(strict);
+  children: Schema.Array(Schema.suspend((): Schema.Codec<Folder> => Folder)),
+});
 
 describe("decodeHostAnswer", () => {
   it("ignores unknown fields at every depth while the shared decoder keeps refusing them", () => {
@@ -23,7 +21,9 @@ describe("decodeHostAnswer", () => {
       added: 1,
       children: [{ name: "leaf", children: [], addedLater: true }],
     };
-    expect(() => Schema.decodeUnknownSync(Folder)(answer)).toThrow(/is unexpected/);
+    expect(() => Schema.decodeUnknownSync(Folder, { onExcessProperty: "error" })(answer)).toThrow(
+      /Expected no excess property/,
+    );
     expect(decodeHostAnswer(Folder)(answer)).toEqual({
       name: "root",
       children: [{ name: "leaf", children: [] }],
@@ -68,7 +68,9 @@ describe("decodeHostAnswer", () => {
 
   it("still refuses an ask a person decides on that carries a field this build does not know", () => {
     const answer = frame({ ...approvalAsk, browserOrigin: "https://example.com" });
-    expect(() => decodeHostAnswer(CodeOperationStreamFrame)(answer)).toThrow(/is unexpected/);
+    expect(() => decodeHostAnswer(CodeOperationStreamFrame)(answer)).toThrow(
+      /Expected no excess property/,
+    );
   });
 
   it("reads a Code approval that offers Remember for this Project", () => {
@@ -111,31 +113,27 @@ function unionsThatDropFieldsWhenLenient(): ReadonlyArray<string> {
     // so one level through a suspension is enough to see every union.
     if (seen.has(ast) || suspended > 1) return;
     seen.add(ast);
+    if (ast.encoding !== undefined) {
+      for (const link of ast.encoding) visit(link.to, owner, suspended);
+    }
     switch (ast._tag) {
-      case "TypeLiteral":
+      case "Objects":
         ast.propertySignatures.forEach((property) => visit(property.type, owner, suspended));
         ast.indexSignatures.forEach((index) => visit(index.type, owner, suspended));
         return;
-      case "TupleType":
-        ast.elements.forEach((element) => visit(element.type, owner, suspended));
-        ast.rest.forEach((member) => visit(member.type, owner, suspended));
+      case "Arrays":
+        ast.elements.forEach((element) => visit(element, owner, suspended));
+        ast.rest.forEach((member) => visit(member, owner, suspended));
         return;
       case "Union":
         checkUnion(ast, owner, found);
         ast.types.forEach((member) => visit(member, owner, suspended));
         return;
-      case "Refinement":
-        visit(ast.from, owner, suspended);
-        return;
-      case "Transformation":
-        visit(ast.from, owner, suspended);
-        visit(ast.to, owner, suspended);
-        return;
       case "Declaration":
         ast.typeParameters.forEach((parameter) => visit(parameter, owner, suspended));
         return;
       case "Suspend":
-        visit(ast.f(), owner, suspended + 1);
+        visit(ast.thunk(), owner, suspended + 1);
         return;
       default:
         return;
@@ -156,7 +154,7 @@ function checkUnion(union: SchemaAST.Union, owner: string, found: Set<string>): 
       const laterFields = new Map(later.propertySignatures.map((field) => [field.name, field]));
       const accepts = earlier.propertySignatures.every((field) => {
         const match = laterFields.get(field.name);
-        if (match === undefined) return field.isOptional;
+        if (match === undefined) return field.type.context?.isOptional === true;
         const mine = literalValues(field.type);
         const theirs = literalValues(match.type);
         return mine === undefined || theirs === undefined || mine.some((v) => theirs.includes(v));
@@ -172,24 +170,15 @@ function checkUnion(union: SchemaAST.Union, owner: string, found: Set<string>): 
   });
 }
 
-function encodedStruct(ast: SchemaAST.AST): SchemaAST.TypeLiteral | undefined {
-  switch (ast._tag) {
-    case "TypeLiteral":
-      return ast;
-    case "Refinement":
-    case "Transformation":
-      return encodedStruct(ast.from);
-    default:
-      return undefined;
-  }
+function encodedStruct(ast: SchemaAST.AST): SchemaAST.Objects | undefined {
+  const encoded = SchemaAST.toEncoded(ast);
+  return encoded._tag === "Objects" ? encoded : undefined;
 }
 
 function literalValues(ast: SchemaAST.AST): ReadonlyArray<SchemaAST.LiteralValue> | undefined {
   switch (ast._tag) {
     case "Literal":
       return [ast.literal];
-    case "Refinement":
-      return literalValues(ast.from);
     case "Union": {
       const values: Array<SchemaAST.LiteralValue> = [];
       for (const member of ast.types) {

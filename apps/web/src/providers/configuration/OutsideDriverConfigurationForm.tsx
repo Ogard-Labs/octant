@@ -17,7 +17,7 @@ import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
 
 type KeyChoice = "none" | "bearer" | "header";
 
-const decodeConfiguration = Schema.decodeUnknownEither(OutsideHarnessEndpointProviderConfiguration);
+const decodeConfiguration = Schema.decodeUnknownResult(OutsideHarnessEndpointProviderConfiguration);
 
 type OutsideInstance = Extract<ProviderInstance, { driverKind: "outside-harness-endpoint" }>;
 
@@ -117,7 +117,7 @@ export function OutsideDriverConfigurationForm(props: {
         ),
       ],
     });
-    if (decoded._tag === "Left") {
+    if (decoded._tag === "Failure") {
       setProblem(
         "Give it an address, at least one model ID, and a key header other than proxy-authorization, cookie, or host.",
       );
@@ -138,7 +138,7 @@ export function OutsideDriverConfigurationForm(props: {
     void props
       .onChange(
         props.instance.id,
-        decoded.right,
+        decoded.success,
         key === undefined ? { value: "", clear: credential.clear } : credential,
       )
       .then((updated) => {

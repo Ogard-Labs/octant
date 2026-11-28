@@ -3,41 +3,42 @@ import { BrowserEditorId } from "@octant/contracts/browser-presentation";
 
 import { BROWSER_EDITABLE_WORLD_ID } from "./browserEditableObservation";
 export { BROWSER_EDITABLE_WORLD_ID };
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Offset = Schema.Number.pipe(Schema.int(), Schema.between(0, 1_048_576));
-const Coordinate = Schema.Number.pipe(Schema.finite(), Schema.between(-100_000, 100_000));
+const Offset = Schema.Number.pipe(
+  Schema.check(Schema.isInt()),
+  Schema.check(Schema.isBetween({ minimum: 0, maximum: 1_048_576 })),
+);
+const Coordinate = Schema.Number.pipe(
+  Schema.check(Schema.isFinite()),
+  Schema.check(Schema.isBetween({ minimum: -100_000, maximum: 100_000 })),
+);
 const Caret = Schema.Struct({
   x: Coordinate,
   y: Coordinate,
   width: Schema.Literal(0),
   height: Schema.Number.pipe(
-    Schema.finite(),
-    Schema.greaterThan(0),
-    Schema.lessThanOrEqualTo(100_000),
+    Schema.check(Schema.isFinite()),
+    Schema.check(Schema.isGreaterThan(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(100_000)),
   ),
-}).annotations(strict);
+});
 const Selected = <Kind extends "text" | "secure">(kind: Kind) =>
   Schema.Struct({
     id: BrowserEditorId,
     kind: Schema.Literal(kind),
     selectionStart: Offset,
     selectionEnd: Offset,
-  })
-    .pipe(Schema.filter((value) => value.selectionEnd >= value.selectionStart))
-    .annotations(strict);
-const Target = Schema.Union(
+  }).pipe(Schema.check(Schema.makeFilter((value) => value.selectionEnd >= value.selectionStart)));
+const Target = Schema.Union([
   Selected("text"),
   Selected("secure"),
-  Schema.Struct({ id: BrowserEditorId, kind: Schema.Literal("field"), caret: Caret }).annotations(
-    strict,
-  ),
+  Schema.Struct({ id: BrowserEditorId, kind: Schema.Literal("field"), caret: Caret }),
   Schema.Struct({
     id: BrowserEditorId,
     kind: Schema.Literal("rich"),
     collapsed: Schema.Boolean,
     caret: Caret,
-  }).annotations(strict),
-);
+  }),
+]);
 /**
  * A focused field as its frame's observer reports it. A text control gives
  * UTF16 offsets for the native caret lookup; a field without a selection API

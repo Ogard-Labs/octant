@@ -1,10 +1,10 @@
 import { ConversationInputReceipt } from "./conversationInputs";
+import { NonNegativeInt } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const nonNegativeCount = Schema.Int.pipe(Schema.nonNegative());
+const nonNegativeCount = NonNegativeInt;
 
 /**
  * What a handoff left out of the conversation it carried, by cause. Every
@@ -23,12 +23,12 @@ export const ContextHandoffOmissions = Schema.Struct({
   truncatedMessages: nonNegativeCount,
   truncatedCharacters: nonNegativeCount,
   sourceTruncatedMessages: nonNegativeCount,
-}).annotations(strict);
+});
 export type ContextHandoffOmissions = typeof ContextHandoffOmissions.Type;
 
 /** Conversation messages a handoff carried; the bound leaves room for its summary block. */
-export const ContextHandoffMessages = Schema.Int.pipe(
-  Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1),
+export const ContextHandoffMessages = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1 }),
 );
 
 /**
@@ -39,12 +39,12 @@ export const ContextHandoffMessages = Schema.Int.pipe(
  * copy refused (a missing file, a link, a differing file already there), or
  * the new account refused to take the copy up.
  */
-export const AccountMoveTextHandoffCause = Schema.Literal(
+export const AccountMoveTextHandoffCause = Schema.Literals([
   "account-unavailable",
   "provider-cannot-carry",
   "session-not-copied",
   "session-not-adopted",
-);
+]);
 export type AccountMoveTextHandoffCause = typeof AccountMoveTextHandoffCause.Type;
 
 /**
@@ -59,7 +59,7 @@ export const AccountMoveSessionHandoff = Schema.Struct({
   previousProviderInstanceId: ProviderInstanceId,
   previousModelId: ProviderModelId,
   nativeSessionTransferred: Schema.Literal(true),
-}).annotations(strict);
+});
 export type AccountMoveSessionHandoff = typeof AccountMoveSessionHandoff.Type;
 
 /**
@@ -91,7 +91,7 @@ export const ProviderSwitchConversationHandoff = Schema.Struct({
   /** Present when the change was to another account of the same provider: why its session stayed behind. */
   accountMoveTextCause: Schema.optional(AccountMoveTextHandoffCause),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 export type ProviderSwitchConversationHandoff = typeof ProviderSwitchConversationHandoff.Type;
 
 /**
@@ -109,5 +109,5 @@ export const RewindConversationHandoff = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 export type RewindConversationHandoff = typeof RewindConversationHandoff.Type;

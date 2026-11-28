@@ -1325,7 +1325,7 @@ export function probeAcpBinary(
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
     const { launch } = probe;
 
-    return Effect.async<AcpBinaryProbe, ProviderFailure>((resume) => {
+    return Effect.callback<AcpBinaryProbe, ProviderFailure>((resume) => {
       const child = spawn(launch.command, [...launch.args], {
         cwd: launch.workingDirectory,
         detached: process.platform !== "win32",
@@ -1676,7 +1676,7 @@ function acquireConnection(
   sandboxPolicy?: SandboxPolicySelection,
 ): Effect.Effect<ManagedConnection, ProviderFailure> {
   const name = profile.displayName;
-  return Effect.async<ManagedConnection, ProviderFailure>((resume) => {
+  return Effect.callback<ManagedConnection, ProviderFailure>((resume) => {
     const child = spawn(launch.command, launch.args, {
       cwd: launch.cwd,
       detached: process.platform !== "win32",
@@ -1985,7 +1985,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         });
         let terminate: (() => Promise<void>) | undefined;
-        const managed = yield* Effect.acquireReleaseInterruptible(
+        const managed = yield* Effect.acquireRelease(
           acquireConnection(
             profile,
             launch,
@@ -2006,6 +2006,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           ),
           () =>
             terminate === undefined ? Effect.void : cleanupEffect(profile.displayName, terminate),
+          { interruptible: true },
         );
         return managed.connection;
       }),

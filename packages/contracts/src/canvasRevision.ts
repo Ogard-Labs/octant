@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AgentRunAuthority } from "./agentRun";
 import { CanvasActor, CanvasId, CanvasSchemaVersion, CanvasVersionId } from "./canvas";
 import {
@@ -12,11 +13,11 @@ import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
-const boundedText = (maxLength: number) => Schema.String.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
+const boundedText = (maxLength: number) => Schema.String.check(Schema.isMaxLength(maxLength));
 
 export const CANVAS_REVISION_PROMPT_MAX_CHARS = CANVAS_CREATE_PROMPT_MAX_CHARS;
 export const CANVAS_MAX_VERSION_HISTORY = 128;
@@ -35,7 +36,7 @@ function modeMatchesWorkspace(
   return workspaceKind === "code-worktree";
 }
 
-export const CanvasReviseDenialCode = Schema.Literal(
+export const CanvasReviseDenialCode = Schema.Literals([
   "mode-mismatch",
   "origin-thread-mismatch",
   "scope-mismatch",
@@ -48,7 +49,7 @@ export const CanvasReviseDenialCode = Schema.Literal(
   "stale-version",
   "unauthorized",
   "unavailable",
-);
+]);
 export type CanvasReviseDenialCode = typeof CanvasReviseDenialCode.Type;
 
 export const CanvasReviseRequest = Schema.Struct({
@@ -56,7 +57,7 @@ export const CanvasReviseRequest = Schema.Struct({
   kind: Schema.Literal("canvas-revise"),
   requestId: CanvasReviseRequestId,
   canvasId: CanvasId,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   prompt: boundedNonEmptyText(CANVAS_REVISION_PROMPT_MAX_CHARS),
   hostId: HostId,
   mode: OctantMode,
@@ -64,14 +65,14 @@ export const CanvasReviseRequest = Schema.Struct({
   originThreadId: CanvasOriginThreadId,
   actor: CanvasActor,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
   requestedAuthority: AgentRunAuthority,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)));
+}).check(
+  Schema.makeFilter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)),
+);
 export type CanvasReviseRequest = typeof CanvasReviseRequest.Type;
 
-export const CanvasReviseOutcome = Schema.Literal("ready", "limited", "failed");
+export const CanvasReviseOutcome = Schema.Literals(["ready", "limited", "failed"]);
 export type CanvasReviseOutcome = typeof CanvasReviseOutcome.Type;
 
 export const CanvasReviseReceipt = Schema.Struct({
@@ -81,23 +82,21 @@ export const CanvasReviseReceipt = Schema.Struct({
   requestId: CanvasReviseRequestId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   outcome: CanvasReviseOutcome,
   createdAt: UtcTimestamp,
   recoveryReason: Schema.optional(boundedText(1_024)),
-}).annotations(strict);
+});
 export type CanvasReviseReceipt = typeof CanvasReviseReceipt.Type;
 
-export const CanvasReviseResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("accepted"), receipt: CanvasReviseReceipt }).annotations(
-    strict,
-  ),
+export const CanvasReviseResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("accepted"), receipt: CanvasReviseReceipt }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasReviseDenialCode,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasReviseResult = typeof CanvasReviseResult.Type;
 
 /**
@@ -106,45 +105,70 @@ export type CanvasReviseResult = typeof CanvasReviseResult.Type;
  */
 export const CanvasVersionHistoryEntry = Schema.Struct({
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   schemaVersion: CanvasSchemaVersion,
   title: boundedNonEmptyText(256),
   createdAt: UtcTimestamp,
   createdBy: CanvasActor,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
   promptSummary: Schema.optional(boundedText(512)),
-}).annotations(strict);
+});
 export type CanvasVersionHistoryEntry = typeof CanvasVersionHistoryEntry.Type;
 
 export const CanvasVersionHistory = Schema.Struct({
   canvasId: CanvasId,
   currentVersionId: CanvasVersionId,
-  entries: Schema.Array(CanvasVersionHistoryEntry).pipe(
-    Schema.maxItems(CANVAS_MAX_VERSION_HISTORY),
+  entries: Schema.Array(CanvasVersionHistoryEntry).check(
+    Schema.isMaxLength(CANVAS_MAX_VERSION_HISTORY),
   ),
-}).annotations(strict);
+});
 export type CanvasVersionHistory = typeof CanvasVersionHistory.Type;
 
-export const CanvasHistoryOutcome = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("ready"), history: CanvasVersionHistory }).annotations(
-    strict,
-  ),
+export const CanvasHistoryOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("ready"), history: CanvasVersionHistory }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     canvasId: CanvasId,
     reason: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }),
+]);
 export type CanvasHistoryOutcome = typeof CanvasHistoryOutcome.Type;
 
-export const decodeCanvasReviseRequestId = Schema.decodeUnknownSync(CanvasReviseRequestId);
-export const decodeCanvasReviseReceiptId = Schema.decodeUnknownSync(CanvasReviseReceiptId);
-export const decodeCanvasReviseDenialCode = Schema.decodeUnknownSync(CanvasReviseDenialCode);
-export const decodeCanvasReviseRequest = Schema.decodeUnknownSync(CanvasReviseRequest);
-export const decodeCanvasReviseReceipt = Schema.decodeUnknownSync(CanvasReviseReceipt);
-export const decodeCanvasReviseResult = Schema.decodeUnknownSync(CanvasReviseResult);
-export const decodeCanvasVersionHistoryEntry = Schema.decodeUnknownSync(CanvasVersionHistoryEntry);
-export const decodeCanvasVersionHistory = Schema.decodeUnknownSync(CanvasVersionHistory);
-export const decodeCanvasHistoryOutcome = Schema.decodeUnknownSync(CanvasHistoryOutcome);
+export const decodeCanvasReviseRequestId = Schema.decodeUnknownSync(
+  CanvasReviseRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasReviseReceiptId = Schema.decodeUnknownSync(
+  CanvasReviseReceiptId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasReviseDenialCode = Schema.decodeUnknownSync(
+  CanvasReviseDenialCode,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasReviseRequest = Schema.decodeUnknownSync(
+  CanvasReviseRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasReviseReceipt = Schema.decodeUnknownSync(
+  CanvasReviseReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasReviseResult = Schema.decodeUnknownSync(
+  CanvasReviseResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasVersionHistoryEntry = Schema.decodeUnknownSync(
+  CanvasVersionHistoryEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasVersionHistory = Schema.decodeUnknownSync(
+  CanvasVersionHistory,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasHistoryOutcome = Schema.decodeUnknownSync(
+  CanvasHistoryOutcome,
+  STRICT_DECODE_OPTIONS,
+);

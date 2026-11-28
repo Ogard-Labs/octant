@@ -4,7 +4,7 @@ import { RemoteSetupCheckInput, RemoteSetupCheckResult } from "./remoteSetup";
 const input = { serverId: "00000000-0000-4000-8000-000000000710", runtime: "octant-harness" };
 describe("read-only remote setup contracts", () => {
   it("admits only a registered identifier, supported choice shape and an optional absolute folder", () => {
-    const decode = Schema.decodeUnknownSync(RemoteSetupCheckInput);
+    const decode = Schema.decodeUnknownSync(RemoteSetupCheckInput, { onExcessProperty: "error" });
     expect(decode({ ...input, folder: "/srv/app" })).toEqual({ ...input, folder: "/srv/app" });
     for (const extra of [
       { script: "pwd" },
@@ -17,7 +17,7 @@ describe("read-only remote setup contracts", () => {
       expect(() => decode({ ...input, folder })).toThrow();
   });
   it("refuses contradictory success and refusal answers", () => {
-    const decode = Schema.decodeUnknownSync(RemoteSetupCheckResult);
+    const decode = Schema.decodeUnknownSync(RemoteSetupCheckResult, { onExcessProperty: "error" });
     expect(decode({ status: "connected", reason: "ready", folder: "/srv/app" })).toMatchObject({
       status: "connected",
     });

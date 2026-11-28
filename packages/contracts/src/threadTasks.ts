@@ -1,6 +1,5 @@
 import { Schema } from "effect";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
 /**
  * One provider-reported task inside a turn's own work plan.
@@ -9,32 +8,34 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * list per turn keyed by the provider's own task id; it never authors steps
  * the provider did not report.
  */
-export const ThreadTaskState = Schema.Literal(
+export const ThreadTaskState = Schema.Literals([
   "pending",
   "running",
   "waiting",
   "completed",
   "failed",
-);
+]);
 export type ThreadTaskState = typeof ThreadTaskState.Type;
 
 export const ThreadTaskProgress = Schema.Struct({
-  taskId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  taskId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   state: ThreadTaskState,
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
+  summary: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048)),
   /**
    * The provider's wording for the task while it runs ("Running the tests").
    * Journals written before it existed omit it, and replay unchanged.
    */
-  runningSummary: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
-}).annotations(strict);
+  runningSummary: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048)),
+  ),
+});
 export type ThreadTaskProgress = typeof ThreadTaskProgress.Type;
 
 /** How many tasks one turn's plan may carry. Beyond this it is a plan record, not a turn. */
 export const MAX_THREAD_TASKS_PER_TURN = 64;
 
-export const ThreadTaskProgressList = Schema.Array(ThreadTaskProgress).pipe(
-  Schema.maxItems(MAX_THREAD_TASKS_PER_TURN),
+export const ThreadTaskProgressList = Schema.Array(ThreadTaskProgress).check(
+  Schema.isMaxLength(MAX_THREAD_TASKS_PER_TURN),
 );
 export type ThreadTaskProgressList = typeof ThreadTaskProgressList.Type;
 
@@ -79,5 +80,11 @@ export function restateThreadTaskList(
   return unchanged ? previous : next;
 }
 
-export const decodeThreadTaskProgress = Schema.decodeUnknownSync(ThreadTaskProgress);
-export const decodeThreadTaskProgressList = Schema.decodeUnknownSync(ThreadTaskProgressList);
+export const decodeThreadTaskProgress = Schema.decodeUnknownSync(
+  ThreadTaskProgress,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadTaskProgressList = Schema.decodeUnknownSync(
+  ThreadTaskProgressList,
+  STRICT_DECODE_OPTIONS,
+);

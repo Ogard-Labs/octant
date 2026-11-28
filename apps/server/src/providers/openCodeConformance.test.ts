@@ -12,7 +12,7 @@ import type { Event } from "@opencode-ai/sdk/v2/types";
 import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   adaptOpenCodeEvent,
@@ -389,7 +389,7 @@ describe("OpenCode provider conformance", () => {
                 });
                 const compact = connection.compact;
                 if (compact === undefined) throw new Error("expected a compact operation");
-                const compacting = yield* Effect.fork(
+                const compacting = yield* Effect.forkChild(
                   compact({
                     sessionId,
                     compactionId: "80000000-0000-4000-8000-000000000205",
@@ -399,7 +399,7 @@ describe("OpenCode provider conformance", () => {
                   yield* Effect.sleep("20 millis");
                   yield* connection.stop(sessionId);
                 }
-                return yield* Effect.fromFiber(compacting);
+                return yield* Fiber.join(compacting);
               }),
             ),
           ),

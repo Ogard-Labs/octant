@@ -1,6 +1,5 @@
-import { Schema } from "effect";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
+import { Effect, Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
 /**
  * How the person using this host wants to be shown and addressed.
@@ -20,8 +19,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const MAX_USER_DISPLAY_NAME_CHARACTERS = 64;
 export const MAX_USER_EMAIL_CHARACTERS = 254;
 
-export const UserDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_USER_DISPLAY_NAME_CHARACTERS),
+export const UserDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_USER_DISPLAY_NAME_CHARACTERS),
 );
 export type UserDisplayName = typeof UserDisplayName.Type;
 
@@ -34,9 +34,10 @@ export type UserDisplayName = typeof UserDisplayName.Type;
  * stricter grammar would reject deliverable addresses while still proving
  * nothing about this one.
  */
-export const UserEmailAddress = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_USER_EMAIL_CHARACTERS),
-  Schema.pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+export const UserEmailAddress = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_USER_EMAIL_CHARACTERS),
+  Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
 );
 export type UserEmailAddress = typeof UserEmailAddress.Type;
 
@@ -46,7 +47,7 @@ export type UserEmailAddress = typeof UserEmailAddress.Type;
  * A name rather than a hex colour, so the theme owns the rendered value and a
  * profile picked in one theme stays legible in another.
  */
-export const AvatarAccent = Schema.Literal(
+export const AvatarAccent = Schema.Literals([
   "slate",
   "indigo",
   "violet",
@@ -55,7 +56,7 @@ export const AvatarAccent = Schema.Literal(
   "amber",
   "rose",
   "cyan",
-);
+]);
 export type AvatarAccent = typeof AvatarAccent.Type;
 
 export const AVATAR_ACCENTS: ReadonlyArray<AvatarAccent> = [
@@ -80,9 +81,9 @@ export const DEFAULT_AVATAR_ACCENT: AvatarAccent = "indigo";
  */
 export const MAX_AVATAR_IMAGE_CHARACTERS = 96 * 1024;
 
-export const AvatarImageDataUrl = Schema.NonEmptyString.pipe(
-  Schema.maxLength(MAX_AVATAR_IMAGE_CHARACTERS),
-  Schema.pattern(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/),
+export const AvatarImageDataUrl = Schema.NonEmptyString.check(
+  Schema.isMaxLength(MAX_AVATAR_IMAGE_CHARACTERS),
+  Schema.isPattern(/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/),
 );
 export type AvatarImageDataUrl = typeof AvatarImageDataUrl.Type;
 
@@ -94,12 +95,12 @@ export type AvatarImageDataUrl = typeof AvatarImageDataUrl.Type;
  * gravatar.com at the user's explicit request. The surface says which, so the
  * user can see that an external service was contacted.
  */
-export const AvatarImageSource = Schema.Literal("upload", "gravatar");
+export const AvatarImageSource = Schema.Literals(["upload", "gravatar"]);
 export type AvatarImageSource = typeof AvatarImageSource.Type;
 
 const InitialsAvatar = Schema.Struct({
   kind: Schema.Literal("initials"),
-}).annotations(strict);
+});
 
 const ImageAvatar = Schema.Struct({
   kind: Schema.Literal("image"),
@@ -110,9 +111,9 @@ const ImageAvatar = Schema.Struct({
    * host never contacts gravatar.com again on its own.
    */
   dataUrl: AvatarImageDataUrl,
-}).annotations(strict);
+});
 
-export const UserAvatar = Schema.Union(InitialsAvatar, ImageAvatar).annotations(strict);
+export const UserAvatar = Schema.Union([InitialsAvatar, ImageAvatar]);
 export type UserAvatar = typeof UserAvatar.Type;
 
 export const DEFAULT_USER_AVATAR: UserAvatar = { kind: "initials" };
@@ -128,11 +129,17 @@ export const DEFAULT_USER_AVATAR: UserAvatar = { kind: "initials" };
 export const UserProfile = Schema.Struct({
   displayName: Schema.optional(UserDisplayName),
   email: Schema.optional(UserEmailAddress),
-  accent: Schema.optionalWith(AvatarAccent, { default: () => DEFAULT_AVATAR_ACCENT }),
-  avatar: Schema.optionalWith(UserAvatar, { default: () => DEFAULT_USER_AVATAR }),
-}).annotations(strict);
+  accent: AvatarAccent.pipe(Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_AVATAR_ACCENT))),
+  avatar: UserAvatar.pipe(Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_USER_AVATAR))),
+});
 export type UserProfile = typeof UserProfile.Type;
 
-export const decodeUserProfile = Schema.decodeUnknownSync(UserProfile);
-export const decodeAvatarImageDataUrl = Schema.decodeUnknownSync(AvatarImageDataUrl);
-export const decodeUserEmailAddress = Schema.decodeUnknownSync(UserEmailAddress);
+export const decodeUserProfile = Schema.decodeUnknownSync(UserProfile, STRICT_DECODE_OPTIONS);
+export const decodeAvatarImageDataUrl = Schema.decodeUnknownSync(
+  AvatarImageDataUrl,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUserEmailAddress = Schema.decodeUnknownSync(
+  UserEmailAddress,
+  STRICT_DECODE_OPTIONS,
+);

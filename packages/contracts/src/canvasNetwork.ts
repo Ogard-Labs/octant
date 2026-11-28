@@ -1,12 +1,11 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId } from "./canvasIdentity";
 
 // One Canvas's "Allow network" switch, as a window reads and sets it. The
 // schemas carry only the Canvas and the choice: who may set it, and what a
 // running page may then reach, are the host's decisions
 // (docs/design/canvas.md § Allow network).
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CANVAS_NETWORK_ACCESS_SCHEMA_VERSION = 1 as const;
 
@@ -46,7 +45,7 @@ export const CanvasNetworkAccessCommand = Schema.Struct({
   kind: Schema.Literal("set-canvas-network-access"),
   canvasId: CanvasId,
   allowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type CanvasNetworkAccessCommand = typeof CanvasNetworkAccessCommand.Type;
 
 /** The switch as it stands for one Canvas. */
@@ -54,26 +53,25 @@ export const CanvasNetworkAccessView = Schema.Struct({
   kind: Schema.Literal("canvas-network-access"),
   canvasId: CanvasId,
   allowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type CanvasNetworkAccessView = typeof CanvasNetworkAccessView.Type;
 
-export const CanvasNetworkAccessRefusalReason = Schema.Literal(
+export const CanvasNetworkAccessRefusalReason = Schema.Literals([
   "malformed",
   "canvas-unavailable",
-  // Only a person at a local window sets the switch.
   "local-window-required",
   "unavailable",
-);
+]);
 export type CanvasNetworkAccessRefusalReason = typeof CanvasNetworkAccessRefusalReason.Type;
 
-export const CanvasNetworkAccessResult = Schema.Union(
+export const CanvasNetworkAccessResult = Schema.Union([
   CanvasNetworkAccessView,
   Schema.Struct({
     kind: Schema.Literal("canvas-network-access-refused"),
     reason: CanvasNetworkAccessRefusalReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type CanvasNetworkAccessResult = typeof CanvasNetworkAccessResult.Type;
 
 /**
@@ -92,19 +90,19 @@ export const CANVAS_NETWORK_PAGE_RENEW_INTERVAL_MS = 20 * 60 * 1_000;
 export const CanvasNetworkPageRenewalCommand = Schema.Struct({
   schemaVersion: Schema.Literal(CANVAS_NETWORK_ACCESS_SCHEMA_VERSION),
   kind: Schema.Literal("renew-canvas-network-page"),
-  ticket: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
-}).annotations(strict);
+  ticket: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/)),
+});
 export type CanvasNetworkPageRenewalCommand = typeof CanvasNetworkPageRenewalCommand.Type;
 
-export const CanvasNetworkPageRenewalResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("canvas-network-page-renewed") }).annotations(strict),
+export const CanvasNetworkPageRenewalResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("canvas-network-page-renewed") }),
   Schema.Struct({
     kind: Schema.Literal("canvas-network-page-renewal-refused"),
     // `not-live`: no page run with that ticket holds a token now (it aged
     // out, the switch went off, or the page never had one).
-    reason: Schema.Literal("malformed", "local-window-required", "not-live"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["malformed", "local-window-required", "not-live"]),
+  }),
+]);
 export type CanvasNetworkPageRenewalResult = typeof CanvasNetworkPageRenewalResult.Type;
 
 export const CANVAS_NETWORK_ACCESS_AGGREGATE_TYPE = "canvas-network-access";
@@ -114,20 +112,30 @@ export const CANVAS_NETWORK_ACCESS_CHANGED = "canvas.network-access-changed@1";
 export const CanvasNetworkAccessChanged = Schema.Struct({
   canvasId: CanvasId,
   allowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type CanvasNetworkAccessChanged = typeof CanvasNetworkAccessChanged.Type;
 
 export const decodeCanvasNetworkAccessCommand = Schema.decodeUnknownSync(
   CanvasNetworkAccessCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasNetworkAccessView = Schema.decodeUnknownSync(CanvasNetworkAccessView);
-export const decodeCanvasNetworkAccessResult = Schema.decodeUnknownSync(CanvasNetworkAccessResult);
+export const decodeCanvasNetworkAccessView = Schema.decodeUnknownSync(
+  CanvasNetworkAccessView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasNetworkAccessResult = Schema.decodeUnknownSync(
+  CanvasNetworkAccessResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasNetworkAccessChanged = Schema.decodeUnknownSync(
   CanvasNetworkAccessChanged,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasNetworkPageRenewalCommand = Schema.decodeUnknownSync(
   CanvasNetworkPageRenewalCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasNetworkPageRenewalResult = Schema.decodeUnknownSync(
   CanvasNetworkPageRenewalResult,
+  STRICT_DECODE_OPTIONS,
 );

@@ -1,10 +1,11 @@
 import { Schema } from "effect";
+import { NonNegativeInt } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const text = (maximum: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const digest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
-const count = Schema.Int.pipe(Schema.nonNegative());
+const text = (maximum: number) =>
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const digest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+const count = NonNegativeInt;
 
 /**
  * The webhook source a spoke contributes for its own endpoints. A routine names
@@ -19,55 +20,52 @@ export const AutomationIntegrationEventTrigger = Schema.Struct({
   kind: Schema.Literal("integration-event"),
   integrationId: text(256),
   sourceId: text(256),
-  filters: Schema.Record({ key: text(64), value: Schema.String.pipe(Schema.maxLength(256)) }).pipe(
-    Schema.filter((filters) => Object.keys(filters).length <= 16),
+  filters: Schema.Record(text(64), Schema.String.check(Schema.isMaxLength(256))).check(
+    Schema.makeFilter((filters) => Object.keys(filters).length <= 16),
   ),
   sourceIdentity: Schema.optional(digest),
   sourceLabel: Schema.optional(text(256)),
-  pollMinutes: Schema.Int.pipe(Schema.between(1, 60)),
-  automaticStartLimit: Schema.Int.pipe(Schema.between(1, 32)),
-}).annotations(strict);
+  pollMinutes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 60 })),
+  automaticStartLimit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 32 })),
+});
 export type AutomationIntegrationEventTrigger = typeof AutomationIntegrationEventTrigger.Type;
 
 export const AutomationIntegrationEvent = Schema.Struct({
   id: text(256),
   label: text(256),
   occurredAt: UtcTimestamp,
-  url: Schema.optional(text(512).pipe(Schema.pattern(/^https:\/\//))),
-  data: Schema.String.pipe(Schema.maxLength(2048)),
+  url: Schema.optional(text(512).check(Schema.isPattern(/^https:\/\//))),
+  data: Schema.String.check(Schema.isMaxLength(2048)),
   /** A source's own attribution, never inferred from arbitrary event text. */
   routineOutput: Schema.Boolean,
-}).annotations(strict);
+});
 export type AutomationIntegrationEvent = typeof AutomationIntegrationEvent.Type;
 
 /** Coverage receipt before a source applies event filters; identifiers carry no event bodies. */
 export const AutomationEventSourceWindow = Schema.Struct({
-  ids: Schema.Array(text(256)).pipe(Schema.maxItems(256)),
+  ids: Schema.Array(text(256)).check(Schema.isMaxLength(256)),
   atLimit: Schema.Boolean,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (window) =>
-        new Set(window.ids).size === window.ids.length &&
-        (!window.atLimit || window.ids.length > 0),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (window) =>
+      new Set(window.ids).size === window.ids.length && (!window.atLimit || window.ids.length > 0),
+  ),
+);
 export type AutomationEventSourceWindow = typeof AutomationEventSourceWindow.Type;
 
 export const AutomationEventSourceCheckpoint = Schema.Struct({
   sourceIdentity: digest,
   observationRevision: count,
-  automaticStarts: Schema.Int.pipe(Schema.between(0, 32)),
+  automaticStarts: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 32 })),
   baselineReady: Schema.Boolean,
-  seen: Schema.Array(text(256)).pipe(Schema.maxItems(256)),
-  pending: Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(32)),
+  seen: Schema.Array(text(256)).check(Schema.isMaxLength(256)),
+  pending: Schema.Array(AutomationIntegrationEvent).check(Schema.isMaxLength(32)),
   /** Last complete source observation; failed attempts do not advance coverage. */
   observedAt: UtcTimestamp,
-  observedWindow: Schema.optional(Schema.Array(text(256)).pipe(Schema.maxItems(256))),
-  phase: Schema.Literal("arming", "watching", "held", "unavailable", "needs-rearm"),
+  observedWindow: Schema.optional(Schema.Array(text(256)).check(Schema.isMaxLength(256))),
+  phase: Schema.Literals(["arming", "watching", "held", "unavailable", "needs-rearm"]),
   reason: Schema.optional(
-    Schema.Literal(
+    Schema.Literals([
       "source-unavailable",
       "source-changed",
       "source-limit",
@@ -75,31 +73,29 @@ export const AutomationEventSourceCheckpoint = Schema.Struct({
       "busy-input",
       "automatic-start-limit",
       "activity-history-limit",
-    ),
+    ]),
   ),
   coverageGap: Schema.Boolean,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (checkpoint) =>
-        new Set(checkpoint.seen).size === checkpoint.seen.length &&
-        new Set(checkpoint.pending.map((event) => event.id)).size === checkpoint.pending.length &&
-        new Set(checkpoint.observedWindow ?? []).size === (checkpoint.observedWindow?.length ?? 0),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (checkpoint) =>
+      new Set(checkpoint.seen).size === checkpoint.seen.length &&
+      new Set(checkpoint.pending.map((event) => event.id)).size === checkpoint.pending.length &&
+      new Set(checkpoint.observedWindow ?? []).size === (checkpoint.observedWindow?.length ?? 0),
+  ),
+);
 export type AutomationEventSourceCheckpoint = typeof AutomationEventSourceCheckpoint.Type;
 
 export const AutomationIntegrationEventReceipt = Schema.Struct({
   checkpoint: AutomationEventSourceCheckpoint,
   event: AutomationIntegrationEvent,
-}).annotations(strict);
+});
 export type AutomationIntegrationEventReceipt = typeof AutomationIntegrationEventReceipt.Type;
 
 export const AutomationEventSourceFieldOption = Schema.Struct({
   value: text(128),
   label: text(128),
-}).annotations(strict);
+});
 export type AutomationEventSourceFieldOption = typeof AutomationEventSourceFieldOption.Type;
 
 export const AutomationEventSourceField = Schema.Struct({
@@ -108,16 +104,16 @@ export const AutomationEventSourceField = Schema.Struct({
   required: Schema.Boolean,
   placeholder: Schema.optional(text(128)),
   options: Schema.optional(
-    Schema.Array(AutomationEventSourceFieldOption).pipe(Schema.maxItems(100)),
+    Schema.Array(AutomationEventSourceFieldOption).check(Schema.isMaxLength(100)),
   ),
-}).annotations(strict);
+});
 export const AutomationEventSourceChoice = Schema.Struct({
   integrationId: text(256),
   sourceId: text(256),
   label: text(256),
-  fields: Schema.Array(AutomationEventSourceField).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  fields: Schema.Array(AutomationEventSourceField).check(Schema.isMaxLength(16)),
+});
 export type AutomationEventSourceChoice = typeof AutomationEventSourceChoice.Type;
-export const AutomationEventSourceChoices = Schema.Array(AutomationEventSourceChoice).pipe(
-  Schema.maxItems(64),
+export const AutomationEventSourceChoices = Schema.Array(AutomationEventSourceChoice).check(
+  Schema.isMaxLength(64),
 );

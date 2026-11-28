@@ -226,7 +226,9 @@ export class AutomationEventSources {
     try {
       observed = Schema.decodeUnknownSync(
         Schema.Struct({
-          events: Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(256)),
+          events: Schema.Array(AutomationIntegrationEvent).pipe(
+            Schema.check(Schema.isMaxLength(256)),
+          ),
           window: Schema.optional(AutomationEventSourceWindow),
         }),
       )({

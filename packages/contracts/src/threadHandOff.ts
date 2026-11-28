@@ -8,16 +8,15 @@
  */
 
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ThreadExportId } from "./threadExport";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 export const ThreadHandOffRequest = Schema.Struct({
   mode: OctantMode,
   threadId: ThreadExportId,
-}).annotations(strict);
+});
 export type ThreadHandOffRequest = typeof ThreadHandOffRequest.Type;
 
 /**
@@ -25,7 +24,7 @@ export type ThreadHandOffRequest = typeof ThreadHandOffRequest.Type;
  * export cut the hand-off starts from; the rest name what the person can
  * change: wait for the turn, fix the provider, file the thread in a Project.
  */
-export const ThreadHandOffRefusalReason = Schema.Literal(
+export const ThreadHandOffRefusalReason = Schema.Literals([
   "not-found",
   "unauthorized",
   "turn-running",
@@ -34,24 +33,30 @@ export const ThreadHandOffRefusalReason = Schema.Literal(
   "empty-thread",
   "document-not-produced",
   "document-refused",
-);
+]);
 export type ThreadHandOffRefusalReason = typeof ThreadHandOffRefusalReason.Type;
 
-export const ThreadHandOffOutcome = Schema.Union(
+export const ThreadHandOffOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("handed-off"),
-    canvasId: Schema.NonEmptyTrimmedString,
-    versionId: Schema.NonEmptyTrimmedString,
+    canvasId: NonEmptyTrimmedString,
+    versionId: NonEmptyTrimmedString,
     projectId: ProjectId,
-    title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  }).annotations(strict),
+    title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     reason: ThreadHandOffRefusalReason,
-    message: Schema.optional(Schema.String.pipe(Schema.maxLength(400))),
-  }).annotations(strict),
-);
+    message: Schema.optional(Schema.String.check(Schema.isMaxLength(400))),
+  }),
+]);
 export type ThreadHandOffOutcome = typeof ThreadHandOffOutcome.Type;
 
-export const decodeThreadHandOffRequest = Schema.decodeUnknownSync(ThreadHandOffRequest);
-export const decodeThreadHandOffOutcome = Schema.decodeUnknownSync(ThreadHandOffOutcome);
+export const decodeThreadHandOffRequest = Schema.decodeUnknownSync(
+  ThreadHandOffRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadHandOffOutcome = Schema.decodeUnknownSync(
+  ThreadHandOffOutcome,
+  STRICT_DECODE_OPTIONS,
+);

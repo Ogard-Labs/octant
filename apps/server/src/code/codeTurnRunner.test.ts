@@ -54,7 +54,7 @@ describe("CodeTurnRunner", () => {
       subscribe: Effect.succeed(Stream.never),
     });
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           new CodeTurnRunner().run(
             input({
@@ -66,8 +66,8 @@ describe("CodeTurnRunner", () => {
       ),
     );
     expect(result).toMatchObject({
-      _tag: "Left",
-      left: { message: expect.stringContaining("original continuation inputs") },
+      _tag: "Failure",
+      failure: { message: expect.stringContaining("original continuation inputs") },
     });
     expect(connection.send).not.toHaveBeenCalled();
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
@@ -106,7 +106,7 @@ describe("CodeTurnRunner", () => {
       ),
     });
     const outcome = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           new CodeTurnRunner().run(
             input({
@@ -118,8 +118,8 @@ describe("CodeTurnRunner", () => {
       ),
     );
     expect(outcome).toMatchObject({
-      _tag: "Left",
-      left: {
+      _tag: "Failure",
+      failure: {
         category: "waiting",
         message: "Session is unavailable.",
         // The refused-resume fact must survive the boundary: the transcript's
@@ -144,7 +144,7 @@ describe("CodeTurnRunner", () => {
       ),
     });
     const outcome = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           new CodeTurnRunner().run(
             input({
@@ -156,8 +156,8 @@ describe("CodeTurnRunner", () => {
       ),
     );
     expect(outcome).toMatchObject({
-      _tag: "Left",
-      left: { category: "waiting", resumeRefused: true, toolCatalogHandoffRequired: true },
+      _tag: "Failure",
+      failure: { category: "waiting", resumeRefused: true, toolCatalogHandoffRequired: true },
     });
     expect(connection.start).not.toHaveBeenCalled();
     expect(connection.send).not.toHaveBeenCalled();

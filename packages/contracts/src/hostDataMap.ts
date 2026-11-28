@@ -13,83 +13,82 @@ import { HostControlServiceMode } from "./hostControl";
 import { ProjectId } from "./projects";
 import { SettingsDeepLink } from "./settings";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-const BoundedName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
-const BoundedPurpose = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
-const BoundedPath = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+const BoundedName = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256));
+const BoundedPurpose = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
+const BoundedPath = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0")),
 );
 
 export const MAX_HOST_DATA_MAP_PROJECTS = 4_096;
 export const MAX_HOST_DATA_MAP_NAMED_LOCATIONS = 24;
 
 /** A filesystem location the host verified, or an honest unknown. */
-export const HostDataMapLocation = Schema.Union(
+export const HostDataMapLocation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
     path: BoundedPath,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unknown"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDataMapLocation = typeof HostDataMapLocation.Type;
 
 export const HostDataMapNamedLocation = Schema.Struct({
   name: BoundedName,
   location: HostDataMapLocation,
-}).annotations(strict);
+});
 export type HostDataMapNamedLocation = typeof HostDataMapNamedLocation.Type;
 
 /**
  * OS credential backends Octant actually uses. Values never appear; only the
  * Keychain or secret-service entry name does.
  */
-export const HostDataMapCredentialBackend = Schema.Literal("keychain", "secret-service");
+export const HostDataMapCredentialBackend = Schema.Literals(["keychain", "secret-service"]);
 export type HostDataMapCredentialBackend = typeof HostDataMapCredentialBackend.Type;
 
 export const HostDataMapCredentialEntry = Schema.Struct({
   service: BoundedName,
-}).annotations(strict);
+});
 export type HostDataMapCredentialEntry = typeof HostDataMapCredentialEntry.Type;
 
-export const HostDataMapCredentials = Schema.Union(
+export const HostDataMapCredentials = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
     backend: HostDataMapCredentialBackend,
-    entries: Schema.Array(HostDataMapCredentialEntry).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
+    entries: Schema.Array(HostDataMapCredentialEntry).check(Schema.isMaxLength(32)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unknown"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDataMapCredentials = typeof HostDataMapCredentials.Type;
 
-export const HostDataMapOutboundCategoryId = Schema.Literal(
+export const HostDataMapOutboundCategoryId = Schema.Literals([
   "provider-calls",
   "update-checks",
   "marketplace-fetches",
   "speech-model-downloads",
-);
+]);
 export type HostDataMapOutboundCategoryId = typeof HostDataMapOutboundCategoryId.Type;
 
-export const HostDataMapOutboundCategory = Schema.Union(
+export const HostDataMapOutboundCategory = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
     category: HostDataMapOutboundCategoryId,
     leavesMachine: Schema.Boolean,
     purpose: BoundedPurpose,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unknown"),
     category: HostDataMapOutboundCategoryId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDataMapOutboundCategory = typeof HostDataMapOutboundCategory.Type;
 
-export const HostDataMapHostKind = Schema.Literal("desktop", "headless");
+export const HostDataMapHostKind = Schema.Literals(["desktop", "headless"]);
 export type HostDataMapHostKind = typeof HostDataMapHostKind.Type;
 
 export const HostDataMapHost = Schema.Struct({
@@ -99,18 +98,18 @@ export const HostDataMapHost = Schema.Struct({
   serviceMode: HostControlServiceMode,
   journal: HostDataMapLocation,
   projections: HostDataMapLocation,
-  artifacts: Schema.Array(HostDataMapNamedLocation).pipe(
-    Schema.maxItems(MAX_HOST_DATA_MAP_NAMED_LOCATIONS),
+  artifacts: Schema.Array(HostDataMapNamedLocation).check(
+    Schema.isMaxLength(MAX_HOST_DATA_MAP_NAMED_LOCATIONS),
   ),
-  caches: Schema.Array(HostDataMapNamedLocation).pipe(
-    Schema.maxItems(MAX_HOST_DATA_MAP_NAMED_LOCATIONS),
+  caches: Schema.Array(HostDataMapNamedLocation).check(
+    Schema.isMaxLength(MAX_HOST_DATA_MAP_NAMED_LOCATIONS),
   ),
   credentials: HostDataMapCredentials,
-  outbound: Schema.Array(HostDataMapOutboundCategory).pipe(Schema.maxItems(8)),
-}).annotations(strict);
+  outbound: Schema.Array(HostDataMapOutboundCategory).check(Schema.isMaxLength(8)),
+});
 export type HostDataMapHost = typeof HostDataMapHost.Type;
 
-export const HostDataMapProjectType = Schema.Literal("chat", "work", "code");
+export const HostDataMapProjectType = Schema.Literals(["chat", "work", "code"]);
 export type HostDataMapProjectType = typeof HostDataMapProjectType.Type;
 
 export const HostDataMapProject = Schema.Struct({
@@ -119,45 +118,47 @@ export const HostDataMapProject = Schema.Struct({
   type: HostDataMapProjectType,
   journal: HostDataMapLocation,
   projections: HostDataMapLocation,
-  artifacts: Schema.Array(HostDataMapNamedLocation).pipe(Schema.maxItems(8)),
-  caches: Schema.Array(HostDataMapNamedLocation).pipe(Schema.maxItems(8)),
+  artifacts: Schema.Array(HostDataMapNamedLocation).check(Schema.isMaxLength(8)),
+  caches: Schema.Array(HostDataMapNamedLocation).check(Schema.isMaxLength(8)),
   credentials: HostDataMapCredentials,
   boundRoot: Schema.optional(HostDataMapLocation),
-}).annotations(strict);
+});
 export type HostDataMapProject = typeof HostDataMapProject.Type;
 
-export const HostDataMapProjects = Schema.Union(
+export const HostDataMapProjects = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
-    projects: Schema.Array(HostDataMapProject).pipe(Schema.maxItems(MAX_HOST_DATA_MAP_PROJECTS)),
-  }).annotations(strict),
+    projects: Schema.Array(HostDataMapProject).check(
+      Schema.isMaxLength(MAX_HOST_DATA_MAP_PROJECTS),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unknown"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDataMapProjects = typeof HostDataMapProjects.Type;
 
 /**
  * Pointers to the existing purge and export surfaces. This map never performs
  * those operations.
  */
-export const HostDataMapRelatedAction = Schema.Union(
+export const HostDataMapRelatedAction = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("thread-retention"),
     settings: SettingsDeepLink,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("thread-export"),
     guidance: BoundedPurpose,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDataMapRelatedAction = typeof HostDataMapRelatedAction.Type;
 
 export const HostDataMap = Schema.Struct({
   host: HostDataMapHost,
   projects: HostDataMapProjects,
-  related: Schema.Array(HostDataMapRelatedAction).pipe(Schema.maxItems(8)),
-}).annotations(strict);
+  related: Schema.Array(HostDataMapRelatedAction).check(Schema.isMaxLength(8)),
+});
 export type HostDataMap = typeof HostDataMap.Type;
 
 export const decodeHostDataMap = Schema.decodeUnknownSync(HostDataMap, {

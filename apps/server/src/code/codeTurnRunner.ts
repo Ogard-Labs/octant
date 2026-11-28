@@ -438,7 +438,7 @@ export class CodeTurnRunner {
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
           await input.appManagedTools?.close?.();
-        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+        }).pipe(Effect.catchCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let outcome: CodeTurnOutcome | undefined;
       let outputLimited = false;
@@ -581,7 +581,7 @@ export class CodeTurnRunner {
             sandboxPolicy: sandboxPolicy !== undefined,
           },
         })
-        .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+        .pipe(Effect.catch((providerFailure) => failForProvider(providerFailure, fail)));
       input.liveTurn?.connect({
         connection,
         sessionId: input.sessionId,
@@ -593,7 +593,7 @@ export class CodeTurnRunner {
       yield* Effect.addFinalizer(() =>
         cleanup.stopped
           ? Effect.void
-          : connection.stop(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+          : connection.stop(input.sessionId).pipe(Effect.catch(() => Effect.void)),
       );
 
       if (input.signal?.aborted) {
@@ -630,15 +630,15 @@ export class CodeTurnRunner {
               resumeCursor: input.resumeCursor,
               tools: input.appManagedTools?.definitions ?? [],
             })
-      ).pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+      ).pipe(Effect.catch((providerFailure) => failForProvider(providerFailure, fail)));
       if (input.onSessionReady !== undefined) {
         yield* input
           .onSessionReady(handle)
-          .pipe(Effect.catchAll((failure) => failForProvider(failure, fail)));
+          .pipe(Effect.catch((failure) => failForProvider(failure, fail)));
       }
 
       if (input.signal?.aborted) {
-        yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+        yield* connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void));
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
@@ -665,7 +665,7 @@ export class CodeTurnRunner {
                       idleMs: noticedIdleMs,
                       occurredAt: decodeTimestamp(clock()),
                     })
-                    .pipe(Effect.catchAll(() => Effect.void)),
+                    .pipe(Effect.catch(() => Effect.void)),
             ),
           ),
         );
@@ -684,10 +684,10 @@ export class CodeTurnRunner {
             occurredAt: decodeTimestamp(clock()),
           };
           if (input.onLoopNotice !== undefined) {
-            yield* input.onLoopNotice(notice).pipe(Effect.catchAll(() => Effect.void));
+            yield* input.onLoopNotice(notice).pipe(Effect.catch(() => Effect.void));
           }
           if (loop.kind === "stop") {
-            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void));
             return yield* fail(
               "interrupted",
               `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
@@ -735,7 +735,7 @@ export class CodeTurnRunner {
                   ) {
                     yield* connection
                       .interrupt(input.sessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
                   }
                   return;
@@ -748,7 +748,7 @@ export class CodeTurnRunner {
                   if (marked.status === "refused") {
                     yield* connection
                       .interrupt(input.sessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
                   }
                   // Under Strict the runtime's own reviewer, chosen for this
@@ -760,7 +760,7 @@ export class CodeTurnRunner {
                   if (strict && input.harnessAutoReviewEnabled === true) {
                     yield* connection
                       .interrupt(input.sessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return yield* fail("interrupted", RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP);
                   }
                   return;
@@ -778,7 +778,7 @@ export class CodeTurnRunner {
                 if (strict && handledEvents > maxEvents) {
                   yield* connection
                     .interrupt(input.sessionId)
-                    .pipe(Effect.catchAll(() => Effect.void));
+                    .pipe(Effect.catch(() => Effect.void));
                   return yield* fail("failed", "Code turn exceeded the bounded event budget.");
                 }
                 if (
@@ -796,7 +796,7 @@ export class CodeTurnRunner {
                   );
                   yield* connection
                     .interrupt(input.sessionId)
-                    .pipe(Effect.catchAll(() => Effect.void));
+                    .pipe(Effect.catch(() => Effect.void));
                   return yield* fail("failed", "Code turn exceeded its streamed output budget.");
                 }
 
@@ -824,7 +824,7 @@ export class CodeTurnRunner {
                   // The receipt is accounting; failing to write it never
                   // fails the turn whose session it describes.
                   yield* Effect.try(() => record(sighting)).pipe(
-                    Effect.catchAll(() =>
+                    Effect.catch(() =>
                       Effect.logWarning("An automatic compaction could not be journaled."),
                     ),
                   );
@@ -1054,11 +1054,11 @@ export class CodeTurnRunner {
           ),
         send: Effect.gen(function* () {
           if (input.signal?.aborted) {
-            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void));
             return yield* fail("interrupted", "Code turn was cancelled before provider send.");
           }
           if (input.inputsCurrent?.() === false) {
-            yield* connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void));
+            yield* connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void));
             return yield* fail(
               "failed",
               "The original continuation inputs are no longer available. No prompt was sent.",
@@ -1071,7 +1071,7 @@ export class CodeTurnRunner {
             }
             yield* connection
               .attachRuntimeTurn(input.sessionId)
-              .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+              .pipe(Effect.catch((providerFailure) => failForProvider(providerFailure, fail)));
             return;
           }
           yield* connection
@@ -1092,7 +1092,7 @@ export class CodeTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...providerWebSearchAtSend(input.appManagedTools, input.sessionId),
             })
-            .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+            .pipe(Effect.catch((providerFailure) => failForProvider(providerFailure, fail)));
           const promptSent = input.onPromptSent;
           if (promptSent !== undefined) {
             yield* Effect.sync(() => {
@@ -1108,7 +1108,7 @@ export class CodeTurnRunner {
       input.liveTurn?.promptSent();
 
       const awaitCollection = Fiber.join(collected).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           isCodeTurnFailure(error) ? Effect.fail(error) : failForProvider(error, fail),
         ),
       );
@@ -1122,19 +1122,17 @@ export class CodeTurnRunner {
           ? Effect.never
           : waitForSignal(input.signal).pipe(
               Effect.flatMap(() =>
-                connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+                connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void)),
               ),
-              Effect.zipRight(fail("interrupted", "Code turn was cancelled.")),
+              Effect.andThen(fail("interrupted", "Code turn was cancelled.")),
             );
       const waitForTimeout =
         stallAction === "stop"
           ? idle.expired.pipe(
               Effect.flatMap(() =>
-                connection.interrupt(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+                connection.interrupt(input.sessionId).pipe(Effect.catch(() => Effect.void)),
               ),
-              Effect.zipRight(
-                fail("interrupted", "Code turn timed out after provider inactivity."),
-              ),
+              Effect.andThen(fail("interrupted", "Code turn timed out after provider inactivity.")),
             )
           : Effect.never;
 
@@ -1151,7 +1149,7 @@ export class CodeTurnRunner {
             cleanup.stopped = true;
           }),
         ),
-        Effect.catchAll(() => fail("waiting", "Provider session cleanup could not be confirmed.")),
+        Effect.catch(() => fail("waiting", "Provider session cleanup could not be confirmed.")),
       );
       if (providerCompleted) yield* persistOutcome("completed");
     });
@@ -1620,11 +1618,11 @@ function codeTurnFailure(
 
 function waitForSignal(signal: AbortSignal): Effect.Effect<void> {
   if (signal.aborted) return Effect.void;
-  return Effect.async<void>((resume) => {
+  return Effect.callback<void>((resume) => {
     const onAbort = () => resume(Effect.void);
     signal.addEventListener("abort", onAbort, { once: true });
     return Effect.sync(() => signal.removeEventListener("abort", onAbort));
-  });
+  }).pipe(Effect.andThen(Effect.yieldNow));
 }
 
 function boundedUtf8(value: string, maximumBytes: number): string {

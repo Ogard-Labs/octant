@@ -159,7 +159,7 @@ function stopSession(
   return connection.stop(sessionId).pipe(
     Effect.interruptible,
     Effect.timeout(SHUTDOWN_TIMEOUT_MS),
-    Effect.catchAll(() => Effect.void),
+    Effect.catch(() => Effect.void),
   );
 }
 

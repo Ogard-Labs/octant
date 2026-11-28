@@ -2,30 +2,39 @@ import { Schema } from "effect";
 import { Questionnaire, type QuestionnaireResponse } from "@octant/contracts";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Choice = Schema.Struct({
-  const: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
-}).annotations(strict);
-const Choices = Schema.Array(Choice).pipe(Schema.minItems(2), Schema.maxItems(8));
+  const: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+  title: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+  ),
+});
+const Choices = Schema.Array(Choice).pipe(
+  Schema.check(Schema.isMinLength(2)),
+  Schema.check(Schema.isMaxLength(8)),
+);
 const Header = {
   title: Schema.optional(Schema.NullOr(Schema.String)),
-  description: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  description: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+  ),
 };
-const Field = Schema.Union(
-  Schema.Struct({ type: Schema.Literal("string"), ...Header, oneOf: Choices }).annotations(strict),
+const Field = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("string"), ...Header, oneOf: Choices }),
   Schema.Struct({
     type: Schema.Literal("array"),
     ...Header,
-    items: Schema.Struct({ anyOf: Choices }).annotations(strict),
-  }).annotations(strict),
-);
+    items: Schema.Struct({ anyOf: Choices }),
+  }),
+]);
 const Form = Schema.Struct({
   type: Schema.Literal("object"),
-  properties: Schema.Record({ key: Schema.String, value: Field }),
-  required: Schema.Array(Schema.String).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  properties: Schema.Record(Schema.String, Field),
+  required: Schema.Array(Schema.String).pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(4)),
+  ),
   description: Schema.optional(Schema.NullOr(Schema.String)),
-}).annotations(strict);
+});
 
 export interface AcpElicitation {
   readonly prompt: string;
@@ -44,7 +53,7 @@ export function normalizeAcpElicitation(
   schema: unknown,
 ): AcpElicitation | undefined {
   try {
-    const form = Schema.decodeUnknownSync(Form)(schema);
+    const form = Schema.decodeUnknownSync(Form, { onExcessProperty: "error" })(schema);
     const keys = Object.keys(form.properties);
     if (
       keys.length !== form.required.length ||
@@ -87,7 +96,7 @@ export function normalizeAcpElicitation(
     if (prompt.trim().length === 0 || prompt.length > 2_000) return undefined;
     return {
       prompt,
-      questionnaire: Schema.decodeUnknownSync(Questionnaire)({
+      questionnaire: Schema.decodeUnknownSync(Questionnaire, { onExcessProperty: "error" })({
         allowComment: false,
         questions: fields.map((field) => field.question),
       }),

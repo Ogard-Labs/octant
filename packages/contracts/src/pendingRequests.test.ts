@@ -311,7 +311,7 @@ describe("pending request contract", () => {
       reviewedAt: requestedAt,
       outcome: { kind: "reviewed", backs: "Open it", reason: "It is ready." },
     };
-    const decode = Schema.decodeUnknownSync(DecisionReviewRecorded);
+    const decode = Schema.decodeUnknownSync(DecisionReviewRecorded, { onExcessProperty: "error" });
     expect(decode(record)).toEqual(record);
     expect(() => decode({ ...record, outcome: { kind: "unreached" } })).toThrow();
     expect(() => decode({ ...record, key: "short" })).toThrow();

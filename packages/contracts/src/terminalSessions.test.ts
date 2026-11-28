@@ -10,7 +10,9 @@ const request = { provider: "codex", sessionId: "019f6f43-f063-7df2-8216-515b7f7
 
 describe("terminal session continuity", () => {
   it("distinguishes a requested native adoption from an explicit text handoff without accepting source paths", () => {
-    const decode = Schema.decodeUnknownSync(TerminalSessionImportRequest);
+    const decode = Schema.decodeUnknownSync(TerminalSessionImportRequest, {
+      onExcessProperty: "error",
+    });
     expect(decode({ ...request, continuation: "native" }).continuation).toBe("native");
     expect(decode({ ...request, continuation: "text-handoff" }).continuation).toBe("text-handoff");
     expect(() => decode({ ...request, folder: "/other/project" })).toThrow();

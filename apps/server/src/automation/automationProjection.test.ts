@@ -73,7 +73,7 @@ afterEach(() => {
   }
 });
 
-const actor = Schema.decodeUnknownSync(EventActor)({
+const actor = Schema.decodeUnknownSync(EventActor, { onExcessProperty: "error" })({
   kind: "local-user",
   actorId: AUTOMATION_TEST_IDS.actor,
 });

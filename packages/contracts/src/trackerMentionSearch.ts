@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { MentionableThreadId } from "./threadMentionIdentity";
 import {
@@ -13,12 +14,11 @@ import {
  * window loads them with the search and not at startup.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** The pull requests and issues one `#` search may offer. */
 export const MAX_TRACKER_MENTION_CANDIDATES = 10;
 
-const shortText = (limit: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(limit));
+const shortText = (limit: number) =>
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(limit));
 
 const trackerSourceMatchesKind = (value: {
   readonly kind: typeof TrackerMentionKind.Type;
@@ -38,9 +38,7 @@ export const TrackerMentionCandidate = Schema.Struct({
   container: shortText(160),
   /** The author on GitHub; the assignee on Linear, absent while nobody is assigned. */
   person: Schema.optional(shortText(128)),
-})
-  .annotations(strict)
-  .pipe(Schema.filter(trackerSourceMatchesKind));
+}).check(Schema.makeFilter(trackerSourceMatchesKind));
 export type TrackerMentionCandidate = typeof TrackerMentionCandidate.Type;
 
 /**
@@ -48,23 +46,28 @@ export type TrackerMentionCandidate = typeof TrackerMentionCandidate.Type;
  * thread would start in; the host decides the repository and team from that.
  */
 export const TrackerMentionSearchRequest = Schema.Struct({
-  query: Schema.String.pipe(Schema.maxLength(128)),
+  query: Schema.String.check(Schema.isMaxLength(128)),
   readerThreadId: Schema.optional(MentionableThreadId),
   projectId: Schema.optional(ProjectId),
-}).annotations(strict);
+});
 export type TrackerMentionSearchRequest = typeof TrackerMentionSearchRequest.Type;
 
 export const TrackerMentionSearchResponse = Schema.Struct({
-  candidates: Schema.Array(TrackerMentionCandidate).pipe(
-    Schema.maxItems(MAX_TRACKER_MENTION_CANDIDATES),
+  candidates: Schema.Array(TrackerMentionCandidate).check(
+    Schema.isMaxLength(MAX_TRACKER_MENTION_CANDIDATES),
   ),
-}).annotations(strict);
+});
 export type TrackerMentionSearchResponse = typeof TrackerMentionSearchResponse.Type;
 
-export const decodeTrackerMentionCandidate = Schema.decodeUnknownSync(TrackerMentionCandidate);
+export const decodeTrackerMentionCandidate = Schema.decodeUnknownSync(
+  TrackerMentionCandidate,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeTrackerMentionSearchRequest = Schema.decodeUnknownSync(
   TrackerMentionSearchRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTrackerMentionSearchResponse = Schema.decodeUnknownSync(
   TrackerMentionSearchResponse,
+  STRICT_DECODE_OPTIONS,
 );

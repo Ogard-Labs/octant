@@ -48,9 +48,8 @@ import {
   registerReplicaArtifactEvents,
 } from "./replicaArtifactEvents";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Sequence = Schema.Int.pipe(Schema.positive());
-const Sha256Hex = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const Sequence = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)));
+const Sha256Hex = Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)));
 
 export const REPLICA_MEMBERSHIP_AGGREGATE_TYPE = "replica-membership";
 export const REPLICA_MEMBERSHIP_EVENT_NAMES = {
@@ -94,8 +93,8 @@ export const ReplicaIdentityCreated = Schema.Struct({
   instanceId: ReplicaInstanceId,
   publicKey: ReplicaDevicePublicKey,
   displayName: ReplicaDisplayName,
-  role: Schema.Literal("founder", "joiner"),
-}).annotations(strict);
+  role: Schema.Literals(["founder", "joiner"]),
+});
 
 /**
  * The founder a joining host's membership is derived from: the root the
@@ -105,7 +104,7 @@ export const ReplicaIdentityCreated = Schema.Struct({
 export const ReplicaFounderPinned = Schema.Struct({
   instanceId: ReplicaInstanceId,
   publicKey: ReplicaDevicePublicKey,
-}).annotations(strict);
+});
 
 /**
  * A valid membership record this host read or published, kept as the exact
@@ -116,9 +115,9 @@ export const ReplicaRecordHeld = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: Sequence,
   hash: Sha256Hex,
-  text: Schema.String.pipe(Schema.maxLength(65_536)),
-  signature: Schema.String.pipe(Schema.maxLength(256)),
-}).annotations(strict);
+  text: Schema.String.pipe(Schema.check(Schema.isMaxLength(65_536))),
+  signature: Schema.String.pipe(Schema.check(Schema.isMaxLength(256))),
+});
 
 /**
  * A signed entry this host is about to publish under its own next sequence.
@@ -128,17 +127,17 @@ export const ReplicaRecordHeld = Schema.Struct({
  */
 export const ReplicaEntrySigned = Schema.Struct({
   entry: ReplicaMembershipEntry,
-}).annotations(strict);
+});
 
 /** A file in the store that is not a valid record. Diagnostic only. */
 export const ReplicaEntryUnreadable = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: Sequence,
-  reason: Schema.Literal("bad-signature", "path-mismatch", "unreadable"),
-}).annotations(strict);
+  reason: Schema.Literals(["bad-signature", "path-mismatch", "unreadable"]),
+});
 
 export const ReplicaMembershipCommandRefused = Schema.Struct({
-  command: Schema.Literal(
+  command: Schema.Literals([
     "create-replica",
     "write-join-request",
     "approve-join",
@@ -148,8 +147,8 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "pull",
     "leave",
     "publish-artifact",
-  ),
-  reason: Schema.Literal(
+  ]),
+  reason: Schema.Literals([
     "not-configured",
     "already-member",
     "revoked-instance",
@@ -163,16 +162,16 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "key-unavailable",
     "restore-stopped",
     "join-stopped",
-  ),
+  ]),
   subject: Schema.optional(ReplicaInstanceId),
-}).annotations(strict);
+});
 
 export const ReplicaMembershipStoreFailure = Schema.Struct({
-  phase: Schema.Literal("entry", "signature", "read", "list"),
-  reason: Schema.Literal("not-connected", "refused", "slot-occupied", "truncated"),
+  phase: Schema.Literals(["entry", "signature", "read", "list"]),
+  reason: Schema.Literals(["not-connected", "refused", "slot-occupied", "truncated"]),
   instanceId: Schema.optional(ReplicaInstanceId),
   sequence: Schema.optional(Sequence),
-}).annotations(strict);
+});
 
 /**
  * A join confirmation began reading the store before it publishes this
@@ -180,8 +179,8 @@ export const ReplicaMembershipStoreFailure = Schema.Struct({
  */
 export const ReplicaJoinReadStarted = Schema.Struct({
   instanceId: ReplicaInstanceId,
-  total: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  total: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+});
 
 /**
  * How far a join confirmation's read got, journaled after each batch. `passed`
@@ -191,17 +190,17 @@ export const ReplicaJoinReadStarted = Schema.Struct({
  */
 export const ReplicaJoinReadProgressed = Schema.Struct({
   instanceId: ReplicaInstanceId,
-  done: Schema.Int.pipe(Schema.nonNegative()),
-  total: Schema.Int.pipe(Schema.nonNegative()),
-  passed: Schema.Array(
-    Schema.Struct({ instanceId: ReplicaInstanceId, sequence: Sequence }).annotations(strict),
-  ).pipe(Schema.maxItems(1_000)),
-}).annotations(strict);
+  done: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  total: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  passed: Schema.Array(Schema.Struct({ instanceId: ReplicaInstanceId, sequence: Sequence })).pipe(
+    Schema.check(Schema.isMaxLength(1_000)),
+  ),
+});
 
 /** The person stopped or resumed a join confirmation's read, or it read every listed slot. */
 export const ReplicaJoinReadMarked = Schema.Struct({
   instanceId: ReplicaInstanceId,
-}).annotations(strict);
+});
 
 /**
  * This computer left its replica: it forgets the identity, the founder it
@@ -212,7 +211,7 @@ export const ReplicaJoinReadMarked = Schema.Struct({
 export const ReplicaLeft = Schema.Struct({
   instanceId: ReplicaInstanceId,
   toldStore: Schema.Boolean,
-}).annotations(strict);
+});
 
 /**
  * One step of the cleanup after leaving that happened outside the journal:
@@ -223,8 +222,8 @@ export const ReplicaLeft = Schema.Struct({
  */
 export const ReplicaLeftCleanup = Schema.Struct({
   instanceId: ReplicaInstanceId,
-  step: Schema.Literal("sync-off", "key-removed"),
-}).annotations(strict);
+  step: Schema.Literals(["sync-off", "key-removed"]),
+});
 
 export function registerReplicaMembershipEvents(registry: EventRegistry): EventRegistry {
   const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
@@ -249,17 +248,33 @@ export function registerReplicaMembershipEvents(registry: EventRegistry): EventR
   return registerReplicaArtifactEvents(registered);
 }
 
-const decodeIdentity = Schema.decodeUnknownSync(ReplicaIdentityCreated);
-const decodePinned = Schema.decodeUnknownSync(ReplicaFounderPinned);
-const decodeHeld = Schema.decodeUnknownSync(ReplicaRecordHeld);
-const decodeSigned = Schema.decodeUnknownSync(ReplicaEntrySigned);
-const decodeUnreadable = Schema.decodeUnknownSync(ReplicaEntryUnreadable);
-const decodeStoreFailure = Schema.decodeUnknownSync(ReplicaMembershipStoreFailure);
-const decodeJoinReadStarted = Schema.decodeUnknownSync(ReplicaJoinReadStarted);
-const decodeJoinReadProgressed = Schema.decodeUnknownSync(ReplicaJoinReadProgressed);
-const decodeJoinReadMarked = Schema.decodeUnknownSync(ReplicaJoinReadMarked);
-export const decodeReplicaLeft = Schema.decodeUnknownSync(ReplicaLeft);
-const decodeLeftCleanup = Schema.decodeUnknownSync(ReplicaLeftCleanup);
+const decodeIdentity = Schema.decodeUnknownSync(ReplicaIdentityCreated, {
+  onExcessProperty: "error",
+});
+const decodePinned = Schema.decodeUnknownSync(ReplicaFounderPinned, { onExcessProperty: "error" });
+const decodeHeld = Schema.decodeUnknownSync(ReplicaRecordHeld, { onExcessProperty: "error" });
+const decodeSigned = Schema.decodeUnknownSync(ReplicaEntrySigned, { onExcessProperty: "error" });
+const decodeUnreadable = Schema.decodeUnknownSync(ReplicaEntryUnreadable, {
+  onExcessProperty: "error",
+});
+const decodeStoreFailure = Schema.decodeUnknownSync(ReplicaMembershipStoreFailure, {
+  onExcessProperty: "error",
+});
+const decodeJoinReadStarted = Schema.decodeUnknownSync(ReplicaJoinReadStarted, {
+  onExcessProperty: "error",
+});
+const decodeJoinReadProgressed = Schema.decodeUnknownSync(ReplicaJoinReadProgressed, {
+  onExcessProperty: "error",
+});
+const decodeJoinReadMarked = Schema.decodeUnknownSync(ReplicaJoinReadMarked, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaLeft = Schema.decodeUnknownSync(ReplicaLeft, {
+  onExcessProperty: "error",
+});
+const decodeLeftCleanup = Schema.decodeUnknownSync(ReplicaLeftCleanup, {
+  onExcessProperty: "error",
+});
 
 /** An identity this computer left whose sync switch or device key is not cleaned up yet. */
 export interface ReplicaUnfinishedLeave {

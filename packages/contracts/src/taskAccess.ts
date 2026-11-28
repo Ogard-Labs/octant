@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ContextSubjectRef } from "./context";
 import { UtcTimestamp } from "./events";
 import {
@@ -9,10 +10,9 @@ import {
   ProviderReadiness,
 } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const label = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
-export const TaskAccessSubject = ContextSubjectRef.pipe(
-  Schema.filter(
+const label = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256));
+export const TaskAccessSubject = ContextSubjectRef.check(
+  Schema.makeFilter(
     (subject) => subject.aggregateType === "code-thread" || subject.aggregateType === "work-thread",
   ),
 );
@@ -21,30 +21,28 @@ export const TaskAccessSubject = ContextSubjectRef.pipe(
 export const TaskAccessQuery = Schema.Struct({
   subject: TaskAccessSubject,
   view: Schema.Literal("task-access"),
-}).annotations(strict);
+});
 
-export const TaskAccessRecovery = Schema.Literal(
+export const TaskAccessRecovery = Schema.Literals([
   "provider-settings",
   "access-settings",
   "host-owner",
   "none",
-);
+]);
 export type TaskAccessRecovery = typeof TaskAccessRecovery.Type;
 
-export const BrowserAgentAvailability = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("available"), readOnly: Schema.Boolean }).annotations(
-    strict,
-  ),
+export const BrowserAgentAvailability = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("unknown") }),
+  Schema.Struct({ status: Schema.Literal("available"), readOnly: Schema.Boolean }),
   Schema.Struct({
     status: Schema.Literal("omitted"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "no-tool-transport",
       "excluded-by-thread-constraints",
       "host-lends-no-browser",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type BrowserAgentAvailability = typeof BrowserAgentAvailability.Type;
 
 /** Host facts describe a read; they are never a grant or a promise about a later call. */
@@ -54,55 +52,55 @@ export const TaskAccessSnapshot = Schema.Struct({
   subject: TaskAccessSubject,
   observedAt: UtcTimestamp,
   selectedMode: PermissionMode,
-  standing: Schema.Literal("active", "inactive", "completed"),
+  standing: Schema.Literals(["active", "inactive", "completed"]),
   effectiveMode: Schema.optional(PermissionMode),
-  effectiveContext: Schema.Literal("thread", "running-turn-or-session", "unknown"),
+  effectiveContext: Schema.Literals(["thread", "running-turn-or-session", "unknown"]),
   ceiling: Schema.optional(PermissionMode),
-  default: Schema.Union(
+  default: Schema.Union([
     Schema.Struct({
       status: Schema.Literal("known"),
       mode: PermissionMode,
-      scope: Schema.Literal("project", "global"),
+      scope: Schema.Literals(["project", "global"]),
       matchesSelected: Schema.Boolean,
-    }).annotations(strict),
-    Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
-  ),
+    }),
+    Schema.Struct({ status: Schema.Literal("unknown") }),
+  ]),
   reviewer: Schema.Struct({
-    kind: Schema.Literal("person", "provider", "octant-shield", "none", "unknown"),
+    kind: Schema.Literals(["person", "provider", "octant-shield", "none", "unknown"]),
     accountId: Schema.optional(ProviderInstanceId),
     accountName: Schema.optional(label),
-    modelId: Schema.optional(ProviderModelId.pipe(Schema.maxLength(1024))),
-    availability: Schema.Literal("available", "unavailable", "unknown", "not-applicable"),
-  }).annotations(strict),
+    modelId: Schema.optional(ProviderModelId.check(Schema.isMaxLength(1024))),
+    availability: Schema.Literals(["available", "unavailable", "unknown", "not-applicable"]),
+  }),
   runtime: Schema.Struct({
     accountId: ProviderInstanceId,
-    modelId: ProviderModelId.pipe(Schema.maxLength(1024)),
+    modelId: ProviderModelId.check(Schema.isMaxLength(1024)),
     accountName: Schema.optional(label),
     enabled: Schema.optional(Schema.Boolean),
     readiness: Schema.optional(ProviderReadiness),
     observedAt: Schema.optional(UtcTimestamp),
     capabilities: Schema.Array(
       Schema.Struct({
-        id: Schema.Literal(
+        id: Schema.Literals([
           "approvals",
           "appManagedTools",
           "nativeWebResearch",
           "nativeChildAgents",
           "forceStop",
-        ),
+        ]),
         // `mixed` is reported for Octant's tools alone: offered at Full
         // access beside tools the runtime loaded that Octant did not supply.
-        support: Schema.Union(ProviderCapabilitySupport, Schema.Literal("mixed")),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(5)),
-  }).annotations(strict),
+        support: Schema.Union([ProviderCapabilitySupport, Schema.Literal("mixed")]),
+      }),
+    ).check(Schema.isMaxLength(5)),
+  }),
   outsideContent: Schema.Struct({
     read: Schema.Boolean,
-    effect: Schema.Literal("gates", "recorded", "unknown"),
-  }).annotations(strict),
+    effect: Schema.Literals(["gates", "recorded", "unknown"]),
+  }),
   limitations: Schema.Array(
     Schema.Struct({
-      kind: Schema.Literal(
+      kind: Schema.Literals([
         "disabled",
         "unavailable",
         "unsupported",
@@ -110,12 +108,18 @@ export const TaskAccessSnapshot = Schema.Struct({
         "unknown",
         "read-only",
         "limited",
-      ),
-      message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+      ]),
+      message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
       recovery: TaskAccessRecovery,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(12)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(12)),
+});
 export type TaskAccessSnapshot = typeof TaskAccessSnapshot.Type;
-export const decodeTaskAccessQuery = Schema.decodeUnknownSync(TaskAccessQuery);
-export const decodeTaskAccessSnapshot = Schema.decodeUnknownSync(TaskAccessSnapshot);
+export const decodeTaskAccessQuery = Schema.decodeUnknownSync(
+  TaskAccessQuery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTaskAccessSnapshot = Schema.decodeUnknownSync(
+  TaskAccessSnapshot,
+  STRICT_DECODE_OPTIONS,
+);

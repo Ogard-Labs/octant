@@ -93,7 +93,9 @@ export async function runLinuxMediationWorker(): Promise<void> {
   const run = async (value: unknown) => {
     let cleanup: "confirmed" | "uncertain" = "confirmed";
     try {
-      const config = Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(value, {
+      const config = Schema.decodeUnknownSync(LinuxMediationWorkerConfig, {
+        onExcessProperty: "error",
+      })(value, {
         onExcessProperty: "error",
       });
       clearMaximum = replaceLinuxMediationWorkerDeadline(clearMaximum, stop, config.maximumMs);

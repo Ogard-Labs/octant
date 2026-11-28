@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ThreadGoalStatus } from "./goal";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { BindingRevisionId, ProjectId } from "./projects";
@@ -9,17 +10,21 @@ import { UtcTimestamp } from "./events";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { WorkThreadId } from "./workThreads";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
-const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
-const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =>
-  Schema.Array(schema).pipe(
-    Schema.filter((values) => values.length <= maximum && new Set(values).size === values.length),
+const boundedNonEmptyText = (maximumBytes: number) =>
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
+const uniqueArray = <S extends Schema.Top>(schema: S, maximum: number) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter(
+      (values) => values.length <= maximum && new Set(values).size === values.length,
+    ),
   );
 
 export const MAX_WORK_BOARD_SEARCH_BYTES = 1_024;
@@ -40,13 +45,13 @@ export type WorkBoardStatus = ThreadBoardStatus;
 export const WorkBoardStatusReason = ThreadBoardReason;
 export type WorkBoardStatusReason = ThreadBoardReason;
 
-export const WorkBoardFollowUpFilter = Schema.Literal("any", "only", "excluded");
+export const WorkBoardFollowUpFilter = Schema.Literals(["any", "only", "excluded"]);
 export type WorkBoardFollowUpFilter = typeof WorkBoardFollowUpFilter.Type;
 
-export const WorkBoardPendingRequestFilter = Schema.Literal("any", "only", "excluded");
+export const WorkBoardPendingRequestFilter = Schema.Literals(["any", "only", "excluded"]);
 export type WorkBoardPendingRequestFilter = typeof WorkBoardPendingRequestFilter.Type;
 
-export const WorkThreadDeliverySatisfaction = Schema.Literal("pending", "waiting", "done");
+export const WorkThreadDeliverySatisfaction = Schema.Literals(["pending", "waiting", "done"]);
 export type WorkThreadDeliverySatisfaction = typeof WorkThreadDeliverySatisfaction.Type;
 
 /**
@@ -65,73 +70,73 @@ export const WorkBoardQuery = Schema.Struct({
   ),
   followUp: Schema.optional(WorkBoardFollowUpFilter),
   pendingRequest: Schema.optional(WorkBoardPendingRequestFilter),
-}).annotations(strict);
+});
 export type WorkBoardQuery = typeof WorkBoardQuery.Type;
 
-export const WorkBoardBinding = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("unbound") }).annotations(strict),
+export const WorkBoardBinding = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unbound") }),
   Schema.Struct({
     kind: Schema.Literal("bound"),
     workingDirectory: ThreadWorkingDirectory,
     bindingRevisionId: Schema.optional(BindingRevisionId),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkBoardBinding = typeof WorkBoardBinding.Type;
 
-export const WorkBoardActiveRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const WorkBoardActiveRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("pending"),
-    requestKind: Schema.Literal("approval", "user-input"),
+    requestKind: Schema.Literals(["approval", "user-input"]),
     summary: boundedNonEmptyText(MAX_WORK_BOARD_CARD_SUMMARY_BYTES),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkBoardActiveRequest = typeof WorkBoardActiveRequest.Type;
 
 export const WorkBoardArtifactSummary = Schema.Struct({
-  count: Schema.Int.pipe(Schema.nonNegative()),
+  count: NonNegativeInt,
   latestDisplayName: Schema.optional(boundedNonEmptyText(MAX_WORK_BOARD_CARD_SUMMARY_BYTES)),
-}).annotations(strict);
+});
 export type WorkBoardArtifactSummary = typeof WorkBoardArtifactSummary.Type;
 
 export const WorkBoardCitationSummary = Schema.Struct({
-  count: Schema.Int.pipe(Schema.nonNegative()),
-  staleCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  count: NonNegativeInt,
+  staleCount: NonNegativeInt,
+});
 export type WorkBoardCitationSummary = typeof WorkBoardCitationSummary.Type;
 
-export const WorkBoardGoalState = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const WorkBoardGoalState = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("present"),
     status: ThreadGoalStatus,
     objective: boundedNonEmptyText(MAX_WORK_BOARD_CARD_SUMMARY_BYTES),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkBoardGoalState = typeof WorkBoardGoalState.Type;
 
 export const WorkBoardChildRunSummary = Schema.Struct({
-  active: Schema.Int.pipe(Schema.nonNegative()),
-  completed: Schema.Int.pipe(Schema.nonNegative()),
-  failed: Schema.Int.pipe(Schema.nonNegative()),
-  unacknowledgedResults: Schema.Int.pipe(Schema.nonNegative()),
+  active: NonNegativeInt,
+  completed: NonNegativeInt,
+  failed: NonNegativeInt,
+  unacknowledgedResults: NonNegativeInt,
   latestSummary: Schema.optional(boundedNonEmptyText(2_048)),
-}).annotations(strict);
+});
 export type WorkBoardChildRunSummary = typeof WorkBoardChildRunSummary.Type;
 
-export const WorkBoardRecoveryReason = Schema.Literal(
+export const WorkBoardRecoveryReason = Schema.Literals([
   "project-projection-missing",
   "binding-revision-mismatch",
-);
+]);
 export type WorkBoardRecoveryReason = typeof WorkBoardRecoveryReason.Type;
 
-export const WorkBoardRecovery = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("ok") }).annotations(strict),
+export const WorkBoardRecovery = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("ok") }),
   Schema.Struct({
     kind: Schema.Literal("recovering"),
     reasons: Schema.NonEmptyArray(WorkBoardRecoveryReason),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkBoardRecovery = typeof WorkBoardRecovery.Type;
 
 /**
@@ -166,25 +171,31 @@ export const WorkBoardCard = Schema.Struct({
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
   /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
   finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
-}).annotations(strict);
+});
 export type WorkBoardCard = typeof WorkBoardCard.Type;
 
 export const WorkBoardView = Schema.Struct({
   version: Schema.Literal(1),
   query: WorkBoardQuery,
-  cards: Schema.Array(WorkBoardCard).pipe(
-    Schema.filter(
+  cards: Schema.Array(WorkBoardCard).check(
+    Schema.makeFilter(
       (cards) =>
         cards.length <= MAX_WORK_BOARD_CARDS &&
         new Set(cards.map((card) => card.threadId)).size === cards.length,
     ),
   ),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkBoardView = typeof WorkBoardView.Type;
 
-export const decodeWorkBoardStatus = Schema.decodeUnknownSync(WorkBoardStatus);
-export const decodeWorkBoardStatusReason = Schema.decodeUnknownSync(WorkBoardStatusReason);
-export const decodeWorkBoardQuery = Schema.decodeUnknownSync(WorkBoardQuery);
-export const decodeWorkBoardCard = Schema.decodeUnknownSync(WorkBoardCard);
-export const decodeWorkBoardView = Schema.decodeUnknownSync(WorkBoardView);
+export const decodeWorkBoardStatus = Schema.decodeUnknownSync(
+  WorkBoardStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkBoardStatusReason = Schema.decodeUnknownSync(
+  WorkBoardStatusReason,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkBoardQuery = Schema.decodeUnknownSync(WorkBoardQuery, STRICT_DECODE_OPTIONS);
+export const decodeWorkBoardCard = Schema.decodeUnknownSync(WorkBoardCard, STRICT_DECODE_OPTIONS);
+export const decodeWorkBoardView = Schema.decodeUnknownSync(WorkBoardView, STRICT_DECODE_OPTIONS);

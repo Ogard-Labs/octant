@@ -11,11 +11,13 @@ import { Schema } from "effect";
  * `toolActions.ts` re-export these, so existing importers are unaffected.
  */
 
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedToken = (maximumLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maximumLength),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maximumLength),
+    Schema.isPattern(/^[a-z][a-z0-9-]*$/),
   );
 
 export const ToolExtensionId = brandedUuid("ToolExtensionId");
@@ -26,14 +28,17 @@ export const ExtensionComponentId = boundedToken(64).pipe(Schema.brand("Extensio
 export type ExtensionComponentId = typeof ExtensionComponentId.Type;
 export const extensionSemverPattern =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
-export const ExtensionPackageVersion = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(extensionSemverPattern),
+export const ExtensionPackageVersion = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.isPattern(extensionSemverPattern),
+  ),
   Schema.brand("ExtensionPackageVersion"),
 );
 export type ExtensionPackageVersion = typeof ExtensionPackageVersion.Type;
 export const ExtensionContentDigest = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
   Schema.brand("ExtensionContentDigest"),
 );
 export type ExtensionContentDigest = typeof ExtensionContentDigest.Type;
@@ -44,20 +49,18 @@ export type ExtensionContentDigest = typeof ExtensionContentDigest.Type;
  * the key in a package's verified signature; a package never states it.
  */
 export const ExtensionPublisherKeyFingerprint = Schema.String.pipe(
-  Schema.pattern(/^ed25519:[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^ed25519:[a-f0-9]{64}$/)),
   Schema.brand("ExtensionPublisherKeyFingerprint"),
 );
 export type ExtensionPublisherKeyFingerprint = typeof ExtensionPublisherKeyFingerprint.Type;
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * A package name as npm accepts it for a new package: an optional lowercase
  * `@scope/` and one name segment, 214 characters at most.
  */
-export const ExtensionNpmPackageName = Schema.String.pipe(
-  Schema.maxLength(214),
-  Schema.pattern(/^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$/),
+export const ExtensionNpmPackageName = Schema.String.check(
+  Schema.isMaxLength(214),
+  Schema.isPattern(/^(?:@[a-z0-9~][a-z0-9._~-]*\/)?[a-z0-9~][a-z0-9._~-]*$/),
 );
 export type ExtensionNpmPackageName = typeof ExtensionNpmPackageName.Type;
 
@@ -70,9 +73,10 @@ export type ExtensionNpmPackageName = typeof ExtensionNpmPackageName.Type;
 export const ExtensionNpmSource = Schema.Struct({
   packageName: ExtensionNpmPackageName,
   version: ExtensionPackageVersion,
-  registry: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(2048),
-    Schema.filter((value) => {
+  registry: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(2048),
+    Schema.makeFilter((value) => {
       try {
         const parsed = new URL(value);
         return (
@@ -85,9 +89,9 @@ export const ExtensionNpmSource = Schema.Struct({
       }
     }),
   ),
-  integrity: Schema.String.pipe(
-    Schema.maxLength(200),
-    Schema.pattern(/^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/),
+  integrity: Schema.String.check(
+    Schema.isMaxLength(200),
+    Schema.isPattern(/^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/),
   ),
-}).annotations(strict);
+});
 export type ExtensionNpmSource = typeof ExtensionNpmSource.Type;

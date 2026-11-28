@@ -17,33 +17,33 @@ import type {
 
 const session = Schema.Struct({
   id: ProviderCloudRemoteId,
-  status: Schema.Literal("idle", "in_progress", "requires_action", "failed"),
+  status: Schema.Literals(["idle", "in_progress", "requires_action", "failed"]),
   required_actions: Schema.optional(Schema.Array(Schema.Unknown)),
 });
 const turns = Schema.Struct({
   data: Schema.Array(
     Schema.Struct({
       id: ProviderCloudRemoteId,
-      status: Schema.Literal(
+      status: Schema.Literals([
         "queued",
         "in_progress",
         "waiting",
         "completed",
         "failed",
         "cancelled",
-      ),
+      ]),
     }),
-  ).pipe(Schema.maxItems(1)),
+  ).pipe(Schema.check(Schema.isMaxLength(1))),
 });
 const itemList = Schema.Struct({
-  data: Schema.Array(Schema.Unknown).pipe(Schema.maxItems(100)),
+  data: Schema.Array(Schema.Unknown).pipe(Schema.check(Schema.isMaxLength(100))),
   has_more: Schema.Boolean,
 });
 const assistantMessage = Schema.Struct({
   id: ProviderCloudRemoteId,
   type: Schema.Literal("message"),
   role: Schema.Literal("assistant"),
-  content: Schema.Array(Schema.Unknown).pipe(Schema.maxItems(256)),
+  content: Schema.Array(Schema.Unknown).pipe(Schema.check(Schema.isMaxLength(256))),
 });
 const outputText = Schema.Struct({ type: Schema.Literal("output_text"), text: Schema.String });
 const headers = { "OpenAI-Beta": "agents=v1" };

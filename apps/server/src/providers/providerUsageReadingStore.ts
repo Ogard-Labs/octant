@@ -1,12 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ProviderUsageLimitsEntry } from "@octant/contracts";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 
 const SCHEMA_VERSION = 1;
 const MAX_READINGS = 128;
 
-const decodeEntry = Schema.decodeUnknownEither(ProviderUsageLimitsEntry);
+const decodeEntry = Schema.decodeUnknownResult(ProviderUsageLimitsEntry);
 
 /**
  * The last plan-limit reading of each provider instance, kept in Octant's
@@ -37,7 +37,9 @@ export class ProviderUsageReadingStore {
     if (file.version !== SCHEMA_VERSION || !Array.isArray(file.entries)) return [];
     return file.entries.slice(0, MAX_READINGS).flatMap((candidate) => {
       const decoded = decodeEntry(candidate);
-      return Either.isRight(decoded) && decoded.right.status === "available" ? [decoded.right] : [];
+      return Result.isSuccess(decoded) && decoded.success.status === "available"
+        ? [decoded.success]
+        : [];
     });
   }
 

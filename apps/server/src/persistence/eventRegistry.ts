@@ -6,7 +6,7 @@ import {
   UnsupportedEventVersion,
 } from "./journalErrors";
 
-type RegisteredSchema = Schema.Schema<unknown, unknown, never>;
+type RegisteredSchema = Schema.Codec<unknown, unknown, never, never>;
 
 interface RegisteredSchemas {
   readonly current: RegisteredSchema;
@@ -22,12 +22,15 @@ export class EventRegistry {
   readonly #schemas = new Map<string, RegisteredSchemas>();
   readonly #versionsByName = new Map<string, Set<number>>();
 
-  register<A, I, R, PersistedA = A, PersistedI = I, PersistedR = R>(
+  register<
+    S extends Schema.Top & { readonly DecodingServices: never },
+    PersistedS extends Schema.Top & { readonly DecodingServices: never } = S,
+  >(
     eventName: string,
     eventVersion: number,
-    schema: Schema.Schema<A, I, R>,
+    schema: S,
     options?: {
-      readonly persistedSchema: Schema.Schema<PersistedA, PersistedI, PersistedR>;
+      readonly persistedSchema: PersistedS;
     },
   ): EventRegistry {
     const key = this.#key(eventName, eventVersion);
@@ -36,8 +39,8 @@ export class EventRegistry {
     }
 
     this.#schemas.set(key, {
-      current: schema as RegisteredSchema,
-      persisted: (options?.persistedSchema ?? schema) as RegisteredSchema,
+      current: Schema.make<RegisteredSchema>(schema.ast),
+      persisted: Schema.make<RegisteredSchema>((options?.persistedSchema ?? schema).ast),
     });
     const versions = this.#versionsByName.get(eventName) ?? new Set<number>();
     versions.add(eventVersion);
@@ -81,7 +84,7 @@ export class EventRegistry {
     }
 
     try {
-      return Schema.decodeUnknownSync(schemas[mode])(payload);
+      return Schema.decodeUnknownSync(schemas[mode], { onExcessProperty: "error" })(payload);
     } catch {
       throw new EventPayloadInvalid({ eventName, eventVersion });
     }

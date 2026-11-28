@@ -50,7 +50,7 @@ function validateAnswer(
   if (maxLength !== undefined && text.length > maxLength) return invalid;
   let response: QuestionnaireResponse;
   try {
-    response = Schema.decodeUnknownSync(schema)(JSON.parse(text));
+    response = Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(JSON.parse(text));
   } catch {
     return invalid;
   }

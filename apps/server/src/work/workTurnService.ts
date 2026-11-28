@@ -1428,17 +1428,18 @@ export class WorkTurnService {
           : { adopted: this.#adoptedWithHistory(threadId, target.adopted) }),
       };
     const listed = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         target.nativeSessions.list({
           instanceId: target.thread.providerInstanceId,
           projectRoot: target.projectRoot,
         }),
       ),
     );
-    if (listed._tag === "Left") return { threadId, sessions: [], unavailable: listed.left.message };
+    if (listed._tag === "Failure")
+      return { threadId, sessions: [], unavailable: listed.failure.message };
     return {
       threadId,
-      sessions: listed.right.flatMap((session) =>
+      sessions: listed.success.flatMap((session) =>
         isProviderNativeSessionId(session.nativeSessionId)
           ? [
               {
@@ -1487,7 +1488,7 @@ export class WorkTurnService {
         };
       const providerSessionId = decodeProviderSessionId(this.#uuid());
       const adopted = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           target.nativeSessions.adopt({
             instanceId: target.thread.providerInstanceId,
             projectRoot: target.projectRoot,
@@ -1498,8 +1499,8 @@ export class WorkTurnService {
           }),
         ),
       );
-      if (adopted._tag === "Left")
-        return { kind: "work-native-session-refused", message: adopted.left.message };
+      if (adopted._tag === "Failure")
+        return { kind: "work-native-session-refused", message: adopted.failure.message };
       // The provider claimed the session for this thread before the thread
       // could record it. An adoption that is not recorded gives the claim
       // back, or the session could never be offered or adopted again.
@@ -1512,7 +1513,7 @@ export class WorkTurnService {
               nativeSessionId,
               sessionId: providerSessionId,
             }) ?? Effect.void
-          ).pipe(Effect.catchAll(() => Effect.void)),
+          ).pipe(Effect.catch(() => Effect.void)),
         );
       try {
         // Read before the commit checks below, which must not yield. The read
@@ -1548,7 +1549,7 @@ export class WorkTurnService {
           {
             nativeSessionId,
             providerSessionId,
-            resumeCursor: adopted.right,
+            resumeCursor: adopted.success,
             providerInstanceId: target.thread.providerInstanceId,
             modelId: target.thread.modelId,
             bindingRevisionId: target.thread.bindingRevisionId,
@@ -2836,7 +2837,7 @@ export class WorkTurnService {
             await preparedTools?.close?.();
           }).pipe(
             Effect.timeout("2 seconds"),
-            Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+            Effect.catchCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
           ),
         );
     }
@@ -3353,7 +3354,7 @@ export class WorkTurnService {
           await appManagedTools?.close?.();
         }).pipe(
           Effect.timeout("2 seconds"),
-          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+          Effect.catchCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
       this.#refuseTurn(input.command, {
@@ -3384,7 +3385,7 @@ export class WorkTurnService {
           await appManagedTools?.close?.();
         }).pipe(
           Effect.timeout("2 seconds"),
-          Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
+          Effect.catchCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
       if (!input.signal.aborted)
@@ -3409,9 +3410,7 @@ export class WorkTurnService {
           await appManagedTools?.close?.();
         }).pipe(
           Effect.timeout("2 seconds"),
-          Effect.catchAllCause(() =>
-            Effect.logWarning("Prepared Work feedback tool cleanup failed."),
-          ),
+          Effect.catchCause(() => Effect.logWarning("Prepared Work feedback tool cleanup failed.")),
         ),
       );
       this.#refuseTurn(input.command, {

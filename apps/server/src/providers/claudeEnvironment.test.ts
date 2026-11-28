@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ProviderFailure } from "@octant/contracts";
-import { Effect, Either, Exit, Scope } from "effect";
+import { Effect, Result, Exit, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
@@ -43,10 +43,10 @@ const hostileHostEnvironment: NodeJS.ProcessEnv = {
 };
 
 async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 describe("sanitizeClaudeEnvironment", () => {
@@ -299,7 +299,7 @@ describe("makeClaudeEnvironmentScope", () => {
   it("refuses an API-key launch that names no account directory", async () => {
     const scope = await Effect.runPromise(Scope.make());
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         makeClaudeEnvironmentScope("api-key", {
           hostEnvironment: { PATH: "/usr/bin", HOME: "/Users/provider-user" },
           apiKey: "unused-api-key-sentinel",
@@ -308,7 +308,7 @@ describe("makeClaudeEnvironmentScope", () => {
     );
     await Effect.runPromise(Scope.close(scope, Exit.void));
 
-    expect(Either.isLeft(result) ? result.left : undefined).toEqual({
+    expect(Result.isFailure(result) ? result.failure : undefined).toEqual({
       category: "invalid-configuration",
       message: "Claude API-key authentication requires an assigned account directory.",
     });

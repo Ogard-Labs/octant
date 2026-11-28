@@ -1,14 +1,18 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
 import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { HubMemberId, OwnerUnlockPrincipal } from "./hubAndSpokes";
 import { WindowId } from "./shell";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Sequence = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER));
-const PositiveSequence = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER));
-const Coordinate = Schema.Number.pipe(Schema.between(0, 1));
+const Sequence = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+);
+const PositiveSequence = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+);
+const Coordinate = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
 export const MAX_PAIRED_BROWSER_FRAME_BYTES = 4 * 1024 * 1024;
 export const MAX_PAIRED_BROWSER_FRAME_WIDTH = 1920;
@@ -23,38 +27,52 @@ export const PAIRED_BROWSER_STREAM_DISCONNECT_MS = 30_000;
 export const PAIRED_BROWSER_IDLE_MS = 60_000;
 export const MAX_PAIRED_BROWSER_FILE_BYTES = 10 * 1024 * 1024;
 
-export const PairedBrowserLeaseId = Schema.UUID.pipe(Schema.brand("PairedBrowserLeaseId"));
+export const PairedBrowserLeaseId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PairedBrowserLeaseId"),
+);
 export type PairedBrowserLeaseId = typeof PairedBrowserLeaseId.Type;
 
-export const PairedBrowserChooserId = Schema.UUID.pipe(Schema.brand("PairedBrowserChooserId"));
+export const PairedBrowserChooserId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PairedBrowserChooserId"),
+);
 export type PairedBrowserChooserId = typeof PairedBrowserChooserId.Type;
 
-export const PairedBrowserUploadId = Schema.UUID.pipe(Schema.brand("PairedBrowserUploadId"));
+export const PairedBrowserUploadId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PairedBrowserUploadId"),
+);
 export type PairedBrowserUploadId = typeof PairedBrowserUploadId.Type;
 
 export const PairedBrowserDocumentVersion = Schema.String.pipe(
-  Schema.pattern(/^[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   Schema.brand("PairedBrowserDocumentVersion"),
 );
 export type PairedBrowserDocumentVersion = typeof PairedBrowserDocumentVersion.Type;
 
-export const PairedBrowserProfileKind = Schema.Literal("private", "personal", "project", "account");
+export const PairedBrowserProfileKind = Schema.Literals([
+  "private",
+  "personal",
+  "project",
+  "account",
+]);
 export type PairedBrowserProfileKind = typeof PairedBrowserProfileKind.Type;
 
 export const PairedBrowserTarget = Schema.Struct({
   threadId: BrowserThreadId,
   contextId: BrowserContextId,
-  tabId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  tabId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   documentVersion: PairedBrowserDocumentVersion,
   profileKind: PairedBrowserProfileKind,
-  originPolicyVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-}).annotations(strict);
+  originPolicyVersion: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+});
 export type PairedBrowserTarget = typeof PairedBrowserTarget.Type;
 
 export const PairedBrowserPoint = Schema.Struct({
   x: Coordinate,
   y: Coordinate,
-}).annotations(strict);
+});
 export type PairedBrowserPoint = typeof PairedBrowserPoint.Type;
 
 export const PairedBrowserKeyModifiers = Schema.Struct({
@@ -62,7 +80,7 @@ export const PairedBrowserKeyModifiers = Schema.Struct({
   control: Schema.optional(Schema.Boolean),
   meta: Schema.optional(Schema.Boolean),
   shift: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type PairedBrowserKeyModifiers = typeof PairedBrowserKeyModifiers.Type;
 
 /**
@@ -70,142 +88,150 @@ export type PairedBrowserKeyModifiers = typeof PairedBrowserKeyModifiers.Type;
  * IME debugger commands. Mouse events are absent so Electron's local input gate
  * sees only the person at the computer.
  */
-export const PairedBrowserInput = Schema.Union(
+export const PairedBrowserInput = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("tap"),
     frameId: PositiveSequence,
     x: Coordinate,
     y: Coordinate,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("long-press"),
     frameId: PositiveSequence,
     x: Coordinate,
     y: Coordinate,
-    durationMs: Schema.optional(Schema.Int.pipe(Schema.between(300, 1_500))),
-  }).annotations(strict),
+    durationMs: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 300, maximum: 1_500 })),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("drag"),
     frameId: PositiveSequence,
-    points: Schema.Array(PairedBrowserPoint).pipe(Schema.minItems(2), Schema.maxItems(64)),
-  }).annotations(strict),
+    points: Schema.Array(PairedBrowserPoint).check(Schema.isMinLength(2), Schema.isMaxLength(64)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("scroll"),
     frameId: PositiveSequence,
     x: Coordinate,
     y: Coordinate,
-    deltaX: Schema.Number.pipe(Schema.between(-2_000, 2_000)),
-    deltaY: Schema.Number.pipe(Schema.between(-2_000, 2_000)),
-  }).annotations(strict),
+    deltaX: Schema.Number.check(Schema.isBetween({ minimum: -2_000, maximum: 2_000 })),
+    deltaY: Schema.Number.check(Schema.isBetween({ minimum: -2_000, maximum: 2_000 })),
+  }),
   Schema.Struct({
     kind: Schema.Literal("key"),
-    phase: Schema.Literal("down", "up"),
-    key: Schema.NonEmptyString.pipe(Schema.maxLength(64)),
-    code: Schema.NonEmptyString.pipe(Schema.maxLength(64)),
+    phase: Schema.Literals(["down", "up"]),
+    key: Schema.NonEmptyString.check(Schema.isMaxLength(64)),
+    code: Schema.NonEmptyString.check(Schema.isMaxLength(64)),
     modifiers: Schema.optional(PairedBrowserKeyModifiers),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("text"),
-    text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_PAIRED_BROWSER_TEXT_LENGTH)),
-  }).annotations(strict),
+    text: Schema.NonEmptyString.check(Schema.isMaxLength(MAX_PAIRED_BROWSER_TEXT_LENGTH)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("composition"),
-    phase: Schema.Literal("start", "update", "commit", "cancel"),
-    text: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PAIRED_BROWSER_TEXT_LENGTH))),
-  }).annotations(strict),
-);
+    phase: Schema.Literals(["start", "update", "commit", "cancel"]),
+    text: Schema.optional(Schema.String.check(Schema.isMaxLength(MAX_PAIRED_BROWSER_TEXT_LENGTH))),
+  }),
+]);
 export type PairedBrowserInput = typeof PairedBrowserInput.Type;
 
-export const PairedBrowserRequest = Schema.Union(
+export const PairedBrowserRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("take-over"),
     target: PairedBrowserTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("hand-back", "release"),
+    kind: Schema.Literals(["hand-back", "release"]),
     leaseId: PairedBrowserLeaseId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("input"),
     leaseId: PairedBrowserLeaseId,
     sequence: PositiveSequence,
-    events: Schema.Array(PairedBrowserInput).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_PAIRED_BROWSER_EVENTS_PER_REQUEST),
+    events: Schema.Array(PairedBrowserInput).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_PAIRED_BROWSER_EVENTS_PER_REQUEST),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("file-choice"),
     leaseId: PairedBrowserLeaseId,
     chooserId: PairedBrowserChooserId,
     uploadId: PairedBrowserUploadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type PairedBrowserRequest = typeof PairedBrowserRequest.Type;
 
 export const PairedBrowserStreamRequest = Schema.Struct({
   leaseId: PairedBrowserLeaseId,
-}).annotations(strict);
+});
 export type PairedBrowserStreamRequest = typeof PairedBrowserStreamRequest.Type;
 
 export const PairedBrowserViewport = Schema.Struct({
-  width: Schema.Int.pipe(Schema.between(1, MAX_PAIRED_BROWSER_FRAME_WIDTH)),
-  height: Schema.Int.pipe(Schema.between(1, MAX_PAIRED_BROWSER_FRAME_HEIGHT)),
-}).annotations(strict);
+  width: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_PAIRED_BROWSER_FRAME_WIDTH }),
+  ),
+  height: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_PAIRED_BROWSER_FRAME_HEIGHT }),
+  ),
+});
 export type PairedBrowserViewport = typeof PairedBrowserViewport.Type;
 
-export const PairedBrowserWithheldReason = Schema.Literal(
+export const PairedBrowserWithheldReason = Schema.Literals([
   "private-custody",
   "native-prompt",
   "outside-document",
-);
+]);
 export type PairedBrowserWithheldReason = typeof PairedBrowserWithheldReason.Type;
 
-export const PairedBrowserEndReason = Schema.Literal(
+export const PairedBrowserEndReason = Schema.Literals([
   "handed-back",
   "reclaimed-locally",
   "disconnected",
   "revoked",
   "page-ended",
   "agent-sign-in",
-);
+]);
 export type PairedBrowserEndReason = typeof PairedBrowserEndReason.Type;
 
 const MAX_JPEG_BASE64_LENGTH = Math.ceil((MAX_PAIRED_BROWSER_FRAME_BYTES * 4) / 3) + 8;
 
-export const PairedBrowserStreamEvent = Schema.Union(
+export const PairedBrowserStreamEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("frame"),
     frameId: PositiveSequence,
     documentVersion: PairedBrowserDocumentVersion,
     viewport: PairedBrowserViewport,
-    devicePixelRatio: Schema.Number.pipe(Schema.between(0.5, 4)),
-    jpegBase64: Schema.String.pipe(
-      Schema.maxLength(MAX_JPEG_BASE64_LENGTH),
-      Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    devicePixelRatio: Schema.Number.check(Schema.isBetween({ minimum: 0.5, maximum: 4 })),
+    jpegBase64: Schema.String.check(
+      Schema.isMaxLength(MAX_JPEG_BASE64_LENGTH),
+      Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("withheld"),
     reason: PairedBrowserWithheldReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("file-chooser"),
     chooserId: PairedBrowserChooserId,
-    accept: Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(Schema.maxItems(32)),
+    accept: Schema.Array(Schema.String.check(Schema.isMaxLength(128))).check(
+      Schema.isMaxLength(32),
+    ),
     multiple: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reclaimed-locally"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("ended"),
     reason: PairedBrowserEndReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type PairedBrowserStreamEvent = typeof PairedBrowserStreamEvent.Type;
 
-export const PairedBrowserRefusalReason = Schema.Literal(
+export const PairedBrowserRefusalReason = Schema.Literals([
   "remote-control-not-person",
   "browser-page-held-elsewhere",
   "stale-frame",
@@ -213,162 +239,193 @@ export const PairedBrowserRefusalReason = Schema.Literal(
   "rate-limited",
   "page-not-here",
   "authority-ended",
-);
+]);
 export type PairedBrowserRefusalReason = typeof PairedBrowserRefusalReason.Type;
 
-export const PairedBrowserResponse = Schema.Union(
+export const PairedBrowserResponse = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("held"),
     leaseId: PairedBrowserLeaseId,
     expiresAt: UtcTimestamp,
     target: PairedBrowserTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("input"),
     lastAcceptedSequence: PositiveSequence,
-    effect: Schema.Literal("none", "possible", "completed"),
-  }).annotations(strict),
+    effect: Schema.Literals(["none", "possible", "completed"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("released"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: PairedBrowserRefusalReason,
-    effect: Schema.optional(Schema.Literal("none", "possible", "completed")),
-    retryAfterSeconds: Schema.optional(Schema.Int.pipe(Schema.between(1, 3_600))),
-  }).annotations(strict),
-);
+    effect: Schema.optional(Schema.Literals(["none", "possible", "completed"])),
+    retryAfterSeconds: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600 })),
+    ),
+  }),
+]);
 export type PairedBrowserResponse = typeof PairedBrowserResponse.Type;
 
-export const decodePairedBrowserLeaseId = Schema.decodeUnknownSync(PairedBrowserLeaseId);
-export const decodePairedBrowserChooserId = Schema.decodeUnknownSync(PairedBrowserChooserId);
-export const decodePairedBrowserUploadId = Schema.decodeUnknownSync(PairedBrowserUploadId);
-export const decodePairedBrowserTarget = Schema.decodeUnknownSync(PairedBrowserTarget);
-export const decodePairedBrowserInput = Schema.decodeUnknownSync(PairedBrowserInput);
-export const decodePairedBrowserRequest = Schema.decodeUnknownSync(PairedBrowserRequest);
+export const decodePairedBrowserLeaseId = Schema.decodeUnknownSync(
+  PairedBrowserLeaseId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserChooserId = Schema.decodeUnknownSync(
+  PairedBrowserChooserId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserUploadId = Schema.decodeUnknownSync(
+  PairedBrowserUploadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserTarget = Schema.decodeUnknownSync(
+  PairedBrowserTarget,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserInput = Schema.decodeUnknownSync(
+  PairedBrowserInput,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserRequest = Schema.decodeUnknownSync(
+  PairedBrowserRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePairedBrowserStreamRequest = Schema.decodeUnknownSync(
   PairedBrowserStreamRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodePairedBrowserStreamEvent = Schema.decodeUnknownSync(PairedBrowserStreamEvent);
-export const decodePairedBrowserResponse = Schema.decodeUnknownSync(PairedBrowserResponse);
+export const decodePairedBrowserStreamEvent = Schema.decodeUnknownSync(
+  PairedBrowserStreamEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairedBrowserResponse = Schema.decodeUnknownSync(
+  PairedBrowserResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Private desktop broker transport. Resource ownership is derived by the server. */
 const NativeOwner = Schema.Struct({
   windowId: WindowId,
   threadId: BrowserThreadId,
-}).annotations(strict);
+});
 
 export const PairedBrowserNativeTarget = Schema.Struct({
-  tabId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  tabId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   documentVersion: PairedBrowserDocumentVersion,
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
-  originPolicyVersion: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048)),
+  originPolicyVersion: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   viewport: PairedBrowserViewport,
-  devicePixelRatio: Schema.Number.pipe(Schema.between(0.5, 4)),
-}).annotations(strict);
+  devicePixelRatio: Schema.Number.check(Schema.isBetween({ minimum: 0.5, maximum: 4 })),
+});
 export type PairedBrowserNativeTarget = typeof PairedBrowserNativeTarget.Type;
 
 export const PairedBrowserNativeFileChooser = Schema.Struct({
   chooserId: PairedBrowserChooserId,
-  accept: Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(Schema.maxItems(32)),
+  accept: Schema.Array(Schema.String.check(Schema.isMaxLength(128))).check(Schema.isMaxLength(32)),
   multiple: Schema.Boolean,
-}).annotations(strict);
+});
 export type PairedBrowserNativeFileChooser = typeof PairedBrowserNativeFileChooser.Type;
 
 const NativeResource = { contextId: BrowserContextId, owner: NativeOwner };
 
-export const PairedBrowserNativeCommand = Schema.Union(
+export const PairedBrowserNativeCommand = Schema.Union([
   Schema.Struct({
     operation: Schema.Literal("inspect"),
     ...NativeResource,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("claim"),
     ...NativeResource,
     leaseId: PairedBrowserLeaseId,
     target: PairedBrowserNativeTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("frame"),
     ...NativeResource,
     leaseId: PairedBrowserLeaseId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("input"),
     ...NativeResource,
     leaseId: PairedBrowserLeaseId,
-    events: Schema.Array(PairedBrowserInput).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_PAIRED_BROWSER_EVENTS_PER_REQUEST),
+    events: Schema.Array(PairedBrowserInput).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_PAIRED_BROWSER_EVENTS_PER_REQUEST),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("file-choice"),
     ...NativeResource,
     leaseId: PairedBrowserLeaseId,
     chooserId: PairedBrowserChooserId,
     /** Host-staged regular file paths only, never client-supplied host paths. */
-    paths: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(16),
+    paths: Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(16),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("release"),
     ...NativeResource,
     leaseId: PairedBrowserLeaseId,
-    disposition: Schema.Literal("revoke", "hand-back"),
-  }).annotations(strict),
-);
+    disposition: Schema.Literals(["revoke", "hand-back"]),
+  }),
+]);
 export type PairedBrowserNativeCommand = typeof PairedBrowserNativeCommand.Type;
 
 export const PairedBrowserNativeFrame = Schema.Struct({
   frameId: PositiveSequence,
   documentVersion: PairedBrowserDocumentVersion,
   viewport: PairedBrowserViewport,
-  devicePixelRatio: Schema.Number.pipe(Schema.between(0.5, 4)),
-  jpegBase64: Schema.String.pipe(
-    Schema.maxLength(MAX_JPEG_BASE64_LENGTH),
-    Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+  devicePixelRatio: Schema.Number.check(Schema.isBetween({ minimum: 0.5, maximum: 4 })),
+  jpegBase64: Schema.String.check(
+    Schema.isMaxLength(MAX_JPEG_BASE64_LENGTH),
+    Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
   ),
-}).annotations(strict);
+});
 export type PairedBrowserNativeFrame = typeof PairedBrowserNativeFrame.Type;
 
-export const PairedBrowserNativeResult = Schema.Union(
+export const PairedBrowserNativeResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("target"),
     target: PairedBrowserNativeTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    status: Schema.Literal("claimed", "released", "file-chosen"),
-  }).annotations(strict),
+    status: Schema.Literals(["claimed", "released", "file-chosen"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("frame"),
     frame: PairedBrowserNativeFrame,
     fileChooser: Schema.optional(PairedBrowserNativeFileChooser),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("withheld"),
     reason: PairedBrowserWithheldReason,
     fileChooser: Schema.optional(PairedBrowserNativeFileChooser),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("input"),
-    effect: Schema.Literal("none", "possible", "completed"),
-  }).annotations(strict),
+    effect: Schema.Literals(["none", "possible", "completed"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: Schema.optional(
-      Schema.Literal("stale-frame", "reclaimed-locally", "unavailable", "outside-document"),
+      Schema.Literals(["stale-frame", "reclaimed-locally", "unavailable", "outside-document"]),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type PairedBrowserNativeResult = typeof PairedBrowserNativeResult.Type;
 
 export const decodePairedBrowserNativeCommand = Schema.decodeUnknownSync(
   PairedBrowserNativeCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodePairedBrowserNativeResult = Schema.decodeUnknownSync(PairedBrowserNativeResult);
+export const decodePairedBrowserNativeResult = Schema.decodeUnknownSync(
+  PairedBrowserNativeResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const PAIRED_BROWSER_HOLD_AGGREGATE = "browser-remote-hold";
 export const PAIRED_BROWSER_HOLD_STARTED_EVENT = "browser.remote-hold-started@1";
@@ -381,31 +438,33 @@ export const PAIRED_BROWSER_HOLD_ENDED_EVENT = "browser.remote-hold-ended@1";
 export const PairedBrowserHoldStartedPayload = Schema.Struct({
   threadId: BrowserThreadId,
   contextId: BrowserContextId,
-  tabId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  tabId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   profileKind: PairedBrowserProfileKind,
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048)),
   leaseId: PairedBrowserLeaseId,
-}).annotations(strict);
+});
 export type PairedBrowserHoldStartedPayload = typeof PairedBrowserHoldStartedPayload.Type;
 
 export const PairedBrowserHoldEndedPayload = Schema.Struct({
   threadId: BrowserThreadId,
   contextId: BrowserContextId,
-  tabId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  tabId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   profileKind: PairedBrowserProfileKind,
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048)),
   leaseId: PairedBrowserLeaseId,
   endReason: PairedBrowserEndReason,
   eventCount: Sequence,
   frameCount: Sequence,
-}).annotations(strict);
+});
 export type PairedBrowserHoldEndedPayload = typeof PairedBrowserHoldEndedPayload.Type;
 
 export const decodePairedBrowserHoldStartedPayload = Schema.decodeUnknownSync(
   PairedBrowserHoldStartedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePairedBrowserHoldEndedPayload = Schema.decodeUnknownSync(
   PairedBrowserHoldEndedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -414,9 +473,12 @@ export const decodePairedBrowserHoldEndedPayload = Schema.decodeUnknownSync(
  * Browser control path. No route or service emits this event.
  */
 export const LEGACY_OWNER_BROWSER_AUDIT_EVENT = "browser.owner-control-recorded@1";
-const LegacyOwnerBrowserControlId = Schema.UUID.pipe(Schema.brand("OwnerBrowserControlId"));
+const LegacyOwnerBrowserControlId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("OwnerBrowserControlId"),
+);
 const LegacyOwnerBrowserTargetVersion = Schema.String.pipe(
-  Schema.pattern(/^[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   Schema.brand("OwnerBrowserTargetVersion"),
 );
 export const LegacyOwnerBrowserAuditRecord = Schema.Struct({
@@ -427,8 +489,8 @@ export const LegacyOwnerBrowserAuditRecord = Schema.Struct({
   controlId: LegacyOwnerBrowserControlId,
   targetVersion: LegacyOwnerBrowserTargetVersion,
   documentRevision: Sequence,
-  operation: Schema.Literal("take-over", "input", "hand-back", "revoke"),
-  phase: Schema.Literal("admitted", "completed", "possible"),
-  inputKind: Schema.optional(Schema.Literal("tap", "scroll", "press", "type")),
-}).annotations(strict);
+  operation: Schema.Literals(["take-over", "input", "hand-back", "revoke"]),
+  phase: Schema.Literals(["admitted", "completed", "possible"]),
+  inputKind: Schema.optional(Schema.Literals(["tap", "scroll", "press", "type"])),
+});
 export type LegacyOwnerBrowserAuditRecord = typeof LegacyOwnerBrowserAuditRecord.Type;

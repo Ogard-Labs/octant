@@ -14,8 +14,8 @@ import type { AgentRunSessionRecord, AgentRunSessionStore } from "./agentRunSess
 const Identity = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   octantSessionId: ProviderSessionId,
-  sdkSessionId: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
-  projectRoot: Schema.NonEmptyString.pipe(Schema.maxLength(16 * 1024)),
+  sdkSessionId: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(4096))),
+  projectRoot: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(16 * 1024))),
   modelId: ProviderModelId,
   authentication: ClaudeAuthentication,
 });

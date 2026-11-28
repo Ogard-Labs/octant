@@ -247,7 +247,7 @@ export function createAgentResultSteering(input: {
     const message = agentResultDeliveryBatchPrompt(runs, input.resultText);
     const outcome = await Effect.runPromise(
       steer({ sessionId: live.sessionId, message, source: "agent-result" }).pipe(
-        Effect.catchAll(() => Effect.succeed("unsupported" as const)),
+        Effect.catch(() => Effect.succeed("unsupported" as const)),
       ),
     );
     if (outcome !== "steered") return "not-steered";

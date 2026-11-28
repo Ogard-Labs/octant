@@ -681,11 +681,10 @@ describe("CodeService reads", () => {
     // heard of threadPullRequests: it drops that field and keeps every row.
     const { threadPullRequests: _unknownToIt, ...previousRuntimeFields } =
       CodeNavigationRuntime.fields;
-    const strict = { parseOptions: { onExcessProperty: "error" as const } };
     const PreviousNavigation = Schema.Struct({
       ...CodeNavigation.fields,
-      runtime: Schema.Array(Schema.Struct(previousRuntimeFields).annotations(strict)),
-    }).annotations(strict);
+      runtime: Schema.Array(Schema.Struct(previousRuntimeFields)),
+    });
     const received: unknown = JSON.parse(JSON.stringify(answer));
     const read = decodeHostAnswer(PreviousNavigation)(received);
     expect(read.runtime[0]?.pullRequestSummaries?.items).toHaveLength(3);
@@ -1568,9 +1567,13 @@ describe("CodeService commands", () => {
       request: new Request("https://octant.example/api/code/commands", { method: "POST" }),
       principal: {
         kind: "remote-device",
-        deviceId: Schema.decodeUnknownSync(DeviceId)(String(ids.window)),
-        hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
-        sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+        deviceId: Schema.decodeUnknownSync(DeviceId, { onExcessProperty: "error" })(
+          String(ids.window),
+        ),
+        hostId: Schema.decodeUnknownSync(StableHostId, { onExcessProperty: "error" })(
+          "00000000-0000-4000-8000-00000000c002",
+        ),
+        sessionId: Schema.decodeUnknownSync(RemoteSessionId, { onExcessProperty: "error" })(
           "00000000-0000-4000-8000-00000000c003",
         ),
         origin: "https://octant.example",

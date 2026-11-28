@@ -182,9 +182,9 @@ export function makeOutsideVideoGenerationProxy(options: OutsideVideoGenerationP
 
   /** Reads a result the driver wrote; one that does not decode stops it. */
   const read = <A>(
-    decoded: { readonly _tag: "Left" } | { readonly _tag: "Right"; readonly right: A },
+    decoded: { readonly _tag: "Failure" } | { readonly _tag: "Success"; readonly success: A },
   ): A => {
-    if (decoded._tag === "Right") return decoded.right;
+    if (decoded._tag === "Success") return decoded.success;
     throw stopped();
   };
 

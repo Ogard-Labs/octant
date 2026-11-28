@@ -46,18 +46,18 @@ describe("a navigation row's live turn", () => {
   });
 
   it("refuses a step that is too long, empty, or carries anything else", () => {
-    const decode = Schema.decodeUnknownEither(ThreadLiveStep);
+    const decode = Schema.decodeUnknownResult(ThreadLiveStep, { onExcessProperty: "error" });
     expect(
       decode({ kind: "tool", tool: "x".repeat(MAX_LIVE_STEP_ARGUMENT_LENGTH + 80) })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
     expect(
       decode({
         kind: "tool",
         tool: "Command",
         argument: "x".repeat(MAX_LIVE_STEP_ARGUMENT_LENGTH + 1),
       })._tag,
-    ).toBe("Left");
-    expect(decode({ kind: "tool", tool: "  " })._tag).toBe("Left");
-    expect(decode({ kind: "waiting", reason: "approval", output: "secret" })._tag).toBe("Left");
+    ).toBe("Failure");
+    expect(decode({ kind: "tool", tool: "  " })._tag).toBe("Failure");
+    expect(decode({ kind: "waiting", reason: "approval", output: "secret" })._tag).toBe("Failure");
   });
 });

@@ -99,9 +99,9 @@ export function validateAgentPluginsManifest(raw: unknown): AgentPluginsManifest
       for (const [namespace, value] of Object.entries(record.extensions)) {
         if (namespace === "octant") {
           const decoded = decodeOctantCodeToolsNamespace(value);
-          if (decoded._tag === "Left")
+          if (decoded._tag === "Failure")
             fail("code-tools-invalid", "extensions.octant must declare bounded Code tools.");
-          codeTools = decoded.right.codeTools;
+          codeTools = decoded.success.codeTools;
           continue;
         }
         if (!isRecord(value)) {

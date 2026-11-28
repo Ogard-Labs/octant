@@ -72,7 +72,7 @@ export function makeAccountSessionCarrier(dependencies: {
     if (nativeSessions === undefined || carrySession === undefined)
       return { status: "text", cause: "provider-cannot-carry" };
     const copied = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         carrySession({
           instanceId: request.toInstanceId,
           fromInstanceId: request.fromInstanceId,
@@ -81,9 +81,9 @@ export function makeAccountSessionCarrier(dependencies: {
         }),
       ),
     ).catch(() => undefined);
-    if (copied === undefined || copied._tag === "Left" || copied.right.status === "refused")
+    if (copied === undefined || copied._tag === "Failure" || copied.success.status === "refused")
       return { status: "text", cause: "session-not-copied" };
-    const discard = copied.right.discard;
+    const discard = copied.success.discard;
     // A turn prepared earlier and never started may already have claimed the
     // copy for this same Octant session; giving that claim back first makes
     // the move repeatable. A claim another session holds is left alone, and
@@ -95,10 +95,10 @@ export function makeAccountSessionCarrier(dependencies: {
           nativeSessionId: request.resumeCursor.value,
           sessionId: request.sessionId,
         }) ?? Effect.void
-      ).pipe(Effect.catchAll(() => Effect.void)),
+      ).pipe(Effect.catch(() => Effect.void)),
     );
     const adopted = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         nativeSessions.adopt({
           instanceId: request.toInstanceId,
           projectRoot: request.projectRoot,
@@ -109,11 +109,11 @@ export function makeAccountSessionCarrier(dependencies: {
         }),
       ),
     ).catch(() => undefined);
-    if (adopted === undefined || adopted._tag === "Left") {
+    if (adopted === undefined || adopted._tag === "Failure") {
       await Effect.runPromise(discard()).catch(() => undefined);
       return { status: "text", cause: "session-not-adopted" };
     }
-    return { status: "carried", resumeCursor: adopted.right };
+    return { status: "carried", resumeCursor: adopted.success };
   };
   return { sameProvider, carry };
 }

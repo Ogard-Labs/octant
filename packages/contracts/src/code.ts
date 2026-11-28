@@ -1,6 +1,12 @@
 import { ConversationInputPolicy } from "./conversationInputs";
+import {
+  GuidString,
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./attachmentMediaType";
-import { Option, Schema } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { FinishedReceiptId } from "./finishedReceipt";
@@ -43,22 +49,21 @@ import {
 import { ThreadTouchedIssues } from "./threadTouchedIssues";
 import { LinkedIssueRef, ThreadLinkedIssues } from "./threadLinkedIssues";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** The most pull requests a thread remembers a person unlinked from it. */
 export const MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS = 50;
 
 export const CodeThreadUnlinkedPullRequest = Schema.Struct({
   owner: GithubRepositoryOwner,
   repository: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
+  number: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999 })),
   unlinkedAt: UtcTimestamp,
-}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+});
 export type CodeThreadUnlinkedPullRequest = typeof CodeThreadUnlinkedPullRequest.Type;
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const brandedString = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.brand(brand));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const brandedString = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand<B>(brand));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const CodeThreadId = brandedUuid("CodeThreadId");
 export type CodeThreadId = typeof CodeThreadId.Type;
@@ -80,17 +85,17 @@ export const ManagedRootGrantId = brandedUuid("ManagedRootGrantId");
 export const MAX_COORDINATOR_DONE_WHEN_ITEMS = 16;
 
 export const CoordinatorDoneWhenPullRequest = Schema.Struct({
-  kind: Schema.Literal("pull-request-merged", "pull-request-checks-green"),
+  kind: Schema.Literals(["pull-request-merged", "pull-request-checks-green"]),
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
   number: PositiveInt,
-}).annotations(strict);
+});
 export type CoordinatorDoneWhenPullRequest = typeof CoordinatorDoneWhenPullRequest.Type;
 
 export const CoordinatorDoneWhenThread = Schema.Struct({
   kind: Schema.Literal("thread-done"),
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type CoordinatorDoneWhenThread = typeof CoordinatorDoneWhenThread.Type;
 
 /**
@@ -98,10 +103,10 @@ export type CoordinatorDoneWhenThread = typeof CoordinatorDoneWhenThread.Type;
  * (docs/design/coordinator-threads.md). Closed set: a pull request merged,
  * a pull request's required checks green, or a Code thread Done.
  */
-export const CoordinatorDoneWhenItem = Schema.Union(
+export const CoordinatorDoneWhenItem = Schema.Union([
   CoordinatorDoneWhenPullRequest,
   CoordinatorDoneWhenThread,
-);
+]);
 export type CoordinatorDoneWhenItem = typeof CoordinatorDoneWhenItem.Type;
 
 const doneWhenItemKey = (item: CoordinatorDoneWhenItem): string =>
@@ -114,16 +119,19 @@ const doneWhenItemKey = (item: CoordinatorDoneWhenItem): string =>
  * All listed items must hold for the condition to be satisfied.
  */
 export const CoordinatorDoneWhen = Schema.Struct({
-  items: Schema.Array(CoordinatorDoneWhenItem).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_COORDINATOR_DONE_WHEN_ITEMS),
-    Schema.filter((items) => new Set(items.map(doneWhenItemKey)).size === items.length, {
-      message: () => "Duplicate done-when items are not permitted.",
+  items: Schema.Array(CoordinatorDoneWhenItem).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_COORDINATOR_DONE_WHEN_ITEMS),
+    Schema.makeFilter((items) => new Set(items.map(doneWhenItemKey)).size === items.length, {
+      message: "Duplicate done-when items are not permitted.",
     }),
   ),
-}).annotations(strict);
+});
 export type CoordinatorDoneWhen = typeof CoordinatorDoneWhen.Type;
-export const decodeCoordinatorDoneWhen = Schema.decodeUnknownSync(CoordinatorDoneWhen);
+export const decodeCoordinatorDoneWhen = Schema.decodeUnknownSync(
+  CoordinatorDoneWhen,
+  STRICT_DECODE_OPTIONS,
+);
 export type ManagedRootGrantId = typeof ManagedRootGrantId.Type;
 export const WorktreeReceiptId = brandedUuid("WorktreeReceiptId");
 export type WorktreeReceiptId = typeof WorktreeReceiptId.Type;
@@ -151,7 +159,7 @@ export const MAX_CODE_TURN_ATTACHMENTS = 8;
 export const MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH = 255;
 
 export const CodeRepositoryId = Schema.String.pipe(
-  Schema.pattern(/^repo_[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^repo_[a-f0-9]{64}$/)),
   Schema.brand("CodeRepositoryId"),
 );
 export type CodeRepositoryId = typeof CodeRepositoryId.Type;
@@ -175,7 +183,7 @@ function isCodeRelativePath(value: string): boolean {
     .every((component) => component !== "" && component !== "." && component !== "..");
 }
 export const CodeRelativePath = Schema.String.pipe(
-  Schema.filter(isCodeRelativePath),
+  Schema.check(Schema.makeFilter(isCodeRelativePath)),
   Schema.brand("CodeRelativePath"),
 );
 export type CodeRelativePath = typeof CodeRelativePath.Type;
@@ -187,19 +195,20 @@ export type CodeRelativePath = typeof CodeRelativePath.Type;
  * the Project's extra folders before it opens or reads anything.
  */
 export const CodeProjectFilePath = Schema.String.pipe(
-  Schema.filter((value) => {
-    if (value.startsWith("/")) {
-      return value.length > 1 && !value.startsWith("//") && isCodeRelativePath(value.slice(1));
-    }
-    return isCodeRelativePath(value);
-  }),
-  // The brand is shared on purpose: the type is the same path, and the places
+  Schema.check(
+    Schema.makeFilter((value) => {
+      if (value.startsWith("/")) {
+        return value.length > 1 && !value.startsWith("//") && isCodeRelativePath(value.slice(1));
+      }
+      return isCodeRelativePath(value);
+    }),
+  ), // The brand is shared on purpose: the type is the same path, and the places
   // that join it to a root first place it in a folder.
   Schema.brand("CodeRelativePath"),
 );
 export type CodeProjectFilePath = typeof CodeProjectFilePath.Type;
 
-const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
+const GitObjectId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
 /**
  * What a checkout's HEAD points at. `none` is the head of a plain folder: a
  * Code Project bound to a directory that is not a Git repository, allowed when
@@ -207,63 +216,52 @@ const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{
  * that needs a revision — branches, worktrees, diffs, pushes, pull requests —
  * has to say what it does without one rather than invent one.
  */
-export const CodeCheckoutHead = Schema.Union(
+export const CodeCheckoutHead = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("branch"),
     name: brandedString("GitBranchName"),
     oid: GitObjectId,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }),
+  Schema.Struct({ kind: Schema.Literal("none") }),
+]);
 export type CodeCheckoutHead = typeof CodeCheckoutHead.Type;
 
-export const CodeCheckoutIdentity = Schema.Union(
+export const CodeCheckoutIdentity = Schema.Union([
   Schema.Struct({
     id: CodeCheckoutId,
     repositoryId: CodeRepositoryId,
     kind: Schema.Literal("existing-worktree"),
-    availability: Schema.Literal("available", "unavailable", "waiting"),
+    availability: Schema.Literals(["available", "unavailable", "waiting"]),
     head: CodeCheckoutHead,
     observedAt: UtcTimestamp,
-  }).annotations(strict),
-  /**
-   * The bound folder itself, with no repository behind it. Its identity is a
-   * digest of the canonical root rather than of a Git common directory, since
-   * there is none; a relink to another folder is a different checkout.
-   */
+  }),
   Schema.Struct({
     id: CodeCheckoutId,
     repositoryId: CodeRepositoryId,
     kind: Schema.Literal("plain-folder"),
-    availability: Schema.Literal("available", "unavailable", "waiting"),
-    head: Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+    availability: Schema.Literals(["available", "unavailable", "waiting"]),
+    head: Schema.Struct({ kind: Schema.Literal("none") }),
     observedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     id: CodeCheckoutId,
     repositoryId: CodeRepositoryId,
     kind: Schema.Literal("managed-worktree"),
-    availability: Schema.Literal("available", "unavailable", "waiting"),
+    availability: Schema.Literals(["available", "unavailable", "waiting"]),
     head: CodeCheckoutHead,
     ownershipReceiptId: WorktreeReceiptId,
     observedAt: UtcTimestamp,
-  }).annotations(strict),
-  /**
-   * A folder on another machine, from the build that could bind a Project to
-   * an SSH target. Those bindings are gone, but their journaled checkouts
-   * still replay, so the kind stays decodable. It is never a folder of this
-   * host and carries no head.
-   */
+  }),
   Schema.Struct({
     id: CodeCheckoutId,
     repositoryId: CodeRepositoryId,
     kind: Schema.Literal("remote-root"),
-    availability: Schema.Literal("available", "unavailable", "waiting"),
-    head: Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+    availability: Schema.Literals(["available", "unavailable", "waiting"]),
+    head: Schema.Struct({ kind: Schema.Literal("none") }),
     observedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeCheckoutIdentity = typeof CodeCheckoutIdentity.Type;
 
 /**
@@ -273,12 +271,12 @@ export type CodeCheckoutIdentity = typeof CodeCheckoutIdentity.Type;
  * The kind is suggested from the creation prompt but only ever set by explicit
  * user confirmation; agents may propose a change but never redefine it.
  */
-export const CodeDeliveryOutcomeKind = Schema.Literal(
+export const CodeDeliveryOutcomeKind = Schema.Literals([
   "investigation-result",
   "local-implementation",
   "opened-pr",
   "merged-pr",
-);
+]);
 export type CodeDeliveryOutcomeKind = typeof CodeDeliveryOutcomeKind.Type;
 
 /**
@@ -288,20 +286,20 @@ export type CodeDeliveryOutcomeKind = typeof CodeDeliveryOutcomeKind.Type;
  */
 export const CodeDeliveryOutcomeProposal = Schema.Struct({
   outcomeKind: CodeDeliveryOutcomeKind,
-  rationale: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
+  rationale: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))),
   proposedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeDeliveryOutcomeProposal = typeof CodeDeliveryOutcomeProposal.Type;
 
 export const CodeDeliveryTarget = Schema.Struct({
-  branchIntent: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  remoteName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  proposedBaseRepository: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  proposedBaseBranch: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  branchIntent: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  remoteName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  proposedBaseRepository: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  proposedBaseBranch: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   outcomeKind: CodeDeliveryOutcomeKind,
   confirmedAt: UtcTimestamp,
   proposedOutcome: Schema.optional(CodeDeliveryOutcomeProposal),
-}).annotations(strict);
+});
 export type CodeDeliveryTarget = typeof CodeDeliveryTarget.Type;
 
 /**
@@ -327,10 +325,10 @@ export const CODE_DELIVERY_OUTCOME_REPLAY_DEFAULT =
  */
 export const PersistedCodeDeliveryTarget = Schema.Struct({
   ...CodeDeliveryTarget.fields,
-  outcomeKind: Schema.optionalWith(CodeDeliveryOutcomeKind, {
-    default: () => CODE_DELIVERY_OUTCOME_REPLAY_DEFAULT,
-  }),
-}).annotations(strict);
+  outcomeKind: CodeDeliveryOutcomeKind.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(CODE_DELIVERY_OUTCOME_REPLAY_DEFAULT)),
+  ),
+});
 export type PersistedCodeDeliveryTarget = typeof PersistedCodeDeliveryTarget.Type;
 
 /**
@@ -340,7 +338,12 @@ export type PersistedCodeDeliveryTarget = typeof PersistedCodeDeliveryTarget.Typ
  */
 export const MAX_CODE_THREAD_TITLE_LENGTH = 200;
 
-export const CodeThreadLifecycle = Schema.Literal("active", "archived", "waiting", "interrupted");
+export const CodeThreadLifecycle = Schema.Literals([
+  "active",
+  "archived",
+  "waiting",
+  "interrupted",
+]);
 export type CodeThreadLifecycle = typeof CodeThreadLifecycle.Type;
 
 /**
@@ -355,8 +358,8 @@ export type CodeThreadLifecycle = typeof CodeThreadLifecycle.Type;
  */
 export const CodeThreadForkOrigin = Schema.Struct({
   threadId: CodeThreadId,
-  throughOperationId: Schema.UUID,
-}).annotations(strict);
+  throughOperationId: GuidString,
+});
 export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
 
 /**
@@ -366,10 +369,12 @@ export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
  * journal or store that carries either value still decodes and the value is
  * dropped: both old forms replay as Full access.
  */
-const RetiredSandboxOffSwitch = Schema.optionalToOptional(Schema.Boolean, Schema.Never, {
-  decode: () => Option.none(),
-  encode: () => Option.none(),
-});
+const RetiredSandboxOffSwitch = Schema.optional(Schema.Boolean).pipe(
+  Schema.decodeTo(Schema.optionalKey(Schema.Never), {
+    decode: SchemaGetter.omit(),
+    encode: SchemaGetter.omit(),
+  }),
+);
 
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
@@ -377,7 +382,7 @@ export const CodeThread = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   repositoryId: CodeRepositoryId,
   checkoutId: CodeCheckoutId,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   /**
    * Whether the user has pinned this thread to the top of the sidebar. Optional
    * so a journal written before pinning existed replays as "not pinned" rather
@@ -482,10 +487,10 @@ export const CodeThread = Schema.Struct({
   putAwayForPullRequests: Schema.optional(
     Schema.Array(
       Schema.Struct({
-        baseRepository: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-        number: Schema.Int.pipe(Schema.positive()),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
+        baseRepository: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+        number: Schema.Int.check(Schema.isGreaterThan(0)),
+      }),
+    ).check(Schema.isMaxLength(32)),
   ),
   /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
   completionReceiptId: Schema.optional(FinishedReceiptId),
@@ -497,8 +502,8 @@ export const CodeThread = Schema.Struct({
    * unlinked from.
    */
   unlinkedPullRequests: Schema.optional(
-    Schema.Array(CodeThreadUnlinkedPullRequest).pipe(
-      Schema.maxItems(MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS),
+    Schema.Array(CodeThreadUnlinkedPullRequest).check(
+      Schema.isMaxLength(MAX_CODE_THREAD_UNLINKED_PULL_REQUESTS),
     ),
   ),
   lifecycle: CodeThreadLifecycle,
@@ -529,7 +534,9 @@ export const CodeThread = Schema.Struct({
    * allowlist. Snapshotted so a later refusal can name the profile without
    * reloading it. Optional for the same replay reason as `profileId`.
    */
-  profileDisplayName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  profileDisplayName: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  ),
   /**
    * The profile's tool allowlist, snapshotted at creation so a later profile
    * edit cannot change what this thread may call. Absent or empty means no
@@ -539,7 +546,7 @@ export const CodeThread = Schema.Struct({
    * for this list.
    */
   toolConstraints: Schema.optional(
-    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
   ),
   /**
    * Instructions and skill allowlist copied from the profile when this thread
@@ -550,10 +557,14 @@ export const CodeThread = Schema.Struct({
    */
   profileContext: Schema.optional(
     Schema.Struct({
-      displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-      instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
-      approvedSkillIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-    }).annotations(strict),
+      displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+      instructions: Schema.optional(
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(100_000)),
+      ),
+      approvedSkillIds: Schema.Array(
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+      ),
+    }),
   ),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   workingFolderId: Schema.optional(ProjectWorkingFolderId),
@@ -593,7 +604,7 @@ export const CodeThread = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeThread = typeof CodeThread.Type;
 
 /**
@@ -605,19 +616,22 @@ export type CodeThread = typeof CodeThread.Type;
 export const PersistedCodeThread = Schema.Struct({
   ...CodeThread.fields,
   deliveryTarget: PersistedCodeDeliveryTarget,
-}).annotations(strict);
+});
 export type PersistedCodeThread = typeof PersistedCodeThread.Type;
 
 export const CodeExternalEditor = Schema.Struct({
-  executable: Schema.NonEmptyTrimmedString.pipe(Schema.filter((value) => value.startsWith("/"))),
-  arguments: Schema.Array(Schema.String.pipe(Schema.maxLength(1_024))).pipe(
-    Schema.filter((arguments_) => arguments_.length <= 32),
+  executable: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => value.startsWith("/")),
   ),
-}).annotations(strict);
+  arguments: Schema.Array(Schema.String.check(Schema.isMaxLength(1_024))).check(
+    Schema.makeFilter((arguments_) => arguments_.length <= 32),
+  ),
+});
 export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 
 /** How Review shows a checkout diff: stacked files, or one file beside its pair. */
-export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
+export const CodeDiffLayout = Schema.Literals(["unified", "side-by-side"]);
 export type CodeDiffLayout = typeof CodeDiffLayout.Type;
 
 /**
@@ -627,7 +641,7 @@ export type CodeDiffLayout = typeof CodeDiffLayout.Type;
  * Windows install carries), PowerShell 7 (`pwsh`), or Command Prompt (`cmd`).
  * macOS and Linux hosts keep the login shell and ignore this.
  */
-export const WindowsTerminalShell = Schema.Literal("powershell", "pwsh", "cmd");
+export const WindowsTerminalShell = Schema.Literals(["powershell", "pwsh", "cmd"]);
 export type WindowsTerminalShell = typeof WindowsTerminalShell.Type;
 
 /**
@@ -638,15 +652,17 @@ export type WindowsTerminalShell = typeof WindowsTerminalShell.Type;
  * keeps the Git requirement it had; the host refused the one pair (on with
  * Git required) that would have meant something else.
  */
-const RetiredDefaultFolderThreadsSwitch = Schema.optionalToOptional(Schema.Boolean, Schema.Never, {
-  decode: () => Option.none(),
-  encode: () => Option.none(),
-});
+const RetiredDefaultFolderThreadsSwitch = Schema.optional(Schema.Boolean).pipe(
+  Schema.decodeTo(Schema.optionalKey(Schema.Never), {
+    decode: SchemaGetter.omit(),
+    encode: SchemaGetter.omit(),
+  }),
+);
 
 export const CodeDefaultModel = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 
 /**
  * The start of a branch name Octant generates for a new managed worktree
@@ -654,9 +670,9 @@ export const CodeDefaultModel = Schema.Struct({
  * none Git treats specially: no segment ends with `.` or `.lock`, and none holds
  * `..`. The domain naming policy repeats the check.
  */
-export const CodeBranchPrefix = Schema.String.pipe(
-  Schema.maxLength(40),
-  Schema.pattern(
+export const CodeBranchPrefix = Schema.String.check(
+  Schema.isMaxLength(40),
+  Schema.isPattern(
     /^(?!.*\.(?:\.|(?:lock)?(?:\/|$)))[A-Za-z0-9][\w.-]*(?:\/[A-Za-z0-9][\w.-]*)*\/?$/,
   ),
 );
@@ -678,11 +694,11 @@ export const CodeWorktreeCleanupSettings = Schema.Struct({
    * Remove a clean worktree nobody has worked in for this many days, from an
    * open or archived thread. The checkout can be restored. Absent is off.
    */
-  inactivityDays: Schema.optional(Schema.Int.pipe(Schema.between(1, 365))),
-}).annotations(strict);
+  inactivityDays: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 365 }))),
+});
 export type CodeWorktreeCleanupSettings = typeof CodeWorktreeCleanupSettings.Type;
 
-export const CodeWorktreeNaming = Schema.Literal("short-id", "prompt");
+export const CodeWorktreeNaming = Schema.Literals(["short-id", "prompt"]);
 export type CodeWorktreeNaming = typeof CodeWorktreeNaming.Type;
 
 /** Settings › Code › Worktrees: how new worktrees are named and when they are cleaned up. */
@@ -692,7 +708,7 @@ export const CodeWorktreeSettings = Schema.Struct({
   /** Absent is `short-id`: the prefix and a short id, with no words from the prompt. */
   branchNaming: Schema.optional(CodeWorktreeNaming),
   cleanup: Schema.optional(CodeWorktreeCleanupSettings),
-}).annotations(strict);
+});
 export type CodeWorktreeSettings = typeof CodeWorktreeSettings.Type;
 
 export const CodeSettings = Schema.Struct({
@@ -710,13 +726,13 @@ export const CodeSettings = Schema.Struct({
    * persisted before the switch existed decodes to on, which is what it always
    * did.
    */
-  requireGitRepository: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  requireGitRepository: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
   /**
    * The Review layout a Code thread uses until this window stores one for it.
    * A store persisted before the choice existed decodes to unified.
    */
-  defaultDiffLayout: Schema.optionalWith(CodeDiffLayout, { default: () => "unified" }),
+  defaultDiffLayout: CodeDiffLayout.pipe(Schema.withDecodingDefaultType(Effect.succeed("unified"))),
   /**
    * Whether the TypeScript language server bundled with Octant serves Code
    * editors (docs/design/language-services.md, decision D2). It is on by
@@ -799,52 +815,52 @@ export const CodeSettings = Schema.Struct({
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeSettings = typeof CodeSettings.Type;
 
-export const CodeWorktreeSourcePreviewFailureReason = Schema.Literal(
+export const CodeWorktreeSourcePreviewFailureReason = Schema.Literals([
   "remote-unavailable",
   "fetch-rejected",
   "cancelled",
   "ambiguous-ref",
   "ref-unavailable",
   "unavailable",
-);
+]);
 export type CodeWorktreeSourcePreviewFailureReason =
   typeof CodeWorktreeSourcePreviewFailureReason.Type;
 
-const WorktreeSourceBranch = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
-const WorktreeSourceRemote = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const WorktreeSourceBranch = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
+const WorktreeSourceRemote = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
 
-export const CodeWorktreeSourcePreview = Schema.Union(
+export const CodeWorktreeSourcePreview = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("origin"),
     remoteName: WorktreeSourceRemote,
     branch: WorktreeSourceBranch,
     resolvedHead: GitObjectId,
     fetchedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("local"),
     branch: WorktreeSourceBranch,
     resolvedHead: GitObjectId,
     remoteName: Schema.optional(WorktreeSourceRemote),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     reason: CodeWorktreeSourcePreviewFailureReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeWorktreeSourcePreview = typeof CodeWorktreeSourcePreview.Type;
 
 export const CodeWorktreeSourceProvenance = Schema.Struct({
   receiptId: WorktreeReceiptId,
-  mode: Schema.Literal("origin", "local"),
+  mode: Schema.Literals(["origin", "local"]),
   branch: WorktreeSourceBranch,
   resolvedHead: GitObjectId,
   remoteName: Schema.optional(WorktreeSourceRemote),
   fetchedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeWorktreeSourceProvenance = typeof CodeWorktreeSourceProvenance.Type;
 
 const CodeThreadCommandFields = {
@@ -856,20 +872,20 @@ export const CodeWorktreeRemoteFacts = Schema.Struct({
   remotes: Schema.Array(WorktreeSourceRemote),
   upstreamRemote: Schema.optional(WorktreeSourceRemote),
   defaultRemote: Schema.optional(WorktreeSourceRemote),
-}).annotations(strict);
+});
 export type CodeWorktreeRemoteFacts = typeof CodeWorktreeRemoteFacts.Type;
 
 /** One selectable git ref for the composer's branch/worktree selector. */
 export const CodeWorktreeRef = Schema.Struct({
   /** Short ref name, e.g. `development` or `origin/development`. */
   name: WorktreeSourceBranch,
-  kind: Schema.Literal("local", "remote"),
+  kind: Schema.Literals(["local", "remote"]),
   remoteName: Schema.optional(WorktreeSourceRemote),
   /** True when this ref is the current checkout head. */
   isCurrent: Schema.optional(Schema.Boolean),
   /** True when a linked worktree currently has this branch checked out. */
   hasWorktree: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type CodeWorktreeRef = typeof CodeWorktreeRef.Type;
 
 /**
@@ -885,7 +901,7 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   workingFolderId: Schema.optional(ProjectWorkingFolderId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
@@ -923,11 +939,9 @@ export const CreateManagedCodeThreadCommand = Schema.Struct({
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
   /** A terminal session in the Project's folder the thread starts from. */
   terminalSession: Schema.optional(TerminalSessionImportRequest),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((command) => command.sourceRevision === undefined || !command.startFromOrigin),
-  );
+}).check(
+  Schema.makeFilter((command) => command.sourceRevision === undefined || !command.startFromOrigin),
+);
 export type CreateManagedCodeThreadCommand = typeof CreateManagedCodeThreadCommand.Type;
 
 /**
@@ -942,7 +956,7 @@ export const CreateCodeThreadCommand = Schema.Struct({
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
   /** A terminal session in the Project's folder the thread starts from. */
   terminalSession: Schema.optional(TerminalSessionImportRequest),
-}).annotations(strict);
+});
 export type CreateCodeThreadCommand = typeof CreateCodeThreadCommand.Type;
 
 /**
@@ -958,9 +972,9 @@ export const ForkCodeThreadCommand = Schema.Struct({
   kind: Schema.Literal("fork-code-thread"),
   threadId: CodeThreadId,
   sourceThreadId: CodeThreadId,
-  throughOperationId: Schema.UUID,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  throughOperationId: GuidString,
+  title: NonEmptyTrimmedString,
+});
 export type ForkCodeThreadCommand = typeof ForkCodeThreadCommand.Type;
 
 /**
@@ -975,68 +989,59 @@ export const MergeCodeForkContextCommand = Schema.Struct({
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** The fork. */
   threadId: CodeThreadId,
-  throughOperationId: Schema.UUID,
-}).annotations(strict);
+  throughOperationId: GuidString,
+});
 export type MergeCodeForkContextCommand = typeof MergeCodeForkContextCommand.Type;
 
 export const CodeProjectConversationBound = Schema.Struct({
   projectId: ProjectId,
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export const decodeCodeProjectConversationBound = Schema.decodeUnknownSync(
   CodeProjectConversationBound,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const CodeProjectReportCursor = Schema.Struct({
   sequence: GlobalSequence,
   operationId: CodeRuntimeWorkId,
-}).annotations(strict);
+});
 export type CodeProjectReportCursor = typeof CodeProjectReportCursor.Type;
 
-export const CodeCommand = Schema.Union(
+export const CodeCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("read-code-project-report-page"),
     projectId: ProjectId,
     before: Schema.optional(CodeProjectReportCursor),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("open-code-project-conversation"),
     projectId: ProjectId,
     model: Schema.optional(CodeDefaultModel),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("prepare-code-project-checkout"),
     projectId: ProjectId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("get-worktree-remote-facts"),
     projectId: ProjectId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("list-code-worktree-refs"),
     projectId: ProjectId,
-  }).annotations(strict),
-  /**
-   * The names a new worktree's branch must not collide with: local branches,
-   * remote branches without the remote's name, and tags. A bounded read of
-   * names only, apart from the display list the Where picker shows.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("list-code-worktree-branch-names"),
     projectId: ProjectId,
-  }).annotations(strict),
-  /**
-   * The person asked a model for words to name a new worktree's branch. It
-   * carries the draft text and the model the composer has selected, and nothing
-   * else about the Project or the checkout.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("suggest-code-worktree-branch"),
     projectId: ProjectId,
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-    draft: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(8_000)),
-  }).annotations(strict),
+    draft: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(8_000)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("preview-code-worktree-source"),
     projectId: ProjectId,
@@ -1045,7 +1050,7 @@ export const CodeCommand = Schema.Union(
     refIntent: WorktreeSourceBranch,
     startFromOrigin: Schema.Boolean,
     remoteName: Schema.optional(WorktreeSourceRemote),
-  }).annotations(strict),
+  }),
   CreateManagedCodeThreadCommand,
   ForkCodeThreadCommand,
   MergeCodeForkContextCommand,
@@ -1087,170 +1092,109 @@ export const CodeCommand = Schema.Union(
     windowsTerminalShell: Schema.optional(WindowsTerminalShell),
     /** Absent keeps the stored choice; a present value replaces it, `{}` returns to the defaults. */
     worktrees: Schema.optional(CodeWorktreeSettings),
-  }).annotations(strict),
+  }),
   CreateCodeThreadCommand,
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-lifecycle"),
     ...CodeThreadCommandFields,
-    lifecycle: Schema.Literal("active", "archived"),
-  }).annotations(strict),
+    lifecycle: Schema.Literals(["active", "archived"]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("rename-code-thread"),
     ...CodeThreadCommandFields,
-    title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_THREAD_TITLE_LENGTH)),
-  }).annotations(strict),
+    title: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(MAX_CODE_THREAD_TITLE_LENGTH),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pin-code-thread"),
     ...CodeThreadCommandFields,
     pinned: Schema.Boolean,
-  }).annotations(strict),
-  /** Make Coordinator and Stop coordinating; only a person at a local window. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-coordinator"),
     ...CodeThreadCommandFields,
     coordinator: Schema.Boolean,
     /** Fixes every worker's level; accepted only while making the coordinator. */
     workerLevel: Schema.optional(CoordinatorWorkerLevel),
-  }).annotations(strict),
-  /**
-   * A coordinator's wake, round and start bounds; only a person at a local
-   * window. The bounds replace the stored ones, so a field left out returns
-   * to its default.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-coordinator-bounds"),
     ...CodeThreadCommandFields,
     bounds: CoordinatorBounds,
-  }).annotations(strict),
-  /**
-   * A coordinator's host-checked "done when" condition; only a person at a
-   * local window or person-paired device may set or clear it. Leaving
-   * `doneWhen` out clears the condition.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-coordinator-done-when"),
     ...CodeThreadCommandFields,
     doneWhen: Schema.optional(CoordinatorDoneWhen),
-  }).annotations(strict),
-  /** The Wake when a message arrives switch; only a person at a local window. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-message-wake"),
     ...CodeThreadCommandFields,
     wake: Schema.Boolean,
-  }).annotations(strict),
-  /** A worker's Wake for coordinator switch; only a person at a local window. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-coordinator-wake"),
     ...CodeThreadCommandFields,
     wake: Schema.Boolean,
-  }).annotations(strict),
-  /** The thread's Continue after restart switch; only a person at a local window. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-restart-continuation"),
     ...CodeThreadCommandFields,
     continueAfterRestart: Schema.Boolean,
-  }).annotations(strict),
-  /**
-   * Put a finished thread away without archiving it. The host refuses while a
-   * turn is running or the thread waits on the person, so a thread never
-   * disappears with work in flight.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("complete-code-thread"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /** Brings a put-away thread back, and clears a person's Done mark. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("reopen-code-thread"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /**
-   * A person marks the Code thread Done whatever its delivery target says.
-   * Only a person may send it: the host refuses it from a routine or anything
-   * else acting as the host, and no provider tool can send it.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("mark-code-thread-done"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /**
-   * A person unlinks one pull request from the thread: the thread stops
-   * listing it and stops being one of its linked threads until the thread
-   * touches it again. Only a person may send it, as with Mark Done.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("unlink-code-thread-pull-request"),
     ...CodeThreadCommandFields,
     owner: GithubRepositoryOwner,
     repository: GithubRepositoryName,
-    number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
-  }).annotations(strict),
-  /**
-   * Hide the thread until `until`. The wake time is the first kind of wake
-   * condition; the host refuses one that is not in the future.
-   */
+    number: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999 })),
+  }),
   Schema.Struct({
     kind: Schema.Literal("snooze-code-thread"),
     ...CodeThreadCommandFields,
     until: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("wake-code-thread"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /**
-   * Hide the thread until the current usage-limited stop's declared reset.
-   * The host derives the wake time from the journaled limit fact rather than
-   * the caller's clock and refuses when there is no current stop or its reset
-   * is unknown or already past. Carries no `until`: the client never
-   * supplies it.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("snooze-code-thread-at-usage-reset"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /**
-   * Move a thread onto the checkout its Project binds now.
-   *
-   * A thread's checkout id is derived from the binding revision it was created
-   * against, so rebinding the Project supersedes it and no later observation
-   * can produce the thread's own id again. Without this the thread is
-   * fail-closed for good, which is never an acceptable resting state. The act is
-   * the user's, never inferred from a matching filesystem root: what authority
-   * a thread holds only changes because someone asked.
-   */
-  /**
-   * Link an issue to the thread, from a reference the person typed:
-   * `#12` (the thread's delivery repository), `owner/repo#12`, or a Linear
-   * identifier such as `ENG-12`. Links live on their own aggregate, so no
-   * thread version is expected.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("link-code-thread-issue"),
     threadId: CodeThreadId,
-    reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  }).annotations(strict),
+    reference: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unlink-code-thread-issue"),
     threadId: CodeThreadId,
     issue: LinkedIssueRef,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("rebind-code-thread-checkout"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-  /**
-   * Move a thread off a checkout it shares onto a managed worktree of its own,
-   * copying its uncommitted changes there. The move writes none of the source
-   * checkout's files, so the source keeps those changes; discarding them there
-   * is the person's own later step. Without `branchName` the host names the
-   * branch as it does for a fork.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("move-code-thread-to-worktree"),
     ...CodeThreadCommandFields,
-    branchName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
-  }).annotations(strict),
+    branchName: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255))),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-access"),
     ...CodeThreadCommandFields,
@@ -1274,104 +1218,72 @@ export const CodeCommand = Schema.Union(
      * current choice; null returns it to its Project's and Settings' default.
      */
     strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
-  }).annotations(strict),
-  /**
-   * The person moves the thread to another account (provider instance) of the
-   * same provider, keeping its model. The host accepts it only from the
-   * person and only while no turn runs; the next turn starts on the new
-   * account with the disclosed conversation handoff.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("move-code-thread-account"),
     ...CodeThreadCommandFields,
     providerInstanceId: ProviderInstanceId,
-  }).annotations(strict),
-  /**
-   * The person's "when this account hits its usage limit, hand off to"
-   * choice for the thread. Absent `providerInstanceId` turns it off.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-code-thread-usage-limit-handoff"),
     ...CodeThreadCommandFields,
     providerInstanceId: Schema.optional(ProviderInstanceId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),
     ...CodeThreadCommandFields,
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
     modelOptionValues: Schema.optional(ProviderModelOptionValues),
-  }).annotations(strict),
-  /**
-   * Chooses how this thread delivers documents. Turning on `native-artifacts`
-   * enables the provider runtime's usage telemetry for the thread's turns, so
-   * only a person at a window on this host may choose it; a paired device may
-   * choose Canvas.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-browser-profile"),
     ...CodeThreadCommandFields,
     browserTaskProfile: BrowserProfileChoice,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-document-delivery"),
     ...CodeThreadCommandFields,
     documentDelivery: ThreadDocumentDelivery,
-  }).annotations(strict),
-  /**
-   * Files a Code thread into another Code Project bound to the same folder
-   * (or one that contains it, when the thread's checkout stays valid there).
-   * The thread keeps its history, guardrail level and checkout; the host
-   * refuses any Project under which the checkout would not stay valid.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("move-code-thread"),
     ...CodeThreadCommandFields,
     projectId: ProjectId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-working-directory"),
     ...CodeThreadCommandFields,
     workingDirectory: ThreadWorkingDirectory,
     workingFolderId: Schema.optional(ProjectWorkingFolderId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("propose-code-delivery-outcome"),
     ...CodeThreadCommandFields,
     outcomeKind: CodeDeliveryOutcomeKind,
-    rationale: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
-  }).annotations(strict),
+    rationale: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-code-delivery-outcome"),
     ...CodeThreadCommandFields,
     outcomeKind: CodeDeliveryOutcomeKind,
-  }).annotations(strict),
-  /**
-   * Opts this thread into resuming a usage-limited provider turn when the
-   * provider's declared reset arrives. The server reads the limit and reset
-   * from the journaled turn rather than trusting the command, and journals
-   * the opt-in on the thread's stream so every client and the host scheduler
-   * see it. The operation id is a plain UUID for the same import-boundary
-   * reason as `throughOperationId`: operations import threads, not the other
-   * way round.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("schedule-code-usage-resume"),
     ...CodeThreadCommandFields,
-    operationId: Schema.UUID,
-  }).annotations(strict),
-  /**
-   * Withdraws the thread's pending usage-resume opt-in before it fires.
-   */
+    operationId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-code-usage-resume"),
     ...CodeThreadCommandFields,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeCommand = typeof CodeCommand.Type;
 
 export const CodeFailure = Schema.Struct({
-  category: Schema.Literal(
+  category: Schema.Literals([
     "unavailable",
     "tools-changed",
     "unauthorized",
@@ -1383,8 +1295,8 @@ export const CodeFailure = Schema.Struct({
     "stale",
     "invalid",
     "conflict",
-  ),
-  message: Schema.NonEmptyTrimmedString,
+  ]),
+  message: NonEmptyTrimmedString,
   retryAfterMs: Schema.optional(PositiveInt),
   /**
    * The provider's own usage-limit signal, when stopping this operation was
@@ -1392,10 +1304,10 @@ export const CodeFailure = Schema.Struct({
    * longer-lived limits the provider disclosed.
    */
   usageLimit: Schema.optional(ProviderUsageLimit),
-}).annotations(strict);
+});
 export type CodeFailure = typeof CodeFailure.Type;
 
-export const CodeDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+export const CodeDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 export type CodeDigest = typeof CodeDigest.Type;
 
 /**
@@ -1405,56 +1317,53 @@ export type CodeDigest = typeof CodeDigest.Type;
  */
 export const CodeAttachmentReference = Schema.Struct({
   attachmentId: CodeAttachmentId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH),
+  displayName: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH),
   ),
   mediaType: CodeAttachmentMediaType,
-  byteLength: Schema.Int.pipe(Schema.between(1, MAX_CODE_ATTACHMENT_BYTES)),
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_CODE_ATTACHMENT_BYTES }),
+  ),
   digest: CodeDigest,
-}).annotations(strict);
+});
 export type CodeAttachmentReference = typeof CodeAttachmentReference.Type;
 
 export const CodeFileMetadata = Schema.Struct({
   identity: Schema.Struct({
-    device: Schema.NonEmptyTrimmedString,
-    inode: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  byteLength: Schema.Int.pipe(Schema.nonNegative()),
-  modifiedNanoseconds: Schema.NonEmptyTrimmedString,
+    device: NonEmptyTrimmedString,
+    inode: NonEmptyTrimmedString,
+  }),
+  byteLength: NonNegativeInt,
+  modifiedNanoseconds: NonEmptyTrimmedString,
   digest: CodeDigest,
-}).annotations(strict);
+});
 export type CodeFileMetadata = typeof CodeFileMetadata.Type;
 
 export const CodeFileSaveFailure = Schema.Struct({
-  category: Schema.Literal("conflict", "failed", "invalid", "unavailable"),
-  code: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  category: Schema.Literals(["conflict", "failed", "invalid", "unavailable"]),
+  code: NonEmptyTrimmedString,
+});
 export type CodeFileSaveFailure = typeof CodeFileSaveFailure.Type;
 
-export const CodeFileSavePublicResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("completed"), metadata: CodeFileMetadata }).annotations(
-    strict,
-  ),
-  Schema.Struct({ status: Schema.Literal("conflict"), failure: CodeFileSaveFailure }).annotations(
-    strict,
-  ),
+export const CodeFileSavePublicResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("completed"), metadata: CodeFileMetadata }),
+  Schema.Struct({ status: Schema.Literal("conflict"), failure: CodeFileSaveFailure }),
   Schema.Struct({
     status: Schema.Literal("interrupted"),
     rescanRequired: Schema.Literal(true),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("failed"), failure: CodeFileSaveFailure }).annotations(
-    strict,
-  ),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("failed"), failure: CodeFileSaveFailure }),
+]);
 export type CodeFileSavePublicResult = typeof CodeFileSavePublicResult.Type;
 
 export const CodeFileSaveResultEnvelope = Schema.Struct({
   kind: Schema.Literal("code-file-save-result"),
   result: CodeFileSavePublicResult,
-}).annotations(strict);
+});
 export type CodeFileSaveResultEnvelope = typeof CodeFileSaveResultEnvelope.Type;
 
-export const CodeFileLifecycle = Schema.Literal(
+export const CodeFileLifecycle = Schema.Literals([
   "available",
   "read-only",
   "saving",
@@ -1464,7 +1373,7 @@ export const CodeFileLifecycle = Schema.Literal(
   "failed",
   "deleted",
   "rescan-required",
-);
+]);
 export type CodeFileLifecycle = typeof CodeFileLifecycle.Type;
 
 export const CodeFileReference = Schema.Struct({
@@ -1474,14 +1383,14 @@ export const CodeFileReference = Schema.Struct({
   relativePath: Schema.optional(CodeProjectFilePath),
   contentId: Schema.optional(CodeEvidenceContentId),
   digest: CodeDigest,
-  byteLength: Schema.Int.pipe(Schema.nonNegative()),
+  byteLength: NonNegativeInt,
   state: CodeFileLifecycle,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeFileReference = typeof CodeFileReference.Type;
 
-export const CodeRuntimeWorkKind = Schema.Literal(
+export const CodeRuntimeWorkKind = Schema.Literals([
   "provider-turn",
   "file",
   "terminal",
@@ -1489,33 +1398,33 @@ export const CodeRuntimeWorkKind = Schema.Literal(
   "git",
   "delivery",
   "review",
-);
+]);
 export type CodeRuntimeWorkKind = typeof CodeRuntimeWorkKind.Type;
 
-export const CodeRuntimeWorkState = Schema.Literal(
+export const CodeRuntimeWorkState = Schema.Literals([
   "running",
   "ambiguous",
   "waiting",
   "interrupted",
   "completed",
   "failed",
-);
+]);
 export type CodeRuntimeWorkState = typeof CodeRuntimeWorkState.Type;
 
-export const CodeRuntimeRemoteStep = Schema.Union(
+export const CodeRuntimeRemoteStep = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("push"),
-    remote: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._-]{1,255}$/)),
-    remoteRef: Schema.String.pipe(
-      Schema.maxLength(1_024),
-      Schema.pattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
+    remote: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,255}$/)),
+    remoteRef: Schema.String.check(
+      Schema.isMaxLength(1_024),
+      Schema.isPattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
     ),
     /** The commit the push sent: the remote branch pointing at it means the push landed. */
-    commitOid: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
-  }).annotations(strict),
+    commitOid: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-request"),
-    action: Schema.Literal("create", "update", "comment", "merge"),
+    action: Schema.Literals(["create", "update", "comment", "merge"]),
     /**
      * For a comment: the SHA-256 of its body, so a comment the host lost can
      * be recognised among the person's own comments without keeping its text
@@ -1523,7 +1432,9 @@ export const CodeRuntimeRemoteStep = Schema.Union(
      */
     commentDigest: Schema.optional(CodeDigest),
     /** For a review reply: the review thread it answers. */
-    reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
+    reviewThreadId: Schema.optional(
+      Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_=-]{1,128}$/)),
+    ),
     /**
      * For a comment: the pull request it was posted to, recorded once the
      * host resolved it and before posting. A lost comment is looked for there
@@ -1531,19 +1442,19 @@ export const CodeRuntimeRemoteStep = Schema.Union(
      */
     pullRequest: Schema.optional(
       Schema.Struct({
-        owner: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,100}$/)),
-        name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,100}$/)),
-        number: Schema.Int.pipe(Schema.positive()),
-      }).annotations(strict),
+        owner: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]{1,100}$/)),
+        name: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]{1,100}$/)),
+        number: Schema.Int.check(Schema.isGreaterThan(0)),
+      }),
     ),
     /**
      * For a comment: how many of the person's own comments there already had
      * this text just before posting. Only a count above it shows the post
      * landed; an older identical comment ("Fixed.") does not.
      */
-    priorMatches: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  }).annotations(strict),
-);
+    priorMatches: Schema.optional(NonNegativeInt),
+  }),
+]);
 export type CodeRuntimeRemoteStep = typeof CodeRuntimeRemoteStep.Type;
 
 const CodeRuntimeWorkFields = {
@@ -1564,33 +1475,33 @@ const CodeRuntimeWorkFields = {
 // The member with evidence comes first: a client ignores unknown fields in a
 // host answer, so the bare member listed first would accept an evidence-bearing
 // value and silently drop its evidence reference.
-export const CodeRuntimeWork = Schema.Union(
+export const CodeRuntimeWork = Schema.Union([
   Schema.Struct({
     ...CodeRuntimeWorkFields,
     evidenceContentId: CodeEvidenceContentId,
     digest: CodeDigest,
-    byteLength: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-  Schema.Struct(CodeRuntimeWorkFields).annotations(strict),
-);
+    byteLength: NonNegativeInt,
+  }),
+  Schema.Struct(CodeRuntimeWorkFields),
+]);
 export type CodeRuntimeWork = typeof CodeRuntimeWork.Type;
 
 export const CodeSettingsUpdated = Schema.Struct({
   kind: Schema.Literal("settings-updated"),
   settings: CodeSettings,
-}).annotations(strict);
+});
 export type CodeSettingsUpdated = typeof CodeSettingsUpdated.Type;
 
 export const CodeThreadCreated = Schema.Struct({
   kind: Schema.Literal("thread-created"),
   thread: CodeThread,
-}).annotations(strict);
+});
 export type CodeThreadCreated = typeof CodeThreadCreated.Type;
 
 export const CodeThreadUpdated = Schema.Struct({
   kind: Schema.Literal("thread-updated"),
   thread: CodeThread,
-}).annotations(strict);
+});
 export type CodeThreadUpdated = typeof CodeThreadUpdated.Type;
 
 /**
@@ -1603,37 +1514,37 @@ export type CodeThreadUpdated = typeof CodeThreadUpdated.Type;
 export const PersistedCodeThreadCreated = Schema.Struct({
   kind: Schema.Literal("thread-created"),
   thread: PersistedCodeThread,
-}).annotations(strict);
+});
 export type PersistedCodeThreadCreated = typeof PersistedCodeThreadCreated.Type;
 
 export const PersistedCodeThreadUpdated = Schema.Struct({
   kind: Schema.Literal("thread-updated"),
   thread: PersistedCodeThread,
-}).annotations(strict);
+});
 export type PersistedCodeThreadUpdated = typeof PersistedCodeThreadUpdated.Type;
 
 export const CodeCheckoutObserved = Schema.Struct({
   kind: Schema.Literal("checkout-observed"),
   checkout: CodeCheckoutIdentity,
-}).annotations(strict);
+});
 export type CodeCheckoutObserved = typeof CodeCheckoutObserved.Type;
 
 export const CodeCheckoutRemoved = Schema.Struct({
   kind: Schema.Literal("checkout-removed"),
   checkoutId: CodeCheckoutId,
-}).annotations(strict);
+});
 export type CodeCheckoutRemoved = typeof CodeCheckoutRemoved.Type;
 
 export const CodeFileReferenceUpdated = Schema.Struct({
   kind: Schema.Literal("file-reference-updated"),
   file: CodeFileReference,
-}).annotations(strict);
+});
 export type CodeFileReferenceUpdated = typeof CodeFileReferenceUpdated.Type;
 
 export const CodeRuntimeWorkUpdated = Schema.Struct({
   kind: Schema.Literal("runtime-work-updated"),
   work: CodeRuntimeWork,
-}).annotations(strict);
+});
 export type CodeRuntimeWorkUpdated = typeof CodeRuntimeWorkUpdated.Type;
 
 export const CODE_EVENT_SCHEMAS = {
@@ -1651,74 +1562,81 @@ export const CODE_EVENT_NAMES = Object.freeze(
   Object.keys(CODE_EVENT_SCHEMAS) as Array<CodePersistenceEventName>,
 );
 
-export const CodePublicEvent = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("thread-created"), thread: CodeThread }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("thread-updated"), thread: CodeThread }).annotations(strict),
+export const CodePublicEvent = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("thread-created"), thread: CodeThread }),
+  Schema.Struct({ kind: Schema.Literal("thread-updated"), thread: CodeThread }),
   Schema.Struct({
     kind: Schema.Literal("thread-lifecycle-changed"),
     threadId: CodeThreadId,
-    lifecycle: Schema.Literal("active", "archived"),
+    lifecycle: Schema.Literals(["active", "archived"]),
     version: AggregateVersion,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("settings-updated"), settings: CodeSettings }).annotations(
-    strict,
-  ),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("settings-updated"), settings: CodeSettings }),
+]);
 export type CodePublicEvent = typeof CodePublicEvent.Type;
 export const CodeCheckoutPrepared = Schema.Struct({
   kind: Schema.Literal("checkout-prepared"),
   bindingRevisionId: BindingRevisionId,
   checkout: CodeCheckoutIdentity,
-}).annotations(strict);
+});
 export type CodeCheckoutPrepared = typeof CodeCheckoutPrepared.Type;
 export const CodeWorktreeSourcePreviewed = Schema.Struct({
   kind: Schema.Literal("worktree-source-previewed"),
   preview: CodeWorktreeSourcePreview,
-}).annotations(strict);
+});
 export type CodeWorktreeSourcePreviewed = typeof CodeWorktreeSourcePreviewed.Type;
 export const CodeManagedThreadCreated = Schema.Struct({
   kind: Schema.Literal("managed-thread-created"),
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
   provenance: CodeWorktreeSourceProvenance,
-}).annotations(strict);
+});
 export type CodeManagedThreadCreated = typeof CodeManagedThreadCreated.Type;
 export const CodeWorktreeRemoteFactsRetrieved = Schema.Struct({
   kind: Schema.Literal("worktree-remote-facts-retrieved"),
   projectId: ProjectId,
   facts: CodeWorktreeRemoteFacts,
-}).annotations(strict);
+});
 export type CodeWorktreeRemoteFactsRetrieved = typeof CodeWorktreeRemoteFactsRetrieved.Type;
 /** The most names one read returns; a repository with more is `truncated` and the composer falls back to the id name. */
 export const MAX_WORKTREE_BRANCH_NAMES = 20_000;
 export const CodeWorktreeBranchNamesListed = Schema.Struct({
   kind: Schema.Literal("worktree-branch-names-listed"),
   projectId: ProjectId,
-  names: Schema.Array(Schema.String.pipe(Schema.maxLength(255))).pipe(
-    Schema.maxItems(MAX_WORKTREE_BRANCH_NAMES),
+  names: Schema.Array(Schema.String.check(Schema.isMaxLength(255))).check(
+    Schema.isMaxLength(MAX_WORKTREE_BRANCH_NAMES),
   ),
   /** More names exist than were returned, or they could not be read: nothing here proves a name is free. */
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeWorktreeBranchNamesListed = typeof CodeWorktreeBranchNamesListed.Type;
 export const CodeWorktreeBranchSuggested = Schema.Struct({
   kind: Schema.Literal("worktree-branch-suggested"),
   projectId: ProjectId,
   /** Lower-case words joined by dashes; the composer adds the prefix and checks collisions. */
-  words: Schema.String.pipe(Schema.pattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), Schema.maxLength(40)),
-}).annotations(strict);
+  words: Schema.String.check(
+    Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    Schema.isMaxLength(40),
+  ),
+});
 export type CodeWorktreeBranchSuggested = typeof CodeWorktreeBranchSuggested.Type;
 export const CodeWorktreeBranchSuggestionDeclined = Schema.Struct({
   kind: Schema.Literal("worktree-branch-suggestion-declined"),
   projectId: ProjectId,
-  reason: Schema.Literal("provider-unavailable", "not-allowed", "spend-limited", "busy", "failed"),
-}).annotations(strict);
+  reason: Schema.Literals([
+    "provider-unavailable",
+    "not-allowed",
+    "spend-limited",
+    "busy",
+    "failed",
+  ]),
+});
 export type CodeWorktreeBranchSuggestionDeclined = typeof CodeWorktreeBranchSuggestionDeclined.Type;
 export const CodeWorktreeRefsListed = Schema.Struct({
   kind: Schema.Literal("worktree-refs-listed"),
   projectId: ProjectId,
   refs: Schema.Array(CodeWorktreeRef),
-}).annotations(strict);
+});
 export type CodeWorktreeRefsListed = typeof CodeWorktreeRefsListed.Type;
 /**
  * Why a checkout rebind was refused.
@@ -1730,28 +1648,28 @@ export type CodeWorktreeRefsListed = typeof CodeWorktreeRefsListed.Type;
  * the Project's own checkout could not be observed, so there is no destination
  * to name.
  */
-export const CodeThreadCheckoutRebindRefusal = Schema.Literal(
+export const CodeThreadCheckoutRebindRefusal = Schema.Literals([
   "already-bound",
   "managed-worktree",
   "checkout-unavailable",
-);
+]);
 export type CodeThreadCheckoutRebindRefusal = typeof CodeThreadCheckoutRebindRefusal.Type;
 
-export const CodeThreadCheckoutRebindOutcome = Schema.Union(
+export const CodeThreadCheckoutRebindOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("rebound"),
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeThreadCheckoutRebindRefusal,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeThreadCheckoutRebindOutcome = typeof CodeThreadCheckoutRebindOutcome.Type;
 
 /** Why a thread was not moved onto a worktree of its own; each is an expected answer. */
-export const CodeThreadWorktreeMoveRefusal = Schema.Literal(
+export const CodeThreadWorktreeMoveRefusal = Schema.Literals([
   "already-own-worktree",
   "not-a-repository",
   "server-project",
@@ -1763,18 +1681,18 @@ export const CodeThreadWorktreeMoveRefusal = Schema.Literal(
   "apply-failed",
   "working-folder",
   "unavailable",
-);
+]);
 export type CodeThreadWorktreeMoveRefusal = typeof CodeThreadWorktreeMoveRefusal.Type;
 
-export const CodeThreadWorktreeMoveOutcome = Schema.Union(
+export const CodeThreadWorktreeMoveOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("moved"),
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     /** The checkout the thread left, which still holds the copied changes. */
     fromCheckoutId: CodeCheckoutId,
-    branch: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    branch: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeThreadWorktreeMoveRefusal,
@@ -1782,20 +1700,22 @@ export const CodeThreadWorktreeMoveOutcome = Schema.Union(
      * With `nested-changes`: the submodules and nested repositories whose own
      * changes a copy would leave behind, so nothing is claimed as copied.
      */
-    paths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
+    paths: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(50))),
     /** With `nested-changes`: submodules with uncommitted or untracked changes of their own. */
-    submodulePaths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
+    submodulePaths: Schema.optional(Schema.Array(Schema.String).check(Schema.isMaxLength(50))),
     /** With `nested-changes`: untracked folders that hold a separate Git repository. */
-    nestedRepositoryPaths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
-  }).annotations(strict),
-);
+    nestedRepositoryPaths: Schema.optional(
+      Schema.Array(Schema.String).check(Schema.isMaxLength(50)),
+    ),
+  }),
+]);
 export type CodeThreadWorktreeMoveOutcome = typeof CodeThreadWorktreeMoveOutcome.Type;
 
 export const CodeThreadMovedToWorktreeResult = Schema.Struct({
   kind: Schema.Literal("thread-moved-to-worktree"),
   threadId: CodeThreadId,
   outcome: CodeThreadWorktreeMoveOutcome,
-}).annotations(strict);
+});
 export type CodeThreadMovedToWorktreeResult = typeof CodeThreadMovedToWorktreeResult.Type;
 
 /**
@@ -1811,12 +1731,10 @@ export const CodeThreadMovedToWorktree = Schema.Struct({
   threadId: CodeThreadId,
   fromCheckoutId: CodeCheckoutId,
   toCheckoutId: CodeCheckoutId,
-  branch: Schema.NonEmptyTrimmedString,
+  branch: NonEmptyTrimmedString,
   sourceHead: GitObjectId,
   /** The uncommitted work the move copied. Absent when nothing was copied. */
-  capturedTrees: Schema.optional(
-    Schema.Struct({ worktree: GitObjectId, index: GitObjectId }).annotations(strict),
-  ),
+  capturedTrees: Schema.optional(Schema.Struct({ worktree: GitObjectId, index: GitObjectId })),
   /**
    * Set when the thread came from Octant and left Octant's worktree for one of
    * this host's own before its first turn here. Nothing is copied from
@@ -1826,38 +1744,41 @@ export const CodeThreadMovedToWorktree = Schema.Struct({
    */
   fromOctant: Schema.optional(
     Schema.Struct({
-      octantFolder: Schema.Literal("clean", "uncommitted-changes-left", "unread", "missing"),
-    }).annotations(strict),
+      octantFolder: Schema.Literals(["clean", "uncommitted-changes-left", "unread", "missing"]),
+    }),
   ),
   movedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeThreadMovedToWorktree = typeof CodeThreadMovedToWorktree.Type;
-export const decodeCodeThreadMovedToWorktree = Schema.decodeUnknownSync(CodeThreadMovedToWorktree);
+export const decodeCodeThreadMovedToWorktree = Schema.decodeUnknownSync(
+  CodeThreadMovedToWorktree,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Why a link or unlink did not change the thread's issues; each is an expected answer. */
-export const CodeThreadIssueLinkRefusal = Schema.Literal(
+export const CodeThreadIssueLinkRefusal = Schema.Literals([
   "invalid-reference",
   "not-found",
   "too-many",
   "not-linked",
   "linear-unavailable",
-);
+]);
 export type CodeThreadIssueLinkRefusal = typeof CodeThreadIssueLinkRefusal.Type;
 
 export const CodeThreadIssueLinksResult = Schema.Struct({
   kind: Schema.Literal("thread-issue-links"),
   threadId: CodeThreadId,
-  outcome: Schema.Union(
+  outcome: Schema.Union([
     Schema.Struct({
-      status: Schema.Literal("linked", "unlinked", "unchanged"),
+      status: Schema.Literals(["linked", "unlinked", "unchanged"]),
       linkedIssues: ThreadLinkedIssues,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       status: Schema.Literal("refused"),
       reason: CodeThreadIssueLinkRefusal,
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+  ]),
+});
 export type CodeThreadIssueLinksResult = typeof CodeThreadIssueLinksResult.Type;
 
 /**
@@ -1869,14 +1790,14 @@ export const CodeThreadCheckoutRebound = Schema.Struct({
   kind: Schema.Literal("thread-checkout-rebind"),
   threadId: CodeThreadId,
   outcome: CodeThreadCheckoutRebindOutcome,
-}).annotations(strict);
+});
 export type CodeThreadCheckoutRebound = typeof CodeThreadCheckoutRebound.Type;
 
 /**
  * Why a fork's conversation was not merged back. Each is an expected answer
  * the person can act on, so it is a value rather than a fault.
  */
-export const CodeForkMergeBackRefusal = Schema.Literal(
+export const CodeForkMergeBackRefusal = Schema.Literals([
   "unsupported",
   "not-a-fork",
   "source-unavailable",
@@ -1888,29 +1809,29 @@ export const CodeForkMergeBackRefusal = Schema.Literal(
   "merges-pending",
   "fork-unreadable",
   "unsaved",
-);
+]);
 export type CodeForkMergeBackRefusal = typeof CodeForkMergeBackRefusal.Type;
 
-export const CodeForkMergeBackOutcome = Schema.Union(
+export const CodeForkMergeBackOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("merged"),
     sourceThreadId: CodeThreadId,
     /** Conversation messages merged, not counting the summary. */
-    messages: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    messages: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeForkMergeBackRefusal,
-    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-  }).annotations(strict),
-);
+    message: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
+  }),
+]);
 export type CodeForkMergeBackOutcome = typeof CodeForkMergeBackOutcome.Type;
 
 export const CodeForkContextMerged = Schema.Struct({
   kind: Schema.Literal("fork-context-merge"),
   threadId: CodeThreadId,
   outcome: CodeForkMergeBackOutcome,
-}).annotations(strict);
+});
 export type CodeForkContextMerged = typeof CodeForkContextMerged.Type;
 
 export const CodeProjectReport = Schema.Struct({
@@ -1918,26 +1839,29 @@ export const CodeProjectReport = Schema.Struct({
   operationId: CodeRuntimeWorkId,
   sequence: GlobalSequence,
   title: Schema.String,
-  state: Schema.Literal("completed", "interrupted", "failed", "ambiguous", "waiting"),
+  state: Schema.Literals(["completed", "interrupted", "failed", "ambiguous", "waiting"]),
   summary: Schema.String,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeProjectReport = typeof CodeProjectReport.Type;
-export const decodeCodeProjectReport = Schema.decodeUnknownSync(CodeProjectReport);
+export const decodeCodeProjectReport = Schema.decodeUnknownSync(
+  CodeProjectReport,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const CodeProjectReportPage = Schema.Struct({
   kind: Schema.Literal("project-report-page"),
   reports: Schema.Array(CodeProjectReport),
   next: Schema.optional(CodeProjectReportCursor),
-}).annotations(strict);
+});
 export type CodeProjectReportPage = typeof CodeProjectReportPage.Type;
 
-export const CodeCommandResult = Schema.Union(
+export const CodeCommandResult = Schema.Union([
   CodeProjectReportPage,
   Schema.Struct({
     kind: Schema.Literal("project-conversation-opened"),
     thread: CodeThread,
-  }).annotations(strict),
+  }),
   CodePublicEvent,
   CodeCheckoutPrepared,
   CodeWorktreeSourcePreviewed,
@@ -1951,11 +1875,11 @@ export const CodeCommandResult = Schema.Union(
   CodeThreadMovedToWorktreeResult,
   CodeThreadIssueLinksResult,
   CodeForkContextMerged,
-);
+]);
 export type CodeCommandResult = typeof CodeCommandResult.Type;
 
 /** Where the cleanup of a thread's managed worktree stands; see `CodeThreadView`. */
-export const CodeThreadViewCleanup = Schema.Literal("cleaned-up", "cleaning-up", "restoring");
+export const CodeThreadViewCleanup = Schema.Literals(["cleaned-up", "cleaning-up", "restoring"]);
 
 export const CodeThreadView = Schema.Struct({
   thread: CodeThread,
@@ -1971,7 +1895,7 @@ export const CodeThreadView = Schema.Struct({
    * always saw.
    */
   worktreeCleanup: Schema.optional(CodeThreadViewCleanup),
-}).annotations(strict);
+});
 export type CodeThreadView = typeof CodeThreadView.Type;
 
 /**
@@ -1985,11 +1909,11 @@ export type CodeThreadView = typeof CodeThreadView.Type;
  * is the one a read cursor can be compared against.
  */
 export const CodeThreadActivity = Schema.Struct({
-  projectReportCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  projectReportCount: Schema.optional(NonNegativeInt),
   projectReportSequence: Schema.optional(GlobalSequence),
   threadId: CodeThreadId,
   lastSequence: GlobalSequence,
-}).annotations(strict);
+});
 export type CodeThreadActivity = typeof CodeThreadActivity.Type;
 
 /**
@@ -2018,12 +1942,12 @@ export const CodeNavigationRuntime = Schema.Struct({
    */
   awaitingInput: Schema.optional(Schema.Literal(true)),
   /** What the person is asked. Absent from an older host, which only reported an approval. */
-  awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
+  awaitingKind: Schema.optional(Schema.Literals(["approval", "user-input"])),
   checkoutChip: Schema.optional(
     Schema.Struct({
-      checkoutKind: Schema.Literal("existing-worktree", "managed-worktree"),
-      label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-    }).annotations(strict),
+      checkoutKind: Schema.Literals(["existing-worktree", "managed-worktree"]),
+      label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+    }),
   ),
   pullRequestSummaries: Schema.optional(ThreadBoardPullRequestSummaries),
   /**
@@ -2049,7 +1973,7 @@ export const CodeNavigationRuntime = Schema.Struct({
   ...ThreadLiveTurnFields,
   /** The latest turn's current usage-limit stop; absent otherwise. */
   ...ThreadLimitedFields,
-}).annotations(strict);
+});
 export type CodeNavigationRuntime = typeof CodeNavigationRuntime.Type;
 
 /**
@@ -2076,16 +2000,20 @@ export const CodeBootstrap = Schema.Struct({
    * whole surface rather than the one thing the field feeds; an empty list
    * degrades to the unread behavior that host already had.
    */
-  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
+  activity: Schema.Array(CodeThreadActivity).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
+  ),
   /**
    * Live executing flag and optional checkout chip per visible thread. Same
    * optional-compat story as `activity`: an older host omits it and the
    * sidebar stays quiet rather than refusing bootstrap.
    */
-  runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
+  runtime: Schema.Array(CodeNavigationRuntime).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
+  ),
   plannerThreadIds: CodePlannerThreadIds,
   projectConversationIds: Schema.optional(Schema.Array(CodeThreadId)),
-}).annotations(strict);
+});
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
 /**
@@ -2097,88 +2025,201 @@ export type CodeBootstrap = typeof CodeBootstrap.Type;
  */
 export const CodeNavigation = Schema.Struct({
   threads: Schema.Array(CodeThread),
-  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
-  runtime: Schema.optionalWith(Schema.Array(CodeNavigationRuntime), { default: () => [] }),
+  activity: Schema.Array(CodeThreadActivity).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
+  ),
+  runtime: Schema.Array(CodeNavigationRuntime).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
+  ),
   plannerThreadIds: CodePlannerThreadIds,
   projectConversationIds: Schema.optional(Schema.Array(CodeThreadId)),
-}).annotations(strict);
+});
 export type CodeNavigation = typeof CodeNavigation.Type;
 
 export const CodeEventFrame = Schema.Struct({
   threadId: CodeThreadId,
-  sequence: GlobalSequence.pipe(Schema.positive()),
+  sequence: GlobalSequence.check(Schema.isGreaterThan(0)),
   event: CodePublicEvent,
-}).annotations(strict);
+});
 export type CodeEventFrame = typeof CodeEventFrame.Type;
 
-export const decodeCodeRepositoryId = Schema.decodeUnknownSync(CodeRepositoryId);
-export const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
-export const decodeCodeCheckoutId = Schema.decodeUnknownSync(CodeCheckoutId);
-export const decodeWorktreeReceiptId = Schema.decodeUnknownSync(WorktreeReceiptId);
-export const decodeCodeTerminalId = Schema.decodeUnknownSync(CodeTerminalId);
-export const decodeCodeTestRunId = Schema.decodeUnknownSync(CodeTestRunId);
-export const decodeCodeFileId = Schema.decodeUnknownSync(CodeFileId);
-export const decodeCodeReviewFindingId = Schema.decodeUnknownSync(CodeReviewFindingId);
-export const decodeCodeEvidenceContentId = Schema.decodeUnknownSync(CodeEvidenceContentId);
-export const decodeCodeAttachmentId = Schema.decodeUnknownSync(CodeAttachmentId);
-export const decodeCodeAttachmentMediaType = Schema.decodeUnknownSync(CodeAttachmentMediaType);
-export const decodeCodeAttachmentReference = Schema.decodeUnknownSync(CodeAttachmentReference);
-export const decodeCodeRuntimeWorkId = Schema.decodeUnknownSync(CodeRuntimeWorkId);
-export const decodeCodeRelativePath = Schema.decodeUnknownSync(CodeRelativePath);
-export const decodeCodeProjectFilePath = Schema.decodeUnknownSync(CodeProjectFilePath);
-export const decodeCodeCheckoutHead = Schema.decodeUnknownSync(CodeCheckoutHead);
-export const decodeCodeCheckoutIdentity = Schema.decodeUnknownSync(CodeCheckoutIdentity);
-export const decodeCodeThread = Schema.decodeUnknownSync(CodeThread);
-export const decodeCodeDeliveryOutcomeKind = Schema.decodeUnknownSync(CodeDeliveryOutcomeKind);
-export const decodeCodeDeliveryTarget = Schema.decodeUnknownSync(CodeDeliveryTarget);
-export const decodeCodeSettings = Schema.decodeUnknownSync(CodeSettings);
-export const decodeCodeCommand = Schema.decodeUnknownSync(CodeCommand);
-export const decodeCodeCommandResult = Schema.decodeUnknownSync(CodeCommandResult);
-export const decodeCodeWorktreeSourcePreview = Schema.decodeUnknownSync(CodeWorktreeSourcePreview);
+export const decodeCodeRepositoryId = Schema.decodeUnknownSync(
+  CodeRepositoryId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId, STRICT_DECODE_OPTIONS);
+export const decodeCodeCheckoutId = Schema.decodeUnknownSync(CodeCheckoutId, STRICT_DECODE_OPTIONS);
+export const decodeWorktreeReceiptId = Schema.decodeUnknownSync(
+  WorktreeReceiptId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeTerminalId = Schema.decodeUnknownSync(CodeTerminalId, STRICT_DECODE_OPTIONS);
+export const decodeCodeTestRunId = Schema.decodeUnknownSync(CodeTestRunId, STRICT_DECODE_OPTIONS);
+export const decodeCodeFileId = Schema.decodeUnknownSync(CodeFileId, STRICT_DECODE_OPTIONS);
+export const decodeCodeReviewFindingId = Schema.decodeUnknownSync(
+  CodeReviewFindingId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeEvidenceContentId = Schema.decodeUnknownSync(
+  CodeEvidenceContentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeAttachmentId = Schema.decodeUnknownSync(
+  CodeAttachmentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeAttachmentMediaType = Schema.decodeUnknownSync(
+  CodeAttachmentMediaType,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeAttachmentReference = Schema.decodeUnknownSync(
+  CodeAttachmentReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRuntimeWorkId = Schema.decodeUnknownSync(
+  CodeRuntimeWorkId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRelativePath = Schema.decodeUnknownSync(
+  CodeRelativePath,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeProjectFilePath = Schema.decodeUnknownSync(
+  CodeProjectFilePath,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeCheckoutHead = Schema.decodeUnknownSync(
+  CodeCheckoutHead,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeCheckoutIdentity = Schema.decodeUnknownSync(
+  CodeCheckoutIdentity,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThread = Schema.decodeUnknownSync(CodeThread, STRICT_DECODE_OPTIONS);
+export const decodeCodeDeliveryOutcomeKind = Schema.decodeUnknownSync(
+  CodeDeliveryOutcomeKind,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeDeliveryTarget = Schema.decodeUnknownSync(
+  CodeDeliveryTarget,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeSettings = Schema.decodeUnknownSync(CodeSettings, STRICT_DECODE_OPTIONS);
+export const decodeCodeCommand = Schema.decodeUnknownSync(CodeCommand, STRICT_DECODE_OPTIONS);
+export const decodeCodeCommandResult = Schema.decodeUnknownSync(
+  CodeCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeWorktreeSourcePreview = Schema.decodeUnknownSync(
+  CodeWorktreeSourcePreview,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeWorktreeSourcePreviewed = Schema.decodeUnknownSync(
   CodeWorktreeSourcePreviewed,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeWorktreeSourceProvenance = Schema.decodeUnknownSync(
   CodeWorktreeSourceProvenance,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeManagedThreadCreated = Schema.decodeUnknownSync(CodeManagedThreadCreated);
-export const decodeCodeWorktreeRemoteFacts = Schema.decodeUnknownSync(CodeWorktreeRemoteFacts);
+export const decodeCodeManagedThreadCreated = Schema.decodeUnknownSync(
+  CodeManagedThreadCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeWorktreeRemoteFacts = Schema.decodeUnknownSync(
+  CodeWorktreeRemoteFacts,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeWorktreeRemoteFactsRetrieved = Schema.decodeUnknownSync(
   CodeWorktreeRemoteFactsRetrieved,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeWorktreeRef = Schema.decodeUnknownSync(CodeWorktreeRef);
-export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(CodeWorktreeRefsListed);
-export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure);
-export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap);
-export const decodeCodeNavigation = Schema.decodeUnknownSync(CodeNavigation);
-export const decodeCodeNavigationRuntime = Schema.decodeUnknownSync(CodeNavigationRuntime);
-export const decodeCodeThreadActivity = Schema.decodeUnknownSync(CodeThreadActivity);
-export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView);
-export const decodeCodeFileMetadata = Schema.decodeUnknownSync(CodeFileMetadata);
-export const decodeCodeFileSavePublicResult = Schema.decodeUnknownSync(CodeFileSavePublicResult);
+export const decodeCodeWorktreeRef = Schema.decodeUnknownSync(
+  CodeWorktreeRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(
+  CodeWorktreeRefsListed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure, STRICT_DECODE_OPTIONS);
+export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap, STRICT_DECODE_OPTIONS);
+export const decodeCodeNavigation = Schema.decodeUnknownSync(CodeNavigation, STRICT_DECODE_OPTIONS);
+export const decodeCodeNavigationRuntime = Schema.decodeUnknownSync(
+  CodeNavigationRuntime,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadActivity = Schema.decodeUnknownSync(
+  CodeThreadActivity,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView, STRICT_DECODE_OPTIONS);
+export const decodeCodeFileMetadata = Schema.decodeUnknownSync(
+  CodeFileMetadata,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeFileSavePublicResult = Schema.decodeUnknownSync(
+  CodeFileSavePublicResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeFileSaveResultEnvelope = Schema.decodeUnknownSync(
   CodeFileSaveResultEnvelope,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeFileReference = Schema.decodeUnknownSync(CodeFileReference);
-export const decodeCodeRuntimeWork = Schema.decodeUnknownSync(CodeRuntimeWork);
-export const decodeCodeSettingsUpdated = Schema.decodeUnknownSync(CodeSettingsUpdated);
-export const decodeCodeThreadCreated = Schema.decodeUnknownSync(CodeThreadCreated);
-export const decodeCodeThreadUpdated = Schema.decodeUnknownSync(CodeThreadUpdated);
+export const decodeCodeFileReference = Schema.decodeUnknownSync(
+  CodeFileReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRuntimeWork = Schema.decodeUnknownSync(
+  CodeRuntimeWork,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeSettingsUpdated = Schema.decodeUnknownSync(
+  CodeSettingsUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadCreated = Schema.decodeUnknownSync(
+  CodeThreadCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadUpdated = Schema.decodeUnknownSync(
+  CodeThreadUpdated,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePersistedCodeDeliveryTarget = Schema.decodeUnknownSync(
   PersistedCodeDeliveryTarget,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodePersistedCodeThread = Schema.decodeUnknownSync(PersistedCodeThread);
+export const decodePersistedCodeThread = Schema.decodeUnknownSync(
+  PersistedCodeThread,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePersistedCodeThreadCreated = Schema.decodeUnknownSync(
   PersistedCodeThreadCreated,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePersistedCodeThreadUpdated = Schema.decodeUnknownSync(
   PersistedCodeThreadUpdated,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeCheckoutObserved = Schema.decodeUnknownSync(CodeCheckoutObserved);
-export const decodeCodeCheckoutRemoved = Schema.decodeUnknownSync(CodeCheckoutRemoved);
-export const decodeCodeFileReferenceUpdated = Schema.decodeUnknownSync(CodeFileReferenceUpdated);
-export const decodeCodeRuntimeWorkUpdated = Schema.decodeUnknownSync(CodeRuntimeWorkUpdated);
-export const decodeCodeEventFrame = Schema.decodeUnknownSync(CodeEventFrame);
+export const decodeCodeCheckoutObserved = Schema.decodeUnknownSync(
+  CodeCheckoutObserved,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeCheckoutRemoved = Schema.decodeUnknownSync(
+  CodeCheckoutRemoved,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeFileReferenceUpdated = Schema.decodeUnknownSync(
+  CodeFileReferenceUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRuntimeWorkUpdated = Schema.decodeUnknownSync(
+  CodeRuntimeWorkUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeEventFrame = Schema.decodeUnknownSync(CodeEventFrame, STRICT_DECODE_OPTIONS);
 
 export function decodeCodePersistenceEventPayload(
   eventName: CodePersistenceEventName | string,

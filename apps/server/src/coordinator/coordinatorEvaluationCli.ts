@@ -32,14 +32,15 @@ const responseSchema = Schema.Struct({
   ),
 });
 
-const strict = { parseOptions: { onExcessProperty: "error" } } as const;
 const sendSchema = Schema.Struct({
   operation: Schema.Literal("send"),
   recipients: Schema.NonEmptyArray(Schema.String).pipe(
-    Schema.maxItems(MAX_AGENT_MESSAGE_RECIPIENTS),
+    Schema.check(Schema.isMaxLength(MAX_AGENT_MESSAGE_RECIPIENTS)),
   ),
-  message: Schema.String.pipe(Schema.filter((message) => message.trim().length > 0)),
-}).annotations(strict);
+  message: Schema.String.pipe(
+    Schema.check(Schema.makeFilter((message) => message.trim().length > 0)),
+  ),
+});
 const operationSchema = Schema.Struct({ operation: Schema.String });
 type StartDecoder = (value: unknown) => unknown;
 const startAssignment = Schema.decodeUnknownSync(
@@ -58,7 +59,7 @@ export async function checkoutStartDecoder(cwd: string): Promise<StartDecoder> {
 const inputSchema = Schema.Struct({
   messages: Schema.NonEmptyArray(
     Schema.Struct({
-      role: Schema.Literal("system", "user"),
+      role: Schema.Literals(["system", "user"]),
       content: Schema.String,
     }),
   ),
@@ -68,16 +69,16 @@ const inputSchema = Schema.Struct({
       function: Schema.Struct({
         name: Schema.String,
         description: Schema.String,
-        parameters: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+        parameters: Schema.Record(Schema.String, Schema.Unknown),
       }),
     }),
   ),
   help: Schema.Struct({ tool: Schema.String, help: Schema.String }),
 });
-const projectInputSchema = Schema.Union(
+const projectInputSchema = Schema.Union([
   inputSchema,
   Schema.Struct({ status: Schema.Literal("unsupported"), reason: Schema.String }),
-);
+]);
 export const decodeInputs = Schema.decodeUnknownSync(
   Schema.Struct({
     status: inputSchema,
@@ -144,7 +145,8 @@ export function decision(
       return { operation, title, prompt };
     }
     if (operation === "read") return decodeSiblingThreadsToolInput(raw);
-    if (operation === "send") return Schema.decodeUnknownSync(sendSchema)(raw);
+    if (operation === "send")
+      return Schema.decodeUnknownSync(sendSchema, { onExcessProperty: "error" })(raw);
     return { operation };
   } catch {
     return { operation: "invalid arguments" };

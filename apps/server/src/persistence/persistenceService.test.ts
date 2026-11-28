@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeUtcTimestamp, decodeWindowId } from "@octant/contracts";
 import { randomUUID } from "node:crypto";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserPageSessions } from "../browser/browserPageSessions";
 import { PersonMemoryStore } from "../personMemory/personMemoryStore";
@@ -45,9 +45,9 @@ describe("PersistenceLive", () => {
 
     const result = await startupResult(directory);
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
         category: "recovery-required",
         recovery: "removal-unfinished",
       });
@@ -89,13 +89,13 @@ describe("PersistenceLive", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const persistence = yield* Persistence;
-          return Either.try(() => persistence.createVerifiedBackup("../escape"));
+          return Result.try(() => persistence.createVerifiedBackup("../escape"));
         }).pipe(
           Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
         ),
       ),
     );
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
     expect(existsSync(join(directory, "escape"))).toBe(false);
   });
 
@@ -401,7 +401,7 @@ describe("PersistenceLive", () => {
     let closed = false;
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -415,11 +415,11 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(PersistenceStartupFailed);
-      expect(result.left).toMatchObject({ category: "migration-incompatible" });
-      expect(String(result.left)).not.toContain(directory);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(PersistenceStartupFailed);
+      expect(result.failure).toMatchObject({ category: "migration-incompatible" });
+      expect(String(result.failure)).not.toContain(directory);
     }
     expect(closed).toBe(true);
   });
@@ -478,7 +478,7 @@ describe("PersistenceLive", () => {
 
     const result = await startupResult(directory);
 
-    expect(Either.isRight(result)).toBe(true);
+    expect(Result.isSuccess(result)).toBe(true);
     expect(warn).toHaveBeenCalledWith(
       "Octant rebuilt its projections from the journal at startup.",
     );
@@ -505,7 +505,7 @@ describe("PersistenceLive", () => {
 
     const result = await startupResult(directory);
 
-    expect(Either.isRight(result)).toBe(true);
+    expect(Result.isSuccess(result)).toBe(true);
     const inspected = openSqlite(join(directory, "octant.sqlite3"));
     expect(inspected.prepare("SELECT * FROM event_journal").all()).toEqual(journalBefore);
     expect(
@@ -534,9 +534,9 @@ describe("PersistenceLive", () => {
 
     const result = await startupResult(directory);
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({
         category: "recovery-required",
         recovery: "store-damaged",
       });
@@ -567,11 +567,11 @@ describe("PersistenceLive", () => {
 
       const result = await startupResult(directory);
 
-      expect(Either.isLeft(result)).toBe(true);
-      if (Either.isLeft(result)) {
-        expect(result.left).toMatchObject({ category: "recovery-required" });
-        expect(String(result.left)).not.toContain("private-");
-        expect(String(result.left)).not.toContain(directory);
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toMatchObject({ category: "recovery-required" });
+        expect(String(result.failure)).not.toContain("private-");
+        expect(String(result.failure)).not.toContain(directory);
       }
 
       const inspected = openSqlite(join(directory, "octant.sqlite3"));
@@ -660,7 +660,7 @@ describe("PersistenceLive", () => {
       const decode = vi.spyOn(EventRegistry.prototype, "decodePersisted");
       try {
         const result = await startupResult(directory, () => build ?? undefined);
-        expect(Either.isRight(result)).toBe(true);
+        expect(Result.isSuccess(result)).toBe(true);
         return decode.mock.calls.length;
       } finally {
         decode.mockRestore();
@@ -861,7 +861,7 @@ describe("PersistenceLive", () => {
 
       const result = await startupResult(directory);
 
-      expect(Either.isLeft(result)).toBe(true);
+      expect(Result.isFailure(result)).toBe(true);
       expect(watermarkRow(directory)).toBeUndefined();
     });
 
@@ -885,7 +885,7 @@ describe("PersistenceLive", () => {
 
       const result = await startupResult(directory);
 
-      expect(Either.isLeft(result)).toBe(true);
+      expect(Result.isFailure(result)).toBe(true);
     });
 
     it.each([
@@ -937,7 +937,7 @@ describe("PersistenceLive", () => {
   ] as const)("reports %s startup failures without internal details", async (code, category) => {
     const directory = temporaryDirectory();
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -952,10 +952,10 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({ category });
-      expect(String(result.left)).not.toContain("private database detail");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({ category });
+      expect(String(result.failure)).not.toContain("private database detail");
     }
   });
 
@@ -966,7 +966,7 @@ describe("PersistenceLive", () => {
     ["ENOSPC", "disk is full"],
   ] as const)("names the %s cause when storage is unavailable", async (code, phrase) => {
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -981,18 +981,18 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toMatchObject({ category: "storage-unavailable" });
-      expect(result.left.message).toContain(phrase);
-      expect(result.left.message).not.toContain("secret");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toMatchObject({ category: "storage-unavailable" });
+      expect(result.failure.message).toContain(phrase);
+      expect(result.failure.message).not.toContain("secret");
     }
   });
 });
 
 function startupResult(directory: string, buildIdentity?: () => string | undefined) {
   return Effect.runPromise(
-    Effect.either(
+    Effect.result(
       Effect.scoped(
         Effect.provide(
           Persistence,

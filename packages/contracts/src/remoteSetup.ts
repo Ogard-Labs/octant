@@ -3,15 +3,14 @@ import { Schema } from "effect";
 import { AggregateId } from "./events";
 import { ServerFolderPath } from "./serverProjects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const RemoteSetupCheckInput = Schema.Struct({
   serverId: AggregateId,
   folder: Schema.optional(ServerFolderPath),
-  runtime: Schema.Literal("octant-harness", "native-provider"),
-}).annotations(strict);
+  runtime: Schema.Literals(["octant-harness", "native-provider"]),
+});
 export type RemoteSetupCheckInput = typeof RemoteSetupCheckInput.Type;
 
-export const RemoteSetupCheckReason = Schema.Literal(
+export const RemoteSetupCheckReason = Schema.Literals([
   "ready",
   "needs-person",
   "needs-local-window",
@@ -29,19 +28,17 @@ export const RemoteSetupCheckReason = Schema.Literal(
   "probe-unavailable",
   "cancelled",
   "busy",
-);
+]);
 export type RemoteSetupCheckReason = typeof RemoteSetupCheckReason.Type;
 export const RemoteSetupCheckResult = Schema.Struct({
-  status: Schema.Literal("connected", "disconnected", "stopped"),
+  status: Schema.Literals(["connected", "disconnected", "stopped"]),
   reason: RemoteSetupCheckReason,
   folder: Schema.optional(ServerFolderPath),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((result) =>
-      result.status === "connected"
-        ? result.reason === "ready" && result.folder !== undefined
-        : result.reason !== "ready" && result.folder === undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter((result) =>
+    result.status === "connected"
+      ? result.reason === "ready" && result.folder !== undefined
+      : result.reason !== "ready" && result.folder === undefined,
+  ),
+);
 export type RemoteSetupCheckResult = typeof RemoteSetupCheckResult.Type;

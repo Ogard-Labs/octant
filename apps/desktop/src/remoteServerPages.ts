@@ -54,8 +54,8 @@ export type RemoteServerPageOpenOutcome =
     }
   | { readonly kind: "refused"; readonly message: string };
 
-const decodeGrant = Schema.decodeUnknownSync(RemoteServerGrant);
-const decodeForward = Schema.decodeUnknownSync(RemotePortForward);
+const decodeGrant = Schema.decodeUnknownSync(RemoteServerGrant, { onExcessProperty: "error" });
+const decodeForward = Schema.decodeUnknownSync(RemotePortForward, { onExcessProperty: "error" });
 
 /** What a window asks for after the host opened a port forward for it. */
 export interface RemotePortForwardOpenRequest {

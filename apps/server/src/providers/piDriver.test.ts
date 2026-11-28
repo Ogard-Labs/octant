@@ -223,12 +223,12 @@ describe("Pi provider driver", () => {
       const { driver, client } = fixture();
       const scope = Effect.runSync(Scope.make());
       const connection = await Effect.runPromise(
-        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
       );
       await Effect.runPromise(
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
       );
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(
         connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
       );
@@ -284,12 +284,12 @@ describe("Pi provider driver", () => {
       const { driver, client } = fixture();
       const scope = Effect.runSync(Scope.make());
       const connection = await Effect.runPromise(
-        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+        driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
       );
       await Effect.runPromise(
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
       );
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(
         connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
       );
@@ -318,7 +318,7 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture("1.1.0");
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
@@ -327,7 +327,7 @@ describe("Pi provider driver", () => {
     expect(await Effect.runPromise(steer({ sessionId, message: "check the tests" }))).toBe(
       "unsupported",
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -345,7 +345,7 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture("1.1.0");
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
@@ -353,7 +353,7 @@ describe("Pi provider driver", () => {
     const compact = connection.compact!;
     const collected = Effect.runPromise(
       Stream.runCollect(
-        Stream.unwrapScoped(connection.subscribe).pipe(
+        Stream.unwrap(connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "context-compacted"),
           Stream.take(1),
         ),
@@ -392,12 +392,12 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture("1.1.0");
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -413,12 +413,12 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture();
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -454,12 +454,12 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture(undefined, undefined, piHome);
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -552,15 +552,15 @@ describe("Pi provider driver", () => {
           const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
           const attempts = yield* Effect.all([first.start(input), second.start(input)], {
             concurrency: "unbounded",
-            mode: "either",
+            mode: "result",
           });
-          expect(attempts.filter((result) => result._tag === "Right")).toHaveLength(1);
+          expect(attempts.filter((result) => result._tag === "Success")).toHaveLength(1);
           expect(f.starts).toHaveLength(1);
           expect(f.active()).toBe(1);
-          const owner = attempts[0]?._tag === "Right" ? first : second;
+          const owner = attempts[0]?._tag === "Success" ? first : second;
           const waiting = owner === first ? second : first;
-          const duplicate = yield* Effect.either(owner.start(input));
-          expect(duplicate._tag).toBe("Left");
+          const duplicate = yield* Effect.result(owner.start(input));
+          expect(duplicate._tag).toBe("Failure");
           expect(f.starts).toHaveLength(1);
           yield* owner.stop(sessionId);
           yield* waiting.start(input);
@@ -752,7 +752,7 @@ describe("Pi provider driver", () => {
         .pipe(Effect.provideService(Scope.Scope, scope)),
     );
     const starting = Effect.runPromise(
-      Effect.either(connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })),
+      Effect.result(connection.start({ sessionId, modelId, executionPolicy: "approval-gated" })),
     );
     try {
       await vi.waitFor(() =>
@@ -766,7 +766,7 @@ describe("Pi provider driver", () => {
       expect(closed).toBe(false);
       finish();
       await closing;
-      expect((await starting)._tag).toBe("Left");
+      expect((await starting)._tag).toBe("Failure");
       expect(f.active()).toBe(0);
     } finally {
       finish();
@@ -843,7 +843,7 @@ describe("Pi provider driver", () => {
           });
           const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
           yield* owner.start(input);
-          expect((yield* Effect.either(competitor.start(input)))._tag).toBe("Left");
+          expect((yield* Effect.result(competitor.start(input)))._tag).toBe("Failure");
           expect(recreated.starts).toHaveLength(0);
           yield* owner.stop(sessionId);
           yield* competitor.start(input);
@@ -865,7 +865,7 @@ describe("Pi provider driver", () => {
             mode: "code",
           });
           const input = { sessionId, modelId, executionPolicy: "approval-gated" as const };
-          expect((yield* Effect.either(connection.start(input)))._tag).toBe("Left");
+          expect((yield* Effect.result(connection.start(input)))._tag).toBe("Failure");
           expect(f.active()).toBe(0);
           yield* connection.start(input);
           expect(f.active()).toBe(1);
@@ -1122,7 +1122,7 @@ describe("Pi provider driver", () => {
         modelProvider: "anthropic",
       });
 
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(
         connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
       );
@@ -1219,7 +1219,7 @@ describe("Pi provider driver", () => {
       );
       const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
       expect(bridge).toBeDefined();
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       const [line] = appToolHostLines([tool]);
       if (line === undefined) throw new Error("Missing Browser guide");
       await Effect.runPromise(
@@ -1379,7 +1379,7 @@ describe("Pi provider driver", () => {
       );
       const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
       expect(bridge).toBeDefined();
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(
         connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
       );
@@ -1425,28 +1425,32 @@ describe("Pi provider driver", () => {
     );
     await expect(
       Effect.runPromise(
-        connection.resume({
-          sessionId,
-          resumeCursor: { driverKind: "pi", value: "unknown" },
-          executionPolicy: "approval-gated",
-        }),
+        Effect.flip(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "pi", value: "unknown" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
       ),
-    ).rejects.toThrow(/stale-resume/);
+    ).resolves.toMatchObject({ category: "stale-resume" });
     // A Pi session keeps the model it was opened with.
     await expect(
       Effect.runPromise(
-        connection.resume({
-          sessionId,
-          modelId: "openai/gpt-5" as ProviderModelId,
-          resumeCursor: {
-            driverKind: "pi",
-            value: sessionId,
-            binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
-          },
-          executionPolicy: "approval-gated",
-        }),
+        Effect.flip(
+          connection.resume({
+            sessionId,
+            modelId: "openai/gpt-5" as ProviderModelId,
+            resumeCursor: {
+              driverKind: "pi",
+              value: sessionId,
+              binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+            },
+            executionPolicy: "approval-gated",
+          }),
+        ),
       ),
-    ).rejects.toThrow(/stale-resume/);
+    ).resolves.toMatchObject({ category: "stale-resume" });
     await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy: "plan" }));
     client.emit({
       type: "extension_ui_request",
@@ -1458,14 +1462,14 @@ describe("Pi provider driver", () => {
     expect(client.responses).toEqual([{ id: "unexpected", response: { confirmed: false } }]);
     await expect(
       Effect.runPromise(
-        connection.answerApproval({ sessionId, requestId: "unknown", approved: true }),
+        Effect.flip(connection.answerApproval({ sessionId, requestId: "unknown", approved: true })),
       ),
-    ).rejects.toThrow(/protocol/);
+    ).resolves.toMatchObject({ category: "protocol" });
     await expect(
       Effect.runPromise(
-        connection.answerUserInput({ sessionId, requestId: "unknown", answer: "x" }),
+        Effect.flip(connection.answerUserInput({ sessionId, requestId: "unknown", answer: "x" })),
       ),
-    ).rejects.toThrow(/unsupported/);
+    ).resolves.toMatchObject({ category: "unsupported" });
     await Effect.runPromise(connection.stop(sessionId));
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
@@ -1474,12 +1478,12 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture();
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );
@@ -1511,12 +1515,12 @@ describe("Pi provider driver", () => {
     const { driver, client } = fixture();
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "deploy", attachments: [], tools: [] }),
     );
@@ -1561,7 +1565,7 @@ describe("Pi provider driver", () => {
     ]);
     const scope = Effect.runSync(Scope.make());
     const connection = await Effect.runPromise(
-      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.provide(scope)),
     );
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
@@ -1572,7 +1576,7 @@ describe("Pi provider driver", () => {
       bytes: new Uint8Array([1, 2, 3]),
     };
     const pdf = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         connection.send({
           sessionId,
           prompt: "read",
@@ -1581,7 +1585,7 @@ describe("Pi provider driver", () => {
         }),
       ),
     );
-    expect(pdf).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(pdf).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     await Effect.runPromise(
       connection.send({
         sessionId,
@@ -1605,7 +1609,7 @@ describe("Pi provider driver", () => {
       const connection = await Effect.runPromise(
         driver
           .acquire({ instanceId, projectRoot: root, mode, attachmentsFolder })
-          .pipe(Scope.extend(scope)),
+          .pipe(Scope.provide(scope)),
       );
       await Effect.runPromise(
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
@@ -1658,7 +1662,7 @@ describe("Pi provider driver", () => {
       await Effect.runPromise(
         connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
       );
-      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      const collected = terminal(Stream.unwrap(connection.subscribe));
       await Effect.runPromise(
         connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
       );
@@ -1727,7 +1731,7 @@ describe("Pi provider driver", () => {
     await Effect.runPromise(
       connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    const collected = terminal(Stream.unwrap(connection.subscribe));
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
     );

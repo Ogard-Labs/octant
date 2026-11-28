@@ -1,9 +1,15 @@
 import { Schema } from "effect";
+import {
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { CodeDebugSessionEndReason } from "./codeDebug";
 import { CorrelationId, UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Wire version for the redacted diagnostics evidence packet. A second reviewer
@@ -38,7 +44,7 @@ export type DiagnosticPacketId = typeof DiagnosticPacketId.Type;
  * Supported failure domains the diagnostics export makes reproducible. The set
  * is closed so a packet cannot smuggle an unmodeled surface past redaction.
  */
-export const DiagnosticFailureDomain = Schema.Literal(
+export const DiagnosticFailureDomain = Schema.Literals([
   "provider",
   "storage",
   "network",
@@ -46,16 +52,15 @@ export const DiagnosticFailureDomain = Schema.Literal(
   "migration",
   "confinement",
   "process-cleanup",
-);
+]);
 export type DiagnosticFailureDomain = typeof DiagnosticFailureDomain.Type;
 
 /**
  * Bounded, provider-neutral failure code. Free-text exception messages never
  * cross the wire through the code; a redacted summary carries any safe hint.
  */
-export const DiagnosticFailureCode = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(/^[a-z][a-z0-9-]*$/),
+export const DiagnosticFailureCode = Schema.Trimmed.pipe(
+  Schema.check(Schema.isNonEmpty(), Schema.isMaxLength(64), Schema.isPattern(/^[a-z][a-z0-9-]*$/)),
   Schema.brand("DiagnosticFailureCode"),
 );
 export type DiagnosticFailureCode = typeof DiagnosticFailureCode.Type;
@@ -65,7 +70,7 @@ export type DiagnosticFailureCode = typeof DiagnosticFailureCode.Type;
  * packet records that redaction ran for that class; the raw value is never
  * representable in the schema.
  */
-export const DiagnosticRedactionTag = Schema.Literal(
+export const DiagnosticRedactionTag = Schema.Literals([
   "credential",
   "private-key",
   "pairing-material",
@@ -73,7 +78,7 @@ export const DiagnosticRedactionTag = Schema.Literal(
   "sensitive-root",
   "private-content",
   "raw-store",
-);
+]);
 export type DiagnosticRedactionTag = typeof DiagnosticRedactionTag.Type;
 
 const RAW_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
@@ -116,14 +121,15 @@ const SAFE_TEXT_ALLOWLIST = /^[A-Za-z0-9 .,:;'"()[\]/@%+=?!_-]+$/;
  * cannot ride along) and, as defense in depth, must contain none of the raw
  * secret shapes below even if the allowlist ever admits one.
  */
-export const DiagnosticSafeText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.filter((value) => SAFE_TEXT_ALLOWLIST.test(value), {
-    message: () =>
+export const DiagnosticSafeText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.makeFilter((value) => SAFE_TEXT_ALLOWLIST.test(value), {
+    message:
       "Diagnostic text must be a single-line safe summary built from sanitized facts (disallowed characters or private content present).",
   }),
-  Schema.filter(isSecretFree, {
-    message: () => "Diagnostic text still contains unredacted sensitive material.",
+  Schema.makeFilter(isSecretFree, {
+    message: "Diagnostic text still contains unredacted sensitive material.",
   }),
 );
 export type DiagnosticSafeText = typeof DiagnosticSafeText.Type;
@@ -134,28 +140,30 @@ export type DiagnosticSafeText = typeof DiagnosticSafeText.Type;
  * paths or free text.
  */
 export const DiagnosticComponentVersion = Schema.Struct({
-  component: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(64),
-    Schema.pattern(/^[@a-z][a-z0-9@/._-]*$/),
-    Schema.filter(isSecretFree, {
-      message: () => "Component identity still contains unredacted sensitive material.",
+  component: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.isPattern(/^[@a-z][a-z0-9@/._-]*$/),
+    Schema.makeFilter(isSecretFree, {
+      message: "Component identity still contains unredacted sensitive material.",
     }),
   ),
-  version: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(64),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/),
-    Schema.filter(isSecretFree, {
-      message: () => "Version fact still contains unredacted sensitive material.",
+  version: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/),
+    Schema.makeFilter(isSecretFree, {
+      message: "Version fact still contains unredacted sensitive material.",
     }),
   ),
-}).annotations(strict);
+});
 export type DiagnosticComponentVersion = typeof DiagnosticComponentVersion.Type;
 
 /** Correlation anchor tying the packet to a replayable event/command trail. */
 export const DiagnosticCorrelation = Schema.Struct({
   correlationId: CorrelationId,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DiagnosticCorrelation = typeof DiagnosticCorrelation.Type;
 
 /**
@@ -164,18 +172,18 @@ export type DiagnosticCorrelation = typeof DiagnosticCorrelation.Type;
  * route name can ride along.
  */
 export const DiagnosticHostHealth = Schema.Struct({
-  slowStatementCount: Schema.Int.pipe(Schema.nonNegative()),
-  slowStatementWorstMs: Schema.Int.pipe(Schema.nonNegative()),
-  eventLoopLagCount: Schema.Int.pipe(Schema.nonNegative()),
-  eventLoopLagWorstMs: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  slowStatementCount: NonNegativeInt,
+  slowStatementWorstMs: NonNegativeInt,
+  eventLoopLagCount: NonNegativeInt,
+  eventLoopLagWorstMs: NonNegativeInt,
+});
 export type DiagnosticHostHealth = typeof DiagnosticHostHealth.Type;
 
 /** A single actionable, redacted recovery fact for the reviewer. */
 export const DiagnosticRecoveryFact = Schema.Struct({
   action: DiagnosticSafeText,
   automated: Schema.Boolean,
-}).annotations(strict);
+});
 export type DiagnosticRecoveryFact = typeof DiagnosticRecoveryFact.Type;
 
 /** Days of journal growth an export reports, today included. */
@@ -189,13 +197,16 @@ export const MAX_JOURNAL_GROWTH_KINDS = 128;
  * representable: no payload, identifier, or thread or project name.
  */
 export const JournalGrowthKind = Schema.Struct({
-  kind: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(64),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  kind: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
   ),
-  counts: Schema.Array(Schema.NonNegativeInt).pipe(Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS)),
-  total: Schema.NonNegativeInt,
-}).annotations(strict);
+  counts: Schema.Array(NonNegativeInt).check(
+    Schema.isBetweenLength(JOURNAL_GROWTH_WINDOW_DAYS, JOURNAL_GROWTH_WINDOW_DAYS),
+  ),
+  total: NonNegativeInt,
+});
 export type JournalGrowthKind = typeof JournalGrowthKind.Type;
 
 /**
@@ -206,21 +217,21 @@ export type JournalGrowthKind = typeof JournalGrowthKind.Type;
 export const JournalGrowth = Schema.Struct({
   generatedAt: UtcTimestamp,
   /** UTC calendar days, oldest first, as YYYY-MM-DD. */
-  days: Schema.Array(Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/))).pipe(
-    Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS),
+  days: Schema.Array(Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))).check(
+    Schema.isBetweenLength(JOURNAL_GROWTH_WINDOW_DAYS, JOURNAL_GROWTH_WINDOW_DAYS),
   ),
-  kinds: Schema.Array(JournalGrowthKind).pipe(Schema.maxItems(MAX_JOURNAL_GROWTH_KINDS)),
+  kinds: Schema.Array(JournalGrowthKind).check(Schema.isMaxLength(MAX_JOURNAL_GROWTH_KINDS)),
   /** Highest journal sequence: O(1) to read, and the row count when nothing was purged. */
-  journalHead: Schema.NonNegativeInt,
-  databaseBytes: Schema.NonNegativeInt,
-}).annotations(strict);
+  journalHead: NonNegativeInt,
+  databaseBytes: NonNegativeInt,
+});
 export type JournalGrowth = typeof JournalGrowth.Type;
 
 /** How many debug sessions ended for one reason. */
 export const DiagnosticDebugSessionEnding = Schema.Struct({
   endReason: CodeDebugSessionEndReason,
-  count: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  count: PositiveInt,
+});
 export type DiagnosticDebugSessionEnding = typeof DiagnosticDebugSessionEnding.Type;
 
 /**
@@ -231,16 +242,16 @@ export type DiagnosticDebugSessionEnding = typeof DiagnosticDebugSessionEnding.T
  */
 export const DiagnosticDebugSessions = Schema.Struct({
   /** The first UTC day counted, as YYYY-MM-DD. */
-  since: Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/)),
-  started: Schema.NonNegativeInt,
-  ended: Schema.Array(DiagnosticDebugSessionEnding).pipe(
-    Schema.maxItems(CodeDebugSessionEndReason.literals.length),
-    Schema.filter(
+  since: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+  started: NonNegativeInt,
+  ended: Schema.Array(DiagnosticDebugSessionEnding).check(
+    Schema.isMaxLength(CodeDebugSessionEndReason.literals.length),
+    Schema.makeFilter(
       (endings) => new Set(endings.map((ending) => ending.endReason)).size === endings.length,
-      { message: () => "Each end reason is counted once." },
+      { message: "Each end reason is counted once." },
     ),
   ),
-}).annotations(strict);
+});
 export type DiagnosticDebugSessions = typeof DiagnosticDebugSessions.Type;
 
 /**
@@ -250,32 +261,34 @@ export type DiagnosticDebugSessions = typeof DiagnosticDebugSessions.Type;
  * stores, or private thread/file content.
  */
 export const DiagnosticEvidencePacket = Schema.Struct({
-  packetVersion: Schema.Literal(
+  packetVersion: Schema.Literals([
     DIAGNOSTICS_PACKET_VERSION,
     DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
     DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS,
-  ),
+  ]),
   packetId: DiagnosticPacketId,
   domain: DiagnosticFailureDomain,
   failureCode: DiagnosticFailureCode,
   summary: DiagnosticSafeText,
-  hostVersions: Schema.Array(DiagnosticComponentVersion).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_DIAGNOSTIC_VERSIONS),
+  hostVersions: Schema.Array(DiagnosticComponentVersion).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_DIAGNOSTIC_VERSIONS),
   ),
-  candidateVersions: Schema.Array(DiagnosticComponentVersion).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_DIAGNOSTIC_VERSIONS),
+  candidateVersions: Schema.Array(DiagnosticComponentVersion).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_DIAGNOSTIC_VERSIONS),
   ),
-  correlations: Schema.Array(DiagnosticCorrelation).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_DIAGNOSTIC_CORRELATIONS),
+  correlations: Schema.Array(DiagnosticCorrelation).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_DIAGNOSTIC_CORRELATIONS),
   ),
-  recovery: Schema.Array(DiagnosticRecoveryFact).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_DIAGNOSTIC_RECOVERY_FACTS),
+  recovery: Schema.Array(DiagnosticRecoveryFact).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_DIAGNOSTIC_RECOVERY_FACTS),
   ),
-  redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
+  redactions: Schema.Array(DiagnosticRedactionTag).check(
+    Schema.isMaxLength(MAX_DIAGNOSTIC_REDACTIONS),
+  ),
   redacted: Schema.Literal(true),
   /** Version 2 or later; absent when the host reports no counters. */
   hostHealth: Schema.optional(DiagnosticHostHealth),
@@ -287,8 +300,8 @@ export const DiagnosticEvidencePacket = Schema.Struct({
    * packet stays version 1 or 2, when no session started or ended in the window.
    */
   debugSessions: Schema.optional(DiagnosticDebugSessions),
-}).pipe(
-  Schema.filter(
+}).check(
+  Schema.makeFilter(
     (packet) =>
       packet.packetVersion === DIAGNOSTICS_PACKET_VERSION_WITH_DEBUG_SESSIONS
         ? packet.debugSessions !== undefined
@@ -296,11 +309,10 @@ export const DiagnosticEvidencePacket = Schema.Struct({
           (packet.packetVersion === DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH ||
             (packet.journalGrowth === undefined && packet.hostHealth === undefined)),
     {
-      message: () =>
+      message:
         "Only a version 2 or 3 packet carries journal growth or host health, and only a version 3 packet carries debug sessions.",
     },
   ),
-  Schema.annotations(strict),
 );
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
 
@@ -309,32 +321,32 @@ export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
  * Every failure path lands here rather than emitting partial or fabricated
  * evidence.
  */
-export const DiagnosticsExportFailure = Schema.Union(
+export const DiagnosticsExportFailure = Schema.Union([
   Schema.Struct({
     category: Schema.Literal("invalid-input"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("incomplete"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unredactable"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("misleading-success"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unsupported-domain"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("persistence-failed"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-).annotations(strict);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type DiagnosticsExportFailure = typeof DiagnosticsExportFailure.Type;
 
 /**
@@ -347,8 +359,8 @@ export type DiagnosticsExportFailure = typeof DiagnosticsExportFailure.Type;
 export const DiagnosticsExportRequest = Schema.Struct({
   correlationId: CorrelationId,
   domain: DiagnosticFailureDomain,
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
-}).annotations(strict);
+  summary: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+});
 export type DiagnosticsExportRequest = typeof DiagnosticsExportRequest.Type;
 
 /**
@@ -356,9 +368,12 @@ export type DiagnosticsExportRequest = typeof DiagnosticsExportRequest.Type;
  * prove which exact packet content was sealed without persisting that
  * content itself.
  */
-export const DiagnosticsExportContentDigest = Schema.NonEmptyTrimmedString.pipe(
-  Schema.length(64),
-  Schema.pattern(/^[0-9a-f]{64}$/),
+export const DiagnosticsExportContentDigest = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isBetweenLength(64, 64),
+    Schema.isPattern(/^[0-9a-f]{64}$/),
+  ),
   Schema.brand("DiagnosticsExportContentDigest"),
 );
 export type DiagnosticsExportContentDigest = typeof DiagnosticsExportContentDigest.Type;
@@ -374,18 +389,20 @@ export const DiagnosticsExportReceipt = Schema.Struct({
   packetId: DiagnosticPacketId,
   domain: DiagnosticFailureDomain,
   failureCode: DiagnosticFailureCode,
-  redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
+  redactions: Schema.Array(DiagnosticRedactionTag).check(
+    Schema.isMaxLength(MAX_DIAGNOSTIC_REDACTIONS),
+  ),
   contentDigest: DiagnosticsExportContentDigest,
   generatedAt: UtcTimestamp,
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DiagnosticsExportReceipt = typeof DiagnosticsExportReceipt.Type;
 
 /** Original v1 payload retained so journal rebuild can decode historical incidents. */
 export const DiagnosticsFailureIncidentRecordedV1 = Schema.Struct({
   domain: DiagnosticFailureDomain,
   outcome: Schema.Literal("failed"),
-}).annotations(strict);
+});
 export type DiagnosticsFailureIncidentRecordedV1 = typeof DiagnosticsFailureIncidentRecordedV1.Type;
 
 /**
@@ -397,13 +414,13 @@ export const DiagnosticsFailureIncidentRecorded = Schema.Struct({
   domain: DiagnosticFailureDomain,
   failureCode: DiagnosticFailureCode,
   outcome: Schema.Literal("failed"),
-}).annotations(strict);
+});
 export type DiagnosticsFailureIncidentRecorded = typeof DiagnosticsFailureIncidentRecorded.Type;
 
 /** Durable journal payload for a bounded exported-packet receipt. */
 export const DiagnosticsExportReceiptRecorded = Schema.Struct({
   receipt: DiagnosticsExportReceipt,
-}).annotations(strict);
+});
 export type DiagnosticsExportReceiptRecorded = typeof DiagnosticsExportReceiptRecorded.Type;
 
 /**
@@ -411,45 +428,89 @@ export type DiagnosticsExportReceiptRecorded = typeof DiagnosticsExportReceiptRe
  * without both a fully redacted, schema-valid packet and its receipt; every
  * other path is a typed `DiagnosticsExportFailure`, never a partial result.
  */
-export const DiagnosticsExportOutcome = Schema.Union(
+export const DiagnosticsExportOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("exported"),
     packet: DiagnosticEvidencePacket,
     receipt: DiagnosticsExportReceipt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     failure: DiagnosticsExportFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type DiagnosticsExportOutcome = typeof DiagnosticsExportOutcome.Type;
 
-export const decodeDiagnosticPacketId = Schema.decodeUnknownSync(DiagnosticPacketId);
-export const decodeDiagnosticFailureDomain = Schema.decodeUnknownSync(DiagnosticFailureDomain);
-export const decodeDiagnosticFailureCode = Schema.decodeUnknownSync(DiagnosticFailureCode);
-export const decodeDiagnosticRedactionTag = Schema.decodeUnknownSync(DiagnosticRedactionTag);
-export const decodeDiagnosticSafeText = Schema.decodeUnknownSync(DiagnosticSafeText);
+export const decodeDiagnosticPacketId = Schema.decodeUnknownSync(
+  DiagnosticPacketId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticFailureDomain = Schema.decodeUnknownSync(
+  DiagnosticFailureDomain,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticFailureCode = Schema.decodeUnknownSync(
+  DiagnosticFailureCode,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticRedactionTag = Schema.decodeUnknownSync(
+  DiagnosticRedactionTag,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticSafeText = Schema.decodeUnknownSync(
+  DiagnosticSafeText,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDiagnosticComponentVersion = Schema.decodeUnknownSync(
   DiagnosticComponentVersion,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDiagnosticCorrelation = Schema.decodeUnknownSync(DiagnosticCorrelation);
-export const decodeDiagnosticRecoveryFact = Schema.decodeUnknownSync(DiagnosticRecoveryFact);
-export const decodeDiagnosticEvidencePacket = Schema.decodeUnknownSync(DiagnosticEvidencePacket);
-export const decodeDiagnosticsExportFailure = Schema.decodeUnknownSync(DiagnosticsExportFailure);
-export const decodeDiagnosticsExportRequest = Schema.decodeUnknownSync(DiagnosticsExportRequest);
+export const decodeDiagnosticCorrelation = Schema.decodeUnknownSync(
+  DiagnosticCorrelation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticRecoveryFact = Schema.decodeUnknownSync(
+  DiagnosticRecoveryFact,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticEvidencePacket = Schema.decodeUnknownSync(
+  DiagnosticEvidencePacket,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticsExportFailure = Schema.decodeUnknownSync(
+  DiagnosticsExportFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiagnosticsExportRequest = Schema.decodeUnknownSync(
+  DiagnosticsExportRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDiagnosticsExportContentDigest = Schema.decodeUnknownSync(
   DiagnosticsExportContentDigest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDiagnosticsExportReceipt = Schema.decodeUnknownSync(DiagnosticsExportReceipt);
+export const decodeDiagnosticsExportReceipt = Schema.decodeUnknownSync(
+  DiagnosticsExportReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDiagnosticsFailureIncidentRecorded = Schema.decodeUnknownSync(
   DiagnosticsFailureIncidentRecorded,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeDiagnosticsFailureIncidentRecordedV1 = Schema.decodeUnknownSync(
   DiagnosticsFailureIncidentRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeDiagnosticsExportReceiptRecorded = Schema.decodeUnknownSync(
   DiagnosticsExportReceiptRecorded,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDiagnosticsExportOutcome = Schema.decodeUnknownSync(DiagnosticsExportOutcome);
-export const decodeJournalGrowth = Schema.decodeUnknownSync(JournalGrowth);
-export const decodeDiagnosticDebugSessions = Schema.decodeUnknownSync(DiagnosticDebugSessions);
+export const decodeDiagnosticsExportOutcome = Schema.decodeUnknownSync(
+  DiagnosticsExportOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeJournalGrowth = Schema.decodeUnknownSync(JournalGrowth, STRICT_DECODE_OPTIONS);
+export const decodeDiagnosticDebugSessions = Schema.decodeUnknownSync(
+  DiagnosticDebugSessions,
+  STRICT_DECODE_OPTIONS,
+);

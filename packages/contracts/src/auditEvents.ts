@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   CausationId,
   CorrelationId,
@@ -10,16 +11,17 @@ import {
 import { HubPrincipal, OwnerUnlockPrincipal, PeerPrincipal } from "./hubAndSpokes";
 import { ToolActionId, ToolApprovalId, ToolCapabilityId } from "./toolActions";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * Bounded, redacted token for audit reason / step / class fields. Rejects path
  * separators and whitespace so absolute private paths and free-form tool output
  * cannot sneak into journaled audit payloads.
  */
-export const AuditBoundedToken = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.pattern(/^[a-z][a-z0-9._:-]*$/),
+export const AuditBoundedToken = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(128),
+    Schema.isPattern(/^[a-z][a-z0-9._:-]*$/),
+  ),
   Schema.brand("AuditBoundedToken"),
 );
 export type AuditBoundedToken = typeof AuditBoundedToken.Type;
@@ -28,11 +30,15 @@ export type AuditBoundedToken = typeof AuditBoundedToken.Type;
  * Opaque reference identity only — never a filesystem path, secret, or raw
  * tool transcript. Caps length and rejects `/`, `\`, and NUL.
  */
-export const AuditOpaqueReference = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.filter((value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"), {
-    message: () => "Audit references must not contain filesystem path separators.",
-  }),
+export const AuditOpaqueReference = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(512),
+    Schema.makeFilter(
+      (value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"),
+      { message: "Audit references must not contain filesystem path separators." },
+    ),
+  ),
   Schema.brand("AuditOpaqueReference"),
 );
 export type AuditOpaqueReference = typeof AuditOpaqueReference.Type;
@@ -43,16 +49,16 @@ export type AuditOpaqueReference = typeof AuditOpaqueReference.Type;
  * while actors answer "who is attributed on the journal envelope". Identity is
  * never client-supplied (`assertNoPrincipalIdentityInPayload`).
  */
-export const AuditActingPrincipal = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+export const AuditActingPrincipal = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("local-window") }),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     deviceId: EventActorDeviceId,
-  }).annotations(strict),
+  }),
   HubPrincipal,
   PeerPrincipal,
   OwnerUnlockPrincipal,
-);
+]);
 export type AuditActingPrincipal = typeof AuditActingPrincipal.Type;
 
 export const AUDIT_EVENT_NAMES = [
@@ -63,12 +69,12 @@ export const AUDIT_EVENT_NAMES = [
 ] as const;
 export type AuditEventName = (typeof AUDIT_EVENT_NAMES)[number];
 
-export const AuditEventNameSchema = Schema.Literal(...AUDIT_EVENT_NAMES).pipe(
+export const AuditEventNameSchema = Schema.Literals(AUDIT_EVENT_NAMES).pipe(
   Schema.brand("AuditEventName"),
 );
 export type AuditEventNameSchema = typeof AuditEventNameSchema.Type;
 
-const PolicyResolutionStep = Schema.Literal(
+const PolicyResolutionStep = Schema.Literals([
   "catalog",
   "schema",
   "mode",
@@ -82,7 +88,7 @@ const PolicyResolutionStep = Schema.Literal(
   "remote-principal",
   "child-clamp",
   "activation",
-);
+]);
 
 const ToolCallAuditFields = {
   actionId: ToolActionId,
@@ -98,23 +104,23 @@ export const ToolCallDeniedPayload = Schema.Struct({
   ...ToolCallAuditFields,
   denialReason: AuditBoundedToken,
   resolutionStep: PolicyResolutionStep,
-}).annotations(strict);
+});
 export type ToolCallDeniedPayload = typeof ToolCallDeniedPayload.Type;
 
 export const PolicyDecisionRecordedPayload = Schema.Struct({
   correlationId: CorrelationId,
   causationId: Schema.optional(CausationId),
   actingPrincipal: AuditActingPrincipal,
-  decision: Schema.Literal("allow", "deny", "prompt"),
+  decision: Schema.Literals(["allow", "deny", "prompt"]),
   denialReason: Schema.optional(AuditBoundedToken),
   resolutionStep: PolicyResolutionStep,
   /** Bounded policy surface name (e.g. tool-action, agent-run, remote-access). */
   policySurface: AuditBoundedToken,
   actionId: Schema.optional(ToolActionId),
-}).annotations(strict);
+});
 export type PolicyDecisionRecordedPayload = typeof PolicyDecisionRecordedPayload.Type;
 
-const ApprovalScope = Schema.Literal("action", "session", "project");
+const ApprovalScope = Schema.Literals(["action", "session", "project"]);
 const ApprovalClass = AuditBoundedToken;
 
 export const ApprovalDeniedPayload = Schema.Struct({
@@ -125,7 +131,7 @@ export const ApprovalDeniedPayload = Schema.Struct({
   correlationId: CorrelationId,
   actingPrincipal: AuditActingPrincipal,
   denialReason: AuditBoundedToken,
-}).annotations(strict);
+});
 export type ApprovalDeniedPayload = typeof ApprovalDeniedPayload.Type;
 
 export const AuthorityTransitionRecordedPayload = Schema.Struct({
@@ -133,31 +139,31 @@ export const AuthorityTransitionRecordedPayload = Schema.Struct({
   actingPrincipal: AuditActingPrincipal,
   /** e.g. project-attach, worktree-bind, child-clamp */
   transitionKind: AuditBoundedToken,
-  outcome: Schema.Literal("applied", "denied", "clamped"),
+  outcome: Schema.Literals(["applied", "denied", "clamped"]),
   denialReason: Schema.optional(AuditBoundedToken),
   /** Opaque bound-root / worktree / project reference — never an absolute path. */
   scopeReference: Schema.optional(AuditOpaqueReference),
-}).annotations(strict);
+});
 export type AuthorityTransitionRecordedPayload = typeof AuthorityTransitionRecordedPayload.Type;
 
-export const AuditEventPayload = Schema.Union(
+export const AuditEventPayload = Schema.Union([
   Schema.Struct({
     eventName: Schema.Literal("tool-call-denied"),
     payload: ToolCallDeniedPayload,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("policy-decision-recorded"),
     payload: PolicyDecisionRecordedPayload,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("approval-denied"),
     payload: ApprovalDeniedPayload,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("authority-transition-recorded"),
     payload: AuthorityTransitionRecordedPayload,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AuditEventPayload = typeof AuditEventPayload.Type;
 
 /**
@@ -166,25 +172,35 @@ export type AuditEventPayload = typeof AuditEventPayload.Type;
  * facts. Secrets, absolute private paths, and raw tool output are unrepresentable.
  */
 export const AuditEvent = Schema.Struct({
-  eventVersion: EventVersion.pipe(Schema.filter((version) => version === 1)),
-  eventName: Schema.Literal(...AUDIT_EVENT_NAMES),
+  eventVersion: EventVersion.check(Schema.makeFilter((version) => version === 1)),
+  eventName: Schema.Literals(AUDIT_EVENT_NAMES),
   actor: EventActor,
   occurredAt: UtcTimestamp,
   body: AuditEventPayload,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((event) => event.eventName === event.body.eventName, {
-      message: () => "Audit eventName must match body.eventName.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((event) => event.eventName === event.body.eventName, {
+    message: "Audit eventName must match body.eventName.",
+  }),
+);
 export type AuditEvent = typeof AuditEvent.Type;
 
-export const decodeAuditEvent = Schema.decodeUnknownSync(AuditEvent);
-export const decodeAuditEventPayload = Schema.decodeUnknownSync(AuditEventPayload);
-export const decodeAuditActingPrincipal = Schema.decodeUnknownSync(AuditActingPrincipal);
-export const decodeAuditBoundedToken = Schema.decodeUnknownSync(AuditBoundedToken);
-export const decodeAuditOpaqueReference = Schema.decodeUnknownSync(AuditOpaqueReference);
+export const decodeAuditEvent = Schema.decodeUnknownSync(AuditEvent, STRICT_DECODE_OPTIONS);
+export const decodeAuditEventPayload = Schema.decodeUnknownSync(
+  AuditEventPayload,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAuditActingPrincipal = Schema.decodeUnknownSync(
+  AuditActingPrincipal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAuditBoundedToken = Schema.decodeUnknownSync(
+  AuditBoundedToken,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAuditOpaqueReference = Schema.decodeUnknownSync(
+  AuditOpaqueReference,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Convenience cast when journaling audit event names into EventName-branded fields. */
 export function auditEventName(name: AuditEventName): string {

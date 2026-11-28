@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   CANVAS_SHARE_MAX_IMAGES,
   CanvasShareImage,
@@ -17,10 +18,10 @@ import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
 
 export const CanvasShareAccessEventId = brandedUuid("CanvasShareAccessEventId");
 export type CanvasShareAccessEventId = typeof CanvasShareAccessEventId.Type;
@@ -49,7 +50,7 @@ export const CANVAS_SHARE_MAX_OVERVIEW_SNAPSHOTS = 256;
  * host itself refuses to share, so the read never reached the snapshot's scope
  * or lifecycle at all.
  */
-export const CanvasShareAccessOutcome = Schema.Literal(
+export const CanvasShareAccessOutcome = Schema.Literals([
   "allowed",
   "denied-expired",
   "denied-revoked",
@@ -57,7 +58,7 @@ export const CanvasShareAccessOutcome = Schema.Literal(
   "denied-deleted-source",
   "denied-scope-mismatch",
   "denied-sharing-disabled",
-);
+]);
 export type CanvasShareAccessOutcome = typeof CanvasShareAccessOutcome.Type;
 
 /**
@@ -76,13 +77,12 @@ export const CanvasShareAccessLogEvent = Schema.Struct({
   occurredAt: UtcTimestamp,
   outcome: CanvasShareAccessOutcome,
   /** Coarse browser family only: chrome | safari | firefox | edge | other */
-  browserFamily: Schema.Literal("chrome", "safari", "firefox", "edge", "other"),
+  browserFamily: Schema.Literals(["chrome", "safari", "firefox", "edge", "other"]),
   /** Optional redacted principal label already owner-visible on the snapshot. */
   audienceLabel: Schema.optional(
-    boundedNonEmptyText(128).pipe(
-      Schema.filter((value) => isCanvasShareSafeText(value), {
-        message: () =>
-          "Canvas share access-log audience labels must not contain secrets or host paths.",
+    boundedNonEmptyText(128).check(
+      Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+        message: "Canvas share access-log audience labels must not contain secrets or host paths.",
       }),
     ),
   ),
@@ -90,8 +90,8 @@ export const CanvasShareAccessLogEvent = Schema.Struct({
    * Optional authenticated principal identity used for lifecycle validation when
    * privacy-preserving producers omit audienceLabel.
    */
-  principalId: Schema.optional(Schema.UUID),
-}).annotations(strict);
+  principalId: Schema.optional(GuidString),
+});
 export type CanvasShareAccessLogEvent = typeof CanvasShareAccessLogEvent.Type;
 
 /**
@@ -115,9 +115,9 @@ export const CanvasShareAccessRequest = Schema.Struct({
     Schema.Struct({
       blockId: CanvasBlockId,
       frameId: Schema.optional(CanvasDesignFrameId),
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type CanvasShareAccessRequest = typeof CanvasShareAccessRequest.Type;
 
 /**
@@ -126,7 +126,7 @@ export type CanvasShareAccessRequest = typeof CanvasShareAccessRequest.Type;
  * outcome the owner later audits. `unavailable` is the only shape without an
  * event: there was no snapshot record to evaluate or log against.
  */
-export const CanvasShareAccessResult = Schema.Union(
+export const CanvasShareAccessResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("allowed"),
     document: CanvasStaticExportDocument,
@@ -137,20 +137,22 @@ export const CanvasShareAccessResult = Schema.Union(
      * frame sandboxed to scripts alone, as for a live Canvas.
      */
     designPage: Schema.optional(
-      Schema.String.pipe(Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/)),
+      Schema.String.check(
+        Schema.isPattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+      ),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     outcome: CanvasShareAccessOutcome,
     event: CanvasShareAccessLogEvent,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     denialCode: CanvasShareDenialCode,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type CanvasShareAccessResult = typeof CanvasShareAccessResult.Type;
 
 /**
@@ -169,11 +171,11 @@ export const CanvasShareOverview = Schema.Struct({
   /** False fails every share closed while local Canvas use stays available. */
   sharingEnabled: Schema.Boolean,
   owner: CanvasShareLocalUserActor,
-  snapshots: Schema.Array(CanvasShareSnapshotSummary).pipe(
-    Schema.maxItems(CANVAS_SHARE_MAX_OVERVIEW_SNAPSHOTS),
+  snapshots: Schema.Array(CanvasShareSnapshotSummary).check(
+    Schema.isMaxLength(CANVAS_SHARE_MAX_OVERVIEW_SNAPSHOTS),
   ),
-  accessLog: Schema.Array(CanvasShareAccessLogEvent).pipe(
-    Schema.maxItems(CANVAS_SHARE_MAX_ACCESS_LOG_EVENTS),
+  accessLog: Schema.Array(CanvasShareAccessLogEvent).check(
+    Schema.isMaxLength(CANVAS_SHARE_MAX_ACCESS_LOG_EVENTS),
   ),
   /**
    * The images a snapshot of the current version would copy, each exactly as
@@ -181,19 +183,34 @@ export const CanvasShareOverview = Schema.Struct({
    * before they agree (maintainer decision, 2026-11-22).
    */
   images: Schema.optional(
-    Schema.Array(CanvasShareImage).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+    Schema.Array(CanvasShareImage).check(Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES)),
   ),
-}).annotations(strict);
+});
 export type CanvasShareOverview = typeof CanvasShareOverview.Type;
 
 /** Journal frame for one evaluated access attempt. */
 export const CanvasShareAccessLogged = Schema.Struct({
   event: CanvasShareAccessLogEvent,
-}).annotations(strict);
+});
 export type CanvasShareAccessLogged = typeof CanvasShareAccessLogged.Type;
 
-export const decodeCanvasShareAccessLogEvent = Schema.decodeUnknownSync(CanvasShareAccessLogEvent);
-export const decodeCanvasShareAccessRequest = Schema.decodeUnknownSync(CanvasShareAccessRequest);
-export const decodeCanvasShareAccessResult = Schema.decodeUnknownSync(CanvasShareAccessResult);
-export const decodeCanvasShareOverview = Schema.decodeUnknownSync(CanvasShareOverview);
-export const decodeCanvasShareAccessLogged = Schema.decodeUnknownSync(CanvasShareAccessLogged);
+export const decodeCanvasShareAccessLogEvent = Schema.decodeUnknownSync(
+  CanvasShareAccessLogEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasShareAccessRequest = Schema.decodeUnknownSync(
+  CanvasShareAccessRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasShareAccessResult = Schema.decodeUnknownSync(
+  CanvasShareAccessResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasShareOverview = Schema.decodeUnknownSync(
+  CanvasShareOverview,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasShareAccessLogged = Schema.decodeUnknownSync(
+  CanvasShareAccessLogged,
+  STRICT_DECODE_OPTIONS,
+);

@@ -297,7 +297,7 @@ describe("OpenCode 2.x app-managed tools", () => {
                     yield* Deferred.make<
                       Extract<ProviderRuntimeEvent, { readonly kind: "tool-request" }>
                     >();
-                  const collector = yield* Effect.fork(
+                  const collector = yield* Effect.forkChild(
                     stream.pipe(
                       Stream.filter((event) => event.sessionId === sessionId),
                       Stream.tap((event) =>
@@ -329,8 +329,10 @@ describe("OpenCode 2.x app-managed tools", () => {
                     Deferred.await(toolRequest),
                     Fiber.join(collector).pipe(
                       Effect.flatMap((early) =>
-                        Effect.dieMessage(
-                          `turn ended before the tool request: ${JSON.stringify(Array.from(early).at(-1))}`,
+                        Effect.die(
+                          new Error(
+                            `turn ended before the tool request: ${JSON.stringify(Array.from(early).at(-1))}`,
+                          ),
                         ),
                       ),
                     ),

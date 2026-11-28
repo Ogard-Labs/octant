@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { LinearNodeId } from "./linearIssues";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The only Linear issue identity a renderer may attach to a new thread. The
@@ -10,16 +9,19 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  */
 export const LinearIssueContextRequest = Schema.Struct({
   id: LinearNodeId,
-}).annotations(strict);
+});
 export type LinearIssueContextRequest = typeof LinearIssueContextRequest.Type;
 
-export const LinearIssueContextRefusedReason = Schema.Literal(
+export const LinearIssueContextRefusedReason = Schema.Literals([
   "unauthorized",
   "unavailable",
   "rate-limited",
   "not-found",
   "forbidden",
-);
+]);
 export type LinearIssueContextRefusedReason = typeof LinearIssueContextRefusedReason.Type;
 
-export const decodeLinearIssueContextRequest = Schema.decodeUnknownSync(LinearIssueContextRequest);
+export const decodeLinearIssueContextRequest = Schema.decodeUnknownSync(
+  LinearIssueContextRequest,
+  STRICT_DECODE_OPTIONS,
+);

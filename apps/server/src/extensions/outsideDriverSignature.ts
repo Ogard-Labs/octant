@@ -44,8 +44,8 @@ export function readOutsideDriverSignature(
     return { status: "invalid" };
   }
   const decoded = decodeOutsideProviderDriverSignatureDocument(parseJson(signatureEntry.content));
-  if (decoded._tag === "Left") return { status: "invalid" };
-  const document = decoded.right;
+  if (decoded._tag === "Failure") return { status: "invalid" };
+  const document = decoded.success;
 
   if (entries.some((entry) => entry.kind !== "file" && entry.kind !== "directory")) {
     return { status: "invalid" };

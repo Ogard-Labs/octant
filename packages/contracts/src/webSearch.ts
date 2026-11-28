@@ -1,9 +1,10 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const BoundedText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const BoundedText = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
 
 /**
  * Where Octant's own `web-search` sends a query: the ordered list of search
@@ -17,17 +18,17 @@ const BoundedText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 export const WebSearchBackendId = brandedUuid("WebSearchBackendId");
 export type WebSearchBackendId = typeof WebSearchBackendId.Type;
 
-export const WebSearchBackendKind = Schema.Literal(
+export const WebSearchBackendKind = Schema.Literals([
   "searxng",
   "staan",
   "mojeek",
   "linkup",
   "brave",
   "exa",
-);
+]);
 export type WebSearchBackendKind = typeof WebSearchBackendKind.Type;
 
-export const WebSearchDataPolicy = Schema.Literal("any", "zdr-only", "eu-only", "eu-and-zdr");
+export const WebSearchDataPolicy = Schema.Literals(["any", "zdr-only", "eu-only", "eu-and-zdr"]);
 export type WebSearchDataPolicy = typeof WebSearchDataPolicy.Type;
 
 /** At most this many backends; a longer list only adds vendors a query might reach. */
@@ -37,24 +38,24 @@ export const WebSearchBackendEntry = Schema.Struct({
   id: WebSearchBackendId,
   kind: WebSearchBackendKind,
   /** The instance or regional host, where the kind has more than one. */
-  address: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
+  address: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_048))),
   /**
    * Where the broker keeps this entry's API key, for a kind that takes one.
    * The host assigns it; a key is never part of the settings.
    */
-  credentialRef: Schema.optional(Schema.UUID),
+  credentialRef: Schema.optional(GuidString),
   enabled: Schema.Boolean,
   /** The person's statement: "This vendor keeps no record of my queries." */
   statesZdr: Schema.Boolean,
   /** The person's statement: "This vendor processes my queries only in the EU or UK." */
   statesEuProcessing: Schema.Boolean,
-}).annotations(strict);
+});
 export type WebSearchBackendEntry = typeof WebSearchBackendEntry.Type;
 
 export const WebSearchSettings = Schema.Struct({
   policy: WebSearchDataPolicy,
-  backends: Schema.Array(WebSearchBackendEntry).pipe(Schema.maxItems(MAX_WEB_SEARCH_BACKENDS)),
-}).annotations(strict);
+  backends: Schema.Array(WebSearchBackendEntry).check(Schema.isMaxLength(MAX_WEB_SEARCH_BACKENDS)),
+});
 export type WebSearchSettings = typeof WebSearchSettings.Type;
 
 /**
@@ -62,22 +63,21 @@ export type WebSearchSettings = typeof WebSearchSettings.Type;
  * its vendor does not offer counts as not made, so a stored statement the
  * offer table no longer supports stops a query rather than passing one.
  */
-export const WebSearchIneligibleReason = Schema.Literal(
+export const WebSearchIneligibleReason = Schema.Literals([
   "disabled",
   "zdr-not-stated",
   "eu-processing-not-stated",
-);
+]);
 export type WebSearchIneligibleReason = typeof WebSearchIneligibleReason.Type;
 
-export const WebSearchBackendState = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("ready") }).annotations(strict),
-  /** No key is stored, or the vendor refused the stored one. */
-  Schema.Struct({ kind: Schema.Literal("needs-key") }).annotations(strict),
+export const WebSearchBackendState = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("ready") }),
+  Schema.Struct({ kind: Schema.Literal("needs-key") }),
   Schema.Struct({
     kind: Schema.Literal("not-eligible"),
     reason: WebSearchIneligibleReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WebSearchBackendState = typeof WebSearchBackendState.Type;
 
 /**
@@ -86,36 +86,34 @@ export type WebSearchBackendState = typeof WebSearchBackendState.Type;
  */
 export const WebSearchSettingsView = Schema.Struct({
   settings: WebSearchSettings,
-  source: Schema.Literal("saved", "migrated"),
-  states: Schema.Array(
-    Schema.Struct({ id: WebSearchBackendId, state: WebSearchBackendState }).annotations(strict),
-  ),
-}).annotations(strict);
+  source: Schema.Literals(["saved", "migrated"]),
+  states: Schema.Array(Schema.Struct({ id: WebSearchBackendId, state: WebSearchBackendState })),
+});
 export type WebSearchSettingsView = typeof WebSearchSettingsView.Type;
 
 export const SetWebSearchSettingsRequest = Schema.Struct({
   settings: WebSearchSettings,
-}).annotations(strict);
+});
 export type SetWebSearchSettingsRequest = typeof SetWebSearchSettingsRequest.Type;
 
-export const WebSearchSettingsRefusalCode = Schema.Literal(
+export const WebSearchSettingsRefusalCode = Schema.Literals([
   "unauthorized",
   "duplicate-entry",
   "address-required",
   "address-not-taken",
   "invalid-address",
   "statement-not-offered",
-);
+]);
 export type WebSearchSettingsRefusalCode = typeof WebSearchSettingsRefusalCode.Type;
 
-export const SetWebSearchSettingsOutcome = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("saved"), view: WebSearchSettingsView }).annotations(strict),
+export const SetWebSearchSettingsOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("saved"), view: WebSearchSettingsView }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     code: WebSearchSettingsRefusalCode,
     message: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type SetWebSearchSettingsOutcome = typeof SetWebSearchSettingsOutcome.Type;
 
 /**
@@ -125,18 +123,18 @@ export type SetWebSearchSettingsOutcome = typeof SetWebSearchSettingsOutcome.Typ
  */
 export const SetWebSearchKeyRequest = Schema.Struct({
   entryId: WebSearchBackendId,
-  key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  key: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+});
 export type SetWebSearchKeyRequest = typeof SetWebSearchKeyRequest.Type;
 
-export const SetWebSearchKeyOutcome = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("saved"), view: WebSearchSettingsView }).annotations(strict),
+export const SetWebSearchKeyOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("saved"), view: WebSearchSettingsView }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    code: Schema.Literal("unauthorized", "unknown-entry", "key-not-taken", "unavailable"),
+    code: Schema.Literals(["unauthorized", "unknown-entry", "key-not-taken", "unavailable"]),
     message: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type SetWebSearchKeyOutcome = typeof SetWebSearchKeyOutcome.Type;
 
 /**
@@ -145,7 +143,7 @@ export type SetWebSearchKeyOutcome = typeof SetWebSearchKeyOutcome.Type;
  * refusal of the query itself, and `not-tried`, where the call's budget ran out
  * first.
  */
-export const WebSearchBackendFailure = Schema.Literal(
+export const WebSearchBackendFailure = Schema.Literals([
   "network",
   "timeout",
   "rate-limited",
@@ -154,7 +152,7 @@ export const WebSearchBackendFailure = Schema.Literal(
   "needs-key",
   "refused-query",
   "not-tried",
-);
+]);
 export type WebSearchBackendFailure = typeof WebSearchBackendFailure.Type;
 
 export const WEB_SEARCH_CALLS_AGGREGATE_TYPE = "web-search-calls";
@@ -173,19 +171,17 @@ export const WebSearchCallRouted = Schema.Struct({
   /** The provider's id for the tool call, as the thread's tool row carries it, when it gave one. */
   toolCallId: Schema.optional(BoundedText),
   answeredBy: Schema.optional(
-    Schema.Struct({ entryId: WebSearchBackendId, backend: WebSearchBackendKind }).annotations(
-      strict,
-    ),
+    Schema.Struct({ entryId: WebSearchBackendId, backend: WebSearchBackendKind }),
   ),
   failed: Schema.Array(
     Schema.Struct({
       entryId: WebSearchBackendId,
       backend: WebSearchBackendKind,
       failure: WebSearchBackendFailure,
-    }).annotations(strict),
+    }),
   ),
   routedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WebSearchCallRouted = typeof WebSearchCallRouted.Type;
 
 export const WEB_SEARCH_SETTINGS_AGGREGATE_TYPE = "web-search-settings";
@@ -196,9 +192,9 @@ export const WebSearchSettingsChanged = Schema.Struct({
   kind: Schema.Literal("web-search-settings-changed"),
   previous: WebSearchSettings,
   next: WebSearchSettings,
-  changedBy: Schema.Literal("local-window", "remote-device"),
+  changedBy: Schema.Literals(["local-window", "remote-device"]),
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WebSearchSettingsChanged = typeof WebSearchSettingsChanged.Type;
 
 export const decodeWebSearchSettings = Schema.decodeUnknownSync(WebSearchSettings, {
@@ -209,16 +205,19 @@ export const decodeWebSearchSettingsView = Schema.decodeUnknownSync(WebSearchSet
 });
 export const decodeSetWebSearchSettingsRequest = Schema.decodeUnknownSync(
   SetWebSearchSettingsRequest,
-  { onExcessProperty: "error" },
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeSetWebSearchSettingsOutcome = Schema.decodeUnknownSync(
   SetWebSearchSettingsOutcome,
-  { onExcessProperty: "error" },
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeWebSearchSettingsChanged = Schema.decodeUnknownSync(WebSearchSettingsChanged, {
   onExcessProperty: "error",
 });
-export const decodeWebSearchBackendId = Schema.decodeUnknownSync(WebSearchBackendId);
+export const decodeWebSearchBackendId = Schema.decodeUnknownSync(
+  WebSearchBackendId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeSetWebSearchKeyRequest = Schema.decodeUnknownSync(SetWebSearchKeyRequest, {
   onExcessProperty: "error",
 });

@@ -131,7 +131,7 @@ export async function readImportedSessionHistory(
     Effect.suspend(() => history(input)).pipe(
       Effect.timeout(Duration.millis(timeoutMs)),
       Effect.map((value): ProviderNativeSessionHistory | "unreadable" => value),
-      Effect.catchAllCause(() => Effect.succeed("unreadable" as const)),
+      Effect.catchCause(() => Effect.succeed("unreadable" as const)),
     ),
   );
   try {

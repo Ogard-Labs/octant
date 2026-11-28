@@ -55,7 +55,7 @@ describe("installed Grok Build runtime", () => {
                 modelId,
                 executionPolicy: "full-access",
               });
-              const completion = yield* Effect.fork(
+              const completion = yield* Effect.forkChild(
                 collectTerminal(yield* connection.subscribe, completionSessionId),
               );
               yield* connection.send({
@@ -84,7 +84,7 @@ describe("installed Grok Build runtime", () => {
                 modelId,
                 executionPolicy: "full-access",
               });
-              const interrupted = yield* Effect.fork(
+              const interrupted = yield* Effect.forkChild(
                 collectTerminal(yield* connection.subscribe, interruptSessionId),
               );
               yield* connection.send({

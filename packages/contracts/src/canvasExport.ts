@@ -8,6 +8,7 @@ import {
   canvasExportSafeBounded,
   canvasExportUniqueFormats,
 } from "./canvasExportContribution";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 export {
   CANVAS_EXPORT_SCHEMA_VERSION,
   CanvasExportSchemaVersion,
@@ -31,10 +32,10 @@ import { UtcTimestamp } from "./events";
 // approval card, and calls the plugin only after approval. Markdown and HTML
 // are text; PNG and PDF are pictures the host draws in its own browser, and a
 // destination that declares them receives files rather than a body.
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
 
 export const CANVAS_EXPORT_BODY_MAX_BYTES = 262_144;
 /** A held approval is answered or forgotten. This is how long it waits. */
@@ -53,10 +54,10 @@ export function canvasExportBodyByteLength(body: string): number {
   return bodyEncoder.encode(body).length;
 }
 
-const exportBody = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_EXPORT_BODY_MAX_BYTES, {
-    message: () => "A Canvas export body must fit the UTF-8 byte budget.",
+const exportBody = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.makeFilter((value) => canvasExportBodyByteLength(value) <= CANVAS_EXPORT_BODY_MAX_BYTES, {
+    message: "A Canvas export body must fit the UTF-8 byte budget.",
   }),
 );
 
@@ -66,23 +67,23 @@ const exportBody = Schema.String.pipe(
  * that draws them itself (a public link).
  */
 /** The forms rendered as one text body. */
-export const CanvasExportTextFormat = Schema.Literal("markdown", "html", "share-document");
+export const CanvasExportTextFormat = Schema.Literals(["markdown", "html", "share-document"]);
 export type CanvasExportTextFormat = typeof CanvasExportTextFormat.Type;
 
 /**
  * The forms drawn as pictures: a PNG per design frame (or one of the whole
  * document), or one PDF of a page per frame (or the document paginated).
  */
-export const CanvasExportPictureFormat = Schema.Literal("png", "pdf");
+export const CanvasExportPictureFormat = Schema.Literals(["png", "pdf"]);
 export type CanvasExportPictureFormat = typeof CanvasExportPictureFormat.Type;
 
-export const CanvasExportImplementedFormat = Schema.Literal(
+export const CanvasExportImplementedFormat = Schema.Literals([
   "markdown",
   "html",
   "share-document",
   "png",
   "pdf",
-);
+]);
 export type CanvasExportImplementedFormat = typeof CanvasExportImplementedFormat.Type;
 
 export const CANVAS_EXPORT_IMPLEMENTED_FORMATS = [
@@ -116,13 +117,14 @@ export const CANVAS_EXPORT_PICTURE_FILES_MAX = 96;
  * and no leading dot, scanned for credential-shaped text like every other
  * exported string, because it is shown on the card and written to disk.
  */
-export const CanvasExportFileName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(160),
-  // oxlint-disable-next-line no-control-regex
-  Schema.pattern(/^[^./\\\0][^/\\\0]*$/),
-  Schema.filter((value) => isExportCredentialFreeText(value), {
-    message: () => "An export file name must not contain a secret.",
-  }),
+export const CanvasExportFileName = Schema.Trimmed.pipe(
+  Schema.check(Schema.isNonEmpty(), Schema.isMaxLength(160)), // oxlint-disable-next-line no-control-regex
+  Schema.check(Schema.isPattern(/^[^./\\\0][^/\\\0]*$/)),
+  Schema.check(
+    Schema.makeFilter((value) => isExportCredentialFreeText(value), {
+      message: "An export file name must not contain a secret.",
+    }),
+  ),
 );
 export type CanvasExportFileName = typeof CanvasExportFileName.Type;
 
@@ -133,7 +135,7 @@ export const CanvasExportApprovalId = brandedUuid("CanvasExportApprovalId");
 export type CanvasExportApprovalId = typeof CanvasExportApprovalId.Type;
 
 export const CanvasExportPayloadDigest = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
   Schema.brand("CanvasExportPayloadDigest"),
 );
 export type CanvasExportPayloadDigest = typeof CanvasExportPayloadDigest.Type;
@@ -145,7 +147,7 @@ const CanvasExportMessage = canvasExportSafeBounded(CANVAS_EXPORT_MESSAGE_MAX_CH
 export const isCanvasExportMessage = Schema.is(CanvasExportMessage);
 
 /** Honest status of a destination that passed activation. Disabled and uninstalled targets are omitted, not listed. */
-export const CanvasExportTargetStatus = Schema.Literal("not-connected", "ready", "refused");
+export const CanvasExportTargetStatus = Schema.Literals(["not-connected", "ready", "refused"]);
 export type CanvasExportTargetStatus = typeof CanvasExportTargetStatus.Type;
 
 /**
@@ -156,27 +158,25 @@ export type CanvasExportTargetStatus = typeof CanvasExportTargetStatus.Type;
  * anyone, which is a thing to say plainly before it happens. A destination with
  * no audience — a file on this Mac — declares neither.
  */
-export const CanvasExportVisibility = Schema.Literal("secret", "public");
+export const CanvasExportVisibility = Schema.Literals(["secret", "public"]);
 export type CanvasExportVisibility = typeof CanvasExportVisibility.Type;
 
 export const CanvasExportTargetOffer = Schema.Struct({
   targetId: CanvasExportTargetId,
   label: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
-  formats: Schema.Array(CanvasExportImplementedFormat).pipe(
-    Schema.maxItems(5),
-    Schema.filter(canvasExportUniqueFormats, {
-      message: () => "Canvas export formats must be unique.",
+  formats: Schema.Array(CanvasExportImplementedFormat).check(
+    Schema.isMaxLength(5),
+    Schema.makeFilter(canvasExportUniqueFormats, {
+      message: "Canvas export formats must be unique.",
     }),
   ),
   status: CanvasExportTargetStatus,
   message: Schema.optional(CanvasExportMessage),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((offer) => offer.status !== "ready" || offer.formats.length > 0, {
-      message: () => "A ready export destination must accept a format this host can render.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((offer) => offer.status !== "ready" || offer.formats.length > 0, {
+    message: "A ready export destination must accept a format this host can render.",
+  }),
+);
 export type CanvasExportTargetOffer = typeof CanvasExportTargetOffer.Type;
 
 export const CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX = 8;
@@ -186,8 +186,8 @@ export const CanvasExportUnconfirmedNotice = Schema.Struct({
   targetId: CanvasExportTargetId,
   destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasExportUnconfirmedNotice = typeof CanvasExportUnconfirmedNotice.Type;
 
 export const CanvasExportOfferList = Schema.Struct({
@@ -195,31 +195,31 @@ export const CanvasExportOfferList = Schema.Struct({
   kind: Schema.Literal("canvas-export-offers"),
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
-  targets: Schema.Array(CanvasExportTargetOffer).pipe(Schema.maxItems(32)),
+  sequence: PositiveInt,
+  targets: Schema.Array(CanvasExportTargetOffer).check(Schema.isMaxLength(32)),
   /**
    * Exports of this Canvas a restart cut off before their delivery was
    * recorded, newest first. A later recorded export to the same destination
    * retires the notice.
    */
   unconfirmed: Schema.optional(
-    Schema.Array(CanvasExportUnconfirmedNotice).pipe(
-      Schema.maxItems(CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX),
+    Schema.Array(CanvasExportUnconfirmedNotice).check(
+      Schema.isMaxLength(CANVAS_EXPORT_UNCONFIRMED_NOTICE_MAX),
     ),
   ),
-}).annotations(strict);
+});
 export type CanvasExportOfferList = typeof CanvasExportOfferList.Type;
 
 export const CanvasExportMetadata = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
-  byteLength: Schema.Int.pipe(
-    Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_BYTES),
+  sequence: PositiveInt,
+  byteLength: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_BYTES),
   ),
   contentDigest: CanvasExportPayloadDigest,
-}).annotations(strict);
+});
 export type CanvasExportMetadata = typeof CanvasExportMetadata.Type;
 
 /**
@@ -227,8 +227,8 @@ export type CanvasExportMetadata = typeof CanvasExportMetadata.Type;
  * decision, 2026-11-22). The body stays the text the card shows whole; the
  * images ride here, and the card shows each one.
  */
-const exportShareImages = Schema.Array(CanvasShareImage).pipe(
-  Schema.maxItems(CANVAS_SHARE_MAX_IMAGES),
+const exportShareImages = Schema.Array(CanvasShareImage).check(
+  Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES),
 );
 
 export const CanvasExportRenderedText = Schema.Struct({
@@ -240,36 +240,34 @@ export const CanvasExportRenderedText = Schema.Struct({
   /** A share document's images, which only that format carries. */
   images: Schema.optional(exportShareImages),
   metadata: CanvasExportMetadata,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((output) => output.images === undefined || output.format === "share-document", {
-      message: () => "Only a share document carries images.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((output) => output.images === undefined || output.format === "share-document", {
+    message: "Only a share document carries images.",
+  }),
+);
 export type CanvasExportRenderedText = typeof CanvasExportRenderedText.Type;
 
 /** One file of a picture export, with the bytes the destination writes. */
 export const CanvasExportRenderedFile = Schema.Struct({
   name: CanvasExportFileName,
-  bytes: Schema.Uint8ArrayFromSelf.pipe(
-    Schema.filter((bytes) => bytes.length > 0, {
-      message: () => "An export file must hold at least one byte.",
+  bytes: Schema.Uint8Array.check(
+    Schema.makeFilter((bytes) => bytes.length > 0, {
+      message: "An export file must hold at least one byte.",
     }),
   ),
-}).annotations(strict);
+});
 export type CanvasExportRenderedFile = typeof CanvasExportRenderedFile.Type;
 
 export const CanvasExportPictureMetadata = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
-  byteLength: Schema.Int.pipe(
-    Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
+  sequence: PositiveInt,
+  byteLength: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
   ),
   contentDigest: CanvasExportPayloadDigest,
-}).annotations(strict);
+});
 export type CanvasExportPictureMetadata = typeof CanvasExportPictureMetadata.Type;
 
 /**
@@ -282,14 +280,14 @@ export const CanvasExportRenderedPictures = Schema.Struct({
   kind: Schema.Literal("canvas-export-output"),
   format: CanvasExportPictureFormat,
   title: canvasExportSafeBounded(256),
-  files: Schema.NonEmptyArray(CanvasExportRenderedFile).pipe(
-    Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX),
-    Schema.filter((files) => new Set(files.map((file) => file.name)).size === files.length, {
-      message: () => "Export file names must be unique.",
+  files: Schema.NonEmptyArray(CanvasExportRenderedFile).check(
+    Schema.isMaxLength(CANVAS_EXPORT_PICTURE_FILES_MAX),
+    Schema.makeFilter((files) => new Set(files.map((file) => file.name)).size === files.length, {
+      message: "Export file names must be unique.",
     }),
   ),
   metadata: CanvasExportPictureMetadata,
-}).annotations(strict);
+});
 export type CanvasExportRenderedPictures = typeof CanvasExportRenderedPictures.Type;
 
 /**
@@ -297,22 +295,22 @@ export type CanvasExportRenderedPictures = typeof CanvasExportRenderedPictures.T
  * so one that declared text alone never has to handle files; it still narrows
  * on `format` to read the body, which is what keeps that true in the types.
  */
-export const CanvasExportRenderedOutput = Schema.Union(
+export const CanvasExportRenderedOutput = Schema.Union([
   CanvasExportRenderedText,
   CanvasExportRenderedPictures,
-);
+]);
 export type CanvasExportRenderedOutput = typeof CanvasExportRenderedOutput.Type;
 
 /** One file as the approval card names it: its name and weight, never its bytes. */
 export const CanvasExportApprovalFile = Schema.Struct({
   name: CanvasExportFileName,
-  byteLength: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  byteLength: PositiveInt,
+});
 export type CanvasExportApprovalFile = typeof CanvasExportApprovalFile.Type;
 
-const exportUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+const exportUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -326,7 +324,7 @@ const exportUrl = Schema.String.pipe(
         return false;
       }
     },
-    { message: () => "An export link must be a credential-free http(s) URL." },
+    { message: "An export link must be a credential-free http(s) URL." },
   ),
 );
 
@@ -341,13 +339,14 @@ const exportUrl = Schema.String.pipe(
  * share filter's path rule protects a snapshot leaving the host, and none of
  * this leaves the host.
  */
-export const CanvasExportFilePath = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0"), {
-    message: () => "An export file path must be an absolute path with no NUL.",
+export const CanvasExportFilePath = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0"), {
+    message: "An export file path must be an absolute path with no NUL.",
   }),
-  Schema.filter((value) => isExportCredentialFreeText(value), {
-    message: () => "An export file path must not contain a secret.",
+  Schema.makeFilter((value) => isExportCredentialFreeText(value), {
+    message: "An export file path must not contain a secret.",
   }),
 );
 export type CanvasExportFilePath = typeof CanvasExportFilePath.Type;
@@ -356,14 +355,14 @@ export type CanvasExportFilePath = typeof CanvasExportFilePath.Type;
  * A stable id a remote destination assigned to what it created. Bounded and
  * scanned like every exported string, because it is echoed back to the person.
  */
-const exportRemoteId = boundedText(128).pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-  Schema.filter((value) => isCanvasShareSafeText(value), {
-    message: () => "An export remote id must not contain a secret.",
+const exportRemoteId = boundedText(128).check(
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+    message: "An export remote id must not contain a secret.",
   }),
 );
 
-export const CanvasExportReceipt = Schema.Union(
+export const CanvasExportReceipt = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("link"),
     href: exportUrl,
@@ -372,20 +371,20 @@ export const CanvasExportReceipt = Schema.Union(
      * one. A gist's URL and id are one receipt, not two.
      */
     remoteId: Schema.optional(exportRemoteId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("path"),
     /** The file a local destination wrote, named the way the person will open it. */
     path: CanvasExportFilePath,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remote-id"),
     remoteId: exportRemoteId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasExportReceipt = typeof CanvasExportReceipt.Type;
 
-export const CanvasExportRefusalCode = Schema.Literal(
+export const CanvasExportRefusalCode = Schema.Literals([
   "approval-required",
   "not-offered",
   "not-connected",
@@ -396,23 +395,23 @@ export const CanvasExportRefusalCode = Schema.Literal(
   "unauthorized",
   "unavailable",
   "expired",
-);
+]);
 export type CanvasExportRefusalCode = typeof CanvasExportRefusalCode.Type;
 
 export const CanvasExportRefusal = Schema.Struct({
   kind: Schema.Literal("refused"),
   code: CanvasExportRefusalCode,
   message: CanvasExportMessage,
-}).annotations(strict);
+});
 export type CanvasExportRefusal = typeof CanvasExportRefusal.Type;
 
-export const CanvasExportDelivery = Schema.Union(
+export const CanvasExportDelivery = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("receipt"),
     receipt: CanvasExportReceipt,
-  }).annotations(strict),
+  }),
   CanvasExportRefusal,
-);
+]);
 export type CanvasExportDelivery = typeof CanvasExportDelivery.Type;
 
 /** The longest a link a destination keeps may live, and the default it offers. */
@@ -425,22 +424,24 @@ export const CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS = 256;
  * How long a published link lives. `never` exists only as the person's own
  * choice on the card; a destination's default is always a number of days.
  */
-export const CanvasExportLinkExpiry = Schema.Union(
+export const CanvasExportLinkExpiry = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("days"),
-    days: Schema.Int.pipe(Schema.between(1, CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS)),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("never") }).annotations(strict),
-);
+    days: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS }),
+    ),
+  }),
+  Schema.Struct({ kind: Schema.Literal("never") }),
+]);
 export type CanvasExportLinkExpiry = typeof CanvasExportLinkExpiry.Type;
 
 /**
  * A link's password. It travels from the card to the destination and on to
  * the service over TLS; it is never journaled, echoed, or put in a URL.
  */
-export const CanvasExportLinkPassword = Schema.String.pipe(
-  Schema.minLength(CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS),
-  Schema.maxLength(CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS),
+export const CanvasExportLinkPassword = Schema.String.check(
+  Schema.isMinLength(CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS),
+  Schema.isMaxLength(CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS),
 );
 
 /**
@@ -448,20 +449,22 @@ export const CanvasExportLinkPassword = Schema.String.pipe(
  * the link an approval would update when one already exists.
  */
 export const CanvasExportLinkTerms = Schema.Struct({
-  defaultExpiryDays: Schema.Int.pipe(Schema.between(1, CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS)),
+  defaultExpiryDays: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS }),
+  ),
   allowsPassword: Schema.Boolean,
   /** The existing link this export replaces the content of, keeping its URL. */
   updatesLink: Schema.optional(exportUrl),
   /** Whether the link it updates has a password, which an update keeps. */
   hasPassword: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type CanvasExportLinkTerms = typeof CanvasExportLinkTerms.Type;
 
 /** What the person chose for a link on the card. */
 export const CanvasExportLinkChoice = Schema.Struct({
   expiry: CanvasExportLinkExpiry,
   password: Schema.optional(CanvasExportLinkPassword),
-}).annotations(strict);
+});
 export type CanvasExportLinkChoice = typeof CanvasExportLinkChoice.Type;
 
 export const CanvasExportApprovalCard = Schema.Struct({
@@ -470,7 +473,7 @@ export const CanvasExportApprovalCard = Schema.Struct({
   approvalId: CanvasExportApprovalId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   targetId: CanvasExportTargetId,
   destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
@@ -491,7 +494,7 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * a file that exists and is not named here is never overwritten.
    */
   alsoReplaces: Schema.optional(
-    Schema.Array(CanvasExportFilePath).pipe(Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX)),
+    Schema.Array(CanvasExportFilePath).check(Schema.isMaxLength(CANVAS_EXPORT_PICTURE_FILES_MAX)),
   ),
   /**
    * The account this export will act as, when the destination acts as one.
@@ -536,44 +539,41 @@ export const CanvasExportApprovalCard = Schema.Struct({
   images: Schema.optional(exportShareImages),
   /** The files a picture form writes, named and weighed, in writing order. */
   files: Schema.optional(
-    Schema.NonEmptyArray(CanvasExportApprovalFile).pipe(
-      Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX),
+    Schema.NonEmptyArray(CanvasExportApprovalFile).check(
+      Schema.isMaxLength(CANVAS_EXPORT_PICTURE_FILES_MAX),
     ),
   ),
   /** How many pages a PDF holds. */
-  pages: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  pages: Schema.optional(PositiveInt),
   /**
    * Present when the destination publishes a link: its default expiry, whether
    * it takes a password, and the link this export would update.
    */
   destinationLinkTerms: Schema.optional(CanvasExportLinkTerms),
   payloadDigest: CanvasExportPayloadDigest,
-  byteLength: Schema.Int.pipe(
-    Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
+  byteLength: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
   ),
   /** Past this instant the host drops the held approval; answering it expires. */
   expiresAt: UtcTimestamp,
 })
-  .annotations(strict)
   // Only a card that names the file can say what it will do to one. A card
   // claiming a replacement without naming the file would be asking for a
   // confirmation nobody can give.
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (card) =>
         (card.replacesExisting === undefined && card.alsoReplaces === undefined) ||
         card.destinationPath !== undefined,
-      {
-        message: () => "Only a card that names a destination path can say it replaces one.",
-      },
+      { message: "Only a card that names a destination path can say it replaces one." },
     ),
   )
   // A text form shows its payload and a picture form names its files, never
   // neither and never both: a card with nothing to approve, or with a body no
   // file will hold, would not be the export it describes.
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (card) =>
         isCanvasExportPictureFormat(card.format)
           ? card.payload === undefined && card.files !== undefined
@@ -581,18 +581,15 @@ export const CanvasExportApprovalCard = Schema.Struct({
             card.files === undefined &&
             card.pages === undefined &&
             card.byteLength <= CANVAS_EXPORT_BODY_MAX_BYTES,
-      {
-        message: () =>
-          "A text export card shows its payload; a picture export card names its files.",
-      },
+      { message: "A text export card shows its payload; a picture export card names its files." },
     ),
   )
-  .pipe(
-    Schema.filter((card) => card.images === undefined || card.format === "share-document", {
-      message: () => "Only a share document's card shows images.",
+  .check(
+    Schema.makeFilter((card) => card.images === undefined || card.format === "share-document", {
+      message: "Only a share document's card shows images.",
     }),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
 
 /**
@@ -604,18 +601,18 @@ export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
  * receives and checks each value again.
  */
 export const CanvasExportFrameTheme = Schema.Struct({
-  scheme: Schema.Literal("light", "dark"),
+  scheme: Schema.Literals(["light", "dark"]),
   tokens: Schema.Array(
-    Schema.Tuple(
-      Schema.String.pipe(Schema.pattern(/^--oct-[a-z0-9-]{1,40}$/)),
-      Schema.String.pipe(
-        Schema.minLength(1),
-        Schema.maxLength(512),
-        Schema.pattern(/^[^<>{};\\]*$/),
+    Schema.Tuple([
+      Schema.String.check(Schema.isPattern(/^--oct-[a-z0-9-]{1,40}$/)),
+      Schema.String.check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(512),
+        Schema.isPattern(/^[^<>{};\\]*$/),
       ),
-    ),
-  ).pipe(Schema.maxItems(96)),
-}).annotations(strict);
+    ]),
+  ).check(Schema.isMaxLength(96)),
+});
 export type CanvasExportFrameTheme = typeof CanvasExportFrameTheme.Type;
 
 export const CanvasExportPrepareRequest = Schema.Struct({
@@ -623,20 +620,20 @@ export const CanvasExportPrepareRequest = Schema.Struct({
   kind: Schema.Literal("canvas-export-prepare"),
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   targetId: CanvasExportTargetId,
   format: CanvasExportFormat,
   frameTheme: Schema.optional(CanvasExportFrameTheme),
-}).annotations(strict);
+});
 export type CanvasExportPrepareRequest = typeof CanvasExportPrepareRequest.Type;
 
-export const CanvasExportPrepareResult = Schema.Union(
+export const CanvasExportPrepareResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("approval"),
     card: CanvasExportApprovalCard,
-  }).annotations(strict),
+  }),
   CanvasExportRefusal,
-);
+]);
 export type CanvasExportPrepareResult = typeof CanvasExportPrepareResult.Type;
 
 /**
@@ -657,7 +654,7 @@ export const CANVAS_HTML_FILE_MAX_BYTES = 7 * 1024 * 1024;
 export const CANVAS_HTML_FILE_IMAGES_MAX_BYTES = 4 * 1024 * 1024;
 
 /** What one HTML-file request takes: the document, or the mockups' TSX handoff. */
-export const CanvasHtmlFileForm = Schema.Literal("document", "mockups-tsx");
+export const CanvasHtmlFileForm = Schema.Literals(["document", "mockups-tsx"]);
 export type CanvasHtmlFileForm = typeof CanvasHtmlFileForm.Type;
 
 export const CanvasHtmlFileRequest = Schema.Struct({
@@ -669,46 +666,46 @@ export const CanvasHtmlFileRequest = Schema.Struct({
   frameTheme: Schema.optional(CanvasExportFrameTheme),
   /** `mockups-tsx` returns each mockup's variants as dependency-free components. */
   form: Schema.optional(CanvasHtmlFileForm),
-}).annotations(strict);
+});
 export type CanvasHtmlFileRequest = typeof CanvasHtmlFileRequest.Type;
 
-export const CanvasHtmlFileResult = Schema.Union(
+export const CanvasHtmlFileResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     /** The name a saved file takes: the Canvas title made safe, with `.html`. */
     fileName: CanvasExportFileName,
-    html: Schema.String.pipe(
-      Schema.minLength(1),
-      Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES, {
-        message: () => "A Canvas HTML file must fit its byte cap.",
-      }),
+    html: Schema.String.check(
+      Schema.isMinLength(1),
+      Schema.makeFilter(
+        (value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES,
+        { message: "A Canvas HTML file must fit its byte cap." },
+      ),
     ),
     /** The file holds design markup as written, which Octant does not check for secrets. */
     writesDesignMarkup: Schema.Boolean,
     /** Declared images that resolved but were drawn as placeholders to keep the file in budget. */
-    imagesLeftOut: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-  // The mockups' TSX handoff: one module of dependency-free components, named
-  // `.tsx`, which a window saves as text rather than as a page.
+    imagesLeftOut: NonNegativeInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("ready-tsx"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     fileName: CanvasExportFileName,
-    tsx: Schema.String.pipe(
-      Schema.minLength(1),
-      Schema.filter((value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES, {
-        message: () => "A mockup TSX file must fit the HTML file's byte cap.",
-      }),
+    tsx: Schema.String.check(
+      Schema.isMinLength(1),
+      Schema.makeFilter(
+        (value) => canvasExportBodyByteLength(value) <= CANVAS_HTML_FILE_MAX_BYTES,
+        { message: "A mockup TSX file must fit the HTML file's byte cap." },
+      ),
     ),
-  }).annotations(strict),
+  }),
   CanvasExportRefusal,
-);
+]);
 export type CanvasHtmlFileResult = typeof CanvasHtmlFileResult.Type;
 
-export const CanvasExportDecision = Schema.Literal("approved", "denied");
+export const CanvasExportDecision = Schema.Literals(["approved", "denied"]);
 export type CanvasExportDecision = typeof CanvasExportDecision.Type;
 
 export const CanvasExportDecideRequest = Schema.Struct({
@@ -728,14 +725,14 @@ export const CanvasExportDecideRequest = Schema.Struct({
    * link terms. Absent means the destination's default expiry and no password.
    */
   link: Schema.optional(CanvasExportLinkChoice),
-}).annotations(strict);
+});
 export type CanvasExportDecideRequest = typeof CanvasExportDecideRequest.Type;
 
 /** The person declined. This is not a destination refusal and is not journaled. */
 export const CanvasExportDenied = Schema.Struct({
   kind: Schema.Literal("denied"),
   message: CanvasExportMessage,
-}).annotations(strict);
+});
 export type CanvasExportDenied = typeof CanvasExportDenied.Type;
 
 const canvasExportRecordFields = {
@@ -743,7 +740,7 @@ const canvasExportRecordFields = {
   exportId: CanvasExportRecordId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   targetId: CanvasExportTargetId,
   destinationLabel: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   format: CanvasExportImplementedFormat,
@@ -759,7 +756,7 @@ const canvasExportRecordFields = {
 export const CanvasExportIntentRecorded = Schema.Struct({
   ...canvasExportRecordFields,
   kind: Schema.Literal("canvas-export-intent"),
-}).annotations(strict);
+});
 export type CanvasExportIntentRecorded = typeof CanvasExportIntentRecorded.Type;
 
 /**
@@ -770,14 +767,14 @@ export type CanvasExportIntentRecorded = typeof CanvasExportIntentRecorded.Type;
 export const CanvasExportUnconfirmedOutcome = Schema.Struct({
   kind: Schema.Literal("unconfirmed"),
   message: CanvasExportMessage,
-}).annotations(strict);
+});
 export type CanvasExportUnconfirmedOutcome = typeof CanvasExportUnconfirmedOutcome.Type;
 
 export const CanvasExportRecorded = Schema.Struct({
   ...canvasExportRecordFields,
   kind: Schema.Literal("canvas-export"),
-  outcome: Schema.Union(CanvasExportDelivery, CanvasExportUnconfirmedOutcome),
-}).annotations(strict);
+  outcome: Schema.Union([CanvasExportDelivery, CanvasExportUnconfirmedOutcome]),
+});
 export type CanvasExportRecorded = typeof CanvasExportRecorded.Type;
 
 /**
@@ -789,18 +786,18 @@ export const CanvasExportUnrecorded = Schema.Struct({
   kind: Schema.Literal("unrecorded"),
   outcome: CanvasExportDelivery,
   message: CanvasExportMessage,
-}).annotations(strict);
+});
 export type CanvasExportUnrecorded = typeof CanvasExportUnrecorded.Type;
 
-export const CanvasExportDecideResult = Schema.Union(
+export const CanvasExportDecideResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("exported"),
     record: CanvasExportRecorded,
-  }).annotations(strict),
+  }),
   CanvasExportUnrecorded,
   CanvasExportDenied,
   CanvasExportRefusal,
-);
+]);
 export type CanvasExportDecideResult = typeof CanvasExportDecideResult.Type;
 
 /**
@@ -813,16 +810,16 @@ export const CanvasExportNoticeDismissRequest = Schema.Struct({
   kind: Schema.Literal("canvas-export-notice-dismiss"),
   canvasId: CanvasId,
   exportId: CanvasExportRecordId,
-}).annotations(strict);
+});
 export type CanvasExportNoticeDismissRequest = typeof CanvasExportNoticeDismissRequest.Type;
 
-export const CanvasExportNoticeDismissResult = Schema.Union(
+export const CanvasExportNoticeDismissResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("dismissed"),
     exportId: CanvasExportRecordId,
-  }).annotations(strict),
+  }),
   CanvasExportRefusal,
-);
+]);
 export type CanvasExportNoticeDismissResult = typeof CanvasExportNoticeDismissResult.Type;
 
 /** The journal frame for a dismissal: the export's third and last event. */
@@ -831,37 +828,82 @@ export const CanvasExportNoticeDismissed = Schema.Struct({
   kind: Schema.Literal("canvas-export-notice-dismissed"),
   exportId: CanvasExportRecordId,
   canvasId: CanvasId,
-}).annotations(strict);
+});
 export type CanvasExportNoticeDismissed = typeof CanvasExportNoticeDismissed.Type;
 
-export const decodeCanvasExportContribution = Schema.decodeUnknownSync(CanvasExportContribution);
-export const decodeCanvasExportTargetOffer = Schema.decodeUnknownSync(CanvasExportTargetOffer);
-export const decodeCanvasExportOfferList = Schema.decodeUnknownSync(CanvasExportOfferList);
+export const decodeCanvasExportContribution = Schema.decodeUnknownSync(
+  CanvasExportContribution,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportTargetOffer = Schema.decodeUnknownSync(
+  CanvasExportTargetOffer,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportOfferList = Schema.decodeUnknownSync(
+  CanvasExportOfferList,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasExportRenderedOutput = Schema.decodeUnknownSync(
   CanvasExportRenderedOutput,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasExportReceipt = Schema.decodeUnknownSync(CanvasExportReceipt);
-export const decodeCanvasExportDelivery = Schema.decodeUnknownSync(CanvasExportDelivery);
-export const decodeCanvasExportApprovalCard = Schema.decodeUnknownSync(CanvasExportApprovalCard);
+export const decodeCanvasExportReceipt = Schema.decodeUnknownSync(
+  CanvasExportReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportDelivery = Schema.decodeUnknownSync(
+  CanvasExportDelivery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportApprovalCard = Schema.decodeUnknownSync(
+  CanvasExportApprovalCard,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasExportPrepareRequest = Schema.decodeUnknownSync(
   CanvasExportPrepareRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasExportPrepareResult = Schema.decodeUnknownSync(CanvasExportPrepareResult);
-export const decodeCanvasExportDecideRequest = Schema.decodeUnknownSync(CanvasExportDecideRequest);
-export const decodeCanvasExportDecideResult = Schema.decodeUnknownSync(CanvasExportDecideResult);
-export const decodeCanvasExportRecorded = Schema.decodeUnknownSync(CanvasExportRecorded);
+export const decodeCanvasExportPrepareResult = Schema.decodeUnknownSync(
+  CanvasExportPrepareResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportDecideRequest = Schema.decodeUnknownSync(
+  CanvasExportDecideRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportDecideResult = Schema.decodeUnknownSync(
+  CanvasExportDecideResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportRecorded = Schema.decodeUnknownSync(
+  CanvasExportRecorded,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasExportIntentRecorded = Schema.decodeUnknownSync(
   CanvasExportIntentRecorded,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasExportPayloadDigest = Schema.decodeUnknownSync(CanvasExportPayloadDigest);
-export const decodeCanvasHtmlFileRequest = Schema.decodeUnknownSync(CanvasHtmlFileRequest);
-export const decodeCanvasHtmlFileResult = Schema.decodeUnknownSync(CanvasHtmlFileResult);
+export const decodeCanvasExportPayloadDigest = Schema.decodeUnknownSync(
+  CanvasExportPayloadDigest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasHtmlFileRequest = Schema.decodeUnknownSync(
+  CanvasHtmlFileRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasHtmlFileResult = Schema.decodeUnknownSync(
+  CanvasHtmlFileResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasExportNoticeDismissRequest = Schema.decodeUnknownSync(
   CanvasExportNoticeDismissRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasExportNoticeDismissResult = Schema.decodeUnknownSync(
   CanvasExportNoticeDismissResult,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasExportNoticeDismissed = Schema.decodeUnknownSync(
   CanvasExportNoticeDismissed,
+  STRICT_DECODE_OPTIONS,
 );

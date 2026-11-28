@@ -235,10 +235,10 @@ export async function runOutsideDriverConformance(
       return violate("a line was not JSON; console output belongs on stderr");
     }
     const decoded = decodeOutsideDriverToHostMessage(parsed);
-    if (decoded._tag === "Left") {
+    if (decoded._tag === "Failure") {
       return violate(`a message did not decode: ${line.slice(0, 200)}`);
     }
-    const message = decoded.right;
+    const message = decoded.success;
     if ("result" in message || "error" in message) {
       if (message.id >= nextId) return violate("an answer named a call the host never made");
       const waiting = pending.get(message.id);
@@ -248,7 +248,7 @@ export async function runOutsideDriverConformance(
         waiting.resolve(message.result);
         return;
       }
-      if (decodeOutsideDriverFailureData(message.error.data)._tag === "Left") {
+      if (decodeOutsideDriverFailureData(message.error.data)._tag === "Failure") {
         return violate(
           `${waiting.method} failed without a category the host reads; the host reports it as a protocol failure`,
         );
@@ -275,9 +275,9 @@ export async function runOutsideDriverConformance(
 
   const read = <A>(
     what: string,
-    decoded: { readonly _tag: "Left" } | { readonly _tag: "Right"; readonly right: A },
+    decoded: { readonly _tag: "Failure" } | { readonly _tag: "Success"; readonly success: A },
   ): A => {
-    if (decoded._tag === "Right") return decoded.right;
+    if (decoded._tag === "Success") return decoded.success;
     return fail(`${what} did not decode`);
   };
 

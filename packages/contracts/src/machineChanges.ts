@@ -1,8 +1,7 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-export const MachineChangeTopic = Schema.Literal(
+export const MachineChangeTopic = Schema.Literals([
   "chat-navigation",
   "work-navigation",
   "code-navigation",
@@ -18,7 +17,7 @@ export const MachineChangeTopic = Schema.Literal(
   "canvas-choice-answers",
   "access-activity",
   "change-notices",
-);
+]);
 export type MachineChangeTopic = typeof MachineChangeTopic.Type;
 
 /**
@@ -28,22 +27,25 @@ export type MachineChangeTopic = typeof MachineChangeTopic.Type;
  * restart that sat at or below the new head was accepted and the changes
  * between were missed. Optional so a client still reads an older host.
  */
-export const MachineChangeEpoch = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9-]{1,64}$/));
+export const MachineChangeEpoch = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9-]{1,64}$/));
 export type MachineChangeEpoch = typeof MachineChangeEpoch.Type;
 
-export const MachineChangeFrame = Schema.Union(
+export const MachineChangeFrame = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("changed"),
-    sequence: Schema.Int.pipe(Schema.positive()),
-    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(15)),
+    sequence: PositiveInt,
+    topics: Schema.Array(MachineChangeTopic).check(Schema.isMaxLength(15)),
     epoch: Schema.optional(MachineChangeEpoch),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
-    sequence: Schema.Int.pipe(Schema.nonNegative()),
+    sequence: NonNegativeInt,
     epoch: Schema.optional(MachineChangeEpoch),
-  }).annotations(strict),
-);
+  }),
+]);
 export type MachineChangeFrame = typeof MachineChangeFrame.Type;
 
-export const decodeMachineChangeFrame = Schema.decodeUnknownSync(MachineChangeFrame);
+export const decodeMachineChangeFrame = Schema.decodeUnknownSync(
+  MachineChangeFrame,
+  STRICT_DECODE_OPTIONS,
+);

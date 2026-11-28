@@ -1,4 +1,5 @@
 import type { EventActor } from "@octant/contracts";
+import { Schema } from "effect";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
   decodeContextCommand,
@@ -383,7 +384,7 @@ async function readJson(
 }
 
 function isDecodeError(error: unknown): boolean {
-  return error instanceof Error && error.name === "ParseError";
+  return Schema.isSchemaError(error);
 }
 
 function response(body: unknown, status: number, origin: string | null): Response {

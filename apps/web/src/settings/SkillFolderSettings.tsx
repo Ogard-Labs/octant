@@ -24,7 +24,7 @@ const PROVIDER_FOLDERS: ReadonlyArray<{
   { id: "codex", settingId: "skill-folder-codex", label: "Codex skills", path: "~/.codex/skills" },
 ];
 
-const decodePath = Schema.decodeUnknownEither(SkillFolderPath);
+const decodePath = Schema.decodeUnknownResult(SkillFolderPath);
 
 export interface SkillFolderSettingsProps {
   readonly value: SkillFolderSettings;
@@ -79,11 +79,11 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
   const add = async (path = draft) => {
     const epoch = generation.current;
     const decoded = decodePath(path);
-    if (decoded._tag === "Left") {
+    if (decoded._tag === "Failure") {
       setProblem("Type an absolute folder path, with no .. in it.");
       return;
     }
-    if (current.current.value.folders.includes(decoded.right)) {
+    if (current.current.value.folders.includes(decoded.success)) {
       setProblem("That folder is already listed.");
       return;
     }
@@ -92,11 +92,11 @@ export function SkillFolderSettingsPanel(props: SkillFolderSettingsProps) {
       return;
     }
     setProblem(undefined);
-    setDraft(decoded.right);
+    setDraft(decoded.success);
     if (
       (await save({
         ...current.current.value,
-        folders: [...current.current.value.folders, decoded.right],
+        folders: [...current.current.value.folders, decoded.success],
       })) &&
       epoch === generation.current
     )

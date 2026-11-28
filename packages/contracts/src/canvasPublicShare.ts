@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import {
   CANVAS_EXPORT_BODY_MAX_BYTES,
@@ -24,8 +25,6 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 // service, and the host's own record of each link. Rules live in
 // docs/design/canvas-public-links.md.
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** Version of the host-to-service wire. The service refuses any other. */
 export const CANVAS_PUBLIC_SHARE_WIRE_VERSION = 1 as const;
 export const CanvasPublicShareWireVersion = Schema.Literal(CANVAS_PUBLIC_SHARE_WIRE_VERSION);
@@ -46,23 +45,24 @@ export const CANVAS_PUBLIC_SHARE_TOMBSTONE_DAYS = 90;
 
 /** Opaque 128-bit id as 22 characters of URL-safe base64. */
 export const CanvasPublicShareId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{22}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/)),
   Schema.brand("CanvasPublicShareId"),
 );
 export type CanvasPublicShareId = typeof CanvasPublicShareId.Type;
 
 /** 32 random bytes as URL-safe base64, held by the host and hashed by the service. */
 export const CanvasPublicShareOwnerSecret = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{43}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/)),
   Schema.brand("CanvasPublicShareOwnerSecret"),
 );
 export type CanvasPublicShareOwnerSecret = typeof CanvasPublicShareOwnerSecret.Type;
 
 const safeText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maximum),
-    Schema.filter((value) => isCanvasShareSafeText(value), {
-      message: () => "Public share text must not contain a secret or a file path.",
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maximum),
+    Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+      message: "Public share text must not contain a secret or a file path.",
     }),
   );
 
@@ -71,9 +71,9 @@ const safeText = (maximum: number) =>
  * self-hosted service can be tried on one computer. No credentials, no
  * fragment.
  */
-export const CanvasPublicShareServiceUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+export const CanvasPublicShareServiceUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -90,7 +90,7 @@ export const CanvasPublicShareServiceUrl = Schema.String.pipe(
       }
     },
     {
-      message: () =>
+      message:
         "A public share service address is https, or http on this computer's loopback address.",
     },
   ),
@@ -103,10 +103,10 @@ export type CanvasPublicShareServiceUrl = typeof CanvasPublicShareServiceUrl.Typ
  * publishing is refused until the person sets one they run or trust. Link
  * records keep the strict URL, because a link only exists after a publish.
  */
-export const CanvasPublicLinkServiceAddress = Schema.Union(
+export const CanvasPublicLinkServiceAddress = Schema.Union([
   CanvasPublicShareServiceUrl,
   Schema.Literal(""),
-);
+]);
 export type CanvasPublicLinkServiceAddress = typeof CanvasPublicLinkServiceAddress.Type;
 
 /**
@@ -129,29 +129,27 @@ export const CanvasPublicShareDocument = Schema.Struct({
   /** The first reading text, shortened, for link previews. */
   summary: Schema.optional(safeText(CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS)),
   publishedAt: UtcTimestamp,
-  blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
+  blocks: Schema.Array(CanvasStaticExportBlock).check(Schema.isMaxLength(128)),
   /**
    * The images the blocks display (maintainer decision, 2026-11-22).
    * They count against the share image budget, not the document budget, which
    * is the text the approval card shows whole.
    */
   images: Schema.optional(
-    Schema.Array(CanvasShareImage).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+    Schema.Array(CanvasShareImage).check(Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES)),
   ),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (document) =>
-        document.shareSchemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
-        document.images === undefined,
-      { message: () => "Shared images require Canvas share version 18." },
-    ),
-    Schema.filter((document) => canvasShareImagesAreConsistent(document), {
-      message: () =>
-        "A share's images must each be named by a block, match their length, and fit the image budget.",
-    }),
-  );
+}).check(
+  Schema.makeFilter(
+    (document) =>
+      document.shareSchemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
+      document.images === undefined,
+    { message: "Shared images require Canvas share version 18." },
+  ),
+  Schema.makeFilter((document) => canvasShareImagesAreConsistent(document), {
+    message:
+      "A share's images must each be named by a block, match their length, and fit the image budget.",
+  }),
+);
 export type CanvasPublicShareDocument = typeof CanvasPublicShareDocument.Type;
 
 /**
@@ -172,7 +170,7 @@ export const CanvasPublicShareCreateRequest = Schema.Struct({
   document: CanvasPublicShareDocument,
   expiry: CanvasExportLinkExpiry,
   password: Schema.optional(CanvasExportLinkPassword),
-}).annotations(strict);
+});
 export type CanvasPublicShareCreateRequest = typeof CanvasPublicShareCreateRequest.Type;
 
 /** A host commits the owner proof and withdrawal intent before sending a document. */
@@ -184,14 +182,15 @@ export const CanvasPublicShareOwnedCreateRequest = Schema.Struct({
   document: CanvasPublicShareDocument,
   expiry: CanvasExportLinkExpiry,
   password: Schema.optional(CanvasExportLinkPassword),
-}).annotations(strict);
+});
 export type CanvasPublicShareOwnedCreateRequest = typeof CanvasPublicShareOwnedCreateRequest.Type;
-export const CanvasPublicShareIncomingCreateRequest = Schema.Union(
+export const CanvasPublicShareIncomingCreateRequest = Schema.Union([
   CanvasPublicShareCreateRequest,
   CanvasPublicShareOwnedCreateRequest,
-);
+]);
 export const decodeCanvasPublicShareIncomingCreateRequest = Schema.decodeUnknownSync(
   CanvasPublicShareIncomingCreateRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 const expiresAt = Schema.NullOr(UtcTimestamp);
@@ -203,7 +202,7 @@ export const CanvasPublicShareCreated = Schema.Struct({
   url: CanvasPublicShareServiceUrl,
   ownerSecret: CanvasPublicShareOwnerSecret,
   expiresAt,
-}).annotations(strict);
+});
 export type CanvasPublicShareCreated = typeof CanvasPublicShareCreated.Type;
 
 /**
@@ -216,7 +215,7 @@ export const CanvasPublicShareUpdateRequest = Schema.Struct({
   document: CanvasPublicShareDocument,
   expiry: CanvasExportLinkExpiry,
   password: Schema.optional(CanvasExportLinkPassword),
-}).annotations(strict);
+});
 export type CanvasPublicShareUpdateRequest = typeof CanvasPublicShareUpdateRequest.Type;
 
 export const CanvasPublicShareUpdated = Schema.Struct({
@@ -227,7 +226,7 @@ export const CanvasPublicShareUpdated = Schema.Struct({
   expiresAt,
   updatedAt: UtcTimestamp,
   passwordProtected: Schema.Boolean,
-}).annotations(strict);
+});
 export type CanvasPublicShareUpdated = typeof CanvasPublicShareUpdated.Type;
 
 /** `DELETE /api/v1/shares/<id>` with the owner secret. */
@@ -235,7 +234,7 @@ export const CanvasPublicShareRevoked = Schema.Struct({
   schemaVersion: CanvasPublicShareWireVersion,
   kind: Schema.Literal("canvas-public-share-revoked"),
   shareId: CanvasPublicShareId,
-}).annotations(strict);
+});
 export type CanvasPublicShareRevoked = typeof CanvasPublicShareRevoked.Type;
 
 /** `GET /api/v1/shares/<id>` with the owner secret. */
@@ -248,13 +247,13 @@ export const CanvasPublicShareStatus = Schema.Struct({
   updatedAt: UtcTimestamp,
   expiresAt,
   passwordProtected: Schema.Boolean,
-  byteLength: Schema.Int.pipe(Schema.nonNegative()),
+  byteLength: NonNegativeInt,
   /** An aggregate count; the service keeps nothing about who viewed. */
-  viewCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  viewCount: NonNegativeInt,
+});
 export type CanvasPublicShareStatus = typeof CanvasPublicShareStatus.Type;
 
-export const CanvasPublicShareReportReason = Schema.Literal(
+export const CanvasPublicShareReportReason = Schema.Literals([
   "spam",
   "phishing",
   "malware",
@@ -262,7 +261,7 @@ export const CanvasPublicShareReportReason = Schema.Literal(
   "harassment",
   "privacy",
   "other",
-);
+]);
 export type CanvasPublicShareReportReason = typeof CanvasPublicShareReportReason.Type;
 
 /** `POST /api/v1/shares/<id>/reports`. Stored without the reporter's address. */
@@ -271,12 +270,12 @@ export const CanvasPublicShareReport = Schema.Struct({
   kind: Schema.Literal("canvas-public-share-report"),
   reason: CanvasPublicShareReportReason,
   detail: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS)),
+    Schema.String.check(Schema.isMaxLength(CANVAS_PUBLIC_SHARE_REPORT_DETAIL_MAX_CHARS)),
   ),
-}).annotations(strict);
+});
 export type CanvasPublicShareReport = typeof CanvasPublicShareReport.Type;
 
-export const CanvasPublicShareRefusalCode = Schema.Literal(
+export const CanvasPublicShareRefusalCode = Schema.Literals([
   "malformed",
   "conflict",
   "too-large",
@@ -285,15 +284,15 @@ export const CanvasPublicShareRefusalCode = Schema.Literal(
   "gone",
   "rate-limited",
   "unavailable",
-);
+]);
 export type CanvasPublicShareRefusalCode = typeof CanvasPublicShareRefusalCode.Type;
 
 export const CanvasPublicShareRefusal = Schema.Struct({
   schemaVersion: CanvasPublicShareWireVersion,
   kind: Schema.Literal("canvas-public-share-refused"),
   code: CanvasPublicShareRefusalCode,
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+});
 export type CanvasPublicShareRefusal = typeof CanvasPublicShareRefusal.Type;
 
 // ---------------------------------------------------------------------------
@@ -307,7 +306,7 @@ export const CanvasPublicLinkSettings = Schema.Struct({
   serviceUrl: CanvasPublicLinkServiceAddress,
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CanvasPublicLinkSettings = typeof CanvasPublicLinkSettings.Type;
 
 /** A person changed the switch or the service address, from the version they read. */
@@ -317,28 +316,28 @@ export const CanvasPublicLinkSettingsCommand = Schema.Struct({
   enabled: Schema.Boolean,
   serviceUrl: CanvasPublicLinkServiceAddress,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type CanvasPublicLinkSettingsCommand = typeof CanvasPublicLinkSettingsCommand.Type;
 
-export const CanvasPublicLinkSettingsResult = Schema.Union(
+export const CanvasPublicLinkSettingsResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("canvas-public-link-settings"),
     settings: CanvasPublicLinkSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("canvas-public-link-settings-refused"),
-    reason: Schema.Literal("malformed", "stale-version", "unauthorized", "unavailable"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["malformed", "stale-version", "unauthorized", "unavailable"]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type CanvasPublicLinkSettingsResult = typeof CanvasPublicLinkSettingsResult.Type;
 
-export const CanvasPublicShareRecordStatus = Schema.Literal(
+export const CanvasPublicShareRecordStatus = Schema.Literals([
   "active",
   "expired",
   "revoking",
   "revoked",
-);
+]);
 export type CanvasPublicShareRecordStatus = typeof CanvasPublicShareRecordStatus.Type;
 
 /**
@@ -351,14 +350,14 @@ export const CanvasPublicShareRecord = Schema.Struct({
   url: CanvasPublicShareServiceUrl,
   serviceUrl: CanvasPublicShareServiceUrl,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   publishedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   expiresAt,
   passwordProtected: Schema.Boolean,
   status: CanvasPublicShareRecordStatus,
   revokedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CanvasPublicShareRecord = typeof CanvasPublicShareRecord.Type;
 
 /** What a window is shown for one Canvas. */
@@ -368,8 +367,8 @@ export const CanvasPublicShareList = Schema.Struct({
   canvasId: CanvasId,
   enabled: Schema.Boolean,
   serviceUrl: CanvasPublicLinkServiceAddress,
-  shares: Schema.Array(CanvasPublicShareRecord).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  shares: Schema.Array(CanvasPublicShareRecord).check(Schema.isMaxLength(64)),
+});
 export type CanvasPublicShareList = typeof CanvasPublicShareList.Type;
 
 export const CanvasPublicShareRevokeRequest = Schema.Struct({
@@ -377,26 +376,25 @@ export const CanvasPublicShareRevokeRequest = Schema.Struct({
   kind: Schema.Literal("canvas-public-share-revoke"),
   canvasId: CanvasId,
   publicShareId: CanvasPublicShareId,
-}).annotations(strict);
+});
 export type CanvasPublicShareRevokeRequest = typeof CanvasPublicShareRevokeRequest.Type;
 
-export const CanvasPublicShareRevokeResult = Schema.Union(
+export const CanvasPublicShareRevokeResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("revoked"),
     share: CanvasPublicShareRecord,
-  }).annotations(strict),
-  /** The service could not be reached; the host keeps trying. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoking"),
     share: CanvasPublicShareRecord,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    code: Schema.Literal("unauthorized", "not-found", "malformed"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    code: Schema.Literals(["unauthorized", "not-found", "malformed"]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type CanvasPublicShareRevokeResult = typeof CanvasPublicShareRevokeResult.Type;
 
 // Journal payloads. A record event names its Canvas, so purging the Canvas
@@ -416,26 +414,26 @@ export const CANVAS_PUBLIC_LINK_SETTINGS_AGGREGATE_TYPE = "canvas-public-link-se
 export const CANVAS_PUBLIC_LINK_SETTINGS_CHANGED = "canvas.public-link-settings-changed@1";
 
 /** A lowercase UUID naming the owner secret in the credential broker. */
-export const CanvasPublicShareCredentialRef = Schema.String.pipe(
-  Schema.pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+export const CanvasPublicShareCredentialRef = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
 );
 
 export const CanvasPublicSharePublished = Schema.Struct({
   record: CanvasPublicShareRecord,
   credentialRef: CanvasPublicShareCredentialRef,
-}).annotations(strict);
+});
 export type CanvasPublicSharePublished = typeof CanvasPublicSharePublished.Type;
 
 export const CanvasPublicShareRecordUpdated = Schema.Struct({
   record: CanvasPublicShareRecord,
-}).annotations(strict);
+});
 export type CanvasPublicShareRecordUpdated = typeof CanvasPublicShareRecordUpdated.Type;
 
 export const CanvasPublicShareRecordRevoked = Schema.Struct({
   publicShareId: CanvasPublicShareId,
   canvasId: CanvasId,
   revokedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasPublicShareRecordRevoked = typeof CanvasPublicShareRecordRevoked.Type;
 
 /** The host settled a link past its expiry: the owner secret is already deleted. */
@@ -443,59 +441,100 @@ export const CanvasPublicShareRecordExpired = Schema.Struct({
   publicShareId: CanvasPublicShareId,
   canvasId: CanvasId,
   expiredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasPublicShareRecordExpired = typeof CanvasPublicShareRecordExpired.Type;
 
 export const CanvasPublicShareRevocationPending = Schema.Struct({
   publicShareId: CanvasPublicShareId,
   serviceUrl: CanvasPublicShareServiceUrl,
   credentialRef: CanvasPublicShareCredentialRef,
-}).annotations(strict);
+});
 export type CanvasPublicShareRevocationPending = typeof CanvasPublicShareRevocationPending.Type;
 
 export const CanvasPublicShareRevocationSettled = Schema.Struct({
   publicShareId: CanvasPublicShareId,
-}).annotations(strict);
+});
 export type CanvasPublicShareRevocationSettled = typeof CanvasPublicShareRevocationSettled.Type;
 
 export const CanvasPublicLinkSettingsChanged = Schema.Struct({
   enabled: Schema.Boolean,
   serviceUrl: CanvasPublicLinkServiceAddress,
-}).annotations(strict);
+});
 export type CanvasPublicLinkSettingsChanged = typeof CanvasPublicLinkSettingsChanged.Type;
 
-export const decodeCanvasPublicShareDocument = Schema.decodeUnknownSync(CanvasPublicShareDocument);
+export const decodeCanvasPublicShareDocument = Schema.decodeUnknownSync(
+  CanvasPublicShareDocument,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasPublicShareCreateRequest = Schema.decodeUnknownSync(
   CanvasPublicShareCreateRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasPublicShareCreated = Schema.decodeUnknownSync(CanvasPublicShareCreated);
+export const decodeCanvasPublicShareCreated = Schema.decodeUnknownSync(
+  CanvasPublicShareCreated,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasPublicShareUpdateRequest = Schema.decodeUnknownSync(
   CanvasPublicShareUpdateRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasPublicShareUpdated = Schema.decodeUnknownSync(CanvasPublicShareUpdated);
-export const decodeCanvasPublicShareRevoked = Schema.decodeUnknownSync(CanvasPublicShareRevoked);
-export const decodeCanvasPublicShareStatus = Schema.decodeUnknownSync(CanvasPublicShareStatus);
-export const decodeCanvasPublicShareReport = Schema.decodeUnknownSync(CanvasPublicShareReport);
-export const decodeCanvasPublicShareRefusal = Schema.decodeUnknownSync(CanvasPublicShareRefusal);
-export const decodeCanvasPublicShareId = Schema.decodeUnknownSync(CanvasPublicShareId);
+export const decodeCanvasPublicShareUpdated = Schema.decodeUnknownSync(
+  CanvasPublicShareUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareRevoked = Schema.decodeUnknownSync(
+  CanvasPublicShareRevoked,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareStatus = Schema.decodeUnknownSync(
+  CanvasPublicShareStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareReport = Schema.decodeUnknownSync(
+  CanvasPublicShareReport,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareRefusal = Schema.decodeUnknownSync(
+  CanvasPublicShareRefusal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareId = Schema.decodeUnknownSync(
+  CanvasPublicShareId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasPublicShareOwnerSecret = Schema.decodeUnknownSync(
   CanvasPublicShareOwnerSecret,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasPublicShareServiceUrl = Schema.decodeUnknownSync(
   CanvasPublicShareServiceUrl,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasPublicLinkSettings = Schema.decodeUnknownSync(CanvasPublicLinkSettings);
+export const decodeCanvasPublicLinkSettings = Schema.decodeUnknownSync(
+  CanvasPublicLinkSettings,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasPublicLinkSettingsCommand = Schema.decodeUnknownSync(
   CanvasPublicLinkSettingsCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasPublicLinkSettingsResult = Schema.decodeUnknownSync(
   CanvasPublicLinkSettingsResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasPublicShareRecord = Schema.decodeUnknownSync(CanvasPublicShareRecord);
-export const decodeCanvasPublicShareList = Schema.decodeUnknownSync(CanvasPublicShareList);
+export const decodeCanvasPublicShareRecord = Schema.decodeUnknownSync(
+  CanvasPublicShareRecord,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPublicShareList = Schema.decodeUnknownSync(
+  CanvasPublicShareList,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasPublicShareRevokeRequest = Schema.decodeUnknownSync(
   CanvasPublicShareRevokeRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasPublicShareRevokeResult = Schema.decodeUnknownSync(
   CanvasPublicShareRevokeResult,
+  STRICT_DECODE_OPTIONS,
 );

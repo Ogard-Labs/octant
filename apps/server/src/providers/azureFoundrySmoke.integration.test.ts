@@ -63,7 +63,7 @@ describe("real Azure AI Foundry endpoint", () => {
               modelId: model,
               executionPolicy: "approval-gated",
             });
-            const events = yield* Effect.fork(
+            const events = yield* Effect.forkChild(
               collectSessionEvents(yield* connection.subscribe, sessionId),
             );
             yield* connection.send({
@@ -86,10 +86,10 @@ describe("real Azure AI Foundry endpoint", () => {
               modelId: model,
               executionPolicy: "approval-gated",
             });
-            const interrupted = yield* Effect.fork(
+            const interrupted = yield* Effect.forkChild(
               collectSessionEvents(yield* connection.subscribe, cancelSessionId),
             );
-            const acceptedOutput = yield* Effect.fork(
+            const acceptedOutput = yield* Effect.forkChild(
               Stream.runHead(
                 (yield* connection.subscribe).pipe(
                   Stream.filter(

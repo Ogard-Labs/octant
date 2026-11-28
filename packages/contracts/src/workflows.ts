@@ -1,10 +1,11 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { UtcTimestamp } from "./events";
 import { WorkThreadId } from "./workThreads";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Branded identity for a Work workflow. A workflow represents one bounded
@@ -22,10 +23,10 @@ export type WorkflowId = typeof WorkflowId.Type;
  * field. `active` is a workflow currently backing live thread work;
  * `completed` and `cancelled` are terminal.
  */
-export const WorkflowLifecycle = Schema.Literal("active", "completed", "cancelled");
+export const WorkflowLifecycle = Schema.Literals(["active", "completed", "cancelled"]);
 export type WorkflowLifecycle = typeof WorkflowLifecycle.Type;
 
-const WorkflowLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+const WorkflowLabel = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
 
 /**
  * Authoritative Work workflow identity. `relatedThreadId` binds the
@@ -47,14 +48,12 @@ export const Workflow = Schema.Struct({
   lifecycle: WorkflowLifecycle,
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-  version: Schema.Int.pipe(Schema.positive()),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((workflow) => (workflow.lifecycle === "active") === (workflow.version === 1), {
-      jsonSchema: {},
-    }),
-  );
+  version: PositiveInt,
+}).check(
+  Schema.makeFilter((workflow) => (workflow.lifecycle === "active") === (workflow.version === 1), {
+    jsonSchema: {},
+  }),
+);
 export type Workflow = typeof Workflow.Type;
 
 /**
@@ -66,34 +65,32 @@ export type Workflow = typeof Workflow.Type;
  * corrupted or mismatched frame is rejected by decoding rather than silently
  * accepted.
  */
-export const WorkflowFrame = Schema.Union(
+export const WorkflowFrame = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("started"),
     workflow: Workflow,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.workflow.lifecycle === "active", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((frame) => frame.workflow.lifecycle === "active", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("completed"),
     workflow: Workflow,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.workflow.lifecycle === "completed", { jsonSchema: {} })),
+  }).check(
+    Schema.makeFilter((frame) => frame.workflow.lifecycle === "completed", { jsonSchema: {} }),
+  ),
   Schema.Struct({
     kind: Schema.Literal("cancelled"),
     workflow: Workflow,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.workflow.lifecycle === "cancelled", { jsonSchema: {} })),
-);
+  }).check(
+    Schema.makeFilter((frame) => frame.workflow.lifecycle === "cancelled", { jsonSchema: {} }),
+  ),
+]);
 export type WorkflowFrame = typeof WorkflowFrame.Type;
 
 export const WORK_WORKFLOW_EVENT_NAMES = ["work.workflow-recorded@1"] as const;
 export type WorkflowEventName = (typeof WORK_WORKFLOW_EVENT_NAMES)[number];
 
-export const decodeWorkflowId = Schema.decodeUnknownSync(WorkflowId);
-export const decodeWorkflow = Schema.decodeUnknownSync(Workflow);
-export const decodeWorkflowFrame = Schema.decodeUnknownSync(WorkflowFrame);
+export const decodeWorkflowId = Schema.decodeUnknownSync(WorkflowId, STRICT_DECODE_OPTIONS);
+export const decodeWorkflow = Schema.decodeUnknownSync(Workflow, STRICT_DECODE_OPTIONS);
+export const decodeWorkflowFrame = Schema.decodeUnknownSync(WorkflowFrame, STRICT_DECODE_OPTIONS);
 
 export function decodeWorkflowEventPayload(
   eventName: WorkflowEventName | string,

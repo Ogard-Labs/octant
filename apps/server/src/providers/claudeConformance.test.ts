@@ -404,7 +404,7 @@ class ConformanceQuery implements ClaudeQueryPort {
         await this.requestQuestion();
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       },
-      catch: () => ({ category: "provider-failed", message: "Claude fixture failed." }),
+      catch: () => ({ category: "provider-failed" as const, message: "Claude fixture failed." }),
     });
   };
 

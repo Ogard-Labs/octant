@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { PreviewSourceVersion } from "./previews";
 import { WorkArtifactRef } from "./workArtifacts";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 /**
  * Branded identity for a bounded Work research brief. One brief owns one
@@ -49,7 +50,7 @@ export type WorkResearchRequestId = typeof WorkResearchRequestId.Type;
  * separately configured read-only mail export. No silent browsing, mailbox
  * access, or connector installation is implied by any kind.
  */
-export const WorkSourceKind = Schema.Literal("web", "file", "user-reference", "mail-export");
+export const WorkSourceKind = Schema.Literals(["web", "file", "user-reference", "mail-export"]);
 export type WorkSourceKind = typeof WorkSourceKind.Type;
 
 /**
@@ -62,8 +63,11 @@ export type WorkSourceKind = typeof WorkSourceKind.Type;
  * research source feeds the existing preview/citation surfaces without a
  * parallel path.
  */
-export const WorkSourceRef = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+export const WorkSourceRef = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+  ),
   Schema.brand("WorkSourceRef"),
 );
 export type WorkSourceRef = typeof WorkSourceRef.Type;
@@ -73,8 +77,9 @@ export type WorkSourceRef = typeof WorkSourceRef.Type;
  * path separators) so a directory path can never reach the renderer through
  * it. Mirrors `WorkArtifactDisplayName`.
  */
-const WorkSourceDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value)),
+const WorkSourceDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value)),
 );
 
 /**
@@ -85,7 +90,7 @@ const WorkSourceDisplayName = Schema.NonEmptyTrimmedString.pipe(
  * unavailable, and revoked sources cannot back new claims; revoked sources
  * fail closed without metadata leakage beyond the opaque id.
  */
-export const WorkSourceAvailability = Schema.Literal("fresh", "stale", "unavailable", "revoked");
+export const WorkSourceAvailability = Schema.Literals(["fresh", "stale", "unavailable", "revoked"]);
 export type WorkSourceAvailability = typeof WorkSourceAvailability.Type;
 
 /**
@@ -96,9 +101,10 @@ export type WorkSourceAvailability = typeof WorkSourceAvailability.Type;
  * presentation across Work surfaces. Capped at `MAX_WORK_RESEARCH_EXCERPT`
  * bytes by the server before recording.
  */
-const WorkResearchExcerpt = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(8_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+const WorkResearchExcerpt = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(8_000),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
 );
 
 /**
@@ -107,8 +113,11 @@ const WorkResearchExcerpt = Schema.NonEmptyTrimmedString.pipe(
  * evidence by listing anchors. The anchor rejects path separators and
  * `file:` URLs so it cannot carry a host path.
  */
-export const WorkCitationAnchor = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+export const WorkCitationAnchor = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+  ),
   Schema.brand("WorkCitationAnchor"),
 );
 export type WorkCitationAnchor = typeof WorkCitationAnchor.Type;
@@ -133,7 +142,7 @@ export const WorkSourceRecord = Schema.Struct({
   citationAnchor: WorkCitationAnchor,
   sourceVersion: PreviewSourceVersion,
   availability: WorkSourceAvailability,
-}).annotations(strict);
+});
 export type WorkSourceRecord = typeof WorkSourceRecord.Type;
 
 /**
@@ -143,10 +152,10 @@ export type WorkSourceRecord = typeof WorkSourceRecord.Type;
  * sources. The server enforces these before recording any source.
  */
 export const WorkResearchSourcePolicy = Schema.Struct({
-  allowedKinds: Schema.Array(WorkSourceKind).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  allowedKinds: Schema.Array(WorkSourceKind).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
   maxSources: PositiveInt,
   excerptByteBudget: PositiveInt,
-}).annotations(strict);
+});
 export type WorkResearchSourcePolicy = typeof WorkResearchSourcePolicy.Type;
 
 /**
@@ -154,17 +163,23 @@ export type WorkResearchSourcePolicy = typeof WorkResearchSourcePolicy.Type;
  * `file:`/`http(s):` schemes so an absolute host path or authority URL can
  * never leak through a question. Mirrors `WorkPromotionSummaryText`.
  */
-const WorkResearchQuestion = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(2_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
+const WorkResearchQuestion = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_000),
+  Schema.makeFilter(
+    (value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value),
+  ),
 );
 
 /**
  * Sanitized free-text research note. Same constraints as a question.
  */
-const WorkResearchNote = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
+const WorkResearchNote = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_000),
+  Schema.makeFilter(
+    (value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value),
+  ),
 );
 
 /**
@@ -172,22 +187,22 @@ const WorkResearchNote = Schema.NonEmptyTrimmedString.pipe(
  * ordinary Work artifact/version workflows; the kind tells the renderer
  * which artifact format to offer.
  */
-export const WorkResearchDeliverableKind = Schema.Literal(
+export const WorkResearchDeliverableKind = Schema.Literals([
   "report",
   "comparison-table",
   "spreadsheet",
   "presentation",
   "source-pack",
-);
+]);
 export type WorkResearchDeliverableKind = typeof WorkResearchDeliverableKind.Type;
 
-export const WorkResearchBriefStatus = Schema.Literal(
+export const WorkResearchBriefStatus = Schema.Literals([
   "draft",
   "gathering",
   "analyzing",
   "finalized",
   "cancelled",
-);
+]);
 export type WorkResearchBriefStatus = typeof WorkResearchBriefStatus.Type;
 
 /**
@@ -199,18 +214,21 @@ export type WorkResearchBriefStatus = typeof WorkResearchBriefStatus.Type;
 export const WorkResearchBrief = Schema.Struct({
   briefId: WorkResearchBriefId,
   projectId: ProjectId,
-  questions: Schema.Array(WorkResearchQuestion).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  questions: Schema.Array(WorkResearchQuestion).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(16),
+  ),
   sourcePolicy: WorkResearchSourcePolicy,
-  notes: Schema.Array(WorkResearchNote).pipe(Schema.maxItems(64)),
-  deliverables: Schema.Array(WorkResearchDeliverableKind).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(8),
+  notes: Schema.Array(WorkResearchNote).check(Schema.isMaxLength(64)),
+  deliverables: Schema.Array(WorkResearchDeliverableKind).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
   ),
   status: WorkResearchBriefStatus,
   createdBy: EventActor,
   createdAt: UtcTimestamp,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type WorkResearchBrief = typeof WorkResearchBrief.Type;
 
 /**
@@ -226,7 +244,7 @@ export const WorkResearchEvidence = Schema.Struct({
   citationAnchor: WorkCitationAnchor,
   excerpt: WorkResearchExcerpt,
   retrievedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkResearchEvidence = typeof WorkResearchEvidence.Type;
 
 /**
@@ -235,18 +253,21 @@ export type WorkResearchEvidence = typeof WorkResearchEvidence.Type;
  * provenance policy and shown honestly to the user. The claim text is
  * sanitized free text mirroring `WorkPromotionSummaryText`.
  */
-const WorkResearchClaimText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(8_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value)),
+const WorkResearchClaimText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(8_000),
+  Schema.makeFilter(
+    (value) => !/[\\/]/.test(value) && !/(?:^|\s|[([{<])(file|https?):/i.test(value),
+  ),
 );
 
 export const WorkResearchClaim = Schema.Struct({
   claimId: brandedUuid("WorkResearchClaimId"),
   briefId: WorkResearchBriefId,
   text: WorkResearchClaimText,
-  citationAnchors: Schema.Array(WorkCitationAnchor).pipe(Schema.maxItems(64)),
+  citationAnchors: Schema.Array(WorkCitationAnchor).check(Schema.isMaxLength(64)),
   unsupported: Schema.Boolean,
-}).annotations(strict);
+});
 export type WorkResearchClaim = typeof WorkResearchClaim.Type;
 
 /**
@@ -260,11 +281,11 @@ export const WorkResearchReport = Schema.Struct({
   reportId: WorkResearchReportId,
   briefId: WorkResearchBriefId,
   projectId: ProjectId,
-  evidence: Schema.Array(WorkResearchEvidence).pipe(Schema.maxItems(256)),
-  claims: Schema.Array(WorkResearchClaim).pipe(Schema.maxItems(128)),
+  evidence: Schema.Array(WorkResearchEvidence).check(Schema.isMaxLength(256)),
+  claims: Schema.Array(WorkResearchClaim).check(Schema.isMaxLength(128)),
   producedArtifactRef: WorkArtifactRef,
   finalizedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkResearchReport = typeof WorkResearchReport.Type;
 
 const RequestCommon = {
@@ -286,18 +307,21 @@ const BriefTransitionCommon = {
  * a newer brief silently. No command carries a host path, credential, mailbox
  * body, or authority token.
  */
-export const WorkResearchCommand = Schema.Union(
+export const WorkResearchCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("create-brief"),
     ...RequestCommon,
     briefId: WorkResearchBriefId,
-    questions: Schema.Array(WorkResearchQuestion).pipe(Schema.minItems(1), Schema.maxItems(16)),
-    sourcePolicy: WorkResearchSourcePolicy,
-    deliverables: Schema.Array(WorkResearchDeliverableKind).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(8),
+    questions: Schema.Array(WorkResearchQuestion).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(16),
     ),
-  }).annotations(strict),
+    sourcePolicy: WorkResearchSourcePolicy,
+    deliverables: Schema.Array(WorkResearchDeliverableKind).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(8),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("add-source"),
     ...RequestCommon,
@@ -309,13 +333,13 @@ export const WorkResearchCommand = Schema.Union(
     excerpt: WorkResearchExcerpt,
     citationAnchor: WorkCitationAnchor,
     sourceVersion: PreviewSourceVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoke-source"),
     ...RequestCommon,
     ...BriefTransitionCommon,
     sourceId: WorkSourceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("record-evidence"),
     ...RequestCommon,
@@ -325,32 +349,32 @@ export const WorkResearchCommand = Schema.Union(
     citationAnchor: WorkCitationAnchor,
     excerpt: WorkResearchExcerpt,
     retrievedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("record-claim"),
     ...RequestCommon,
     ...BriefTransitionCommon,
     claimId: brandedUuid("WorkResearchClaimId"),
     text: WorkResearchClaimText,
-    citationAnchors: Schema.Array(WorkCitationAnchor).pipe(Schema.maxItems(64)),
-  }).annotations(strict),
+    citationAnchors: Schema.Array(WorkCitationAnchor).check(Schema.isMaxLength(64)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("finalize-report"),
     ...RequestCommon,
     ...BriefTransitionCommon,
     reportId: WorkResearchReportId,
     producedArtifactRef: WorkArtifactRef,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-retrieval"),
     ...RequestCommon,
     ...BriefTransitionCommon,
     sourceId: WorkSourceId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkResearchCommand = typeof WorkResearchCommand.Type;
 
-export const WorkResearchFailureCode = Schema.Literal(
+export const WorkResearchFailureCode = Schema.Literals([
   "invalid",
   "unauthorized",
   "stale",
@@ -359,7 +383,7 @@ export const WorkResearchFailureCode = Schema.Literal(
   "conflict",
   "interrupted",
   "failed",
-);
+]);
 export type WorkResearchFailureCode = typeof WorkResearchFailureCode.Type;
 
 /**
@@ -368,8 +392,9 @@ export type WorkResearchFailureCode = typeof WorkResearchFailureCode.Type;
  * credentials, or authority tokens cannot leak. Mirrors
  * `WorkSafeDiagnostic`.
  */
-const WorkResearchSafeDiagnostic = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+const WorkResearchSafeDiagnostic = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
 );
 
 /**
@@ -380,111 +405,101 @@ const WorkResearchSafeDiagnostic = Schema.NonEmptyTrimmedString.pipe(
  * presentation. `unauthorized` exposes only optional opaque ids; never
  * content-derived metadata, display name, or source kind.
  */
-export const WorkResearchCommandResult = Schema.Union(
+export const WorkResearchCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("brief-created"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((r) => r.brief.status === "draft", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((r) => r.brief.status === "draft", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("source-added"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     source: WorkSourceRecord,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (r) => r.source.briefId === r.brief.briefId && r.source.projectId === r.brief.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (r) => r.source.briefId === r.brief.briefId && r.source.projectId === r.brief.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("source-revoked"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     sourceId: WorkSourceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("evidence-recorded"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     evidence: WorkResearchEvidence,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((r) => r.evidence.briefId === r.brief.briefId, { jsonSchema: {} })),
+  }).check(Schema.makeFilter((r) => r.evidence.briefId === r.brief.briefId, { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("claim-recorded"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     claim: WorkResearchClaim,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((r) => r.claim.briefId === r.brief.briefId, { jsonSchema: {} })),
+  }).check(Schema.makeFilter((r) => r.claim.briefId === r.brief.briefId, { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("report-finalized"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     report: WorkResearchReport,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (r) => r.report.briefId === r.brief.briefId && r.report.projectId === r.brief.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (r) => r.report.briefId === r.brief.briefId && r.report.projectId === r.brief.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("retrieval-cancelled"),
     requestId: WorkResearchRequestId,
     brief: WorkResearchBrief,
     sourceId: WorkSourceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unauthorized"),
     requestId: WorkResearchRequestId,
     briefId: Schema.optional(WorkResearchBriefId),
     sourceId: Schema.optional(WorkSourceId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("stale"),
     requestId: WorkResearchRequestId,
     briefId: WorkResearchBriefId,
     sourceId: WorkSourceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unsupported"),
     requestId: WorkResearchRequestId,
     sourceKind: Schema.optional(WorkSourceKind),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("not-found"),
     requestId: WorkResearchRequestId,
     briefId: Schema.optional(WorkResearchBriefId),
     sourceId: Schema.optional(WorkSourceId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("conflict"),
     requestId: WorkResearchRequestId,
     briefId: Schema.optional(WorkResearchBriefId),
     sourceId: Schema.optional(WorkSourceId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("interrupted"),
     requestId: WorkResearchRequestId,
     briefId: Schema.optional(WorkResearchBriefId),
     sourceId: Schema.optional(WorkSourceId),
     canRetry: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     requestId: WorkResearchRequestId,
     reason: WorkResearchFailureCode,
     message: Schema.optional(WorkResearchSafeDiagnostic),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkResearchCommandResult = typeof WorkResearchCommandResult.Type;
 
 /**
@@ -493,62 +508,52 @@ export type WorkResearchCommandResult = typeof WorkResearchCommandResult.Type;
  * brief state and are not journaled. Projections rebuild brief state from this
  * success-only stream.
  */
-export const WorkResearchSuccessTransition = Schema.Union(
+export const WorkResearchSuccessTransition = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("brief-created"),
     brief: WorkResearchBrief,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((t) => t.brief.status === "draft", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((t) => t.brief.status === "draft", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("source-added"),
     brief: WorkResearchBrief,
     source: WorkSourceRecord,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (t) => t.source.briefId === t.brief.briefId && t.source.projectId === t.brief.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (t) => t.source.briefId === t.brief.briefId && t.source.projectId === t.brief.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("source-revoked"),
     brief: WorkResearchBrief,
     sourceId: WorkSourceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("evidence-recorded"),
     brief: WorkResearchBrief,
     evidence: WorkResearchEvidence,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((t) => t.evidence.briefId === t.brief.briefId, { jsonSchema: {} })),
+  }).check(Schema.makeFilter((t) => t.evidence.briefId === t.brief.briefId, { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("claim-recorded"),
     brief: WorkResearchBrief,
     claim: WorkResearchClaim,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((t) => t.claim.briefId === t.brief.briefId, { jsonSchema: {} })),
+  }).check(Schema.makeFilter((t) => t.claim.briefId === t.brief.briefId, { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("report-finalized"),
     brief: WorkResearchBrief,
     report: WorkResearchReport,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (t) => t.report.briefId === t.brief.briefId && t.report.projectId === t.brief.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (t) => t.report.briefId === t.brief.briefId && t.report.projectId === t.brief.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("retrieval-cancelled"),
     brief: WorkResearchBrief,
     sourceId: WorkSourceId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkResearchSuccessTransition = typeof WorkResearchSuccessTransition.Type;
 
 /**
@@ -569,32 +574,66 @@ export const WorkResearchFrame = Schema.Struct({
   sequence: AggregateVersion,
   occurredAt: UtcTimestamp,
   transition: WorkResearchSuccessTransition,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((frame) => frame.transition.brief.projectId === frame.projectId, {
-      jsonSchema: {},
-    }),
-  );
+}).check(
+  Schema.makeFilter((frame) => frame.transition.brief.projectId === frame.projectId, {
+    jsonSchema: {},
+  }),
+);
 export type WorkResearchFrame = typeof WorkResearchFrame.Type;
 
 export const WORK_RESEARCH_EVENT_NAMES = ["work.research-recorded@1"] as const;
 export type WorkResearchEventName = (typeof WORK_RESEARCH_EVENT_NAMES)[number];
 
-export const decodeWorkResearchBriefId = Schema.decodeUnknownSync(WorkResearchBriefId);
-export const decodeWorkSourceId = Schema.decodeUnknownSync(WorkSourceId);
-export const decodeWorkResearchReportId = Schema.decodeUnknownSync(WorkResearchReportId);
-export const decodeWorkResearchRequestId = Schema.decodeUnknownSync(WorkResearchRequestId);
-export const decodeWorkSourceRef = Schema.decodeUnknownSync(WorkSourceRef);
-export const decodeWorkCitationAnchor = Schema.decodeUnknownSync(WorkCitationAnchor);
-export const decodeWorkResearchBrief = Schema.decodeUnknownSync(WorkResearchBrief);
-export const decodeWorkSourceRecord = Schema.decodeUnknownSync(WorkSourceRecord);
-export const decodeWorkResearchEvidence = Schema.decodeUnknownSync(WorkResearchEvidence);
-export const decodeWorkResearchClaim = Schema.decodeUnknownSync(WorkResearchClaim);
-export const decodeWorkResearchReport = Schema.decodeUnknownSync(WorkResearchReport);
-export const decodeWorkResearchCommand = Schema.decodeUnknownSync(WorkResearchCommand);
-export const decodeWorkResearchCommandResult = Schema.decodeUnknownSync(WorkResearchCommandResult);
-export const decodeWorkResearchFrame = Schema.decodeUnknownSync(WorkResearchFrame);
+export const decodeWorkResearchBriefId = Schema.decodeUnknownSync(
+  WorkResearchBriefId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkSourceId = Schema.decodeUnknownSync(WorkSourceId, STRICT_DECODE_OPTIONS);
+export const decodeWorkResearchReportId = Schema.decodeUnknownSync(
+  WorkResearchReportId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchRequestId = Schema.decodeUnknownSync(
+  WorkResearchRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkSourceRef = Schema.decodeUnknownSync(WorkSourceRef, STRICT_DECODE_OPTIONS);
+export const decodeWorkCitationAnchor = Schema.decodeUnknownSync(
+  WorkCitationAnchor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchBrief = Schema.decodeUnknownSync(
+  WorkResearchBrief,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkSourceRecord = Schema.decodeUnknownSync(
+  WorkSourceRecord,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchEvidence = Schema.decodeUnknownSync(
+  WorkResearchEvidence,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchClaim = Schema.decodeUnknownSync(
+  WorkResearchClaim,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchReport = Schema.decodeUnknownSync(
+  WorkResearchReport,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchCommand = Schema.decodeUnknownSync(
+  WorkResearchCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchCommandResult = Schema.decodeUnknownSync(
+  WorkResearchCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkResearchFrame = Schema.decodeUnknownSync(
+  WorkResearchFrame,
+  STRICT_DECODE_OPTIONS,
+);
 
 export function decodeWorkResearchEventPayload(
   eventName: WorkResearchEventName | string,

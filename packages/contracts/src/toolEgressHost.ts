@@ -8,7 +8,7 @@ import { Schema } from "effect";
 
 export const MAX_TOOL_EGRESS_HOST_LENGTH = 253;
 
-export const ToolEgressPort = Schema.Int.pipe(Schema.between(1, 65_535));
+export const ToolEgressPort = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }));
 export type ToolEgressPort = typeof ToolEgressPort.Type;
 
 const DNS_LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
@@ -30,11 +30,13 @@ export const TOOL_EGRESS_HOST_NAME_PATTERN = new RegExp(
  * labels after it, so `*.com` is not a rule.
  */
 export const ToolEgressRuleHost = Schema.String.pipe(
-  Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
-  Schema.filter((value) => {
-    const name = value.startsWith("*.") ? value.slice(2) : value;
-    return name.length <= MAX_TOOL_EGRESS_HOST_LENGTH && TOOL_EGRESS_HOST_NAME_PATTERN.test(name);
-  }),
+  Schema.check(
+    Schema.isMaxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
+    Schema.makeFilter((value) => {
+      const name = value.startsWith("*.") ? value.slice(2) : value;
+      return name.length <= MAX_TOOL_EGRESS_HOST_LENGTH && TOOL_EGRESS_HOST_NAME_PATTERN.test(name);
+    }),
+  ),
   Schema.brand("ToolEgressRuleHost"),
 );
 export type ToolEgressRuleHost = typeof ToolEgressRuleHost.Type;

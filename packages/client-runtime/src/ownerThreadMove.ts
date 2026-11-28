@@ -14,7 +14,7 @@ import type {
   UnlockAttempt,
 } from "./hubOwnerClient";
 
-const decodeMemberId = Schema.decodeUnknownEither(HubMemberId);
+const decodeMemberId = Schema.decodeUnknownResult(HubMemberId);
 
 export async function confirmThreadMoveOnPhone(input: {
   readonly source: { readonly memberId: string } & Pick<OwnerThreadMoveClient, "confirmMove">;
@@ -24,9 +24,9 @@ export async function confirmThreadMoveOnPhone(input: {
   // The source named in the ticket is the computer the phone read the wait
   // from, never one a listing names, so the ticket opens moves only from there.
   const sourceMemberId = decodeMemberId(input.source.memberId);
-  if (sourceMemberId._tag === "Left") return { status: "refused", kind: "invalid-answer" };
+  if (sourceMemberId._tag === "Failure") return { status: "refused", kind: "invalid-answer" };
   const ticket = await input.destination.issueMoveTicket({
-    sourceMemberId: sourceMemberId.right,
+    sourceMemberId: sourceMemberId.success,
     threads: input.confirmation.threads.map((entry) => entry.thread),
   });
   if (ticket.status !== "done") return ticket;

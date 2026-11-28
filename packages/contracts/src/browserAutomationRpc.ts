@@ -1,4 +1,5 @@
 import { BrowserAgentAvailability } from "./taskAccess";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import {
@@ -27,9 +28,7 @@ import { PairedBrowserLeaseId, PairedBrowserTarget } from "./pairedBrowserContro
 import { AggregateVersion } from "./events";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-export const BrowserWorkspaceStatus = Schema.Literal(
+export const BrowserWorkspaceStatus = Schema.Literals([
   "ready",
   "running",
   "waiting",
@@ -37,39 +36,39 @@ export const BrowserWorkspaceStatus = Schema.Literal(
   "interrupted",
   "failed",
   "stale",
-);
+]);
 export type BrowserWorkspaceStatus = typeof BrowserWorkspaceStatus.Type;
 
 export const BrowserThreadScopeRequest = Schema.Struct({
   threadId: BrowserThreadId,
-  mode: Schema.Literal("chat", "work", "code"),
-}).annotations(strict);
+  mode: Schema.Literals(["chat", "work", "code"]),
+});
 export type BrowserThreadScopeRequest = typeof BrowserThreadScopeRequest.Type;
 
 export const BrowserThreadScope = Schema.Struct({
   threadId: BrowserThreadId,
   authority: ToolActionAuthority,
-}).annotations(strict);
+});
 export type BrowserThreadScope = typeof BrowserThreadScope.Type;
 
 /** A one origin, one window approval shown while a managed turn is waiting. */
 export const BrowserToolApproval = Schema.Struct({
   approvalId: ToolApprovalId,
   threadId: BrowserThreadId,
-  mode: Schema.Literal("chat", "work", "code"),
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  mode: Schema.Literals(["chat", "work", "code"]),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
   /**
    * The Project or Personal profile the page lives in, when it is in one. A
    * signed-in page acts as the person's account, so the prompt names the profile
    * and a grant covers that (origin, profile) pair and nothing wider.
    */
   profile: Schema.optional(StoredBrowserProfile),
-  profileLabel: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  profileLabel: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   /**
    * How many browser extensions are on in that profile, when any are. They can
    * read and change what the agent reads there, so the prompt says so.
    */
-  extensionCount: Schema.optional(Schema.Int.pipe(Schema.between(1, 64))),
+  extensionCount: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
   /**
    * Set when the agent asks to save a download a page started into the
    * thread's workspace: the file, by name, size and sniffed type. Such an
@@ -77,11 +76,11 @@ export const BrowserToolApproval = Schema.Struct({
    */
   download: Schema.optional(
     Schema.Struct({
-      name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-      sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
-      mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+      sizeBytes: NonNegativeInt,
+      mediaType: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
       source: Schema.optional(BrowserDownloadSource),
-    }).annotations(strict),
+    }),
   ),
   /**
    * Set when the agent asks to upload files to the page rather than to open
@@ -92,11 +91,11 @@ export const BrowserToolApproval = Schema.Struct({
     Schema.Struct({
       files: Schema.Array(
         Schema.Struct({
-          name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-          sizeBytes: Schema.Int.pipe(Schema.nonNegative()),
-        }).annotations(strict),
-      ).pipe(Schema.minItems(1), Schema.maxItems(MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
-    }).annotations(strict),
+          name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+          sizeBytes: NonNegativeInt,
+        }),
+      ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
+    }),
   ),
   /**
    * Set when the agent asks the person to sign in on the page rather than to
@@ -105,25 +104,23 @@ export const BrowserToolApproval = Schema.Struct({
    */
   signIn: Schema.optional(
     Schema.Struct({
-      reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
-    }).annotations(strict),
+      reason: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(300))),
+    }),
   ),
   /** One exact-source script; never a remembered origin permission. */
-  script: Schema.optional(
-    Schema.Struct({ source: Schema.String.pipe(Schema.maxLength(8192)) }).annotations(strict),
-  ),
+  script: Schema.optional(Schema.Struct({ source: Schema.String.check(Schema.isMaxLength(8192)) })),
   /**
    * One call of a tool the page declares for agents: the tool's name, as the
    * page wrote it, and the arguments the agent chose, as JSON. Never remembered.
    */
   pageTool: Schema.optional(
     Schema.Struct({
-      name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,64}$/)),
-      arguments: Schema.String.pipe(Schema.maxLength(4096)),
-    }).annotations(strict),
+      name: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]{1,64}$/)),
+      arguments: Schema.String.check(Schema.isMaxLength(4096)),
+    }),
   ),
   requestedAt: UtcTimestamp,
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;
 
 export const BrowserToolApprovalList = Schema.Array(BrowserToolApproval);
@@ -131,7 +128,7 @@ export type BrowserToolApprovalList = typeof BrowserToolApprovalList.Type;
 
 export const BrowserToolApprovalDecision = Schema.Struct({
   approvalId: ToolApprovalId,
-  decision: Schema.Literal("approved", "denied"),
+  decision: Schema.Literals(["approved", "denied"]),
   /**
    * Set on an approval that should survive the prompt: the host remembers the
    * origin in shell settings and later requests for it settle approved without
@@ -145,7 +142,7 @@ export const BrowserToolApprovalDecision = Schema.Struct({
    * Private page, which has no profile to remember.
    */
   rememberProfile: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type BrowserToolApprovalDecision = typeof BrowserToolApprovalDecision.Type;
 
 export const BrowserContextCreateCommand = Schema.Struct({
@@ -173,7 +170,7 @@ export const BrowserContextCreateCommand = Schema.Struct({
    * successful Open then ends the old record as reopened.
    */
   reopenPageId: Schema.optional(BrowserContextId),
-}).annotations(strict);
+});
 export type BrowserContextCreateCommand = typeof BrowserContextCreateCommand.Type;
 
 /**
@@ -186,13 +183,13 @@ export const BrowserContextInspectCommand = Schema.Struct({
   contextId: BrowserContextId,
   threadId: BrowserThreadId,
   freshPicture: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type BrowserContextInspectCommand = typeof BrowserContextInspectCommand.Type;
 
 export const BrowserThreadContextCommand = Schema.Struct({
   threadId: BrowserThreadId,
   leaseId: Schema.optional(PairedBrowserLeaseId),
-}).annotations(strict);
+});
 export type BrowserThreadContextCommand = typeof BrowserThreadContextCommand.Type;
 
 /**
@@ -203,7 +200,7 @@ export type BrowserThreadContextCommand = typeof BrowserThreadContextCommand.Typ
 export const BrowserThreadInspectCommand = Schema.Struct({
   threadId: BrowserThreadId,
   freshPicture: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type BrowserThreadInspectCommand = typeof BrowserThreadInspectCommand.Type;
 
 export const BrowserActionCommand = BrowserActionRequest;
@@ -213,19 +210,19 @@ export const BrowserContextCancelCommand = Schema.Struct({
   contextId: BrowserContextId,
   threadId: BrowserThreadId,
   cancellation: ToolActionCancellation,
-}).annotations(strict);
+});
 export type BrowserContextCancelCommand = typeof BrowserContextCancelCommand.Type;
 
 export const BrowserContextStopCommand = Schema.Struct({
   contextId: BrowserContextId,
   threadId: BrowserThreadId,
-}).annotations(strict);
+});
 export type BrowserContextStopCommand = typeof BrowserContextStopCommand.Type;
 
 export const BrowserContextObservation = Schema.Struct({
   context: BrowserContextRecord,
   observation: Schema.optional(BrowserObservation),
-}).annotations(strict);
+});
 export type BrowserContextObservation = typeof BrowserContextObservation.Type;
 
 export const BrowserAutomationSnapshot = Schema.Struct({
@@ -235,7 +232,7 @@ export const BrowserAutomationSnapshot = Schema.Struct({
   context: Schema.optional(BrowserContextRecord),
   observation: Schema.optional(BrowserObservation),
   contexts: Schema.optional(
-    Schema.Array(BrowserContextObservation).pipe(Schema.maxItems(MAX_BROWSER_THREAD_CONTEXTS)),
+    Schema.Array(BrowserContextObservation).check(Schema.isMaxLength(MAX_BROWSER_THREAD_CONTEXTS)),
   ),
   evidence: Schema.Array(ToolEvidence),
   failure: Schema.optional(BrowserAutomationFailure),
@@ -249,15 +246,15 @@ export const BrowserAutomationSnapshot = Schema.Struct({
    * `sign-in` when the agent handed it over to sign in (a window showing the
    * thread brings its Browser forward), `take-over` when the person took it.
    */
-  waitingForPerson: Schema.optional(Schema.Literal("sign-in", "take-over")),
+  waitingForPerson: Schema.optional(Schema.Literals(["sign-in", "take-over"])),
   /** Set when a person-paired device holds a live remote control lease on this page. */
   remoteHolder: Schema.optional(
     Schema.Struct({
-      deviceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-      deviceName: Schema.String.pipe(Schema.maxLength(128)),
+      deviceId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+      deviceName: Schema.String.check(Schema.isMaxLength(128)),
       leaseId: PairedBrowserLeaseId,
       expiresAt: UtcTimestamp,
-    }).annotations(strict),
+    }),
   ),
   /** Returned to the person-paired device that opened a live lease through Take over. */
   pairedLease: Schema.optional(
@@ -265,7 +262,7 @@ export const BrowserAutomationSnapshot = Schema.Struct({
       leaseId: PairedBrowserLeaseId,
       expiresAt: UtcTimestamp,
       target: PairedBrowserTarget,
-    }).annotations(strict),
+    }),
   ),
   /**
    * Set on an agent action's answer once: the person used the page since the
@@ -273,76 +270,109 @@ export const BrowserAutomationSnapshot = Schema.Struct({
    * agent's call was answered with a fresh snapshot instead of running
    * (`handed-back`). Absent from every poll of the page.
    */
-  personUsedPage: Schema.optional(Schema.Literal("used", "handed-back")),
-}).annotations(strict);
+  personUsedPage: Schema.optional(Schema.Literals(["used", "handed-back"])),
+});
 export type BrowserAutomationSnapshot = typeof BrowserAutomationSnapshot.Type;
 
 /** A local person's default for one task; it is a choice of store, never access. */
 export const BrowserTaskProfileReadCommand = Schema.Struct({
   threadId: BrowserThreadId,
-  mode: Schema.Literal("work", "code"),
-}).annotations(strict);
+  mode: Schema.Literals(["work", "code"]),
+});
 export type BrowserTaskProfileReadCommand = typeof BrowserTaskProfileReadCommand.Type;
 
 export const BrowserTaskProfileSelectCommand = Schema.Struct({
   threadId: BrowserThreadId,
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   expectedVersion: AggregateVersion,
   profile: BrowserProfileChoice,
   expectedContextId: Schema.optional(BrowserContextId),
   /** The current address the person sees; never a page's form values or storage. */
-  url: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
-}).annotations({ ...strict, ...personDecides });
+  url: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096))),
+}).annotate(personDecides);
 export type BrowserTaskProfileSelectCommand = typeof BrowserTaskProfileSelectCommand.Type;
 
 export const BrowserTaskProfileState = Schema.Struct({
   threadId: BrowserThreadId,
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   version: AggregateVersion,
   profile: BrowserProfileChoice,
   contextId: Schema.optional(BrowserContextId),
-}).annotations(strict);
+});
 export type BrowserTaskProfileState = typeof BrowserTaskProfileState.Type;
 
 export const BrowserTaskProfileSelection = Schema.Struct({
   selection: BrowserTaskProfileState,
   browser: BrowserAutomationSnapshot,
-}).annotations(strict);
+});
 export type BrowserTaskProfileSelection = typeof BrowserTaskProfileSelection.Type;
 
 export const decodeBrowserTaskProfileReadCommand = Schema.decodeUnknownSync(
   BrowserTaskProfileReadCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBrowserTaskProfileSelectCommand = Schema.decodeUnknownSync(
   BrowserTaskProfileSelectCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBrowserTaskProfileState = Schema.decodeUnknownSync(BrowserTaskProfileState);
+export const decodeBrowserTaskProfileState = Schema.decodeUnknownSync(
+  BrowserTaskProfileState,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBrowserTaskProfileSelection = Schema.decodeUnknownSync(
   BrowserTaskProfileSelection,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const decodeBrowserThreadScopeRequest = Schema.decodeUnknownSync(BrowserThreadScopeRequest);
-export const decodeBrowserThreadScope = Schema.decodeUnknownSync(BrowserThreadScope);
-export const decodeBrowserToolApproval = Schema.decodeUnknownSync(BrowserToolApproval);
-export const decodeBrowserToolApprovalList = Schema.decodeUnknownSync(BrowserToolApprovalList);
+export const decodeBrowserThreadScopeRequest = Schema.decodeUnknownSync(
+  BrowserThreadScopeRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserThreadScope = Schema.decodeUnknownSync(
+  BrowserThreadScope,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserToolApproval = Schema.decodeUnknownSync(
+  BrowserToolApproval,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserToolApprovalList = Schema.decodeUnknownSync(
+  BrowserToolApprovalList,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBrowserToolApprovalDecision = Schema.decodeUnknownSync(
   BrowserToolApprovalDecision,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBrowserContextCreateCommand = Schema.decodeUnknownSync(
   BrowserContextCreateCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBrowserContextInspectCommand = Schema.decodeUnknownSync(
   BrowserContextInspectCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBrowserThreadContextCommand = Schema.decodeUnknownSync(
   BrowserThreadContextCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBrowserThreadInspectCommand = Schema.decodeUnknownSync(
   BrowserThreadInspectCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBrowserActionCommand = Schema.decodeUnknownSync(BrowserActionCommand);
+export const decodeBrowserActionCommand = Schema.decodeUnknownSync(
+  BrowserActionCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBrowserContextCancelCommand = Schema.decodeUnknownSync(
   BrowserContextCancelCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBrowserContextStopCommand = Schema.decodeUnknownSync(BrowserContextStopCommand);
-export const decodeBrowserAutomationSnapshot = Schema.decodeUnknownSync(BrowserAutomationSnapshot);
+export const decodeBrowserContextStopCommand = Schema.decodeUnknownSync(
+  BrowserContextStopCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserAutomationSnapshot = Schema.decodeUnknownSync(
+  BrowserAutomationSnapshot,
+  STRICT_DECODE_OPTIONS,
+);

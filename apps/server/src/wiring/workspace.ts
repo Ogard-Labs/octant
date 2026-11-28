@@ -502,4 +502,4 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
   });
 }
 
-export type WorkspaceWiring = Effect.Effect.Success<ReturnType<typeof wireWorkspace>>;
+export type WorkspaceWiring = Effect.Success<ReturnType<typeof wireWorkspace>>;

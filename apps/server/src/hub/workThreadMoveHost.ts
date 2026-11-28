@@ -49,23 +49,25 @@ import {
 
 export const MOVED_WORK_THREAD_FORMAT = "octant.thread-move.work/1" as const;
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 const MovedWorkThread = Schema.Struct({
   format: Schema.Literal(MOVED_WORK_THREAD_FORMAT),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  providerDriverKind: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+  providerDriverKind: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(64)),
+  ),
   modelId: ProviderModelId,
   externalContentIngested: Schema.Boolean,
-  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.check(Schema.isMaxLength(10_000))),
   parts: Schema.optional(MovedThreadParts),
   /** The files of the thread's own folder; absent when its folder stays where it is. */
   folder: Schema.optional(MovedWorkFolder),
-}).annotations(strict);
+});
 type MovedWorkThread = typeof MovedWorkThread.Type;
 
-const decodeMovedWorkThread = Schema.decodeUnknownSync(MovedWorkThread);
-const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
+const decodeMovedWorkThread = Schema.decodeUnknownSync(MovedWorkThread, {
+  onExcessProperty: "error",
+});
+const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId, { onExcessProperty: "error" });
 
 /**
  * What the source keeps beside a move's parts and never sends: the folder the
@@ -77,24 +79,24 @@ const WorkFolderOnSource = Schema.Struct({
   folder: Schema.NonEmptyString,
   index: MovedWorkFolder,
   /** Each travelled file's device and inode when packed, in `index.files` order. */
-  identities: Schema.Array(
-    Schema.Struct({ dev: Schema.Number, ino: Schema.Number }).annotations(strict),
-  ),
+  identities: Schema.Array(Schema.Struct({ dev: Schema.Number, ino: Schema.Number })),
   /** The erase's clean-up has started, setting files aside in this folder. */
-  settling: Schema.optional(Schema.Struct({ setAside: Schema.NonEmptyString }).annotations(strict)),
+  settling: Schema.optional(Schema.Struct({ setAside: Schema.NonEmptyString })),
   settled: Schema.optional(
-    Schema.Union(
-      Schema.Struct({ status: Schema.Literal("removed") }).annotations(strict),
+    Schema.Union([
+      Schema.Struct({ status: Schema.Literal("removed") }),
       Schema.Struct({
         status: Schema.Literal("kept"),
         keptFiles: Schema.Array(Schema.String),
-      }).annotations(strict),
-    ),
+      }),
+    ]),
   ),
-}).annotations(strict);
+});
 type WorkFolderOnSource = typeof WorkFolderOnSource.Type;
 const encodeWorkFolderOnSource = Schema.encodeSync(WorkFolderOnSource);
-const decodeWorkFolderOnSource = Schema.decodeUnknownSync(WorkFolderOnSource);
+const decodeWorkFolderOnSource = Schema.decodeUnknownSync(WorkFolderOnSource, {
+  onExcessProperty: "error",
+});
 const WORK_FOLDER_ON_SOURCE = "work-folder.json";
 const WORK_FILES_PART = "work-files";
 

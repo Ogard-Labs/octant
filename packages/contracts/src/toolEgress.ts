@@ -11,6 +11,7 @@
  */
 
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, EventActorDeviceId, UtcTimestamp } from "./events";
 import { NativeHarnessApprovalId } from "./nativeHarness";
 import {
@@ -27,8 +28,8 @@ export {
   ToolEgressRuleHost,
 } from "./toolEgressHost";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const TOOL_EGRESS_THREAD_AGGREGATE = "thread-egress";
 export const TOOL_EGRESS_PROJECT_AGGREGATE = "project-egress";
@@ -62,8 +63,10 @@ export type ToolEgressProposalId = typeof ToolEgressProposalId.Type;
 
 /** An exact name a proposal asks for; a proposal never names a wildcard. */
 export const ToolEgressProposalHost = Schema.String.pipe(
-  Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
-  Schema.pattern(TOOL_EGRESS_HOST_NAME_PATTERN),
+  Schema.check(
+    Schema.isMaxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
+    Schema.isPattern(TOOL_EGRESS_HOST_NAME_PATTERN),
+  ),
   Schema.brand("ToolEgressProposalHost"),
 );
 export type ToolEgressProposalHost = typeof ToolEgressProposalHost.Type;
@@ -73,10 +76,10 @@ export type ToolEgressProposalHost = typeof ToolEgressProposalHost.Type;
  * the proxy refused, so it is not held to rule syntax, but it is bounded and
  * holds no path, query, credentials, or whitespace.
  */
-export const ToolEgressRecordedHost = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
-  Schema.pattern(/^[a-z0-9._:-]+$/),
+export const ToolEgressRecordedHost = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_TOOL_EGRESS_HOST_LENGTH),
+  Schema.isPattern(/^[a-z0-9._:-]+$/),
 );
 export type ToolEgressRecordedHost = typeof ToolEgressRecordedHost.Type;
 
@@ -84,7 +87,7 @@ export type ToolEgressRecordedHost = typeof ToolEgressRecordedHost.Type;
  * Why the proxy refused a request. Only `no-rule` and `expired` may become a
  * learn-mode proposal; the rest are never proposable.
  */
-export const ToolEgressRefusalReason = Schema.Literal(
+export const ToolEgressRefusalReason = Schema.Literals([
   "token",
   "ip-literal",
   "invalid-port",
@@ -96,28 +99,28 @@ export const ToolEgressRefusalReason = Schema.Literal(
   "sni-mismatch",
   "limit",
   "audit-unavailable",
-);
+]);
 export type ToolEgressRefusalReason = typeof ToolEgressRefusalReason.Type;
 
 /** Who answered the `network-access` approval a rule came from. */
-export const ToolEgressGrantingPrincipal = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+export const ToolEgressGrantingPrincipal = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("local-window") }),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     deviceId: EventActorDeviceId,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("reviewer") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("reviewer") }),
+]);
 export type ToolEgressGrantingPrincipal = typeof ToolEgressGrantingPrincipal.Type;
 
 /** A person who may take a rule away or turn a proposal down. */
-export const ToolEgressPersonPrincipal = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
+export const ToolEgressPersonPrincipal = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("local-window") }),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     deviceId: EventActorDeviceId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ToolEgressPersonPrincipal = typeof ToolEgressPersonPrincipal.Type;
 
 /**
@@ -129,21 +132,21 @@ export const ToolEgressLaunch = Schema.Struct({
   threadId: AggregateId,
   projectId: AggregateId,
   parentThreadId: Schema.optional(AggregateId),
-  toolCallId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-}).annotations(strict);
+  toolCallId: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+});
 export type ToolEgressLaunch = typeof ToolEgressLaunch.Type;
 
 /** A thread aggregate's rule covers one launch, or every launch of the thread. */
-export const ToolEgressThreadRuleScope = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("call"), launchId: ToolEgressLaunchId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("thread") }).annotations(strict),
-);
+export const ToolEgressThreadRuleScope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("call"), launchId: ToolEgressLaunchId }),
+  Schema.Struct({ kind: Schema.Literal("thread") }),
+]);
 export type ToolEgressThreadRuleScope = typeof ToolEgressThreadRuleScope.Type;
 
-const byteCount = Schema.Int.pipe(Schema.nonNegative());
+const byteCount = NonNegativeInt;
 // A refused request may have named a port no rule could hold.
-const recordedPort = Schema.Int.pipe(Schema.nonNegative());
-const requestCount = Schema.Int.pipe(Schema.positive());
+const recordedPort = NonNegativeInt;
+const requestCount = PositiveInt;
 
 /**
  * A reviewer's answer yields only `call` rules, and a tainted thread may be
@@ -161,20 +164,18 @@ export const ThreadEgressRuleGrantedPayload = Schema.Struct({
   principal: ToolEgressGrantingPrincipal,
   approvalId: NativeHarnessApprovalId,
   threadTainted: Schema.Boolean,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (payload) =>
-        payload.principal.kind === "reviewer"
-          ? payload.scope.kind === "call" && !payload.threadTainted
-          : payload.scope.kind === "call" || !payload.threadTainted,
-      {
-        message: () =>
-          "Only call rules may come from a reviewer or a tainted thread, and a reviewer cannot grant on a tainted thread.",
-      },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (payload) =>
+      payload.principal.kind === "reviewer"
+        ? payload.scope.kind === "call" && !payload.threadTainted
+        : payload.scope.kind === "call" || !payload.threadTainted,
+    {
+      message:
+        "Only call rules may come from a reviewer or a tainted thread, and a reviewer cannot grant on a tainted thread.",
+    },
+  ),
+);
 export type ThreadEgressRuleGrantedPayload = typeof ThreadEgressRuleGrantedPayload.Type;
 
 export const ThreadEgressRuleRevokedPayload = Schema.Struct({
@@ -182,7 +183,7 @@ export const ThreadEgressRuleRevokedPayload = Schema.Struct({
   threadId: AggregateId,
   principal: ToolEgressPersonPrincipal,
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressRuleRevokedPayload = typeof ThreadEgressRuleRevokedPayload.Type;
 
 /**
@@ -202,14 +203,14 @@ export const ProjectEgressRuleGrantedPayload = Schema.Struct({
   principal: ToolEgressPersonPrincipal,
   approvalId: NativeHarnessApprovalId,
   threadTainted: Schema.Literal(false),
-}).annotations(strict);
+});
 export type ProjectEgressRuleGrantedPayload = typeof ProjectEgressRuleGrantedPayload.Type;
 
 export const ProjectEgressRuleRevokedPayload = Schema.Struct({
   ruleId: ToolEgressRuleId,
   projectId: AggregateId,
   principal: ToolEgressPersonPrincipal,
-}).annotations(strict);
+});
 export type ProjectEgressRuleRevokedPayload = typeof ProjectEgressRuleRevokedPayload.Type;
 
 /**
@@ -224,32 +225,32 @@ export const ThreadEgressProposalRaisedPayload = Schema.Struct({
   launch: ToolEgressLaunch,
   host: ToolEgressProposalHost,
   port: ToolEgressPort,
-  reason: Schema.Literal("no-rule", "expired"),
+  reason: Schema.Literals(["no-rule", "expired"]),
   attempts: requestCount,
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressProposalRaisedPayload = typeof ThreadEgressProposalRaisedPayload.Type;
 
 export const ThreadEgressProposalDeclinedPayload = Schema.Struct({
   threadId: AggregateId,
-  proposalIds: Schema.Array(ToolEgressProposalId).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+  proposalIds: Schema.Array(ToolEgressProposalId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
   ),
   principal: ToolEgressPersonPrincipal,
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressProposalDeclinedPayload = typeof ThreadEgressProposalDeclinedPayload.Type;
 
 export const ThreadEgressLaunchStartedPayload = Schema.Struct({
   launch: ToolEgressLaunch,
   startedAt: UtcTimestamp,
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressLaunchStartedPayload = typeof ThreadEgressLaunchStartedPayload.Type;
 
 /** One destination's decision and counts within a launch. */
-export const ToolEgressDecisionEntry = Schema.Union(
+export const ToolEgressDecisionEntry = Schema.Union([
   Schema.Struct({
     host: ToolEgressRecordedHost,
     port: recordedPort,
@@ -257,25 +258,25 @@ export const ToolEgressDecisionEntry = Schema.Union(
     requests: requestCount,
     bytesSent: byteCount,
     bytesReceived: byteCount,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     host: ToolEgressRecordedHost,
     port: recordedPort,
     decision: Schema.Literal("refused"),
     reason: ToolEgressRefusalReason,
     requests: requestCount,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ToolEgressDecisionEntry = typeof ToolEgressDecisionEntry.Type;
 
 export const ThreadEgressDecisionsRecordedPayload = Schema.Struct({
   launch: ToolEgressLaunch,
-  entries: Schema.Array(ToolEgressDecisionEntry).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES),
+  entries: Schema.Array(ToolEgressDecisionEntry).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES),
   ),
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressDecisionsRecordedPayload = typeof ThreadEgressDecisionsRecordedPayload.Type;
 
 /**
@@ -294,12 +295,12 @@ export const ThreadEgressLaunchSummarizedPayload = Schema.Struct({
    * else.
    */
   malformedRequests: byteCount,
-  entries: Schema.Array(ToolEgressDecisionEntry).pipe(
-    Schema.maxItems(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
+  entries: Schema.Array(ToolEgressDecisionEntry).check(
+    Schema.isMaxLength(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
   ),
   truncated: Schema.Boolean,
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressLaunchSummarizedPayload = typeof ThreadEgressLaunchSummarizedPayload.Type;
 
 /**
@@ -310,13 +311,13 @@ export const ThreadEgressLaunchIncompletePayload = Schema.Struct({
   launch: ToolEgressLaunch,
   recordedBytesSent: byteCount,
   recordedBytesReceived: byteCount,
-  entries: Schema.Array(ToolEgressDecisionEntry).pipe(
-    Schema.maxItems(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
+  entries: Schema.Array(ToolEgressDecisionEntry).check(
+    Schema.isMaxLength(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
   ),
   truncated: Schema.Boolean,
   tail: Schema.Literal("unknown"),
   threadTainted: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadEgressLaunchIncompletePayload = typeof ThreadEgressLaunchIncompletePayload.Type;
 
 /**
@@ -327,13 +328,13 @@ export const ThreadEgressLearnModeSetPayload = Schema.Struct({
   threadId: AggregateId,
   enabled: Schema.Boolean,
   principal: ToolEgressPersonPrincipal,
-}).annotations(strict);
+});
 export type ThreadEgressLearnModeSetPayload = typeof ThreadEgressLearnModeSetPayload.Type;
 
 /** How long a thread rule lives. A `call` rule ends with its launch instead. */
-export const ToolEgressThreadRuleLifetime = Schema.Literal("1h", "8h", "7d");
+export const ToolEgressThreadRuleLifetime = Schema.Literals(["1h", "8h", "7d"]);
 export type ToolEgressThreadRuleLifetime = typeof ToolEgressThreadRuleLifetime.Type;
-export const ToolEgressProjectRuleLifetime = Schema.Literal("7d", "30d");
+export const ToolEgressProjectRuleLifetime = Schema.Literals(["7d", "30d"]);
 export type ToolEgressProjectRuleLifetime = typeof ToolEgressProjectRuleLifetime.Type;
 
 /** A live rule as the thread's and the Project's rules lists show it. */
@@ -341,11 +342,11 @@ export const ToolEgressRuleView = Schema.Struct({
   ruleId: ToolEgressRuleId,
   host: ToolEgressRuleHost,
   port: ToolEgressPort,
-  scope: Schema.Literal("call", "thread", "project"),
+  scope: Schema.Literals(["call", "thread", "project"]),
   expiresAt: UtcTimestamp,
   grantedAt: UtcTimestamp,
-  grantedBy: Schema.Literal("local-window", "remote-device", "reviewer"),
-}).annotations(strict);
+  grantedBy: Schema.Literals(["local-window", "remote-device", "reviewer"]),
+});
 export type ToolEgressRuleView = typeof ToolEgressRuleView.Type;
 
 /** An open learn-mode proposal. A child's names the child thread that asked. */
@@ -353,12 +354,12 @@ export const ToolEgressProposalView = Schema.Struct({
   proposalId: ToolEgressProposalId,
   host: ToolEgressProposalHost,
   port: ToolEgressPort,
-  reason: Schema.Literal("no-rule", "expired"),
+  reason: Schema.Literals(["no-rule", "expired"]),
   attempts: requestCount,
   raisedAt: UtcTimestamp,
   threadTainted: Schema.Boolean,
   childThreadId: Schema.optional(AggregateId),
-}).annotations(strict);
+});
 export type ToolEgressProposalView = typeof ToolEgressProposalView.Type;
 
 /**
@@ -373,35 +374,39 @@ export const ToolEgressThreadView = Schema.Struct({
   enforced: Schema.Boolean,
   learnMode: Schema.Boolean,
   threadTainted: Schema.Boolean,
-  projectGrant: Schema.Literal("allowed", "needs-local-window", "thread-tainted"),
-  threadRules: Schema.Array(ToolEgressRuleView).pipe(Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
-  projectRules: Schema.Array(ToolEgressRuleView).pipe(Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
-  proposals: Schema.Array(ToolEgressProposalView).pipe(
-    Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+  projectGrant: Schema.Literals(["allowed", "needs-local-window", "thread-tainted"]),
+  threadRules: Schema.Array(ToolEgressRuleView).check(
+    Schema.isMaxLength(MAX_LIVE_TOOL_EGRESS_RULES),
   ),
-}).annotations(strict);
+  projectRules: Schema.Array(ToolEgressRuleView).check(
+    Schema.isMaxLength(MAX_LIVE_TOOL_EGRESS_RULES),
+  ),
+  proposals: Schema.Array(ToolEgressProposalView).check(
+    Schema.isMaxLength(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+  ),
+});
 export type ToolEgressThreadView = typeof ToolEgressThreadView.Type;
 
 /** What a person chose for one host: a thread rule or a Project rule, each with its lifetime. */
-export const ToolEgressGrantChoice = Schema.Union(
+export const ToolEgressGrantChoice = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("thread"),
     lifetime: ToolEgressThreadRuleLifetime,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project"),
     lifetime: ToolEgressProjectRuleLifetime,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ToolEgressGrantChoice = typeof ToolEgressGrantChoice.Type;
 
 /**
  * The host as a person typed it. The host puts it in canonical form and
  * refuses what no rule may name, so a client never decides that.
  */
-const typedRuleHost = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2),
+const typedRuleHost = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2),
 );
 
 /**
@@ -409,7 +414,7 @@ const typedRuleHost = Schema.String.pipe(
  * (from proposals or typed into the rules list), turn proposals down, take a
  * rule away, or switch learn mode.
  */
-export const ToolEgressCommand = Schema.Union(
+export const ToolEgressCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("grant-rules"),
     grants: Schema.Array(
@@ -417,31 +422,31 @@ export const ToolEgressCommand = Schema.Union(
         host: typedRuleHost,
         port: ToolEgressPort,
         choice: ToolEgressGrantChoice,
-      }).annotations(strict),
-    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
-    declineProposalIds: Schema.Array(ToolEgressProposalId).pipe(
-      Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+      }),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_LIVE_TOOL_EGRESS_RULES)),
+    declineProposalIds: Schema.Array(ToolEgressProposalId).check(
+      Schema.isMaxLength(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("decline-proposals"),
-    proposalIds: Schema.Array(ToolEgressProposalId).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+    proposalIds: Schema.Array(ToolEgressProposalId).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoke-rule"),
     ruleId: ToolEgressRuleId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-learn-mode"),
     enabled: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ToolEgressCommand = typeof ToolEgressCommand.Type;
 
-export const ToolEgressCommandRefusalReason = Schema.Literal(
+export const ToolEgressCommandRefusalReason = Schema.Literals([
   "not-a-code-thread",
   "thread-tainted",
   "needs-local-window",
@@ -450,55 +455,75 @@ export const ToolEgressCommandRefusalReason = Schema.Literal(
   "rule-not-found",
   "proposal-not-found",
   "unavailable",
-);
+]);
 export type ToolEgressCommandRefusalReason = typeof ToolEgressCommandRefusalReason.Type;
 
-export const ToolEgressCommandResult = Schema.Union(
+export const ToolEgressCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("tool-egress-updated"),
     view: ToolEgressThreadView,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("tool-egress-refused"),
     reason: ToolEgressCommandRefusalReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ToolEgressCommandResult = typeof ToolEgressCommandResult.Type;
 
-export const decodeToolEgressRuleHost = Schema.decodeUnknownSync(ToolEgressRuleHost);
+export const decodeToolEgressRuleHost = Schema.decodeUnknownSync(
+  ToolEgressRuleHost,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadEgressRuleGrantedPayload = Schema.decodeUnknownSync(
   ThreadEgressRuleGrantedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressRuleRevokedPayload = Schema.decodeUnknownSync(
   ThreadEgressRuleRevokedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProjectEgressRuleGrantedPayload = Schema.decodeUnknownSync(
   ProjectEgressRuleGrantedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProjectEgressRuleRevokedPayload = Schema.decodeUnknownSync(
   ProjectEgressRuleRevokedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressProposalRaisedPayload = Schema.decodeUnknownSync(
   ThreadEgressProposalRaisedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressProposalDeclinedPayload = Schema.decodeUnknownSync(
   ThreadEgressProposalDeclinedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressLaunchStartedPayload = Schema.decodeUnknownSync(
   ThreadEgressLaunchStartedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressDecisionsRecordedPayload = Schema.decodeUnknownSync(
   ThreadEgressDecisionsRecordedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressLaunchSummarizedPayload = Schema.decodeUnknownSync(
   ThreadEgressLaunchSummarizedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressLaunchIncompletePayload = Schema.decodeUnknownSync(
   ThreadEgressLaunchIncompletePayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadEgressLearnModeSetPayload = Schema.decodeUnknownSync(
   ThreadEgressLearnModeSetPayload,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeToolEgressCommand = Schema.decodeUnknownSync(ToolEgressCommand);
-export const decodeToolEgressThreadView = Schema.decodeUnknownSync(ToolEgressThreadView);
+export const decodeToolEgressCommand = Schema.decodeUnknownSync(
+  ToolEgressCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeToolEgressThreadView = Schema.decodeUnknownSync(
+  ToolEgressThreadView,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   CanvasActor,
   CanvasBlockId,
@@ -16,10 +17,10 @@ import { DesignSystemLocation } from "./designSystems";
 
 export { CANVAS_SCHEMA_VERSION };
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
 
 export const CANVAS_COMMENT_BODY_MAX_CHARS = 4_096;
 export const CANVAS_COMMENT_REPLY_BODY_MAX_CHARS = 4_096;
@@ -43,21 +44,21 @@ export type CanvasCommentReplyId = typeof CanvasCommentReplyId.Type;
 export const CanvasCommentBlockAnchor = Schema.Struct({
   kind: Schema.Literal("block"),
   blockId: CanvasBlockId,
-}).annotations(strict);
+});
 export type CanvasCommentBlockAnchor = typeof CanvasCommentBlockAnchor.Type;
 
 export const CanvasCommentNodeAnchor = Schema.Struct({
   kind: Schema.Literal("node"),
   blockId: CanvasBlockId,
   nodeId: CanvasNodeId,
-}).annotations(strict);
+});
 export type CanvasCommentNodeAnchor = typeof CanvasCommentNodeAnchor.Type;
 
 export const CanvasCommentEdgeAnchor = Schema.Struct({
   kind: Schema.Literal("edge"),
   blockId: CanvasBlockId,
   edgeId: CanvasEdgeId,
-}).annotations(strict);
+});
 export type CanvasCommentEdgeAnchor = typeof CanvasCommentEdgeAnchor.Type;
 
 // A row anchor names a table row by the stable id its author gave it, never
@@ -71,13 +72,13 @@ export const CanvasCommentRowAnchor = Schema.Struct({
   kind: Schema.Literal("row"),
   blockId: CanvasBlockId,
   rowId: CanvasTableRowId,
-}).annotations(strict);
+});
 export type CanvasCommentRowAnchor = typeof CanvasCommentRowAnchor.Type;
 
-const FiniteNumber = Schema.Number.pipe(
-  Schema.filter(Number.isFinite, { message: () => "Canvas board numbers must be finite." }),
+const FiniteNumber = Schema.Number.check(
+  Schema.makeFilter(Number.isFinite, { message: "Canvas board numbers must be finite." }),
 );
-const NonNegativeFiniteNumber = FiniteNumber.pipe(Schema.nonNegative());
+const NonNegativeFiniteNumber = FiniteNumber.check(Schema.isGreaterThanOrEqualTo(0));
 
 export const CanvasCommentRegionAnchor = Schema.Struct({
   kind: Schema.Literal("region"),
@@ -87,13 +88,13 @@ export const CanvasCommentRegionAnchor = Schema.Struct({
   y: FiniteNumber,
   width: NonNegativeFiniteNumber,
   height: NonNegativeFiniteNumber,
-}).annotations(strict);
+});
 export type CanvasCommentRegionAnchor = typeof CanvasCommentRegionAnchor.Type;
 
 /** A stroke long enough to circle or underline a part, short enough to send to an agent whole. */
 export const CANVAS_COMMENT_STROKE_MAX_POINTS = 128;
 
-const Percent = FiniteNumber.pipe(Schema.between(0, 100));
+const Percent = FiniteNumber.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
 
 // A stroke anchor is a line a person drew over one block, in the same percent
 // of the block's drawn box a region uses. Unlike a region it is bounded to the
@@ -104,21 +105,21 @@ export const CanvasCommentStrokeAnchor = Schema.Struct({
   kind: Schema.Literal("stroke"),
   blockId: CanvasBlockId,
   strokeId: brandedUuid("CanvasCommentStrokeId"),
-  points: Schema.Array(Schema.Struct({ x: Percent, y: Percent }).annotations(strict)).pipe(
-    Schema.minItems(2),
-    Schema.maxItems(CANVAS_COMMENT_STROKE_MAX_POINTS),
+  points: Schema.Array(Schema.Struct({ x: Percent, y: Percent })).check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(CANVAS_COMMENT_STROKE_MAX_POINTS),
   ),
-}).annotations(strict);
+});
 export type CanvasCommentStrokeAnchor = typeof CanvasCommentStrokeAnchor.Type;
 
-export const CanvasCommentAnchor = Schema.Union(
+export const CanvasCommentAnchor = Schema.Union([
   CanvasCommentBlockAnchor,
   CanvasCommentNodeAnchor,
   CanvasCommentEdgeAnchor,
   CanvasCommentRowAnchor,
   CanvasCommentRegionAnchor,
   CanvasCommentStrokeAnchor,
-);
+]);
 export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;
 
 // ── Comment entities ───────────────────────────────────────────────────────
@@ -132,18 +133,18 @@ export type CanvasCommentAnchor = typeof CanvasCommentAnchor.Type;
  * taken in through artifact sync: it names that computer as its signed
  * replica entry does, and only the sync import stamps it.
  */
-export const CanvasCommentOrigin = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("host") }).annotations(strict),
+export const CanvasCommentOrigin = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("host") }),
   Schema.Struct({
     kind: Schema.Literal("remote-device"),
     deviceId: boundedNonEmptyText(128),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("replica"),
-    instanceId: Schema.UUID,
+    instanceId: GuidString,
     computerName: boundedNonEmptyText(128),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasCommentOrigin = typeof CanvasCommentOrigin.Type;
 
 /**
@@ -154,9 +155,9 @@ export type CanvasCommentOrigin = typeof CanvasCommentOrigin.Type;
  * rather than off a second comment state.
  */
 export const CanvasCommentAgentRequest = Schema.Struct({
-  canvasSequence: Schema.Int.pipe(Schema.positive()),
+  canvasSequence: PositiveInt,
   sentAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentAgentRequest = typeof CanvasCommentAgentRequest.Type;
 
 export const CanvasComment = Schema.Struct({
@@ -169,7 +170,7 @@ export const CanvasComment = Schema.Struct({
   resolvedAt: Schema.optional(UtcTimestamp),
   resolvedBy: Schema.optional(CanvasActor),
   sentToAgent: Schema.optional(CanvasCommentAgentRequest),
-}).annotations(strict);
+});
 export type CanvasComment = typeof CanvasComment.Type;
 
 export const CanvasCommentReply = Schema.Struct({
@@ -179,7 +180,7 @@ export const CanvasCommentReply = Schema.Struct({
   origin: Schema.optional(CanvasCommentOrigin),
   body: boundedNonEmptyText(CANVAS_COMMENT_REPLY_BODY_MAX_CHARS),
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentReply = typeof CanvasCommentReply.Type;
 
 // ── Comment commands ─────────────────────────────────────────────────────────
@@ -191,9 +192,9 @@ export const CanvasCommentAddCommand = Schema.Struct({
   anchor: CanvasCommentAnchor,
   author: CanvasActor,
   body: boundedNonEmptyText(CANVAS_COMMENT_BODY_MAX_CHARS),
-  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  expectedSequence: NonNegativeInt,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentAddCommand = typeof CanvasCommentAddCommand.Type;
 
 export const CanvasCommentReplyCommand = Schema.Struct({
@@ -203,9 +204,9 @@ export const CanvasCommentReplyCommand = Schema.Struct({
   replyId: CanvasCommentReplyId,
   author: CanvasActor,
   body: boundedNonEmptyText(CANVAS_COMMENT_REPLY_BODY_MAX_CHARS),
-  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  expectedSequence: NonNegativeInt,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentReplyCommand = typeof CanvasCommentReplyCommand.Type;
 
 export const CanvasCommentResolveCommand = Schema.Struct({
@@ -213,9 +214,9 @@ export const CanvasCommentResolveCommand = Schema.Struct({
   canvasId: CanvasId,
   commentId: CanvasCommentId,
   resolvedBy: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  expectedSequence: NonNegativeInt,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentResolveCommand = typeof CanvasCommentResolveCommand.Type;
 
 export const CanvasCommentDeleteCommand = Schema.Struct({
@@ -223,9 +224,9 @@ export const CanvasCommentDeleteCommand = Schema.Struct({
   canvasId: CanvasId,
   commentId: CanvasCommentId,
   deletedBy: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  expectedSequence: NonNegativeInt,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentDeleteCommand = typeof CanvasCommentDeleteCommand.Type;
 
 /**
@@ -239,19 +240,19 @@ export const CanvasCommentSendToAgentCommand = Schema.Struct({
   canvasId: CanvasId,
   commentId: CanvasCommentId,
   sentBy: CanvasActor,
-  canvasSequence: Schema.Int.pipe(Schema.positive()),
-  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  canvasSequence: PositiveInt,
+  expectedSequence: NonNegativeInt,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasCommentSendToAgentCommand = typeof CanvasCommentSendToAgentCommand.Type;
 
-export const CanvasCommentCommand = Schema.Union(
+export const CanvasCommentCommand = Schema.Union([
   CanvasCommentAddCommand,
   CanvasCommentReplyCommand,
   CanvasCommentResolveCommand,
   CanvasCommentDeleteCommand,
   CanvasCommentSendToAgentCommand,
-);
+]);
 export type CanvasCommentCommand = typeof CanvasCommentCommand.Type;
 
 // ── Comment events ───────────────────────────────────────────────────────────
@@ -259,15 +260,15 @@ export type CanvasCommentCommand = typeof CanvasCommentCommand.Type;
 export const CanvasCommentAdded = Schema.Struct({
   canvasId: CanvasId,
   comment: CanvasComment,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasCommentAdded = typeof CanvasCommentAdded.Type;
 
 export const CanvasCommentReplied = Schema.Struct({
   canvasId: CanvasId,
   reply: CanvasCommentReply,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasCommentReplied = typeof CanvasCommentReplied.Type;
 
 export const CanvasCommentResolved = Schema.Struct({
@@ -275,8 +276,8 @@ export const CanvasCommentResolved = Schema.Struct({
   commentId: CanvasCommentId,
   resolvedBy: CanvasActor,
   resolvedAt: UtcTimestamp,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasCommentResolved = typeof CanvasCommentResolved.Type;
 
 export const CanvasCommentDeleted = Schema.Struct({
@@ -284,18 +285,18 @@ export const CanvasCommentDeleted = Schema.Struct({
   commentId: CanvasCommentId,
   deletedBy: CanvasActor,
   deletedAt: UtcTimestamp,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasCommentDeleted = typeof CanvasCommentDeleted.Type;
 
 export const CanvasCommentSentToAgent = Schema.Struct({
   canvasId: CanvasId,
   commentId: CanvasCommentId,
   sentBy: CanvasActor,
-  canvasSequence: Schema.Int.pipe(Schema.positive()),
+  canvasSequence: PositiveInt,
   sentAt: UtcTimestamp,
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type CanvasCommentSentToAgent = typeof CanvasCommentSentToAgent.Type;
 
 export const CANVAS_COMMENT_ADDED = "canvas.comment-added@1";
@@ -304,22 +305,16 @@ export const CANVAS_COMMENT_RESOLVED = "canvas.comment-resolved@1";
 export const CANVAS_COMMENT_DELETED = "canvas.comment-deleted@1";
 export const CANVAS_COMMENT_SENT_TO_AGENT = "canvas.comment-sent-to-agent@1";
 
-export const CanvasCommentEvent = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("added"), event: CanvasCommentAdded }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("replied"), event: CanvasCommentReplied }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("resolved"), event: CanvasCommentResolved }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("deleted"), event: CanvasCommentDeleted }).annotations(
-    strict,
-  ),
+export const CanvasCommentEvent = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("added"), event: CanvasCommentAdded }),
+  Schema.Struct({ kind: Schema.Literal("replied"), event: CanvasCommentReplied }),
+  Schema.Struct({ kind: Schema.Literal("resolved"), event: CanvasCommentResolved }),
+  Schema.Struct({ kind: Schema.Literal("deleted"), event: CanvasCommentDeleted }),
   Schema.Struct({
     kind: Schema.Literal("sent-to-agent"),
     event: CanvasCommentSentToAgent,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasCommentEvent = typeof CanvasCommentEvent.Type;
 
 // ── Comment reads and command results ────────────────────────────────────────
@@ -327,8 +322,10 @@ export type CanvasCommentEvent = typeof CanvasCommentEvent.Type;
 /** One comment with its replies, as the conversation panel shows it. */
 export const CanvasCommentThread = Schema.Struct({
   comment: CanvasComment,
-  replies: Schema.Array(CanvasCommentReply).pipe(Schema.maxItems(CANVAS_MAX_REPLIES_PER_COMMENT)),
-}).annotations(strict);
+  replies: Schema.Array(CanvasCommentReply).check(
+    Schema.isMaxLength(CANVAS_MAX_REPLIES_PER_COMMENT),
+  ),
+});
 export type CanvasCommentThread = typeof CanvasCommentThread.Type;
 
 /**
@@ -336,25 +333,25 @@ export type CanvasCommentThread = typeof CanvasCommentThread.Type;
  * a workspace that may not read the Canvas learns nothing about what was said
  * on it, not even how much.
  */
-export const CanvasCommentsOutcome = Schema.Union(
+export const CanvasCommentsOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     canvasId: CanvasId,
-    sequence: Schema.Int.pipe(Schema.nonNegative()),
-    threads: Schema.Array(CanvasCommentThread).pipe(
-      Schema.maxItems(CANVAS_MAX_COMMENTS_PER_CANVAS),
+    sequence: NonNegativeInt,
+    threads: Schema.Array(CanvasCommentThread).check(
+      Schema.isMaxLength(CANVAS_MAX_COMMENTS_PER_CANVAS),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     canvasId: CanvasId,
     reason: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }),
+]);
 export type CanvasCommentsOutcome = typeof CanvasCommentsOutcome.Type;
 
-export const CanvasCommentDenialCode = Schema.Literal(
+export const CanvasCommentDenialCode = Schema.Literals([
   "malformed-request",
   "stale-version",
   "unauthorized",
@@ -366,21 +363,21 @@ export const CanvasCommentDenialCode = Schema.Literal(
   "duplicate-reply",
   "reply-budget-exceeded",
   "unknown-reply-target",
-);
+]);
 export type CanvasCommentDenialCode = typeof CanvasCommentDenialCode.Type;
 
-export const CanvasCommentCommandResult = Schema.Union(
+export const CanvasCommentCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     canvasId: CanvasId,
-    sequence: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    sequence: PositiveInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasCommentDenialCode,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasCommentCommandResult = typeof CanvasCommentCommandResult.Type;
 
 // ── Layout revision ────────────────────────────────────────────────────────────
@@ -394,7 +391,7 @@ export const CanvasDiagramNodePosition = Schema.Struct({
   nodeId: CanvasNodeId,
   x: FiniteNumber,
   y: FiniteNumber,
-}).annotations(strict);
+});
 export type CanvasDiagramNodePosition = typeof CanvasDiagramNodePosition.Type;
 
 export const CanvasDiagramLayoutReviseCommand = Schema.Struct({
@@ -402,30 +399,36 @@ export const CanvasDiagramLayoutReviseCommand = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   blockId: CanvasBlockId,
-  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.minItems(1), Schema.maxItems(512)),
+  positions: Schema.Array(CanvasDiagramNodePosition).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(512),
+  ),
   actor: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   schemaVersion: CanvasSchemaVersion,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasDiagramLayoutReviseCommand = typeof CanvasDiagramLayoutReviseCommand.Type;
 
 export const CanvasDiagramLayoutRevised = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   blockId: CanvasBlockId,
-  positions: Schema.Array(CanvasDiagramNodePosition).pipe(Schema.minItems(1), Schema.maxItems(512)),
+  positions: Schema.Array(CanvasDiagramNodePosition).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(512),
+  ),
   actor: CanvasActor,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   revisedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasDiagramLayoutRevised = typeof CanvasDiagramLayoutRevised.Type;
 
 /**
  * Why a board command was refused. Mirrors the domain policy's rejection codes
  * plus the two the server adds when it cannot reach the policy at all.
  */
-export const CanvasBoardDenialCode = Schema.Literal(
+export const CanvasBoardDenialCode = Schema.Literals([
   "malformed-request",
   "stale-version",
   "unauthorized",
@@ -437,22 +440,22 @@ export const CanvasBoardDenialCode = Schema.Literal(
   "not-a-plan",
   "unknown-task",
   "nothing-to-present",
-);
+]);
 export type CanvasBoardDenialCode = typeof CanvasBoardDenialCode.Type;
 
-export const CanvasDiagramLayoutReviseResult = Schema.Union(
+export const CanvasDiagramLayoutReviseResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
-    sequence: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    sequence: PositiveInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasBoardDenialCode,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasDiagramLayoutReviseResult = typeof CanvasDiagramLayoutReviseResult.Type;
 
 // ── Deck proposal ─────────────────────────────────────────────────────────────
@@ -466,10 +469,10 @@ export const CanvasDeckProposeCommand = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   actor: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   schemaVersion: CanvasSchemaVersion,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasDeckProposeCommand = typeof CanvasDeckProposeCommand.Type;
 
 /**
@@ -482,11 +485,11 @@ export const CanvasDesignSystemApplyCommand = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   actor: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   schemaVersion: CanvasSchemaVersion,
   issuedAt: UtcTimestamp,
   designSystem: Schema.NullOr(DesignSystemLocation),
-}).annotations(strict);
+});
 export type CanvasDesignSystemApplyCommand = typeof CanvasDesignSystemApplyCommand.Type;
 
 export const CanvasDeckProposeResult = CanvasDiagramLayoutReviseResult;
@@ -506,10 +509,10 @@ export const CanvasPlanTaskReviseCommand = Schema.Struct({
   taskId: CanvasPlanTaskId,
   status: CanvasPlanTaskStatus,
   actor: CanvasActor,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   schemaVersion: CanvasSchemaVersion,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasPlanTaskReviseCommand = typeof CanvasPlanTaskReviseCommand.Type;
 
 /** A board revision's answer: the new version, or why it was refused. */
@@ -518,51 +521,112 @@ export type CanvasPlanTaskReviseResult = CanvasDiagramLayoutReviseResult;
 
 // ── Decoders ─────────────────────────────────────────────────────────────────
 
-export const decodeCanvasCommentId = Schema.decodeUnknownSync(CanvasCommentId);
-export const decodeCanvasCommentReplyId = Schema.decodeUnknownSync(CanvasCommentReplyId);
-export const decodeCanvasCommentAnchor = Schema.decodeUnknownSync(CanvasCommentAnchor);
-export const decodeCanvasComment = Schema.decodeUnknownSync(CanvasComment);
-export const decodeCanvasCommentReply = Schema.decodeUnknownSync(CanvasCommentReply);
-export const decodeCanvasCommentAddCommand = Schema.decodeUnknownSync(CanvasCommentAddCommand);
-export const decodeCanvasCommentReplyCommand = Schema.decodeUnknownSync(CanvasCommentReplyCommand);
+export const decodeCanvasCommentId = Schema.decodeUnknownSync(
+  CanvasCommentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentReplyId = Schema.decodeUnknownSync(
+  CanvasCommentReplyId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentAnchor = Schema.decodeUnknownSync(
+  CanvasCommentAnchor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasComment = Schema.decodeUnknownSync(CanvasComment, STRICT_DECODE_OPTIONS);
+export const decodeCanvasCommentReply = Schema.decodeUnknownSync(
+  CanvasCommentReply,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentAddCommand = Schema.decodeUnknownSync(
+  CanvasCommentAddCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentReplyCommand = Schema.decodeUnknownSync(
+  CanvasCommentReplyCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasCommentResolveCommand = Schema.decodeUnknownSync(
   CanvasCommentResolveCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasCommentDeleteCommand = Schema.decodeUnknownSync(
   CanvasCommentDeleteCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasCommentSendToAgentCommand = Schema.decodeUnknownSync(
   CanvasCommentSendToAgentCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasCommentSentToAgent = Schema.decodeUnknownSync(CanvasCommentSentToAgent);
-export const decodeCanvasCommentCommand = Schema.decodeUnknownEither(CanvasCommentCommand);
-export const decodeCanvasCommentAdded = Schema.decodeUnknownSync(CanvasCommentAdded);
-export const decodeCanvasCommentReplied = Schema.decodeUnknownSync(CanvasCommentReplied);
-export const decodeCanvasCommentResolved = Schema.decodeUnknownSync(CanvasCommentResolved);
-export const decodeCanvasCommentDeleted = Schema.decodeUnknownSync(CanvasCommentDeleted);
-export const decodeCanvasDiagramNodePosition = Schema.decodeUnknownSync(CanvasDiagramNodePosition);
+export const decodeCanvasCommentSentToAgent = Schema.decodeUnknownSync(
+  CanvasCommentSentToAgent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentCommand = Schema.decodeUnknownResult(
+  CanvasCommentCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentAdded = Schema.decodeUnknownSync(
+  CanvasCommentAdded,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentReplied = Schema.decodeUnknownSync(
+  CanvasCommentReplied,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentResolved = Schema.decodeUnknownSync(
+  CanvasCommentResolved,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentDeleted = Schema.decodeUnknownSync(
+  CanvasCommentDeleted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasDiagramNodePosition = Schema.decodeUnknownSync(
+  CanvasDiagramNodePosition,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasDiagramLayoutReviseCommand = Schema.decodeUnknownSync(
   CanvasDiagramLayoutReviseCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasDiagramLayoutRevised = Schema.decodeUnknownSync(
   CanvasDiagramLayoutRevised,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasDiagramLayoutReviseResult = Schema.decodeUnknownSync(
   CanvasDiagramLayoutReviseResult,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasPlanTaskReviseCommand = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasDeckProposeCommand = Schema.decodeUnknownSync(CanvasDeckProposeCommand);
+export const decodeCanvasDeckProposeCommand = Schema.decodeUnknownSync(
+  CanvasDeckProposeCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasDesignSystemApplyCommand = Schema.decodeUnknownSync(
   CanvasDesignSystemApplyCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasPlanTaskReviseResult = Schema.decodeUnknownSync(
   CanvasPlanTaskReviseResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasCommentOrigin = Schema.decodeUnknownSync(CanvasCommentOrigin);
-export const decodeCanvasCommentEvent = Schema.decodeUnknownSync(CanvasCommentEvent);
-export const decodeCanvasCommentsOutcome = Schema.decodeUnknownSync(CanvasCommentsOutcome);
+export const decodeCanvasCommentOrigin = Schema.decodeUnknownSync(
+  CanvasCommentOrigin,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentEvent = Schema.decodeUnknownSync(
+  CanvasCommentEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCommentsOutcome = Schema.decodeUnknownSync(
+  CanvasCommentsOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasCommentCommandResult = Schema.decodeUnknownSync(
   CanvasCommentCommandResult,
+  STRICT_DECODE_OPTIONS,
 );

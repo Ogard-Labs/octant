@@ -54,7 +54,7 @@ const decodeDesignPages = Schema.decodeUnknownSync(
   Schema.Array(
     Schema.Struct({
       blockId: CanvasBlockId,
-      path: Schema.String.pipe(Schema.pattern(/^\/design-page\/\d{1,3}$/)),
+      path: Schema.String.pipe(Schema.check(Schema.isPattern(/^\/design-page\/\d{1,3}$/))),
     }),
   ),
 );

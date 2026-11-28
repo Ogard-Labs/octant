@@ -1,11 +1,15 @@
 import { Schema } from "effect";
+import {
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { PreviewHostId, PreviewOpaqueRef, PreviewTargetId } from "./previews";
 import { ProjectId } from "./projects";
 import { WorkArtifactFormat, WorkArtifactId } from "./workArtifacts";
 import { WorkThreadId } from "./workThreads";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Bound on one listing response. A Work folder is a person's documents
@@ -26,7 +30,7 @@ export const MAX_WORK_FILE_LISTING_DEPTH = 8;
  * a file without inventing the attribution. `untouched` therefore means "this
  * folder already held it", not "a different task wrote it".
  */
-export const WorkFileListingOrigin = Schema.Literal("authored", "untouched");
+export const WorkFileListingOrigin = Schema.Literals(["authored", "untouched"]);
 export type WorkFileListingOrigin = typeof WorkFileListingOrigin.Type;
 
 /**
@@ -40,8 +44,8 @@ export const WorkFileListingArtifact = Schema.Struct({
   artifactId: WorkArtifactId,
   format: WorkArtifactFormat,
   /** Monotonic version sequence, so "v3" in the panel is the host's count. */
-  sequence: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  sequence: PositiveInt,
+});
 export type WorkFileListingArtifact = typeof WorkFileListingArtifact.Type;
 
 /**
@@ -56,7 +60,7 @@ export type WorkFileListingArtifact = typeof WorkFileListingArtifact.Type;
 export const WorkFileListingPreview = Schema.Struct({
   targetId: PreviewTargetId,
   opaqueRef: PreviewOpaqueRef,
-}).annotations(strict);
+});
 export type WorkFileListingPreview = typeof WorkFileListingPreview.Type;
 
 /**
@@ -64,20 +68,20 @@ export type WorkFileListingPreview = typeof WorkFileListingPreview.Type;
  * the host absolute path is never part of this contract, so a renderer or
  * remote client cannot learn where the folder lives on the host.
  */
-export const WorkFileListingEntry = Schema.Union(
+export const WorkFileListingEntry = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("directory"),
-    path: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    path: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("file"),
-    path: Schema.NonEmptyTrimmedString,
-    byteLength: Schema.Int.pipe(Schema.nonNegative()),
+    path: NonEmptyTrimmedString,
+    byteLength: NonNegativeInt,
     origin: WorkFileListingOrigin,
     artifact: Schema.optional(WorkFileListingArtifact),
     preview: Schema.optional(WorkFileListingPreview),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkFileListingEntry = typeof WorkFileListingEntry.Type;
 
 /**
@@ -90,7 +94,7 @@ export const WorkFileListing = Schema.Struct({
   threadId: WorkThreadId,
   projectId: ProjectId,
   /** Absent when the listing starts at the bound folder itself. */
-  directory: Schema.optional(Schema.NonEmptyTrimmedString),
+  directory: Schema.optional(NonEmptyTrimmedString),
   entries: Schema.Array(WorkFileListingEntry),
   /**
    * The preview host these entries' targets belong to. Absent on a host that
@@ -99,28 +103,40 @@ export const WorkFileListing = Schema.Struct({
   previewHostId: Schema.optional(PreviewHostId),
   truncated: Schema.Boolean,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkFileListing = typeof WorkFileListing.Type;
 
 export const WorkFileListingFailure = Schema.Struct({
-  category: Schema.Literal("invalid", "unauthorized", "unavailable", "not-found"),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  category: Schema.Literals(["invalid", "unauthorized", "unavailable", "not-found"]),
+  message: NonEmptyTrimmedString,
+});
 export type WorkFileListingFailure = typeof WorkFileListingFailure.Type;
 
-export const WorkFileListingResult = Schema.Union(
+export const WorkFileListingResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("listed"),
     listing: WorkFileListing,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     failure: WorkFileListingFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkFileListingResult = typeof WorkFileListingResult.Type;
 
-export const decodeWorkFileListingEntry = Schema.decodeUnknownSync(WorkFileListingEntry);
-export const decodeWorkFileListing = Schema.decodeUnknownSync(WorkFileListing);
-export const decodeWorkFileListingFailure = Schema.decodeUnknownSync(WorkFileListingFailure);
-export const decodeWorkFileListingResult = Schema.decodeUnknownSync(WorkFileListingResult);
+export const decodeWorkFileListingEntry = Schema.decodeUnknownSync(
+  WorkFileListingEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkFileListing = Schema.decodeUnknownSync(
+  WorkFileListing,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkFileListingFailure = Schema.decodeUnknownSync(
+  WorkFileListingFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkFileListingResult = Schema.decodeUnknownSync(
+  WorkFileListingResult,
+  STRICT_DECODE_OPTIONS,
+);

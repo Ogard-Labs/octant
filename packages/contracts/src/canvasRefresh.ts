@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AgentRunAuthority } from "./agentRun";
 import {
   CanvasActor,
@@ -25,26 +26,30 @@ import {
   StandaloneSkillScope,
 } from "./extensions";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const CANVAS_REFRESH_MAX_PARAMETERS = 32;
 export const CANVAS_REFRESH_PARAMETER_VALUE_MAX_CHARS = 512;
 export const CANVAS_REFRESH_MESSAGE_MAX_CHARS = 1_024;
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 // Values are typed server-owned references (opaque or ref) only. Free-form
 // `literal:` text is intentionally rejected so a secret-shaped value can never
 // be journaled in a durable recipe; the policy boundary enforces the same rule
 // against independently constructed receipts.
-const CanvasRefreshParameterValue = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(CANVAS_REFRESH_PARAMETER_VALUE_MAX_CHARS),
-  Schema.pattern(/^(?:opaque|ref):[A-Za-z0-9._:-]+$/),
+const CanvasRefreshParameterValue = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(CANVAS_REFRESH_PARAMETER_VALUE_MAX_CHARS),
+  Schema.isPattern(/^(?:opaque|ref):[A-Za-z0-9._:-]+$/),
 );
 
 export const CanvasRefreshRequestId = brandedUuid("CanvasRefreshRequestId");
@@ -56,7 +61,7 @@ export const CanvasRefreshParameter = Schema.Struct({
   key: boundedToken("CanvasRefreshParameterKey"),
   /** Values are server-owned opaque/ref references, never raw text or credentials. */
   value: CanvasRefreshParameterValue,
-}).annotations(strict);
+});
 export type CanvasRefreshParameter = typeof CanvasRefreshParameter.Type;
 
 export const CanvasRefreshSkill = Schema.Struct({
@@ -66,7 +71,7 @@ export const CanvasRefreshSkill = Schema.Struct({
    * still pinned by qualifiedId (which includes the source digest). */
   version: Schema.optional(ExtensionPackageVersion),
   scope: Schema.optional(StandaloneSkillScope),
-}).annotations(strict);
+});
 export type CanvasRefreshSkill = typeof CanvasRefreshSkill.Type;
 
 export const CANVAS_REFRESH_MAX_SKILL_OPTIONS = 64;
@@ -83,11 +88,11 @@ export const CANVAS_REFRESH_MAX_SKILL_OPTIONS = 64;
 export const CanvasRefreshSkillOption = Schema.Struct({
   skill: CanvasRefreshSkill,
   displayName: boundedNonEmptyText(128),
-}).annotations(strict);
+});
 export type CanvasRefreshSkillOption = typeof CanvasRefreshSkillOption.Type;
 
-export const CanvasRefreshSkillOptions = Schema.Array(CanvasRefreshSkillOption).pipe(
-  Schema.maxItems(CANVAS_REFRESH_MAX_SKILL_OPTIONS),
+export const CanvasRefreshSkillOptions = Schema.Array(CanvasRefreshSkillOption).check(
+  Schema.isMaxLength(CANVAS_REFRESH_MAX_SKILL_OPTIONS),
 );
 export type CanvasRefreshSkillOptions = typeof CanvasRefreshSkillOptions.Type;
 
@@ -101,15 +106,15 @@ export const CanvasRefreshRecipe = Schema.Struct({
   workspace: CanvasWorkspaceScope,
   originThreadId: CanvasOriginThreadId,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
-  parameters: Schema.Array(CanvasRefreshParameter).pipe(
-    Schema.maxItems(CANVAS_REFRESH_MAX_PARAMETERS),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
+  parameters: Schema.Array(CanvasRefreshParameter).check(
+    Schema.isMaxLength(CANVAS_REFRESH_MAX_PARAMETERS),
   ),
   // Refresh always reauthorizes at least one canonical source. Source-free
   // regeneration requires a separate authoritative generator contract.
-  sourceManifest: CanvasSourceManifest.pipe(Schema.minItems(1)),
+  sourceManifest: CanvasSourceManifest.check(Schema.isMinLength(1)),
   skill: Schema.optional(CanvasRefreshSkill),
-}).annotations(strict);
+});
 export type CanvasRefreshRecipe = typeof CanvasRefreshRecipe.Type;
 
 export const CanvasRefreshRequest = Schema.Struct({
@@ -118,16 +123,16 @@ export const CanvasRefreshRequest = Schema.Struct({
   requestId: CanvasRefreshRequestId,
   canvasId: CanvasId,
   recipe: CanvasRefreshRecipe,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   hostId: HostId,
   mode: OctantMode,
   workspace: CanvasWorkspaceScope,
   originThreadId: CanvasOriginThreadId,
   actor: CanvasActor,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
   requestedAuthority: AgentRunAuthority,
-}).annotations(strict);
+});
 export type CanvasRefreshRequest = typeof CanvasRefreshRequest.Type;
 
 export const CanvasRefreshCancelRequest = Schema.Struct({
@@ -136,10 +141,10 @@ export const CanvasRefreshCancelRequest = Schema.Struct({
   requestId: CanvasRefreshRequestId,
   recipeId: CanvasRefreshRecipeId,
   canvasId: CanvasId,
-}).annotations(strict);
+});
 export type CanvasRefreshCancelRequest = typeof CanvasRefreshCancelRequest.Type;
 
-export const CanvasRefreshSourceStatus = Schema.Literal(
+export const CanvasRefreshSourceStatus = Schema.Literals([
   "ready",
   "stale",
   "missing",
@@ -150,7 +155,7 @@ export const CanvasRefreshSourceStatus = Schema.Literal(
   "interrupted",
   "oversized",
   "failed",
-);
+]);
 export type CanvasRefreshSourceStatus = typeof CanvasRefreshSourceStatus.Type;
 
 export const CanvasRefreshSourceResult = Schema.Struct({
@@ -158,16 +163,16 @@ export const CanvasRefreshSourceResult = Schema.Struct({
   status: CanvasRefreshSourceStatus,
   message: Schema.optional(boundedNonEmptyText(CANVAS_REFRESH_MESSAGE_MAX_CHARS)),
   observedVersion: Schema.optional(CanvasSourceVersion),
-}).annotations(strict);
+});
 export type CanvasRefreshSourceResult = typeof CanvasRefreshSourceResult.Type;
 
-export const CanvasRefreshOutcome = Schema.Literal(
+export const CanvasRefreshOutcome = Schema.Literals([
   "ready",
   "limited",
   "partial",
   "cancelled",
   "failed",
-);
+]);
 export type CanvasRefreshOutcome = typeof CanvasRefreshOutcome.Type;
 
 export const CanvasRefreshReceipt = Schema.Struct({
@@ -178,23 +183,23 @@ export const CanvasRefreshReceipt = Schema.Struct({
   recipe: Schema.optional(CanvasRefreshRecipe),
   canvasId: CanvasId,
   versionId: Schema.optional(CanvasVersionId),
-  sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  sequence: Schema.optional(PositiveInt),
   outcome: CanvasRefreshOutcome,
   sources: Schema.Array(CanvasRefreshSourceResult),
   completedAt: UtcTimestamp,
   recoveryReason: Schema.optional(boundedNonEmptyText(CANVAS_REFRESH_MESSAGE_MAX_CHARS)),
-}).annotations(strict);
+});
 export type CanvasRefreshReceipt = typeof CanvasRefreshReceipt.Type;
 
 /** Durable journal payload for refresh idempotency and cancellation replay. */
 export const CanvasRefreshReceiptRecorded = Schema.Struct({
   receipt: CanvasRefreshReceipt,
-}).annotations(strict);
+});
 export type CanvasRefreshReceiptRecorded = typeof CanvasRefreshReceiptRecorded.Type;
 
 export const CANVAS_REFRESH_RECEIPT_RECORDED = "canvas.refresh-receipt-recorded@1";
 
-export const CanvasRefreshDenialCode = Schema.Literal(
+export const CanvasRefreshDenialCode = Schema.Literals([
   "malformed-request",
   "unavailable",
   "unauthorized",
@@ -206,10 +211,10 @@ export const CanvasRefreshDenialCode = Schema.Literal(
   "offline",
   "incompatible",
   "cancelled",
-);
+]);
 export type CanvasRefreshDenialCode = typeof CanvasRefreshDenialCode.Type;
 
-export const CanvasRefreshResult = Schema.Union(
+export const CanvasRefreshResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     receipt: CanvasRefreshReceipt,
@@ -220,27 +225,47 @@ export const CanvasRefreshResult = Schema.Union(
      * presentation metadata only and never grants authority.
      */
     contribution: Schema.optional(CanvasSkillContribution),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasRefreshDenialCode,
     message: boundedNonEmptyText(CANVAS_REFRESH_MESSAGE_MAX_CHARS),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasRefreshResult = typeof CanvasRefreshResult.Type;
 
-export const decodeCanvasRefreshRequestId = Schema.decodeUnknownSync(CanvasRefreshRequestId);
-export const decodeCanvasRefreshRecipeId = Schema.decodeUnknownSync(CanvasRefreshRecipeId);
-export const decodeCanvasRefreshRequest = Schema.decodeUnknownSync(CanvasRefreshRequest);
+export const decodeCanvasRefreshRequestId = Schema.decodeUnknownSync(
+  CanvasRefreshRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasRefreshRecipeId = Schema.decodeUnknownSync(
+  CanvasRefreshRecipeId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasRefreshRequest = Schema.decodeUnknownSync(
+  CanvasRefreshRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasRefreshCancelRequest = Schema.decodeUnknownSync(
   CanvasRefreshCancelRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasRefreshSourceResult = Schema.decodeUnknownSync(CanvasRefreshSourceResult);
-export const decodeCanvasRefreshReceipt = Schema.decodeUnknownSync(CanvasRefreshReceipt);
+export const decodeCanvasRefreshSourceResult = Schema.decodeUnknownSync(
+  CanvasRefreshSourceResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasRefreshReceipt = Schema.decodeUnknownSync(
+  CanvasRefreshReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasRefreshReceiptRecorded = Schema.decodeUnknownSync(
   CanvasRefreshReceiptRecorded,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasRefreshResult = Schema.decodeUnknownSync(CanvasRefreshResult);
+export const decodeCanvasRefreshResult = Schema.decodeUnknownSync(
+  CanvasRefreshResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 // Kept as a named type import target for callers that need the exact scope
 // shape without re-exporting a second Canvas authority model.

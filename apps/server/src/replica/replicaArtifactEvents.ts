@@ -28,8 +28,7 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Sequence = Schema.Int.pipe(Schema.positive());
+const Sequence = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)));
 
 export const REPLICA_ARTIFACT_EVENT_NAMES = {
   queued: "replica.artifact-queued@2",
@@ -52,7 +51,7 @@ export const REPLICA_ARTIFACT_EVENT_NAMES = {
   backfillRestoring: "replica.backfill-restore-requested@1",
 } as const;
 
-export const ReplicaArtifactKind = Schema.Literal("artifact-version", "artifact-tombstone");
+export const ReplicaArtifactKind = Schema.Literals(["artifact-version", "artifact-tombstone"]);
 export type ReplicaArtifactKind = typeof ReplicaArtifactKind.Type;
 
 /**
@@ -62,32 +61,37 @@ export type ReplicaArtifactKind = typeof ReplicaArtifactKind.Type;
  * so a squatted slot skipped in between never reorders the queue.
  */
 export const ReplicaArtifactQueued = Schema.Struct({
-  queueId: Schema.UUID,
+  queueId: Schema.String.check(Schema.isGUID()),
   kind: ReplicaArtifactKind,
   artifact: ReplicaArtifactOrigin,
   parents: ReplicaParents,
   bundle: ArtifactBundle,
-}).annotations(strict);
+});
 export type ReplicaArtifactQueued = typeof ReplicaArtifactQueued.Type;
 
 export const ReplicaBackfillStarted = Schema.Struct({
-  backfillId: Schema.UUID,
+  backfillId: Schema.String.check(Schema.isGUID()),
   instanceId: ReplicaInstanceId,
   canvasId: CanvasId,
-  versionIds: Schema.Array(CanvasVersionId).pipe(Schema.minItems(1), Schema.maxItems(24)),
-}).annotations(strict);
+  versionIds: Schema.Array(CanvasVersionId).pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(24)),
+  ),
+});
 export type ReplicaBackfillStarted = typeof ReplicaBackfillStarted.Type;
 export const ReplicaBackfillRestoring = Schema.Struct({
-  backfillId: Schema.UUID,
+  backfillId: Schema.String.check(Schema.isGUID()),
   versionId: CanvasVersionId,
-  deletionDigest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-}).annotations(strict);
+  deletionDigest: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+});
 export type ReplicaBackfillRestoring = typeof ReplicaBackfillRestoring.Type;
-export const ReplicaBackfillMarked = Schema.Struct({ backfillId: Schema.UUID }).annotations(strict);
+export const ReplicaBackfillMarked = Schema.Struct({
+  backfillId: Schema.String.check(Schema.isGUID()),
+});
 export const ReplicaBackfillQueued = Schema.Struct({
   ...ReplicaArtifactQueued.fields,
-  backfillId: Schema.UUID,
-}).annotations(strict);
+  backfillId: Schema.String.check(Schema.isGUID()),
+});
 
 /**
  * A change to a Canvas's comments this host will publish, in the same queue
@@ -95,12 +99,12 @@ export const ReplicaBackfillQueued = Schema.Struct({
  * computers' comments on that Canvas when the change was made.
  */
 export const ReplicaCommentQueued = Schema.Struct({
-  queueId: Schema.UUID,
+  queueId: Schema.String.check(Schema.isGUID()),
   kind: Schema.Literal("canvas-comment"),
   artifact: ReplicaArtifactOrigin,
-  after: Schema.Array(ReplicaSlotRef).pipe(Schema.maxItems(64)),
+  after: Schema.Array(ReplicaSlotRef).pipe(Schema.check(Schema.isMaxLength(64))),
   change: ReplicaCommentChange,
-}).annotations(strict);
+});
 export type ReplicaCommentQueued = typeof ReplicaCommentQueued.Type;
 
 /**
@@ -110,12 +114,12 @@ export type ReplicaCommentQueued = typeof ReplicaCommentQueued.Type;
  * when the change was made.
  */
 export const ReplicaChoiceAnswerQueued = Schema.Struct({
-  queueId: Schema.UUID,
+  queueId: Schema.String.check(Schema.isGUID()),
   kind: Schema.Literal("canvas-choice-answer"),
   artifact: ReplicaArtifactOrigin,
-  after: Schema.Array(ReplicaSlotRef).pipe(Schema.maxItems(64)),
+  after: Schema.Array(ReplicaSlotRef).pipe(Schema.check(Schema.isMaxLength(64))),
   change: ReplicaChoiceAnswerChange,
-}).annotations(strict);
+});
 export type ReplicaChoiceAnswerQueued = typeof ReplicaChoiceAnswerQueued.Type;
 
 /**
@@ -123,10 +127,10 @@ export type ReplicaChoiceAnswerQueued = typeof ReplicaChoiceAnswerQueued.Type;
  * slots this computer had not read.
  */
 export const ReplicaRestoreStarted = Schema.Struct({
-  restoreId: Schema.UUID,
+  restoreId: Schema.String.check(Schema.isGUID()),
   instanceId: ReplicaInstanceId,
-  total: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  total: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+});
 
 /**
  * How far a restore got: `done` slots read out of `total`. Journaled after
@@ -134,89 +138,87 @@ export const ReplicaRestoreStarted = Schema.Struct({
  * at the next unread slot and the count never runs ahead of what is held.
  */
 export const ReplicaRestoreProgressed = Schema.Struct({
-  restoreId: Schema.UUID,
-  done: Schema.Int.pipe(Schema.nonNegative()),
-  total: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  restoreId: Schema.String.check(Schema.isGUID()),
+  done: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  total: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+});
 
 /** The person stopped, resumed, or the restore read every listed slot. */
 export const ReplicaRestoreMarked = Schema.Struct({
-  restoreId: Schema.UUID,
-}).annotations(strict);
+  restoreId: Schema.String.check(Schema.isGUID()),
+});
 
 /**
  * A version that never enters the queue: its text would carry a credential,
  * a secret-shaped value, or an absolute path out of this host, or it is past
  * the bundle size bound.
  */
-export const ReplicaArtifactPublishRefused = Schema.Union(
+export const ReplicaArtifactPublishRefused = Schema.Union([
   Schema.Struct({
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     kind: ReplicaArtifactKind,
-    reason: Schema.Literal("unsafe-content", "too-large"),
-  }).annotations(strict),
-  /** A comment or reply whose text the share filter would not let leave. */
+    reason: Schema.Literals(["unsafe-content", "too-large"]),
+  }),
   Schema.Struct({
     canvasId: CanvasId,
     kind: Schema.Literal("canvas-comment"),
     reason: Schema.Literal("unsafe-content"),
-  }).annotations(strict),
-  /** A decision-form answer or note whose text the share filter would not let leave. */
+  }),
   Schema.Struct({
     canvasId: CanvasId,
     kind: Schema.Literal("canvas-choice-answer"),
     reason: Schema.Literal("unsafe-content"),
-  }).annotations(strict),
-);
+  }),
+]);
 
 /** A queued entry landed in this host's slot at `sequence`. */
 export const ReplicaArtifactPublished = Schema.Struct({
-  queueId: Schema.UUID,
+  queueId: Schema.String.check(Schema.isGUID()),
   instanceId: ReplicaInstanceId,
   displayName: ReplicaDisplayName,
   sequence: Sequence,
   contentHash: ReplicaContentHash,
-}).annotations(strict);
+});
 export type ReplicaArtifactPublished = typeof ReplicaArtifactPublished.Type;
 
 /**
  * A publish that did not land. The local version is unchanged and the entry
  * stays queued; this is the receipt that says why.
  */
-export const ReplicaArtifactPublishFailure = Schema.Literal(
+export const ReplicaArtifactPublishFailure = Schema.Literals([
   "not-a-member",
   "key-unavailable",
   "not-connected",
   "refused",
   "slots-squatted",
-);
+]);
 export type ReplicaArtifactPublishFailure = typeof ReplicaArtifactPublishFailure.Type;
 
 export const ReplicaArtifactPublishFailed = Schema.Struct({
-  queueId: Schema.UUID,
+  queueId: Schema.String.check(Schema.isGUID()),
   reason: ReplicaArtifactPublishFailure,
-}).annotations(strict);
+});
 
 /**
  * What one pulled artifact entry did here. A kept entry carries its exact
  * text, so a restart rebuilds the synced library from the journal alone. A
  * refusal carries its reason and no content.
  */
-export const ReplicaArtifactReconciledEvent = Schema.Union(
+export const ReplicaArtifactReconciledEvent = Schema.Union([
   Schema.Struct({
     instanceId: ReplicaInstanceId,
     sequence: Sequence,
     outcome: ReplicaArtifactKeptOutcome,
-    text: Schema.String.pipe(Schema.maxLength(2 * MAX_ARTIFACT_BUNDLE_BYTES)),
-  }).annotations(strict),
+    text: Schema.String.pipe(Schema.check(Schema.isMaxLength(2 * MAX_ARTIFACT_BUNDLE_BYTES))),
+  }),
   Schema.Struct({
     instanceId: ReplicaInstanceId,
     sequence: Sequence,
     outcome: Schema.Literal("refused"),
     reason: ReplicaReadRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaArtifactReconciledEvent = typeof ReplicaArtifactReconciledEvent.Type;
 
 /**
@@ -227,7 +229,7 @@ export type ReplicaArtifactReconciledEvent = typeof ReplicaArtifactReconciledEve
 export const ReplicaArtifactSlotErased = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: Sequence,
-}).annotations(strict);
+});
 
 /**
  * Refusals that depend only on the entry's own bytes, so reading it again can
@@ -264,21 +266,47 @@ export function registerReplicaArtifactEvents(registry: EventRegistry): EventReg
     .register(names.restoreFinished, 1, ReplicaRestoreMarked);
 }
 
-export const decodeReplicaArtifactQueued = Schema.decodeUnknownSync(ReplicaArtifactQueued);
-export const decodeReplicaBackfillRestoring = Schema.decodeUnknownSync(ReplicaBackfillRestoring);
-export const decodeReplicaBackfillStarted = Schema.decodeUnknownSync(ReplicaBackfillStarted);
-export const decodeReplicaBackfillMarked = Schema.decodeUnknownSync(ReplicaBackfillMarked);
-export const decodeReplicaBackfillQueued = Schema.decodeUnknownSync(ReplicaBackfillQueued);
-export const decodeReplicaArtifactPublished = Schema.decodeUnknownSync(ReplicaArtifactPublished);
+export const decodeReplicaArtifactQueued = Schema.decodeUnknownSync(ReplicaArtifactQueued, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaBackfillRestoring = Schema.decodeUnknownSync(ReplicaBackfillRestoring, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaBackfillStarted = Schema.decodeUnknownSync(ReplicaBackfillStarted, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaBackfillMarked = Schema.decodeUnknownSync(ReplicaBackfillMarked, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaBackfillQueued = Schema.decodeUnknownSync(ReplicaBackfillQueued, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaArtifactPublished = Schema.decodeUnknownSync(ReplicaArtifactPublished, {
+  onExcessProperty: "error",
+});
 export const decodeReplicaArtifactPublishFailed = Schema.decodeUnknownSync(
   ReplicaArtifactPublishFailed,
+  { onExcessProperty: "error" },
 );
 export const decodeReplicaArtifactReconciled = Schema.decodeUnknownSync(
   ReplicaArtifactReconciledEvent,
+  { onExcessProperty: "error" },
 );
-export const decodeReplicaArtifactSlotErased = Schema.decodeUnknownSync(ReplicaArtifactSlotErased);
-export const decodeReplicaCommentQueued = Schema.decodeUnknownSync(ReplicaCommentQueued);
-export const decodeReplicaChoiceAnswerQueued = Schema.decodeUnknownSync(ReplicaChoiceAnswerQueued);
-export const decodeReplicaRestoreStarted = Schema.decodeUnknownSync(ReplicaRestoreStarted);
-export const decodeReplicaRestoreProgressed = Schema.decodeUnknownSync(ReplicaRestoreProgressed);
-export const decodeReplicaRestoreMarked = Schema.decodeUnknownSync(ReplicaRestoreMarked);
+export const decodeReplicaArtifactSlotErased = Schema.decodeUnknownSync(ReplicaArtifactSlotErased, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaCommentQueued = Schema.decodeUnknownSync(ReplicaCommentQueued, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaChoiceAnswerQueued = Schema.decodeUnknownSync(ReplicaChoiceAnswerQueued, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaRestoreStarted = Schema.decodeUnknownSync(ReplicaRestoreStarted, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaRestoreProgressed = Schema.decodeUnknownSync(ReplicaRestoreProgressed, {
+  onExcessProperty: "error",
+});
+export const decodeReplicaRestoreMarked = Schema.decodeUnknownSync(ReplicaRestoreMarked, {
+  onExcessProperty: "error",
+});

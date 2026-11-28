@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId } from "./canvas";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { FolderBrowseMode, FolderCandidateId } from "./folderBrowse";
@@ -9,8 +10,6 @@ import { ProjectId } from "./projects";
 // already browsed and the host resolves it to a path, so no renderer-supplied
 // path is ever stored here. A Project that has chosen for itself wins over the
 // host's folder, which is what a thread filed nowhere exports to.
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CANVAS_EXPORT_FOLDER_SCHEMA_VERSION = 1 as const;
 export const CanvasExportFolderSchemaVersion = Schema.Literal(CANVAS_EXPORT_FOLDER_SCHEMA_VERSION);
@@ -26,10 +25,11 @@ export const MAX_CANVAS_EXPORT_FOLDER_OVERRIDES = 64;
  * is decided at the moment of choosing, not encoded here: a folder that was
  * inside home when it was chosen is still the same folder if home changes.
  */
-export const CanvasExportFolder = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0"), {
-    message: () => "An export folder must be an absolute path with no NUL.",
+export const CanvasExportFolder = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0"), {
+    message: "An export folder must be an absolute path with no NUL.",
   }),
 );
 export type CanvasExportFolder = typeof CanvasExportFolder.Type;
@@ -38,7 +38,7 @@ export type CanvasExportFolder = typeof CanvasExportFolder.Type;
 export const CanvasExportFolderOverride = Schema.Struct({
   projectId: ProjectId,
   folder: CanvasExportFolder,
-}).annotations(strict);
+});
 export type CanvasExportFolderOverride = typeof CanvasExportFolderOverride.Type;
 
 /**
@@ -50,24 +50,24 @@ export type CanvasExportFolderOverride = typeof CanvasExportFolderOverride.Type;
 export const CanvasExportFolderSettings = Schema.Struct({
   kind: Schema.Literal("canvas-export-folder-settings"),
   fallback: Schema.optional(CanvasExportFolder),
-  overrides: Schema.Array(CanvasExportFolderOverride).pipe(
-    Schema.filter(
+  overrides: Schema.Array(CanvasExportFolderOverride).check(
+    Schema.makeFilter(
       (overrides) =>
         overrides.length <= MAX_CANVAS_EXPORT_FOLDER_OVERRIDES &&
         new Set(overrides.map((override) => String(override.projectId))).size === overrides.length,
-      { message: () => "A Project may hold at most one export folder." },
+      { message: "A Project may hold at most one export folder." },
     ),
   ),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasExportFolderSettings = typeof CanvasExportFolderSettings.Type;
 
 /**
  * Which folder a choice applies to. `project` is the Canvas's own Project;
  * `host` is the folder a thread filed nowhere exports to.
  */
-export const CanvasExportFolderScope = Schema.Literal("project", "host");
+export const CanvasExportFolderScope = Schema.Literals(["project", "host"]);
 export type CanvasExportFolderScope = typeof CanvasExportFolderScope.Type;
 
 /**
@@ -86,7 +86,7 @@ export const CanvasExportFolderCommand = Schema.Struct({
   candidateId: FolderCandidateId,
   scope: CanvasExportFolderScope,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type CanvasExportFolderCommand = typeof CanvasExportFolderCommand.Type;
 
 export type CanvasExportFolderRefusalReason =
@@ -97,24 +97,24 @@ export type CanvasExportFolderRefusalReason =
   | "outside-home"
   | "folder-unavailable";
 
-export const CanvasExportFolderResult = Schema.Union(
+export const CanvasExportFolderResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("canvas-export-folder-settings"),
     settings: CanvasExportFolderSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("canvas-export-folder-refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "malformed",
       "stale-version",
       "canvas-unavailable",
       "candidate-unavailable",
       "outside-home",
       "folder-unavailable",
-    ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    ]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type CanvasExportFolderResult = typeof CanvasExportFolderResult.Type;
 
 export const CANVAS_EXPORT_FOLDER_AGGREGATE_TYPE = "canvas-export-folder";
@@ -137,12 +137,22 @@ export const CanvasExportFolderView = Schema.Struct({
   scope: CanvasExportFolderScope,
   hostId: HostId,
   mode: FolderBrowseMode,
-}).annotations(strict);
+});
 export type CanvasExportFolderView = typeof CanvasExportFolderView.Type;
 
 export const decodeCanvasExportFolderSettings = Schema.decodeUnknownSync(
   CanvasExportFolderSettings,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasExportFolderCommand = Schema.decodeUnknownSync(CanvasExportFolderCommand);
-export const decodeCanvasExportFolderResult = Schema.decodeUnknownSync(CanvasExportFolderResult);
-export const decodeCanvasExportFolderView = Schema.decodeUnknownSync(CanvasExportFolderView);
+export const decodeCanvasExportFolderCommand = Schema.decodeUnknownSync(
+  CanvasExportFolderCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportFolderResult = Schema.decodeUnknownSync(
+  CanvasExportFolderResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasExportFolderView = Schema.decodeUnknownSync(
+  CanvasExportFolderView,
+  STRICT_DECODE_OPTIONS,
+);

@@ -9,14 +9,13 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import { CANVAS_MAX_TAGS_PER_CANVAS, CanvasTagName } from "./canvasTags";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ThreadPublishedSnapshot } from "./threadToolSteps";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_ARTIFACT_LIBRARY_ENTRIES = 120;
 export const MAX_ARTIFACT_PREVIEW_CHARACTERS = 4_096;
@@ -28,14 +27,14 @@ export const MAX_ARTIFACT_PREVIEW_CHARACTERS = 4_096;
  * reading of its content rather than a field someone set. It exists to make the
  * gallery filterable; nothing decides authority by it.
  */
-export const ArtifactKind = Schema.Literal(
+export const ArtifactKind = Schema.Literals([
   "document",
   "diagram",
   "chart",
   "table",
   "code",
   "mixed",
-);
+]);
 export type ArtifactKind = typeof ArtifactKind.Type;
 
 /** The shapes and text the host's artifact renderer draws, and nothing else. */
@@ -123,15 +122,15 @@ function isInertSvg(markup: string): boolean {
  */
 export const ArtifactPreview = Schema.Struct({
   format: Schema.Literal("svg"),
-  markup: Schema.String.pipe(
-    Schema.maxLength(MAX_ARTIFACT_PREVIEW_CHARACTERS),
-    Schema.filter(isInertSvg),
+  markup: Schema.String.check(
+    Schema.isMaxLength(MAX_ARTIFACT_PREVIEW_CHARACTERS),
+    Schema.makeFilter(isInertSvg),
   ),
-}).annotations(strict);
+});
 export type ArtifactPreview = typeof ArtifactPreview.Type;
 
 /** A computer's name, as it names itself in this person's replica. */
-const ComputerName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const ComputerName = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
 
 /**
  * Where an artifact stands across this person's computers.
@@ -141,7 +140,7 @@ const ComputerName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
  * or merges them. `deleted`: a deletion on another computer is all that is
  * left of it, and it can be restored.
  */
-export const ArtifactSyncStatus = Schema.Literal("current", "two-versions", "deleted");
+export const ArtifactSyncStatus = Schema.Literals(["current", "two-versions", "deleted"]);
 export type ArtifactSyncStatus = typeof ArtifactSyncStatus.Type;
 
 export const ArtifactLibraryEntry = Schema.Struct({
@@ -153,19 +152,19 @@ export const ArtifactLibraryEntry = Schema.Struct({
    */
   projectId: Schema.optional(ProjectId),
   /** The Project's own name, so a card names a Project rather than an id. */
-  projectName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  projectName: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   mode: OctantMode,
   kind: ArtifactKind,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  versionCount: Schema.Int.pipe(Schema.positive()),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  versionCount: PositiveInt,
   currentVersionId: CanvasVersionId,
-  currentSequence: Schema.Int.pipe(Schema.positive()),
+  currentSequence: PositiveInt,
   updatedAt: UtcTimestamp,
   /** Whether a share of this artifact is live right now. */
   shared: Schema.Boolean,
   /** The person's own tags on this Canvas, absent when it carries none. */
   tags: Schema.optional(
-    Schema.Array(CanvasTagName).pipe(Schema.maxItems(CANVAS_MAX_TAGS_PER_CANVAS)),
+    Schema.Array(CanvasTagName).check(Schema.isMaxLength(CANVAS_MAX_TAGS_PER_CANVAS)),
   ),
   preview: Schema.optional(ArtifactPreview),
   /**
@@ -177,7 +176,7 @@ export const ArtifactLibraryEntry = Schema.Struct({
   syncStatus: Schema.optional(ArtifactSyncStatus),
   /** The computer whose deletion is all that is left, when `syncStatus` is `deleted`. */
   deletedOn: Schema.optional(ComputerName),
-}).annotations(strict);
+});
 export type ArtifactLibraryEntry = typeof ArtifactLibraryEntry.Type;
 
 /**
@@ -189,35 +188,35 @@ export type ArtifactLibraryEntry = typeof ArtifactLibraryEntry.Type;
 export const ArtifactLibrarySyncedEntry = Schema.Struct({
   canvasId: CanvasId,
   /** The Project name on the computer that filed it. */
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  projectName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   /** The computer that wrote the head shown, as that computer names itself. */
   computerName: ComputerName,
   mode: OctantMode,
   kind: ArtifactKind,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  versionCount: Schema.Int.pipe(Schema.positive()),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  versionCount: PositiveInt,
   /**
    * How many heads its history has. Two computers that revised the same
    * version leave two; the person picks one or merges them.
    */
-  headCount: Schema.Int.pipe(Schema.positive()),
+  headCount: PositiveInt,
   status: ArtifactSyncStatus,
   /** The computer whose deletion is all that is left, when `status` is `deleted`. */
   deletedOn: Schema.optional(ComputerName),
   updatedAt: UtcTimestamp,
   preview: Schema.optional(ArtifactPreview),
-}).annotations(strict);
+});
 export type ArtifactLibrarySyncedEntry = typeof ArtifactLibrarySyncedEntry.Type;
 
 /** Where a library entry came from: a Canvas document, or a page Claude published. */
-export const ArtifactLibrarySource = Schema.Literal("canvas", "claude");
+export const ArtifactLibrarySource = Schema.Literals(["canvas", "claude"]);
 export type ArtifactLibrarySource = typeof ArtifactLibrarySource.Type;
 
 /** The kind a Claude page reads as when its publish named no Claude artifact type. */
 export const CLAUDE_PLAIN_PAGE_TYPE = "Page";
 
-const ClaudeArtifactType = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
-const ClaudeAccountId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const ClaudeArtifactType = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64));
+const ClaudeAccountId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
 
 /**
  * A page a Work or Code thread published to claude.ai through Claude's
@@ -227,53 +226,53 @@ const ClaudeAccountId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))
  * version of it, and the entry shows the newest.
  */
 export const ArtifactLibraryClaudeEntry = Schema.Struct({
-  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  url: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   /** The Claude artifact type its newest publish named; `Page` for a plain page. */
   artifactType: ClaudeArtifactType,
   /** The Claude account that published the newest version, when journaled. */
   account: Schema.optional(ClaudeAccountId),
   /** The account's display name, when the host still holds the account. */
-  accountName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  accountName: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   projectId: ProjectId,
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  mode: Schema.Literal("work", "code"),
-  threadId: Schema.UUID,
-  threadTitle: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  projectName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  mode: Schema.Literals(["work", "code"]),
+  threadId: GuidString,
+  threadTitle: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   /** The tool call that published the newest version, which names its snapshot. */
-  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-  versionCount: Schema.Int.pipe(Schema.positive()),
+  toolCallId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  versionCount: PositiveInt,
   publishedAt: UtcTimestamp,
   /** Present when the newest publish named a local file Octant kept a copy of. */
-  snapshot: Schema.optional(Schema.Literal("html", "markdown")),
-}).annotations(strict);
+  snapshot: Schema.optional(Schema.Literals(["html", "markdown"])),
+});
 export type ArtifactLibraryClaudeEntry = typeof ArtifactLibraryClaudeEntry.Type;
 
 /** One Claude account the library's Claude pages came from, for its filter. */
 export const ArtifactLibraryClaudeAccount = Schema.Struct({
   account: ClaudeAccountId,
-  name: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
-  pageCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  name: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
+  pageCount: NonNegativeInt,
+});
 export type ArtifactLibraryClaudeAccount = typeof ArtifactLibraryClaudeAccount.Type;
 
 /** One Project, as the library's filter offers it. */
 export const ArtifactLibraryProject = Schema.Struct({
   projectId: ProjectId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   mode: OctantMode,
-  artifactCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  artifactCount: NonNegativeInt,
+});
 export type ArtifactLibraryProject = typeof ArtifactLibraryProject.Type;
 
 /** One tag the library's artifacts carry, with how many artifacts carry it. */
 export const ArtifactLibraryTag = Schema.Struct({
   name: CanvasTagName,
-  artifactCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  artifactCount: NonNegativeInt,
+});
 export type ArtifactLibraryTag = typeof ArtifactLibraryTag.Type;
 
-export const ArtifactLibraryTab = Schema.Literal("all", "by-project", "by-tag", "shared");
+export const ArtifactLibraryTab = Schema.Literals(["all", "by-project", "by-tag", "shared"]);
 export type ArtifactLibraryTab = typeof ArtifactLibraryTab.Type;
 
 /**
@@ -285,7 +284,7 @@ export type ArtifactLibraryTab = typeof ArtifactLibraryTab.Type;
  */
 export const ArtifactLibraryQuery = Schema.Struct({
   tab: ArtifactLibraryTab,
-  query: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  query: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   projectId: Schema.optional(ProjectId),
   mode: Schema.optional(OctantMode),
   kind: Schema.optional(ArtifactKind),
@@ -297,29 +296,29 @@ export const ArtifactLibraryQuery = Schema.Struct({
   claudeType: Schema.optional(ClaudeArtifactType),
   /** One Claude account; only Claude pages it published match it. */
   account: Schema.optional(ClaudeAccountId),
-}).annotations(strict);
+});
 export type ArtifactLibraryQuery = typeof ArtifactLibraryQuery.Type;
 
 export const ArtifactLibraryListing = Schema.Struct({
   kind: Schema.Literal("artifact-library-listing"),
-  entries: Schema.Array(ArtifactLibraryEntry).pipe(
-    Schema.filter(
+  entries: Schema.Array(ArtifactLibraryEntry).check(
+    Schema.makeFilter(
       (entries) =>
         entries.length <= MAX_ARTIFACT_LIBRARY_ENTRIES &&
         new Set(entries.map((entry) => String(entry.canvasId))).size === entries.length,
     ),
   ),
   /** Every Project the caller may see artifacts from, whether or not filtered. */
-  projects: Schema.Array(ArtifactLibraryProject).pipe(
-    Schema.filter(
+  projects: Schema.Array(ArtifactLibraryProject).check(
+    Schema.makeFilter(
       (projects) =>
         new Set(projects.map((project) => String(project.projectId))).size === projects.length,
     ),
   ),
   /** Every tag this caller's artifacts carry, whether or not filtered. */
   tags: Schema.optional(
-    Schema.Array(ArtifactLibraryTag).pipe(
-      Schema.filter((tags) => new Set(tags.map((tag) => tag.name)).size === tags.length),
+    Schema.Array(ArtifactLibraryTag).check(
+      Schema.makeFilter((tags) => new Set(tags.map((tag) => tag.name)).size === tags.length),
     ),
   ),
   /**
@@ -327,30 +326,35 @@ export const ArtifactLibraryListing = Schema.Struct({
    * Only a window on this host sees them; a paired device does not.
    */
   synced: Schema.optional(
-    Schema.Array(ArtifactLibrarySyncedEntry).pipe(Schema.maxItems(MAX_ARTIFACT_LIBRARY_ENTRIES)),
+    Schema.Array(ArtifactLibrarySyncedEntry).check(
+      Schema.isMaxLength(MAX_ARTIFACT_LIBRARY_ENTRIES),
+    ),
   ),
   /**
    * Pages this caller's threads published to claude.ai, newest first, under
    * the same Project scoping as the entries. Absent when none match.
    */
   claude: Schema.optional(
-    Schema.Array(ArtifactLibraryClaudeEntry).pipe(Schema.maxItems(MAX_ARTIFACT_LIBRARY_ENTRIES)),
+    Schema.Array(ArtifactLibraryClaudeEntry).check(
+      Schema.isMaxLength(MAX_ARTIFACT_LIBRARY_ENTRIES),
+    ),
   ),
   /** How many Claude pages matched before the page ceiling. */
-  claudeMatchCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  claudeMatchCount: Schema.optional(NonNegativeInt),
   /** Every Claude account and artifact type this caller's Claude pages carry, whether or not filtered. */
   claudeAccounts: Schema.optional(Schema.Array(ArtifactLibraryClaudeAccount)),
   claudeTypes: Schema.optional(Schema.Array(ClaudeArtifactType)),
   /** How many artifacts matched before the page ceiling, so a cut list says so. */
-  matchCount: Schema.Int.pipe(Schema.nonNegative()),
+  matchCount: NonNegativeInt,
   truncated: Schema.Boolean,
   generatedAt: UtcTimestamp,
 })
-  .annotations(strict)
-  .pipe(
-    Schema.filter((listing) => listing.truncated === listing.entries.length < listing.matchCount),
+  .check(
+    Schema.makeFilter(
+      (listing) => listing.truncated === listing.entries.length < listing.matchCount,
+    ),
   )
-  .pipe(Schema.filter((listing) => listing.entries.length <= listing.matchCount));
+  .check(Schema.makeFilter((listing) => listing.entries.length <= listing.matchCount));
 export type ArtifactLibraryListing = typeof ArtifactLibraryListing.Type;
 
 // ── Synced artifacts: provenance, two versions, and deletions ──────────────
@@ -358,7 +362,7 @@ export type ArtifactLibraryListing = typeof ArtifactLibraryListing.Type;
 /** One version in an artifact's synced history, with the computer that wrote it. */
 export const ArtifactSyncedVersion = Schema.Struct({
   versionId: CanvasVersionId,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   computerName: ComputerName,
   /** Written on this computer rather than read in from another one. */
   thisComputer: Schema.Boolean,
@@ -367,17 +371,17 @@ export const ArtifactSyncedVersion = Schema.Struct({
   candidate: Schema.Boolean,
   /** Drawn only for a candidate, so two can be compared side by side. */
   preview: Schema.optional(ArtifactPreview),
-}).annotations(strict);
+});
 export type ArtifactSyncedVersion = typeof ArtifactSyncedVersion.Type;
 
 /** A thread here that an artifact can be opened in without widening anything. */
 export const ArtifactSyncedThread = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   projectId: ProjectId,
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-}).annotations(strict);
+  projectName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+});
 export type ArtifactSyncedThread = typeof ArtifactSyncedThread.Type;
 
 export const MAX_ARTIFACT_SYNCED_VERSIONS = 200;
@@ -386,42 +390,42 @@ export const MAX_ARTIFACT_SYNCED_THREADS = 50;
 /** Everything the library's sync view shows for one artifact. */
 export const MAX_ARTIFACT_BACKFILL_VERSIONS = 24;
 export const ArtifactPublicationPreview = Schema.Struct({
-  destination: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-  instanceId: Schema.NullOr(Schema.UUID),
-  previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  destination: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  instanceId: Schema.NullOr(GuidString),
+  previewToken: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   available: Schema.Boolean,
   versions: Schema.Array(
     Schema.Struct({
       versionId: CanvasVersionId,
-      sequence: Schema.Int.pipe(Schema.positive()),
-      byteLength: Schema.Int.pipe(Schema.nonNegative()),
-      status: Schema.Literal("eligible", "excluded", "queued", "published"),
-      reason: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+      sequence: PositiveInt,
+      byteLength: NonNegativeInt,
+      status: Schema.Literals(["eligible", "excluded", "queued", "published"]),
+      reason: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
     }),
-  ).pipe(Schema.maxItems(200)),
+  ).check(Schema.isMaxLength(200)),
   truncated: Schema.Boolean,
   deletionPending: Schema.Boolean,
   deletionAvailable: Schema.Boolean,
   deletionConflict: Schema.Boolean,
   backfill: Schema.optional(
     Schema.Struct({
-      id: Schema.UUID,
-      state: Schema.Literal("running", "stopped", "finished"),
-      done: Schema.Int.pipe(Schema.nonNegative()),
-      total: Schema.Int.pipe(Schema.nonNegative()),
+      id: GuidString,
+      state: Schema.Literals(["running", "stopped", "finished"]),
+      done: NonNegativeInt,
+      total: NonNegativeInt,
       restoreAvailable: Schema.optional(Schema.Boolean),
-      message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+      message: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
     }),
   ),
-}).annotations(strict);
+});
 export type ArtifactPublicationPreview = typeof ArtifactPublicationPreview.Type;
 
 export const ArtifactSyncedDetail = Schema.Struct({
   kind: Schema.Literal("artifact-synced-detail"),
   canvasId: CanvasId,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   /** The Project it is filed under: here when it is open here, else where it came from. */
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  projectName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   mode: OctantMode,
   status: ArtifactSyncStatus,
   deletedOn: Schema.optional(ComputerName),
@@ -429,13 +433,17 @@ export const ArtifactSyncedDetail = Schema.Struct({
   openHere: Schema.Boolean,
   publication: Schema.optional(ArtifactPublicationPreview),
   /** Newest first. */
-  versions: Schema.Array(ArtifactSyncedVersion).pipe(Schema.maxItems(MAX_ARTIFACT_SYNCED_VERSIONS)),
+  versions: Schema.Array(ArtifactSyncedVersion).check(
+    Schema.isMaxLength(MAX_ARTIFACT_SYNCED_VERSIONS),
+  ),
   /**
    * Threads it may be opened in here. Empty when it is already open here or
    * when no thread on this computer is compatible.
    */
-  threads: Schema.Array(ArtifactSyncedThread).pipe(Schema.maxItems(MAX_ARTIFACT_SYNCED_THREADS)),
-}).annotations(strict);
+  threads: Schema.Array(ArtifactSyncedThread).check(
+    Schema.isMaxLength(MAX_ARTIFACT_SYNCED_THREADS),
+  ),
+});
 export type ArtifactSyncedDetail = typeof ArtifactSyncedDetail.Type;
 
 /**
@@ -445,72 +453,65 @@ export type ArtifactSyncedDetail = typeof ArtifactSyncedDetail.Type;
  * needs a thread when the artifact is not open here yet. Restore publishes a
  * version that supersedes a deletion.
  */
-export const ArtifactSyncedCommand = Schema.Union(
+export const ArtifactSyncedCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("backfill"),
     canvasId: CanvasId,
-    backfillId: Schema.UUID,
-    previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-    versionIds: Schema.Array(CanvasVersionId).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_ARTIFACT_BACKFILL_VERSIONS),
+    backfillId: GuidString,
+    previewToken: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+    versionIds: Schema.Array(CanvasVersionId).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_ARTIFACT_BACKFILL_VERSIONS),
     ),
     confirmed: Schema.Literal(true),
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("pause-backfill", "resume-backfill"),
+    kind: Schema.Literals(["pause-backfill", "resume-backfill"]),
     canvasId: CanvasId,
-    backfillId: Schema.UUID,
-  }).annotations(strict),
+    backfillId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("delete-synced"),
     canvasId: CanvasId,
-    previewToken: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+    previewToken: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
     confirmed: Schema.Literal(true),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("detail"), canvasId: CanvasId }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("detail"), canvasId: CanvasId }),
   Schema.Struct({
     kind: Schema.Literal("open"),
     canvasId: CanvasId,
-    threadId: Schema.UUID,
-  }).annotations(strict),
+    threadId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("keep"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("merge"),
     canvasId: CanvasId,
-    threadId: Schema.optional(Schema.UUID),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("restore"), canvasId: CanvasId }).annotations(strict),
-);
+    threadId: Schema.optional(GuidString),
+  }),
+  Schema.Struct({ kind: Schema.Literal("restore"), canvasId: CanvasId }),
+]);
 export type ArtifactSyncedCommand = typeof ArtifactSyncedCommand.Type;
 
-export const ArtifactSyncedRefusalReason = Schema.Literal(
+export const ArtifactSyncedRefusalReason = Schema.Literals([
   "stale-preview",
-  /** Nothing synced is known for this artifact here. */
   "not-found",
-  /** No thread on this computer can take it without widening its authority. */
   "no-compatible-thread",
-  /** The thread named cannot take it: wrong mode, read-only, or not active. */
   "incompatible-thread",
-  /** It is already open in a thread here; open it from there. */
   "already-open-here",
-  /** Merge needs a thread to open the merged version in. */
   "thread-required",
   "not-two-versions",
   "unknown-version",
   "not-deleted",
-  /** Publishing needs sync on and this computer in a replica. */
   "sync-off",
-  /** The host refused the version itself; the message says why. */
   "refused",
-);
+]);
 export type ArtifactSyncedRefusalReason = typeof ArtifactSyncedRefusalReason.Type;
 
-export const ArtifactSyncedResult = Schema.Union(
+export const ArtifactSyncedResult = Schema.Union([
   ArtifactSyncedDetail,
   Schema.Struct({
     kind: Schema.Literal("artifact-synced-opened"),
@@ -520,38 +521,54 @@ export const ArtifactSyncedResult = Schema.Union(
      * Blocks a merge left out: one that names a source the version it was
      * merged into does not list, or one past the block ceiling.
      */
-    omittedBlocks: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
+    omittedBlocks: Schema.optional(PositiveInt),
+  }),
   Schema.Struct({
     kind: Schema.Literal("artifact-synced-published"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     /** False while the store cannot be reached: the version waits here and goes out later. */
     published: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("artifact-synced-refused"),
     reason: ArtifactSyncedRefusalReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ArtifactSyncedResult = typeof ArtifactSyncedResult.Type;
 
-export const decodeArtifactSyncedCommand = Schema.decodeUnknownSync(ArtifactSyncedCommand);
-export const decodeArtifactSyncedResult = Schema.decodeUnknownSync(ArtifactSyncedResult);
-export const decodeArtifactLibraryQuery = Schema.decodeUnknownSync(ArtifactLibraryQuery);
-export const decodeArtifactLibraryEntry = Schema.decodeUnknownSync(ArtifactLibraryEntry);
-export const decodeArtifactLibraryListing = Schema.decodeUnknownSync(ArtifactLibraryListing);
+export const decodeArtifactSyncedCommand = Schema.decodeUnknownSync(
+  ArtifactSyncedCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactSyncedResult = Schema.decodeUnknownSync(
+  ArtifactSyncedResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactLibraryQuery = Schema.decodeUnknownSync(
+  ArtifactLibraryQuery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactLibraryEntry = Schema.decodeUnknownSync(
+  ArtifactLibraryEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactLibraryListing = Schema.decodeUnknownSync(
+  ArtifactLibraryListing,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Asks for the copy Octant kept of a Claude page's published file. */
 export const ArtifactLibraryClaudeSnapshotRequest = Schema.Struct({
-  mode: Schema.Literal("work", "code"),
-  threadId: Schema.UUID,
-  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-}).annotations(strict);
+  mode: Schema.Literals(["work", "code"]),
+  threadId: GuidString,
+  toolCallId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+});
 export type ArtifactLibraryClaudeSnapshotRequest = typeof ArtifactLibraryClaudeSnapshotRequest.Type;
 export const decodeArtifactLibraryClaudeSnapshotRequest = Schema.decodeUnknownSync(
   ArtifactLibraryClaudeSnapshotRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -561,25 +578,27 @@ export const decodeArtifactLibraryClaudeSnapshotRequest = Schema.decodeUnknownSy
  * title is the one the person confirmed, never the page's own.
  */
 export const ArtifactLibraryClaudeCopyRequest = Schema.Struct({
-  mode: Schema.Literal("work", "code"),
-  threadId: Schema.UUID,
-  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
-}).annotations(strict);
+  mode: Schema.Literals(["work", "code"]),
+  threadId: GuidString,
+  toolCallId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  title: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
+});
 export type ArtifactLibraryClaudeCopyRequest = typeof ArtifactLibraryClaudeCopyRequest.Type;
 export const decodeArtifactLibraryClaudeCopyRequest = Schema.decodeUnknownSync(
   ArtifactLibraryClaudeCopyRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** The kept copy, or why there is none this caller may read. */
-export const ArtifactLibraryClaudeSnapshotResult = Schema.Union(
+export const ArtifactLibraryClaudeSnapshotResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("claude-snapshot"),
     snapshot: ThreadPublishedSnapshot,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unavailable") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("unavailable") }),
+]);
 export type ArtifactLibraryClaudeSnapshotResult = typeof ArtifactLibraryClaudeSnapshotResult.Type;
 export const decodeArtifactLibraryClaudeSnapshotResult = Schema.decodeUnknownSync(
   ArtifactLibraryClaudeSnapshotResult,
+  STRICT_DECODE_OPTIONS,
 );

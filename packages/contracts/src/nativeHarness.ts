@@ -16,6 +16,7 @@
  */
 
 import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
@@ -43,10 +44,10 @@ import { ShieldDecision } from "./shield";
 import { ThreadPlanStepId } from "./threadPlan";
 import { SessionMetrics, TurnMetrics, TurnUsage } from "./turnMetrics";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const NativeHarnessSessionId = brandedUuid("NativeHarnessSessionId");
 export type NativeHarnessSessionId = typeof NativeHarnessSessionId.Type;
@@ -80,7 +81,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "skill",
   "diagnostics",
 ] as const;
-export const NativeHarnessToolName = Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES);
+export const NativeHarnessToolName = Schema.Literals(NATIVE_HARNESS_TOOL_NAMES);
 export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
 
 /**
@@ -92,10 +93,10 @@ export type NativeHarnessToolName = typeof NativeHarnessToolName.Type;
 export const NATIVE_HARNESS_RETIRED_TOOL_NAMES = ["delegate"] as const;
 
 /** A tool name as a journaled turn record or approval carries it. */
-export const NativeHarnessRecordedToolName = Schema.Literal(
+export const NativeHarnessRecordedToolName = Schema.Literals([
   ...NATIVE_HARNESS_TOOL_NAMES,
   ...NATIVE_HARNESS_RETIRED_TOOL_NAMES,
-);
+]);
 export type NativeHarnessRecordedToolName = typeof NativeHarnessRecordedToolName.Type;
 
 /**
@@ -107,15 +108,13 @@ export const NativeHarnessToolResultBounds = Schema.Struct({
   returnedBytes: NonNegativeInt,
   omittedBytes: Schema.optional(PositiveInt),
   nextOffset: Schema.optional(PositiveInt),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((bounds) =>
-      bounds.truncated
-        ? bounds.omittedBytes !== undefined && bounds.nextOffset !== undefined
-        : bounds.omittedBytes === undefined && bounds.nextOffset === undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter((bounds) =>
+    bounds.truncated
+      ? bounds.omittedBytes !== undefined && bounds.nextOffset !== undefined
+      : bounds.omittedBytes === undefined && bounds.nextOffset === undefined,
+  ),
+);
 export type NativeHarnessToolResultBounds = typeof NativeHarnessToolResultBounds.Type;
 
 /**
@@ -130,15 +129,13 @@ export const NativeHarnessContextRemaining = Schema.Struct({
   confidence: ContextConfidence,
   source: Schema.Literal("capacity-planner"),
   measuredAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (remaining) =>
-        remaining.usedTokens <= remaining.safeInputBudgetTokens &&
-        remaining.remainingTokens === remaining.safeInputBudgetTokens - remaining.usedTokens,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (remaining) =>
+      remaining.usedTokens <= remaining.safeInputBudgetTokens &&
+      remaining.remainingTokens === remaining.safeInputBudgetTokens - remaining.usedTokens,
+  ),
+);
 export type NativeHarnessContextRemaining = typeof NativeHarnessContextRemaining.Type;
 
 // ── Tool arguments and definitions ───────────────────────────────────────────
@@ -178,42 +175,48 @@ export const MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES = 20;
 export const MAX_NATIVE_HARNESS_SKILL_CHARACTERS = 32_000;
 
 /** A path the model names. Relative to the thread's root; never containing NUL. */
-const ToolPath = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(1_024),
-  Schema.filter((value) => !value.includes("\0")),
+const ToolPath = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(1_024),
+  Schema.makeFilter((value) => !value.includes("\0")),
 );
 
 export const NativeHarnessReadArguments = Schema.Struct({
   path: ToolPath,
   /** Zero-based line to start from, for paging a long file. */
   offset: Schema.optional(NonNegativeInt),
-  limit: Schema.optional(PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_READ_LINES))),
-}).annotations(strict);
+  limit: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_READ_LINES)),
+  ),
+});
 export type NativeHarnessReadArguments = typeof NativeHarnessReadArguments.Type;
 
 export const NativeHarnessGrepArguments = Schema.Struct({
-  pattern: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  pattern: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   path: Schema.optional(ToolPath),
   /** A glob the matched file names must satisfy, such as `*.ts`. */
-  include: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  include: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
   maxMatches: Schema.optional(
-    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_GREP_MATCHES)),
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_GREP_MATCHES)),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessGrepArguments = typeof NativeHarnessGrepArguments.Type;
 
 export const NativeHarnessGlobArguments = Schema.Struct({
-  pattern: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  pattern: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   path: Schema.optional(ToolPath),
-}).annotations(strict);
+});
 export type NativeHarnessGlobArguments = typeof NativeHarnessGlobArguments.Type;
 
 export const NativeHarnessBashArguments = Schema.Struct({
-  command: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
-  timeoutMs: Schema.optional(
-    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS)),
+  command: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH),
   ),
-}).annotations(strict);
+  timeoutMs: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_COMMAND_TIMEOUT_MS)),
+  ),
+});
 export type NativeHarnessBashArguments = typeof NativeHarnessBashArguments.Type;
 
 /**
@@ -222,13 +225,13 @@ export type NativeHarnessBashArguments = typeof NativeHarnessBashArguments.Type;
  */
 export const NativeHarnessReplacement = Schema.Struct({
   path: ToolPath,
-  oldText: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH),
+  oldText: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH),
   ),
-  newText: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH)),
+  newText: Schema.String.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_EDIT_TEXT_LENGTH)),
   replaceAll: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type NativeHarnessReplacement = typeof NativeHarnessReplacement.Type;
 
 /**
@@ -236,54 +239,62 @@ export type NativeHarnessReplacement = typeof NativeHarnessReplacement.Type;
  * are all or nothing: every one is checked before any file is written, and
  * replacements in the same file apply in the order given.
  */
-export const NativeHarnessEditArguments = Schema.Union(
+export const NativeHarnessEditArguments = Schema.Union([
   NativeHarnessReplacement,
   Schema.Struct({
-    edits: Schema.Array(NativeHarnessReplacement).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_NATIVE_HARNESS_EDITS_PER_CALL),
+    edits: Schema.Array(NativeHarnessReplacement).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_NATIVE_HARNESS_EDITS_PER_CALL),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessEditArguments = typeof NativeHarnessEditArguments.Type;
 
 export const NativeHarnessWriteArguments = Schema.Struct({
   path: ToolPath,
-  content: Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_WRITE_LENGTH)),
-}).annotations(strict);
+  content: Schema.String.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_WRITE_LENGTH)),
+});
 export type NativeHarnessWriteArguments = typeof NativeHarnessWriteArguments.Type;
 
 export const NativeHarnessWebFetchArguments = Schema.Struct({
-  url: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(2_048),
-    Schema.filter((value) => /^https?:\/\//i.test(value)),
+  url: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(2_048)),
+    Schema.check(Schema.makeFilter((value) => /^https?:\/\//i.test(value))),
   ),
   maxBytes: Schema.optional(
-    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_FETCH_BYTES)),
+    PositiveInt.pipe(Schema.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_FETCH_BYTES))),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessWebFetchArguments = typeof NativeHarnessWebFetchArguments.Type;
 
 export const NativeHarnessWebSearchArguments = Schema.Struct({
-  query: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  limit: Schema.optional(
-    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_SEARCH_RESULTS)),
+  query: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(512)),
   ),
-}).annotations(strict);
+  limit: Schema.optional(
+    PositiveInt.pipe(Schema.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_SEARCH_RESULTS))),
+  ),
+});
 export type NativeHarnessWebSearchArguments = typeof NativeHarnessWebSearchArguments.Type;
 
 export const NativeHarnessTodoItem = Schema.Struct({
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  status: Schema.Literal("pending", "in-progress", "done"),
-}).annotations(strict);
+  title: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(512)),
+  ),
+  status: Schema.Literals(["pending", "in-progress", "done"]),
+});
 export type NativeHarnessTodoItem = typeof NativeHarnessTodoItem.Type;
 
 export const NativeHarnessTodoWriteArguments = Schema.Struct({
-  items: Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
-}).annotations(strict);
+  items: Schema.Array(NativeHarnessTodoItem).pipe(
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+  ),
+});
 export type NativeHarnessTodoWriteArguments = typeof NativeHarnessTodoWriteArguments.Type;
 
-export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotations(strict);
+export const NativeHarnessContextRemainingArguments = Schema.Struct({});
 
 /**
  * A read of the lead's own conversation as the journal holds it. `from` is a
@@ -296,10 +307,12 @@ export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotati
 export const NativeHarnessJournalLookupArguments = Schema.Struct({
   from: NonNegativeInt,
   count: Schema.optional(
-    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES)),
+    PositiveInt.pipe(
+      Schema.check(Schema.isLessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES)),
+    ),
   ),
   offset: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 export type NativeHarnessJournalLookupArguments = typeof NativeHarnessJournalLookupArguments.Type;
 
 export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
@@ -311,18 +324,24 @@ export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
  */
 export const NativeHarnessAskUserArguments = Schema.Struct({
   questionnaire: Schema.optional(Questionnaire),
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
-  options: Schema.optional(
-    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
-      Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
-    ),
+  prompt: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(8_192)),
   ),
-}).annotations(strict);
+  options: Schema.optional(
+    Schema.Array(
+      Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(256))),
+    ).pipe(Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_QUESTION_OPTIONS))),
+  ),
+});
 export type NativeHarnessAskUserArguments = typeof NativeHarnessAskUserArguments.Type;
 
 export const NativeHarnessSecondOpinionArguments = Schema.Struct({
-  question: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
-}).annotations(strict);
+  question: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(4_096)),
+  ),
+});
 export type NativeHarnessSecondOpinionArguments = typeof NativeHarnessSecondOpinionArguments.Type;
 
 /**
@@ -331,16 +350,16 @@ export type NativeHarnessSecondOpinionArguments = typeof NativeHarnessSecondOpin
  * criteria once, only while the goal has none, so a lead cannot quietly swap
  * a criterion it failed for an easier one.
  */
-export const NativeHarnessGoalArguments = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("read") }).annotations(strict),
+export const NativeHarnessGoalArguments = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("read") }),
   Schema.Struct({
     operation: Schema.Literal("set-criteria"),
     criteria: Schema.Array(ThreadGoalCriterionDraft).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_THREAD_GOAL_CRITERIA),
+      Schema.check(Schema.isMinLength(1)),
+      Schema.check(Schema.isMaxLength(MAX_THREAD_GOAL_CRITERIA)),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessGoalArguments = typeof NativeHarnessGoalArguments.Type;
 
 /**
@@ -350,7 +369,7 @@ export type NativeHarnessGoalArguments = typeof NativeHarnessGoalArguments.Type;
  */
 export const NativeHarnessGoalCheckArguments = Schema.Struct({
   criterionId: ThreadGoalCriterionId,
-}).annotations(strict);
+});
 export type NativeHarnessGoalCheckArguments = typeof NativeHarnessGoalCheckArguments.Type;
 
 /**
@@ -359,18 +378,19 @@ export type NativeHarnessGoalCheckArguments = typeof NativeHarnessGoalCheckArgum
  * in the composer, or its source-qualified id when two skills share a name.
  * Neither operation installs, trusts, enables, or activates anything.
  */
-export const NativeHarnessSkillArguments = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("list") }).annotations(strict),
+export const NativeHarnessSkillArguments = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("list") }),
   Schema.Struct({
     operation: Schema.Literal("load"),
-    name: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(512),
-      Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._~:-]*$/),
+    name: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(512)),
+      Schema.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._~:-]*$/)),
     ),
     /** Character to resume from, as a truncated load's nextOffset names. */
     offset: Schema.optional(NonNegativeInt),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessSkillArguments = typeof NativeHarnessSkillArguments.Type;
 export const MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES = 50;
 
@@ -380,34 +400,48 @@ export const MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES = 50;
  * `files` narrows the returned problems, not what the command checks.
  */
 export const NativeHarnessDiagnosticsArguments = Schema.Struct({
-  which: Schema.optional(Schema.Literal("typecheck", "lint", "both")),
+  which: Schema.optional(Schema.Literals(["typecheck", "lint", "both"])),
   command: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+    Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_COMMAND_LENGTH)),
+    ),
   ),
   files: Schema.optional(
-    Schema.Array(ToolPath).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES)),
+    Schema.Array(ToolPath).pipe(
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_DIAGNOSTICS_FILES)),
+    ),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessDiagnosticsArguments = typeof NativeHarnessDiagnosticsArguments.Type;
 
 const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unknown) => unknown>> = {
-  read: Schema.decodeUnknownSync(NativeHarnessReadArguments),
-  grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments),
-  glob: Schema.decodeUnknownSync(NativeHarnessGlobArguments),
-  bash: Schema.decodeUnknownSync(NativeHarnessBashArguments),
-  edit: Schema.decodeUnknownSync(NativeHarnessEditArguments),
-  write: Schema.decodeUnknownSync(NativeHarnessWriteArguments),
-  "web-fetch": Schema.decodeUnknownSync(NativeHarnessWebFetchArguments),
-  "web-search": Schema.decodeUnknownSync(NativeHarnessWebSearchArguments),
-  "todo-write": Schema.decodeUnknownSync(NativeHarnessTodoWriteArguments),
-  "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
-  "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupArguments),
-  "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
-  "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
-  goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments),
-  "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments),
-  skill: Schema.decodeUnknownSync(NativeHarnessSkillArguments),
-  diagnostics: Schema.decodeUnknownSync(NativeHarnessDiagnosticsArguments),
+  read: Schema.decodeUnknownSync(NativeHarnessReadArguments, STRICT_DECODE_OPTIONS),
+  grep: Schema.decodeUnknownSync(NativeHarnessGrepArguments, STRICT_DECODE_OPTIONS),
+  glob: Schema.decodeUnknownSync(NativeHarnessGlobArguments, STRICT_DECODE_OPTIONS),
+  bash: Schema.decodeUnknownSync(NativeHarnessBashArguments, STRICT_DECODE_OPTIONS),
+  edit: Schema.decodeUnknownSync(NativeHarnessEditArguments, STRICT_DECODE_OPTIONS),
+  write: Schema.decodeUnknownSync(NativeHarnessWriteArguments, STRICT_DECODE_OPTIONS),
+  "web-fetch": Schema.decodeUnknownSync(NativeHarnessWebFetchArguments, STRICT_DECODE_OPTIONS),
+  "web-search": Schema.decodeUnknownSync(NativeHarnessWebSearchArguments, STRICT_DECODE_OPTIONS),
+  "todo-write": Schema.decodeUnknownSync(NativeHarnessTodoWriteArguments, STRICT_DECODE_OPTIONS),
+  "context-remaining": Schema.decodeUnknownSync(
+    NativeHarnessContextRemainingArguments,
+    STRICT_DECODE_OPTIONS,
+  ),
+  "journal-lookup": Schema.decodeUnknownSync(
+    NativeHarnessJournalLookupArguments,
+    STRICT_DECODE_OPTIONS,
+  ),
+  "second-opinion": Schema.decodeUnknownSync(
+    NativeHarnessSecondOpinionArguments,
+    STRICT_DECODE_OPTIONS,
+  ),
+  "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments, STRICT_DECODE_OPTIONS),
+  goal: Schema.decodeUnknownSync(NativeHarnessGoalArguments, STRICT_DECODE_OPTIONS),
+  "goal-check": Schema.decodeUnknownSync(NativeHarnessGoalCheckArguments, STRICT_DECODE_OPTIONS),
+  skill: Schema.decodeUnknownSync(NativeHarnessSkillArguments, STRICT_DECODE_OPTIONS),
+  diagnostics: Schema.decodeUnknownSync(NativeHarnessDiagnosticsArguments, STRICT_DECODE_OPTIONS),
 };
 
 /** Throws on a malformed argument object; the catalog's argument-schema step relies on it. */
@@ -728,26 +762,33 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
  * later reader can check.
  */
 export const NativeHarnessCarriedNote = Schema.Struct({
-  claim: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  anchor: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("plan-step"), stepId: ThreadPlanStepId }).annotations(
-      strict,
-    ),
+  claim: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(512)),
+  ),
+  anchor: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("plan-step"), stepId: ThreadPlanStepId }),
     Schema.Struct({
       kind: Schema.Literal("goal-evidence"),
       evidence: ThreadGoalEvidenceRef,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       kind: Schema.Literal("artifact"),
-      artifactId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-    }).annotations(strict),
+      artifactId: Schema.Trimmed.pipe(
+        Schema.check(Schema.isNonEmpty()),
+        Schema.check(Schema.isMaxLength(256)),
+      ),
+    }),
     Schema.Struct({
       kind: Schema.Literal("file-hash"),
-      path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-      sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+      path: Schema.Trimmed.pipe(
+        Schema.check(Schema.isNonEmpty()),
+        Schema.check(Schema.isMaxLength(1_024)),
+      ),
+      sha256: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+    }),
+  ]),
+});
 export type NativeHarnessCarriedNote = typeof NativeHarnessCarriedNote.Type;
 
 const ReductionFields = {
@@ -763,25 +804,25 @@ const ReductionFields = {
  * cutover, then summary as last resort — and none of them touches the durable
  * journal; they change only what the next request contains.
  */
-export const NativeHarnessContextReduction = Schema.Union(
+export const NativeHarnessContextReduction = Schema.Union([
   Schema.Struct({
     ...ReductionFields,
     kind: Schema.Literal("prune"),
     prunedToolResults: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...ReductionFields,
     kind: Schema.Literal("cutover"),
     droppedTurns: PositiveInt,
-    boundary: Schema.Literal("turn", "tool-call-group"),
+    boundary: Schema.Literals(["turn", "tool-call-group"]),
     /**
      * A cut drops the oldest turns of the mutable history, which invalidates
      * the provider prefix cache for everything after the cut point. That cost
      * is paid once per cut and recorded here so it is visible, not guessed.
      */
     cachePrefixInvalidated: Schema.Literal(true),
-    carriedNotes: Schema.Array(NativeHarnessCarriedNote).pipe(Schema.maxItems(64)),
-  }).annotations(strict),
+    carriedNotes: Schema.Array(NativeHarnessCarriedNote).pipe(Schema.check(Schema.isMaxLength(64))),
+  }),
   Schema.Struct({
     ...ReductionFields,
     kind: Schema.Literal("summary"),
@@ -789,14 +830,17 @@ export const NativeHarnessContextReduction = Schema.Union(
     /** Summaries run on `smol`, never on the lead's slot. */
     slotId: NativeHarnessSlotId,
     /** Where the attributed summary text is stored; it is never journaled. */
-    reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048)),
-  }).annotations(strict),
-);
+    reference: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(2_048)),
+    ),
+  }),
+]);
 export type NativeHarnessContextReduction = typeof NativeHarnessContextReduction.Type;
 
 // ── Turns ────────────────────────────────────────────────────────────────────
 
-export const NativeHarnessTurnStopReason = Schema.Literal(
+export const NativeHarnessTurnStopReason = Schema.Literals([
   "end-of-turn",
   "max-tokens",
   "user-interrupt",
@@ -805,7 +849,7 @@ export const NativeHarnessTurnStopReason = Schema.Literal(
   "advisor-cancelled",
   "provider-failure",
   "context-unrecoverable",
-);
+]);
 export type NativeHarnessTurnStopReason = typeof NativeHarnessTurnStopReason.Type;
 
 /** Only what the provider reported. Octant holds no price list. */
@@ -818,13 +862,18 @@ export const MAX_NATIVE_HARNESS_TOOL_DETAIL = 4_096;
 /** One tool call as the lead made it: what it asked for, how it ended, how long it took. */
 export const NativeHarnessToolCall = Schema.Struct({
   name: NativeHarnessRecordedToolName,
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
-  status: Schema.Literal("ok", "refused", "failed"),
+  summary: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(240)),
+  ),
+  status: Schema.Literals(["ok", "refused", "failed"]),
   durationMs: NonNegativeInt,
   at: UtcTimestamp,
   /** What the call produced, bounded: a unified diff for an edit, the tail of a command's output. */
-  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_NATIVE_HARNESS_TOOL_DETAIL))),
-}).annotations(strict);
+  detail: Schema.optional(
+    Schema.String.pipe(Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TOOL_DETAIL))),
+  ),
+});
 export type NativeHarnessToolCall = typeof NativeHarnessToolCall.Type;
 
 export const NativeHarnessTurnRecord = Schema.Struct({
@@ -837,7 +886,7 @@ export const NativeHarnessTurnRecord = Schema.Struct({
   /** The last calls of the turn, newest last; `toolCalls` counts them all. */
   tools: Schema.optional(
     Schema.Array(NativeHarnessToolCall).pipe(
-      Schema.maxItems(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN)),
     ),
   ),
   stopReason: NativeHarnessTurnStopReason,
@@ -846,9 +895,7 @@ export const NativeHarnessTurnRecord = Schema.Struct({
   metrics: Schema.optional(TurnMetrics),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((turn) => turn.endedAt >= turn.startedAt));
+}).pipe(Schema.check(Schema.makeFilter((turn) => turn.endedAt >= turn.startedAt)));
 export type NativeHarnessTurnRecord = typeof NativeHarnessTurnRecord.Type;
 
 // ── Advisor ──────────────────────────────────────────────────────────────────
@@ -866,15 +913,16 @@ const MAX_ADVISOR_DIGEST_FILES = 32;
  */
 export const NativeHarnessAdvisorDigest = Schema.Struct({
   turnId: NativeHarnessTurnId,
-  summary: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(MAX_NATIVE_HARNESS_ADVISOR_DIGEST_LENGTH),
+  summary: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_ADVISOR_DIGEST_LENGTH)),
   ),
   toolCalls: NonNegativeInt,
-  filesTouched: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))).pipe(
-    Schema.maxItems(MAX_ADVISOR_DIGEST_FILES),
-  ),
-  boundary: Schema.optional(Schema.Literal("plan-approval", "pre-commit-diff")),
-}).annotations(strict);
+  filesTouched: Schema.Array(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(1_024))),
+  ).pipe(Schema.check(Schema.isMaxLength(MAX_ADVISOR_DIGEST_FILES))),
+  boundary: Schema.optional(Schema.Literals(["plan-approval", "pre-commit-diff"])),
+});
 export type NativeHarnessAdvisorDigest = typeof NativeHarnessAdvisorDigest.Type;
 
 const InterventionFields = {
@@ -891,32 +939,47 @@ const InterventionFields = {
  * authority, and every write still traces to the lead or to one child's
  * worktree.
  */
-export const NativeHarnessAdvisorIntervention = Schema.Union(
+export const NativeHarnessAdvisorIntervention = Schema.Union([
   Schema.Struct({
     ...InterventionFields,
     kind: Schema.Literal("cancel-turn"),
     turnId: NativeHarnessTurnId,
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
+    reason: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(1_024)),
+    ),
+  }),
   Schema.Struct({
     ...InterventionFields,
     kind: Schema.Literal("redirect"),
     /** The lead must read this before its next turn. */
-    instruction: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
-  }).annotations(strict),
+    instruction: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(4_096)),
+    ),
+  }),
   Schema.Struct({
     ...InterventionFields,
     kind: Schema.Literal("pause-run"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
+    reason: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(1_024)),
+    ),
+  }),
   Schema.Struct({
     ...InterventionFields,
     kind: Schema.Literal("second-opinion"),
     /** The lead asked; the answer is advice the lead may ignore. */
-    question: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
-    answer: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
-  }).annotations(strict),
-);
+    question: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(4_096)),
+    ),
+    answer: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(8_192)),
+    ),
+  }),
+]);
 export type NativeHarnessAdvisorIntervention = typeof NativeHarnessAdvisorIntervention.Type;
 
 // ── Follow-up suggestions ────────────────────────────────────────────────────
@@ -928,15 +991,16 @@ export const MAX_NATIVE_HARNESS_FOLLOW_UPS = 3;
 export const MAX_NATIVE_HARNESS_FOLLOW_UP_TITLE_LENGTH = 120;
 export const MAX_NATIVE_HARNESS_FOLLOW_UP_PROMPT_LENGTH = 4_096;
 
-export const NativeHarnessFollowUpTarget = Schema.Literal(
+export const NativeHarnessFollowUpTarget = Schema.Literals([
   "same-thread",
   "new-thread",
   "new-worktree",
-);
+]);
 export type NativeHarnessFollowUpTarget = typeof NativeHarnessFollowUpTarget.Type;
 
-const FollowUpTitle = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_NATIVE_HARNESS_FOLLOW_UP_TITLE_LENGTH),
+const FollowUpTitle = Schema.Trimmed.pipe(
+  Schema.check(Schema.isNonEmpty()),
+  Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_FOLLOW_UP_TITLE_LENGTH)),
 );
 
 /** A suggestion carries no authority and creates nothing by itself. */
@@ -944,60 +1008,65 @@ export const NativeHarnessFollowUpSuggestion = Schema.Struct({
   id: NativeHarnessFollowUpId,
   title: FollowUpTitle,
   /** Standalone: it must make sense to a fresh thread with no other context. */
-  prompt: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(MAX_NATIVE_HARNESS_FOLLOW_UP_PROMPT_LENGTH),
+  prompt: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_FOLLOW_UP_PROMPT_LENGTH)),
   ),
   target: NativeHarnessFollowUpTarget,
-}).annotations(strict);
+});
 export type NativeHarnessFollowUpSuggestion = typeof NativeHarnessFollowUpSuggestion.Type;
 
 export const NativeHarnessFollowUpSet = Schema.Struct({
   turnId: NativeHarnessTurnId,
   suggestions: Schema.Array(NativeHarnessFollowUpSuggestion).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_FOLLOW_UPS),
-    Schema.filter(
-      (suggestions) =>
-        new Set(suggestions.map((suggestion) => suggestion.id)).size === suggestions.length,
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_FOLLOW_UPS)),
+    Schema.check(
+      Schema.makeFilter(
+        (suggestions) =>
+          new Set(suggestions.map((suggestion) => suggestion.id)).size === suggestions.length,
+      ),
     ),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessFollowUpSet = typeof NativeHarnessFollowUpSet.Type;
 
 /**
  * Exactly what activating a suggestion would create. A worktree needs a
  * checkout, so only a Code thread can be the target of one.
  */
-export const NativeHarnessFollowUpCreation = Schema.Union(
+export const NativeHarnessFollowUpCreation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("same-thread"),
-    threadId: Schema.UUID,
-  }).annotations(strict),
+    threadId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("new-thread"),
     mode: OctantMode,
     projectId: Schema.optional(ProjectId),
     title: FollowUpTitle,
     /** Present once the thread exists; a preview has none. */
-    threadId: Schema.optional(Schema.UUID),
-  }).annotations(strict),
+    threadId: Schema.optional(GuidString),
+  }),
   Schema.Struct({
     kind: Schema.Literal("new-worktree"),
     mode: Schema.Literal("code"),
     projectId: ProjectId,
     title: FollowUpTitle,
     /** Present once the thread exists; a preview has none. */
-    threadId: Schema.optional(Schema.UUID),
-  }).annotations(strict),
-);
+    threadId: Schema.optional(GuidString),
+  }),
+]);
 export type NativeHarnessFollowUpCreation = typeof NativeHarnessFollowUpCreation.Type;
 
 /** Shown before anything is created; the target and the creation must agree. */
 export const NativeHarnessFollowUpPreview = Schema.Struct({
   suggestion: NativeHarnessFollowUpSuggestion,
   wouldCreate: NativeHarnessFollowUpCreation,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((preview) => preview.suggestion.target === preview.wouldCreate.kind));
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((preview) => preview.suggestion.target === preview.wouldCreate.kind),
+  ),
+);
 export type NativeHarnessFollowUpPreview = typeof NativeHarnessFollowUpPreview.Type;
 
 /** A person confirms; there is no shape in which this command is implicit. */
@@ -1005,27 +1074,30 @@ export const ActivateNativeHarnessFollowUp = Schema.Struct({
   turnId: NativeHarnessTurnId,
   suggestionId: NativeHarnessFollowUpId,
   confirmed: Schema.Literal(true),
-}).annotations(strict);
+});
 export type ActivateNativeHarnessFollowUp = typeof ActivateNativeHarnessFollowUp.Type;
 
-export const NativeHarnessFollowUpActivationResult = Schema.Union(
+export const NativeHarnessFollowUpActivationResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("follow-up-activated"),
     suggestionId: NativeHarnessFollowUpId,
     created: NativeHarnessFollowUpCreation,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("follow-up-refused"),
     suggestionId: NativeHarnessFollowUpId,
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "suggestion-not-found",
       "already-activated",
       "not-authorized",
       "target-unavailable",
+    ]),
+    message: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(512)),
     ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessFollowUpActivationResult =
   typeof NativeHarnessFollowUpActivationResult.Type;
 
@@ -1034,22 +1106,26 @@ export type NativeHarnessFollowUpActivationResult =
 export const NativeHarnessQuestionId = brandedUuid("NativeHarnessQuestionId");
 export type NativeHarnessQuestionId = typeof NativeHarnessQuestionId.Type;
 
-export const NativeHarnessQuestionStatus = Schema.Literal(
+export const NativeHarnessQuestionStatus = Schema.Literals([
   "pending",
   "answered",
   "expired",
   "cancelled",
-);
+]);
 export type NativeHarnessQuestionStatus = typeof NativeHarnessQuestionStatus.Type;
 
 /** Attribution only: a child interaction grants no authority to its parent or siblings. */
 export const NativeHarnessInteractionSource = Schema.Struct({
   runId: AgentRunId,
-  targetFolder: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+  targetFolder: Schema.optional(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(4096))),
+  ),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-}).annotations(strict);
+  providerName: Schema.optional(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(128))),
+  ),
+});
 export type NativeHarnessInteractionSource = typeof NativeHarnessInteractionSource.Type;
 
 /** A question the lead or one of its children asked the person. */
@@ -1057,10 +1133,13 @@ export const NativeHarnessQuestion = Schema.Struct({
   id: NativeHarnessQuestionId,
   questionnaire: Schema.optional(Questionnaire),
   source: Schema.optional(NativeHarnessInteractionSource),
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192)),
-  options: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_QUESTION_OPTIONS),
+  prompt: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(8_192)),
   ),
+  options: Schema.Array(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(256))),
+  ).pipe(Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_QUESTION_OPTIONS))),
   status: NativeHarnessQuestionStatus,
   answer: Schema.optional(QuestionnaireAnswerText),
   /**
@@ -1072,18 +1151,19 @@ export const NativeHarnessQuestion = Schema.Struct({
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
-  .annotations(strict)
   // An answered question carries its answer, a secret one never does; a
   // pending one carries nothing yet.
   .pipe(
-    Schema.filter(
-      (question) =>
-        (question.status === "answered" && question.secret !== true) ===
-          (question.answer !== undefined) &&
-        (question.status === "pending") === (question.settledAt === undefined),
+    Schema.check(
+      Schema.makeFilter(
+        (question) =>
+          (question.status === "answered" && question.secret !== true) ===
+            (question.answer !== undefined) &&
+          (question.status === "pending") === (question.settledAt === undefined),
+      ),
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type NativeHarnessQuestion = typeof NativeHarnessQuestion.Type;
 
 // ── Approvals ────────────────────────────────────────────────────────────────
@@ -1091,13 +1171,13 @@ export type NativeHarnessQuestion = typeof NativeHarnessQuestion.Type;
 export const NativeHarnessApprovalId = brandedUuid("NativeHarnessApprovalId");
 export type NativeHarnessApprovalId = typeof NativeHarnessApprovalId.Type;
 
-export const NativeHarnessApprovalStatus = Schema.Literal(
+export const NativeHarnessApprovalStatus = Schema.Literals([
   "pending",
   "approved",
   "denied",
   "expired",
   "cancelled",
-);
+]);
 export type NativeHarnessApprovalStatus = typeof NativeHarnessApprovalStatus.Type;
 
 /**
@@ -1114,9 +1194,9 @@ export const MAX_NATIVE_HARNESS_COMMAND_HOSTS = 192;
 export const NativeHarnessCommandHost = Schema.Struct({
   host: ToolEgressRuleHost,
   port: ToolEgressPort,
-  from: Schema.Literal("thread-rule", "project-rule", "proposal"),
+  from: Schema.Literals(["thread-rule", "project-rule", "proposal"]),
   preselected: Schema.Boolean,
-}).annotations(strict);
+});
 export type NativeHarnessCommandHost = typeof NativeHarnessCommandHost.Type;
 
 /**
@@ -1124,9 +1204,12 @@ export type NativeHarnessCommandHost = typeof NativeHarnessCommandHost.Type;
  * host, which grants it only when the approval listed it.
  */
 export const NativeHarnessCommandHostChoice = Schema.Struct({
-  host: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2)),
+  host: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2)),
+  ),
   port: ToolEgressPort,
-}).annotations(strict);
+});
 export type NativeHarnessCommandHostChoice = typeof NativeHarnessCommandHostChoice.Type;
 
 /**
@@ -1136,11 +1219,19 @@ export type NativeHarnessCommandHostChoice = typeof NativeHarnessCommandHostChoi
  */
 export const NativeHarnessApproval = Schema.Struct({
   id: NativeHarnessApprovalId,
-  toolName: Schema.Union(NativeHarnessRecordedToolName, Schema.Literal("provider-action")),
+  toolName: Schema.Union([NativeHarnessRecordedToolName, Schema.Literal("provider-action")]),
   source: Schema.optional(NativeHarnessInteractionSource),
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
-  approvalClass: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_192))),
+  summary: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(240)),
+  ),
+  approvalClass: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(64)),
+  ),
+  detail: Schema.optional(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(8_192))),
+  ),
   status: NativeHarnessApprovalStatus,
   /** Set on an approval that also covers the class for the session. */
   remembered: Schema.optional(Schema.Boolean),
@@ -1160,7 +1251,9 @@ export const NativeHarnessApproval = Schema.Struct({
    * granted for that command alone and ends with it.
    */
   commandHosts: Schema.optional(
-    Schema.Array(NativeHarnessCommandHost).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_COMMAND_HOSTS)),
+    Schema.Array(NativeHarnessCommandHost).pipe(
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_COMMAND_HOSTS)),
+    ),
   ),
   /**
    * Octant Shield's decision on this call, at Auto with Shield reviewing. An
@@ -1171,45 +1264,48 @@ export const NativeHarnessApproval = Schema.Struct({
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
-  .annotations(strict)
   .pipe(
-    Schema.filter(
-      (approval) =>
-        (approval.shield?.verdict !== "allow" || approval.status === "approved") &&
-        (approval.shield?.verdict !== "deny" || approval.status === "denied") &&
-        (approval.status === "pending") === (approval.settledAt === undefined) &&
-        (approval.outsideContent === undefined || approval.singleUse === true) &&
-        // Only a single-use confirmation can name hosts: a remembered approval
-        // would otherwise carry them to calls nobody saw.
-        (approval.commandHosts === undefined || approval.singleUse === true),
+    Schema.check(
+      Schema.makeFilter(
+        (approval) =>
+          (approval.shield?.verdict !== "allow" || approval.status === "approved") &&
+          (approval.shield?.verdict !== "deny" || approval.status === "denied") &&
+          (approval.status === "pending") === (approval.settledAt === undefined) &&
+          (approval.outsideContent === undefined || approval.singleUse === true) &&
+          // Only a single-use confirmation can name hosts: a remembered approval
+          // would otherwise carry them to calls nobody saw.
+          (approval.commandHosts === undefined || approval.singleUse === true),
+      ),
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type NativeHarnessApproval = typeof NativeHarnessApproval.Type;
 
 export const DecideNativeHarnessApproval = Schema.Struct({
   approvalId: NativeHarnessApprovalId,
-  decision: Schema.Literal("approve", "approve-always", "deny"),
+  decision: Schema.Literals(["approve", "approve-always", "deny"]),
   /** The listed hosts the person lets this one command reach; none when absent. */
   commandHosts: Schema.optional(
     Schema.Array(NativeHarnessCommandHostChoice).pipe(
-      Schema.maxItems(MAX_NATIVE_HARNESS_COMMAND_HOSTS),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_COMMAND_HOSTS)),
     ),
   ),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((input) => input.commandHosts === undefined || input.decision === "approve"));
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((input) => input.commandHosts === undefined || input.decision === "approve"),
+  ),
+);
 export type DecideNativeHarnessApproval = typeof DecideNativeHarnessApproval.Type;
 
-export const NativeHarnessApprovalDecisionResult = Schema.Union(
+export const NativeHarnessApprovalDecisionResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("approval-decided"),
     approval: NativeHarnessApproval,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("approval-refused"),
     approvalId: NativeHarnessApprovalId,
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "approval-not-found",
       "already-settled",
       "withdrawn",
@@ -1217,10 +1313,13 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
       "host-not-offered",
       "lost-in-restart",
       "posture-changed",
+    ]),
+    message: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(512)),
     ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessApprovalDecisionResult = typeof NativeHarnessApprovalDecisionResult.Type;
 
 // ── Steering ─────────────────────────────────────────────────────────────────
@@ -1233,28 +1332,31 @@ export const MAX_NATIVE_HARNESS_STEERING_NOTES = 16;
  * its own; one still queued when the turn ends is sent as the next prompt.
  */
 export const NativeHarnessSteeringNote = Schema.Struct({
-  id: Schema.UUID,
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
-  status: Schema.Literal("queued", "delivered"),
+  id: GuidString,
+  text: Schema.Trimmed.pipe(
+    Schema.check(Schema.isNonEmpty()),
+    Schema.check(Schema.isMaxLength(4_096)),
+  ),
+  status: Schema.Literals(["queued", "delivered"]),
   at: UtcTimestamp,
-}).annotations(strict);
+});
 export type NativeHarnessSteeringNote = typeof NativeHarnessSteeringNote.Type;
 
 /** A note typed while the lead works, journaled so a restart cannot lose it. */
 export const NativeHarnessSteeringQueued = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   note: NativeHarnessSteeringNote,
-}).annotations(strict);
+});
 export type NativeHarnessSteeringQueued = typeof NativeHarnessSteeringQueued.Type;
 
 /** The queued notes the lead was just handed, inside a tool result. */
 export const NativeHarnessSteeringDelivered = Schema.Struct({
   sessionId: NativeHarnessSessionId,
-  noteIds: Schema.Array(Schema.UUID).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+  noteIds: Schema.Array(GuidString).pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_STEERING_NOTES)),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessSteeringDelivered = typeof NativeHarnessSteeringDelivered.Type;
 
 /**
@@ -1263,20 +1365,20 @@ export type NativeHarnessSteeringDelivered = typeof NativeHarnessSteeringDeliver
  * send as the next prompt. A take names its notes so replay removes exactly
  * those, not whatever else was queued by then.
  */
-export const NativeHarnessSteeringCleared = Schema.Union(
+export const NativeHarnessSteeringCleared = Schema.Union([
   Schema.Struct({
     sessionId: NativeHarnessSessionId,
-    which: Schema.Literal("delivered", "all"),
-  }).annotations(strict),
+    which: Schema.Literals(["delivered", "all"]),
+  }),
   Schema.Struct({
     sessionId: NativeHarnessSessionId,
     which: Schema.Literal("taken"),
-    noteIds: Schema.Array(Schema.UUID).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+    noteIds: Schema.Array(GuidString).pipe(
+      Schema.check(Schema.isMinLength(1)),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_STEERING_NOTES)),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessSteeringCleared = typeof NativeHarnessSteeringCleared.Type;
 
 /**
@@ -1286,21 +1388,24 @@ export type NativeHarnessSteeringCleared = typeof NativeHarnessSteeringCleared.T
  * clients watching the same turn end cannot both send them as the next
  * prompt.
  */
-export const SteerNativeHarnessSession = Schema.Union(
+export const SteerNativeHarnessSession = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("queue"),
-    text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096)),
-    noteId: Schema.optional(Schema.UUID),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("clear") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("take") }).annotations(strict),
-);
+    text: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(4_096)),
+    ),
+    noteId: Schema.optional(GuidString),
+  }),
+  Schema.Struct({ kind: Schema.Literal("clear") }),
+  Schema.Struct({ kind: Schema.Literal("take") }),
+]);
 export type SteerNativeHarnessSession = typeof SteerNativeHarnessSession.Type;
 
 /** The notes a `take` removed from the queue, oldest first, for the caller to send. */
 export const NativeHarnessSteeringTaken = Schema.Struct({
   taken: Schema.Array(NativeHarnessSteeringNote).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_STEERING_NOTES)),
   ),
 });
 export type NativeHarnessSteeringTaken = typeof NativeHarnessSteeringTaken.Type;
@@ -1316,26 +1421,29 @@ export const AnswerNativeHarnessQuestion = Schema.Struct({
    * the value.
    */
   secretAnswer: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type AnswerNativeHarnessQuestion = typeof AnswerNativeHarnessQuestion.Type;
 
-export const NativeHarnessQuestionAnswerResult = Schema.Union(
+export const NativeHarnessQuestionAnswerResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("question-answered"),
     question: NativeHarnessQuestion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("question-refused"),
     questionId: NativeHarnessQuestionId,
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "question-not-found",
       "already-settled",
       "not-authorized",
       "invalid-answer",
+    ]),
+    message: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(512)),
     ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessQuestionAnswerResult = typeof NativeHarnessQuestionAnswerResult.Type;
 
 // ── Session ──────────────────────────────────────────────────────────────────
@@ -1347,7 +1455,7 @@ export type NativeHarnessQuestionAnswerResult = typeof NativeHarnessQuestionAnsw
  * settles what was lost clears it — a restart never picks work back up on
  * its own.
  */
-export const NativeHarnessSessionStatus = Schema.Literal(
+export const NativeHarnessSessionStatus = Schema.Literals([
   "idle",
   "running",
   "waiting-approval",
@@ -1356,12 +1464,12 @@ export const NativeHarnessSessionStatus = Schema.Literal(
   "budget-limited",
   "failed",
   "recovery-required",
-);
+]);
 export type NativeHarnessSessionStatus = typeof NativeHarnessSessionStatus.Type;
 
 export const NativeHarnessSession = Schema.Struct({
   id: NativeHarnessSessionId,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
   /** The lead's slot and the candidate it currently runs on. */
@@ -1369,7 +1477,9 @@ export const NativeHarnessSession = Schema.Struct({
   lead: NativeHarnessSlotCandidate,
   status: NativeHarnessSessionStatus,
   /** Why it is not running, when it is not. */
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  detail: Schema.optional(
+    Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(512))),
+  ),
   turnsRun: NonNegativeInt,
   cutovers: NonNegativeInt,
   /** Totals over every turn, kept even after the view's turn list has scrolled old ones out. */
@@ -1380,14 +1490,15 @@ export const NativeHarnessSession = Schema.Struct({
   updatedAt: UtcTimestamp,
   version: AggregateVersion,
 })
-  .annotations(strict)
   // A session that is running or idle has nothing to explain; a paused,
   // waiting, limited, or failed one always does.
   .pipe(
-    Schema.filter(
-      (session) =>
-        (session.status === "running" || session.status === "idle") ===
-        (session.detail === undefined),
+    Schema.check(
+      Schema.makeFilter(
+        (session) =>
+          (session.status === "running" || session.status === "idle") ===
+          (session.detail === undefined),
+      ),
     ),
   );
 export type NativeHarnessSession = typeof NativeHarnessSession.Type;
@@ -1397,33 +1508,33 @@ const SessionCommandFields = {
   expectedVersion: AggregateVersion,
 } as const;
 
-export const NativeHarnessSessionCommand = Schema.Union(
+export const NativeHarnessSessionCommand = Schema.Union([
   Schema.Struct({
     ...SessionCommandFields,
     kind: Schema.Literal("pause-native-harness-session"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...SessionCommandFields,
     kind: Schema.Literal("resume-native-harness-session"),
     /** Explicitly continue a restart-interrupted turn, not just lift a pause. */
     continueInterrupted: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...SessionCommandFields,
     kind: Schema.Literal("interrupt-native-harness-turn"),
     turnId: NativeHarnessTurnId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessSessionCommand = typeof NativeHarnessSessionCommand.Type;
 
-export const NativeHarnessSessionCommandResult = Schema.Union(
+export const NativeHarnessSessionCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("native-harness-session"),
     session: NativeHarnessSession,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("native-harness-session-refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "stale-version",
       "session-not-found",
       "turn-not-found",
@@ -1431,10 +1542,13 @@ export const NativeHarnessSessionCommandResult = Schema.Union(
       "not-running",
       "not-authorized",
       "not-ready",
+    ]),
+    message: Schema.Trimmed.pipe(
+      Schema.check(Schema.isNonEmpty()),
+      Schema.check(Schema.isMaxLength(512)),
     ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type NativeHarnessSessionCommandResult = typeof NativeHarnessSessionCommandResult.Type;
 
 export const MAX_NATIVE_HARNESS_VIEW_ENTRIES = 50;
@@ -1446,33 +1560,37 @@ export const MAX_NATIVE_HARNESS_VIEW_ENTRIES = 50;
 export const NativeHarnessSessionView = Schema.Struct({
   session: NativeHarnessSession,
   routes: Schema.Array(NativeHarnessRouteDecision).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   turns: Schema.Array(NativeHarnessTurnRecord).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   reductions: Schema.Array(NativeHarnessContextReduction).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   interventions: Schema.Array(NativeHarnessAdvisorIntervention).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   followUps: Schema.optional(NativeHarnessFollowUpSet),
   activatedFollowUpIds: Schema.Array(NativeHarnessFollowUpId).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_FOLLOW_UPS),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_FOLLOW_UPS)),
   ),
   questions: Schema.Array(NativeHarnessQuestion).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   approvals: Schema.optional(
-    Schema.Array(NativeHarnessApproval).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
+    Schema.Array(NativeHarnessApproval).pipe(
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
+    ),
   ),
   /**
    * The lead's own task list, as `todo-write` last replaced it. It is the
    * lead's working notes, not a thread plan, and needs no approval.
    */
   tasks: Schema.optional(
-    Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+    Schema.Array(NativeHarnessTodoItem).pipe(
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+    ),
   ),
   /**
    * Whether a note queued during a turn can reach the lead. Only the Octant
@@ -1484,13 +1602,13 @@ export const NativeHarnessSessionView = Schema.Struct({
   /** Notes typed during the running turn; not journaled. */
   steering: Schema.optional(
     Schema.Array(NativeHarnessSteeringNote).pipe(
-      Schema.maxItems(MAX_NATIVE_HARNESS_STEERING_NOTES),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_STEERING_NOTES)),
     ),
   ),
   /** Calls of the turn running right now; not journaled, gone when the turn ends. */
   activeTools: Schema.optional(
     Schema.Array(NativeHarnessToolCall).pipe(
-      Schema.maxItems(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN),
+      Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TOOL_CALLS_PER_TURN)),
     ),
   ),
   /**
@@ -1498,24 +1616,24 @@ export const NativeHarnessSessionView = Schema.Struct({
    * The next content, or the turn ending, clears it.
    */
   retrying: Schema.optional(HarnessRetryNotice),
-}).annotations(strict);
+});
 export type NativeHarnessSessionView = typeof NativeHarnessSessionView.Type;
 
 /** A paired caller receives only requests its own child runs may answer. */
 export const NativeHarnessChildRequestsView = Schema.Struct({
   kind: Schema.Literal("child-requests"),
   approvals: Schema.Array(NativeHarnessApproval).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
   questions: Schema.Array(NativeHarnessQuestion).pipe(
-    Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
-}).annotations(strict);
+});
 export type NativeHarnessChildRequestsView = typeof NativeHarnessChildRequestsView.Type;
-export const NativeHarnessSessionReadView = Schema.Union(
+export const NativeHarnessSessionReadView = Schema.Union([
   NativeHarnessSessionView,
   NativeHarnessChildRequestsView,
-);
+]);
 export type NativeHarnessSessionReadView = typeof NativeHarnessSessionReadView.Type;
 
 export const NATIVE_HARNESS_SESSION_AGGREGATE_TYPE = "native-harness-session";
@@ -1541,70 +1659,127 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   steeringCleared: "native-harness-steering-cleared@1",
 } as const;
 
-export const decodeNativeHarnessSessionId = Schema.decodeUnknownSync(NativeHarnessSessionId);
+export const decodeNativeHarnessSessionId = Schema.decodeUnknownSync(
+  NativeHarnessSessionId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessSteeringQueued = Schema.decodeUnknownSync(
   NativeHarnessSteeringQueued,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessSteeringDelivered = Schema.decodeUnknownSync(
   NativeHarnessSteeringDelivered,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessSteeringCleared = Schema.decodeUnknownSync(
   NativeHarnessSteeringCleared,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessTurnId = Schema.decodeUnknownSync(NativeHarnessTurnId);
-export const decodeNativeHarnessToolName = Schema.decodeUnknownSync(NativeHarnessToolName);
+export const decodeNativeHarnessTurnId = Schema.decodeUnknownSync(
+  NativeHarnessTurnId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNativeHarnessToolName = Schema.decodeUnknownSync(
+  NativeHarnessToolName,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessToolResultBounds = Schema.decodeUnknownSync(
   NativeHarnessToolResultBounds,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessContextRemaining = Schema.decodeUnknownSync(
   NativeHarnessContextRemaining,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessCarriedNote = Schema.decodeUnknownSync(NativeHarnessCarriedNote);
+export const decodeNativeHarnessCarriedNote = Schema.decodeUnknownSync(
+  NativeHarnessCarriedNote,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessContextReduction = Schema.decodeUnknownSync(
   NativeHarnessContextReduction,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessTurnRecord = Schema.decodeUnknownSync(NativeHarnessTurnRecord);
+export const decodeNativeHarnessTurnRecord = Schema.decodeUnknownSync(
+  NativeHarnessTurnRecord,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessAdvisorDigest = Schema.decodeUnknownSync(
   NativeHarnessAdvisorDigest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessAdvisorIntervention = Schema.decodeUnknownSync(
   NativeHarnessAdvisorIntervention,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessFollowUpSet = Schema.decodeUnknownSync(NativeHarnessFollowUpSet);
+export const decodeNativeHarnessFollowUpSet = Schema.decodeUnknownSync(
+  NativeHarnessFollowUpSet,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessFollowUpPreview = Schema.decodeUnknownSync(
   NativeHarnessFollowUpPreview,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeActivateNativeHarnessFollowUp = Schema.decodeUnknownSync(
   ActivateNativeHarnessFollowUp,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessFollowUpActivationResult = Schema.decodeUnknownSync(
   NativeHarnessFollowUpActivationResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessQuestionId = Schema.decodeUnknownSync(NativeHarnessQuestionId);
-export const decodeNativeHarnessApprovalId = Schema.decodeUnknownSync(NativeHarnessApprovalId);
-export const decodeNativeHarnessApproval = Schema.decodeUnknownSync(NativeHarnessApproval);
+export const decodeNativeHarnessQuestionId = Schema.decodeUnknownSync(
+  NativeHarnessQuestionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNativeHarnessApprovalId = Schema.decodeUnknownSync(
+  NativeHarnessApprovalId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNativeHarnessApproval = Schema.decodeUnknownSync(
+  NativeHarnessApproval,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDecideNativeHarnessApproval = Schema.decodeUnknownSync(
   DecideNativeHarnessApproval,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessApprovalDecisionResult = Schema.decodeUnknownSync(
   NativeHarnessApprovalDecisionResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeSteerNativeHarnessSession = Schema.decodeUnknownSync(SteerNativeHarnessSession);
+export const decodeSteerNativeHarnessSession = Schema.decodeUnknownSync(
+  SteerNativeHarnessSession,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessSteeringTaken = Schema.decodeUnknownSync(
   NativeHarnessSteeringTaken,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessQuestion = Schema.decodeUnknownSync(NativeHarnessQuestion);
+export const decodeNativeHarnessQuestion = Schema.decodeUnknownSync(
+  NativeHarnessQuestion,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAnswerNativeHarnessQuestion = Schema.decodeUnknownSync(
   AnswerNativeHarnessQuestion,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessQuestionAnswerResult = Schema.decodeUnknownSync(
   NativeHarnessQuestionAnswerResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNativeHarnessSession = Schema.decodeUnknownSync(NativeHarnessSession);
-export const decodeNativeHarnessSessionView = Schema.decodeUnknownSync(NativeHarnessSessionView);
+export const decodeNativeHarnessSession = Schema.decodeUnknownSync(
+  NativeHarnessSession,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNativeHarnessSessionView = Schema.decodeUnknownSync(
+  NativeHarnessSessionView,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNativeHarnessSessionCommand = Schema.decodeUnknownSync(
   NativeHarnessSessionCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNativeHarnessSessionCommandResult = Schema.decodeUnknownSync(
   NativeHarnessSessionCommandResult,
+  STRICT_DECODE_OPTIONS,
 );

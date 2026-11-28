@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import {
   CodeOwnerMergeUnlockRefusal,
@@ -9,11 +10,11 @@ import { UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter(
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\0"),
     ),
   );
@@ -47,8 +48,8 @@ export const CodeProjectPullRequestSwitchTarget = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type CodeProjectPullRequestSwitchTarget = typeof CodeProjectPullRequestSwitchTarget.Type;
 
 /**
@@ -57,7 +58,7 @@ export type CodeProjectPullRequestSwitchTarget = typeof CodeProjectPullRequestSw
  * method is optional and, when absent, the host picks the first one the
  * repository allows (squash, merge, rebase).
  */
-export const CodeProjectPullRequestMergeWhenReadyCommand = Schema.Union(
+export const CodeProjectPullRequestMergeWhenReadyCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("enable"),
     target: CodeProjectPullRequestSwitchTarget,
@@ -68,73 +69,69 @@ export const CodeProjectPullRequestMergeWhenReadyCommand = Schema.Union(
      * client must send it; a local window's own click stands in for it there.
      */
     confirmed: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("disable"),
     target: CodeProjectPullRequestSwitchTarget,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestMergeWhenReadyCommand =
   typeof CodeProjectPullRequestMergeWhenReadyCommand.Type;
 
 /** The person's completion conditions for Auto-fix on a linked pull request. */
 export const PullRequestBabysitRules = Schema.Struct({
-  checks: Schema.Literal("required", "all"),
+  checks: Schema.Literals(["required", "all"]),
   requiredLabel: Schema.optional(CodeProjectPullRequestLabel),
-}).annotations(strict);
+});
 export type PullRequestBabysitRules = typeof PullRequestBabysitRules.Type;
 
 /**
  * Turns Auto-fix on for one thread linked to the pull request, or off. The
  * host refuses a thread that is not linked to that pull request.
  */
-export const CodeProjectPullRequestAutoFixCommand = Schema.Union(
+export const CodeProjectPullRequestAutoFixCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("enable"),
     target: CodeProjectPullRequestSwitchTarget,
     threadId: CodeThreadId,
     babysit: Schema.optional(PullRequestBabysitRules),
     expectedStoppedAt: Schema.optional(UtcTimestamp),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("disable"),
     threadId: Schema.optional(CodeThreadId),
     target: CodeProjectPullRequestSwitchTarget,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestAutoFixCommand = typeof CodeProjectPullRequestAutoFixCommand.Type;
 
 /** What a pull request is waiting on before the forge merges it. */
-export const CodeProjectPullRequestMergeWait = Schema.Literal("checks", "reviews", "conflicts");
+export const CodeProjectPullRequestMergeWait = Schema.Literals(["checks", "reviews", "conflicts"]);
 export type CodeProjectPullRequestMergeWait = typeof CodeProjectPullRequestMergeWait.Type;
 
-export const CodeProjectPullRequestMergeWhenReadyState = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("off") }).annotations(strict),
+export const CodeProjectPullRequestMergeWhenReadyState = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("off") }),
   Schema.Struct({
     status: Schema.Literal("on"),
     method: CodeProjectPullRequestMergeMethod,
     enabledAt: UtcTimestamp,
     /** Empty until the host has observed the pull request since it was turned on. */
-    waitingOn: Schema.Array(CodeProjectPullRequestMergeWait).pipe(Schema.maxItems(3)),
-  }).annotations(strict),
+    waitingOn: Schema.Array(CodeProjectPullRequestMergeWait).check(Schema.isMaxLength(3)),
+  }),
   Schema.Struct({
     status: Schema.Literal("merged"),
     observedAt: UtcTimestamp,
-  }).annotations(strict),
-  /**
-   * The forge dropped auto-merge on its own: a push by someone without merge
-   * rights, a closed pull request, or a repository setting change.
-   */
+  }),
   Schema.Struct({
     status: Schema.Literal("turned-off-by-forge"),
     observedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestMergeWhenReadyState =
   typeof CodeProjectPullRequestMergeWhenReadyState.Type;
 
 /** Why Auto-fix stopped on its own. */
-export const CodeProjectPullRequestAutoFixStopReason = Schema.Literal(
+export const CodeProjectPullRequestAutoFixStopReason = Schema.Literals([
   "attempt-limit",
   "feedback-limit",
   "needs-help",
@@ -143,36 +140,36 @@ export const CodeProjectPullRequestAutoFixStopReason = Schema.Literal(
   "closed",
   "thread-unavailable",
   "authority-lost",
-);
+]);
 export type CodeProjectPullRequestAutoFixStopReason =
   typeof CodeProjectPullRequestAutoFixStopReason.Type;
 
 /** Why Auto-fix is holding a wake back right now. Never journaled. */
-export const CodeProjectPullRequestAutoFixPauseReason = Schema.Literal(
+export const CodeProjectPullRequestAutoFixPauseReason = Schema.Literals([
   "person-typing",
   "turn-active",
-);
+]);
 export type CodeProjectPullRequestAutoFixPauseReason =
   typeof CodeProjectPullRequestAutoFixPauseReason.Type;
 
 /** One failure Auto-fix watches for, by kind and a short opaque identity. */
 export const CodeProjectPullRequestAutoFixFailure = Schema.Struct({
-  kind: Schema.Literal("check", "review-thread", "conflict", "behind", "feedback"),
+  kind: Schema.Literals(["check", "review-thread", "conflict", "behind", "feedback"]),
   /** Check name, review thread id, or `base` for a merge conflict. */
   key: boundedNonEmptyText(512),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestAutoFixFailure = typeof CodeProjectPullRequestAutoFixFailure.Type;
 
-export const CodeProjectPullRequestAutoFixWakeResult = Schema.Literal(
+export const CodeProjectPullRequestAutoFixWakeResult = Schema.Literals([
   "started",
   "refused",
   "unmarked",
-);
+]);
 export type CodeProjectPullRequestAutoFixWakeResult =
   typeof CodeProjectPullRequestAutoFixWakeResult.Type;
 
-export const CodeProjectPullRequestAutoFixState = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("off") }).annotations(strict),
+export const CodeProjectPullRequestAutoFixState = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("off") }),
   Schema.Struct({
     status: Schema.Literal("on"),
     threadId: CodeThreadId,
@@ -182,16 +179,19 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
     lastWake: Schema.optional(
       Schema.Struct({
         at: UtcTimestamp,
-        attempt: Schema.Int.pipe(
-          Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING),
+        attempt: Schema.Int.check(
+          Schema.isBetween({
+            minimum: 1,
+            maximum: MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+          }),
         ),
         result: CodeProjectPullRequestAutoFixWakeResult,
-        failures: Schema.Array(CodeProjectPullRequestAutoFixFailure).pipe(
-          Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
+        failures: Schema.Array(CodeProjectPullRequestAutoFixFailure).check(
+          Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
         ),
-      }).annotations(strict),
+      }),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("stopped"),
     threadId: CodeThreadId,
@@ -199,8 +199,8 @@ export const CodeProjectPullRequestAutoFixState = Schema.Union(
     babysit: Schema.optional(PullRequestBabysitRules),
     readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
     stoppedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestAutoFixState = typeof CodeProjectPullRequestAutoFixState.Type;
 
 export const CodeProjectPullRequestSwitchesView = Schema.Struct({
@@ -213,25 +213,30 @@ export const CodeProjectPullRequestSwitchesView = Schema.Struct({
    * host older than the setting, which means the former fixed three.
    */
   autoFixAttempts: Schema.optional(
-    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
+    Schema.Int.check(
+      Schema.isBetween({
+        minimum: 1,
+        maximum: MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+      }),
+    ),
   ),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeProjectPullRequestSwitchesView = typeof CodeProjectPullRequestSwitchesView.Type;
 
 /**
  * The answer to a switch command. Refusals and an unsupported forge are
  * values, so the pane can say exactly why a switch did not move.
  */
-export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
+export const CodeProjectPullRequestSwitchOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("applied"),
     alreadyActive: Schema.optional(Schema.Literal(true)),
     view: CodeProjectPullRequestSwitchesView,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "not-authorized",
       "not-open",
       "stale",
@@ -239,19 +244,18 @@ export const CodeProjectPullRequestSwitchOutcome = Schema.Union(
       "already-active",
       "method-not-allowed",
       "failed",
-    ),
-  }).annotations(strict),
-  /** The repository does not allow auto-merge; the host never imitates it. */
+    ]),
+  }),
   Schema.Struct({
     status: Schema.Literal("unsupported"),
     reason: Schema.Literal("auto-merge-not-allowed"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("disconnected", "unauthenticated", "unavailable"),
-  }).annotations(strict),
+    reason: Schema.Literals(["disconnected", "unauthenticated", "unavailable"]),
+  }),
   CodeOwnerMergeUnlockRefusal,
-);
+]);
 export type CodeProjectPullRequestSwitchOutcome = typeof CodeProjectPullRequestSwitchOutcome.Type;
 
 /**
@@ -260,7 +264,7 @@ export type CodeProjectPullRequestSwitchOutcome = typeof CodeProjectPullRequestS
  */
 export const CodeThreadComposerActivity = Schema.Struct({
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type CodeThreadComposerActivity = typeof CodeThreadComposerActivity.Type;
 
 /** Pull requests one thread's waiting row and its details name. */
@@ -272,7 +276,7 @@ export const MAX_CODE_THREAD_PULL_REQUEST_WAITS = 32;
  * the pull request's, so it is never a thread's wait.
  */
 export const CodeThreadPullRequestWait = Schema.Struct({
-  kind: Schema.Literal("watch", "auto-fix", "babysit"),
+  kind: Schema.Literals(["watch", "auto-fix", "babysit"]),
   target: CodeProjectPullRequestSwitchTarget,
   /** When it was turned on; a stop names it, so it never ends a later one. */
   since: UtcTimestamp,
@@ -282,46 +286,50 @@ export const CodeThreadPullRequestWait = Schema.Struct({
    * What holds a paused wait besides a window not yet vouching for it: GitHub
    * access is revoked, or the last pass could not read the pull request.
    */
-  pausedBy: Schema.optional(Schema.Literal("github-disconnected", "unreachable")),
+  pausedBy: Schema.optional(Schema.Literals(["github-disconnected", "unreachable"])),
   /** Turns it has started, and the count that ends it. */
-  wakes: Schema.optional(Schema.NonNegativeInt),
+  wakes: Schema.optional(NonNegativeInt),
   wakeLimit: Schema.optional(
-    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
+    Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING }),
+    ),
   ),
   endsAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeThreadPullRequestWait = typeof CodeThreadPullRequestWait.Type;
 
 export const CodeThreadPullRequestWaits = Schema.Struct({
   threadId: CodeThreadId,
-  waits: Schema.Array(CodeThreadPullRequestWait).pipe(
-    Schema.maxItems(MAX_CODE_THREAD_PULL_REQUEST_WAITS),
+  waits: Schema.Array(CodeThreadPullRequestWait).check(
+    Schema.isMaxLength(MAX_CODE_THREAD_PULL_REQUEST_WAITS),
   ),
-}).annotations(strict);
+});
 export type CodeThreadPullRequestWaits = typeof CodeThreadPullRequestWaits.Type;
 
 /** The person stops one of a thread's own waits. Babysitting stops as Auto-fix. */
 export const StopCodeThreadPullRequestWait = Schema.Struct({
   kind: Schema.Literal("stop-code-thread-pull-request-wait"),
   threadId: CodeThreadId,
-  wait: Schema.Literal("watch", "auto-fix"),
+  wait: Schema.Literals(["watch", "auto-fix"]),
   target: CodeProjectPullRequestSwitchTarget,
   since: UtcTimestamp,
-}).annotations(strict);
+});
 export type StopCodeThreadPullRequestWait = typeof StopCodeThreadPullRequestWait.Type;
 
 export const StopCodeThreadPullRequestWaitResult = Schema.Struct({
   kind: Schema.Literal("code-thread-pull-request-wait-stopped"),
   /** False when that wait had already ended, or a later one took its place. */
   stopped: Schema.Boolean,
-}).annotations(strict);
+});
 export type StopCodeThreadPullRequestWaitResult = typeof StopCodeThreadPullRequestWaitResult.Type;
 
 export const decodeCodeThreadPullRequestWaits = Schema.decodeUnknownSync(
   CodeThreadPullRequestWaits,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeStopCodeThreadPullRequestWait = Schema.decodeUnknownSync(
   StopCodeThreadPullRequestWait,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED =
@@ -340,19 +348,19 @@ export const CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE = "code-project-pull-r
  */
 export const CodeProjectPullRequestMergeWhenReadyRecorded = Schema.Struct({
   target: CodeProjectPullRequestSwitchTarget,
-  change: Schema.Union(
+  change: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("enabled"),
       method: CodeProjectPullRequestMergeMethod,
       headSha: boundedNonEmptyText(64),
       /** Set when a paired phone or web client turned it on; absent for the local window. */
       caller: Schema.optional(Schema.Literal("remote-device")),
-    }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("merged") }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("turned-off-by-forge") }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+    Schema.Struct({ kind: Schema.Literal("disabled") }),
+    Schema.Struct({ kind: Schema.Literal("merged") }),
+    Schema.Struct({ kind: Schema.Literal("turned-off-by-forge") }),
+  ]),
+});
 export type CodeProjectPullRequestMergeWhenReadyRecorded =
   typeof CodeProjectPullRequestMergeWhenReadyRecorded.Type;
 
@@ -364,32 +372,35 @@ export type CodeProjectPullRequestMergeWhenReadyRecorded =
 export const CodeProjectPullRequestAutoFixRecorded = Schema.Struct({
   target: CodeProjectPullRequestSwitchTarget,
   threadId: CodeThreadId,
-  change: Schema.Union(
+  change: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("enabled"),
       babysit: Schema.optional(PullRequestBabysitRules),
-    }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
+    }),
+    Schema.Struct({ kind: Schema.Literal("disabled") }),
     Schema.Struct({
       kind: Schema.Literal("woke"),
       /** The head the failures were observed on. */
       headSha: boundedNonEmptyText(64),
-      failures: Schema.Array(CodeProjectPullRequestAutoFixFailure).pipe(
-        Schema.minItems(1),
-        Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
+      failures: Schema.Array(CodeProjectPullRequestAutoFixFailure).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_FAILURES),
       ),
-      attempt: Schema.Int.pipe(
-        Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING),
+      attempt: Schema.Int.check(
+        Schema.isBetween({
+          minimum: 1,
+          maximum: MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+        }),
       ),
       result: CodeProjectPullRequestAutoFixWakeResult,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       kind: Schema.Literal("stopped"),
       reason: CodeProjectPullRequestAutoFixStopReason,
       readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+  ]),
+});
 export type CodeProjectPullRequestAutoFixRecorded =
   typeof CodeProjectPullRequestAutoFixRecorded.Type;
 
@@ -399,27 +410,27 @@ export type CodeProjectPullRequestAutoFixRecorded =
  * decision for a review decision, and the forge's id for a review or comment.
  */
 export const CodeProjectPullRequestWatchSignal = Schema.Struct({
-  kind: Schema.Literal(
+  kind: Schema.Literals([
     "checks-passed",
     "checks-failed",
     "review-decision",
     "review",
     "comment",
     "conflict",
-  ),
+  ]),
   key: boundedNonEmptyText(512),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestWatchSignal = typeof CodeProjectPullRequestWatchSignal.Type;
 
 /** Why a watch ended on its own. */
-export const CodeProjectPullRequestWatchStopReason = Schema.Literal(
+export const CodeProjectPullRequestWatchStopReason = Schema.Literals([
   "merged",
   "closed",
   "thread-unavailable",
   "authority-lost",
   "expired",
   "wake-limit",
-);
+]);
 export type CodeProjectPullRequestWatchStopReason =
   typeof CodeProjectPullRequestWatchStopReason.Type;
 
@@ -434,57 +445,71 @@ export type CodeProjectPullRequestWatchStopReason =
 export const CodeProjectPullRequestWatchRecorded = Schema.Struct({
   target: CodeProjectPullRequestSwitchTarget,
   threadId: CodeThreadId,
-  change: Schema.Union(
+  change: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("enabled"),
-      baseline: Schema.Array(CodeProjectPullRequestWatchSignal).pipe(
-        Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
+      baseline: Schema.Array(CodeProjectPullRequestWatchSignal).check(
+        Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
       ),
-    }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("disabled") }).annotations(strict),
+    }),
+    Schema.Struct({ kind: Schema.Literal("disabled") }),
     Schema.Struct({
       kind: Schema.Literal("woke"),
       /** The head the signals were observed on. */
       headSha: boundedNonEmptyText(64),
-      signals: Schema.Array(CodeProjectPullRequestWatchSignal).pipe(
-        Schema.minItems(1),
-        Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
+      signals: Schema.Array(CodeProjectPullRequestWatchSignal).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_WATCH_SIGNALS),
       ),
-      wake: Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
+      wake: Schema.Int.check(
+        Schema.isBetween({
+          minimum: 1,
+          maximum: MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING,
+        }),
+      ),
       result: CodeProjectPullRequestAutoFixWakeResult,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       kind: Schema.Literal("stopped"),
       reason: CodeProjectPullRequestWatchStopReason,
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+  ]),
+});
 export type CodeProjectPullRequestWatchRecorded = typeof CodeProjectPullRequestWatchRecorded.Type;
 
 export const decodeCodeProjectPullRequestSwitchTarget = Schema.decodeUnknownSync(
   CodeProjectPullRequestSwitchTarget,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestMergeWhenReadyCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeWhenReadyCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestAutoFixCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestAutoFixCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestSwitchesView = Schema.decodeUnknownSync(
   CodeProjectPullRequestSwitchesView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestSwitchOutcome = Schema.decodeUnknownSync(
   CodeProjectPullRequestSwitchOutcome,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeThreadComposerActivity = Schema.decodeUnknownSync(
   CodeThreadComposerActivity,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestMergeWhenReadyRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeWhenReadyRecorded,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestAutoFixRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestAutoFixRecorded,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestWatchRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestWatchRecorded,
+  STRICT_DECODE_OPTIONS,
 );

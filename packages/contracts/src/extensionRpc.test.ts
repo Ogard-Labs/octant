@@ -71,7 +71,9 @@ describe("the server connection contract", () => {
 import { ExtensionProvenance } from "./extensions";
 import { Schema } from "effect";
 
-const decodeExtensionProvenance = Schema.decodeUnknownSync(ExtensionProvenance);
+const decodeExtensionProvenance = Schema.decodeUnknownSync(ExtensionProvenance, {
+  onExcessProperty: "error",
+});
 
 it("bounds root diagnostics and never accepts filesystem authority or an enablement grant in them", () => {
   const status = {

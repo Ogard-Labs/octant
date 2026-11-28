@@ -1,4 +1,10 @@
 import { OwnerUnlockPrincipal } from "./hubAndSpokes";
+import {
+  GuidString,
+  NonEmptyTrimmedString,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { ConversationInputReceipt, ConversationInputPolicy } from "./conversationInputs";
 import { MAX_SECRET_ANSWER_LENGTH, Questionnaire } from "./questionnaire";
 import { SideChatDraftReturnReferences } from "./sideChatReturn";
@@ -23,7 +29,7 @@ import { ThreadCallTiming } from "./threadToolStepList";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { ThreadBoardFinishedMark } from "./finishedReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { AgentResultsSteeredIntoTurn, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ThreadDeliveryMark } from "./sideTasks";
 import { ThreadMessagesSteeredIntoTurn } from "./threadMessageSteering";
@@ -96,17 +102,21 @@ import {
   TurnStallNotice,
 } from "./turnLoopNotice";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
-const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
-const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =>
-  Schema.Array(schema).pipe(
-    Schema.filter((values) => values.length <= maximum && new Set(values).size === values.length),
+const boundedNonEmptyText = (maximumBytes: number) =>
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
+const uniqueArray = <S extends Schema.Top>(schema: S, maximum: number) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter(
+      (values) => values.length <= maximum && new Set(values).size === values.length,
+    ),
   );
 
 export const MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES = 64 * 1024;
@@ -116,15 +126,20 @@ export const MAX_CODE_OPERATION_PATHS = 10_000;
 export const MAX_CODE_OPERATION_REPLAY_LIMIT = 1_000;
 export const MAX_CODE_OPERATION_EVIDENCE_BYTES = 64 * 1024 * 1024;
 
-export const CodeOperationId = Schema.UUID.pipe(Schema.brand("CodeOperationId"));
+export const CodeOperationId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CodeOperationId"),
+);
 export type CodeOperationId = typeof CodeOperationId.Type;
 
 export const CodeEvidenceReference = Schema.Struct({
   contentId: CodeEvidenceContentId,
   digest: CodeDigest,
-  byteLength: Schema.Int.pipe(Schema.between(0, MAX_CODE_OPERATION_EVIDENCE_BYTES)),
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: MAX_CODE_OPERATION_EVIDENCE_BYTES }),
+  ),
   truncated: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type CodeEvidenceReference = typeof CodeEvidenceReference.Type;
 
 /**
@@ -132,36 +147,36 @@ export type CodeEvidenceReference = typeof CodeEvidenceReference.Type;
  * variant carries the server-resolved file identity and never a root path; the
  * editable variant hands back a content reference the content route serves.
  */
-export const CodeFileOpenPublicResult = Schema.Union(
+export const CodeFileOpenPublicResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("editable"),
     fileId: CodeFileId,
     metadata: CodeFileMetadata,
     content: CodeEvidenceReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("read-only"),
     fileId: CodeFileId,
     metadata: CodeFileMetadata,
-    reason: Schema.Literal("binary", "oversized"),
-  }).annotations(strict),
+    reason: Schema.Literals(["binary", "oversized"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("interrupted"),
     fileId: CodeFileId,
     rescanRequired: Schema.Literal(true),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     fileId: CodeFileId,
     failure: CodeFileSaveFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeFileOpenPublicResult = typeof CodeFileOpenPublicResult.Type;
 
 export const CodeFileOpenResultEnvelope = Schema.Struct({
   kind: Schema.Literal("code-file-open-result"),
   result: CodeFileOpenPublicResult,
-}).annotations(strict);
+});
 export type CodeFileOpenResultEnvelope = typeof CodeFileOpenResultEnvelope.Type;
 
 const OperationScope = {
@@ -173,13 +188,13 @@ export const CodeTerminalInspectionRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   terminalId: CodeTerminalId,
-}).annotations(strict);
+});
 export type CodeTerminalInspectionRequest = typeof CodeTerminalInspectionRequest.Type;
 
 export const CodeTerminalInspection = Schema.Struct({
   terminalId: CodeTerminalId,
-  state: Schema.Literal("running", "exited", "interrupted"),
-}).annotations(strict);
+  state: Schema.Literals(["running", "exited", "interrupted"]),
+});
 export type CodeTerminalInspection = typeof CodeTerminalInspection.Type;
 
 /** The most UTF-8 bytes of text one live terminal frame carries; longer output is split across frames. */
@@ -195,7 +210,7 @@ export const CodeTerminalLiveRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   terminalId: CodeTerminalId,
-  afterCharacters: Schema.optional(Schema.Int.pipe(Schema.greaterThanOrEqualTo(0))),
+  afterCharacters: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * The operation whose journal the window also follows this terminal through.
    * A window reading live stops reading that journal, and the host collects the
@@ -203,7 +218,7 @@ export const CodeTerminalLiveRequest = Schema.Struct({
    * being collected. It grants nothing and is never trusted for authority.
    */
   operationId: Schema.optional(CodeOperationId),
-}).annotations(strict);
+});
 export type CodeTerminalLiveRequest = typeof CodeTerminalLiveRequest.Type;
 
 /**
@@ -217,24 +232,24 @@ export const CodeTerminalLiveFrame = Schema.Struct({
   terminalId: CodeTerminalId,
   text: boundedText(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES),
   replace: Schema.Boolean,
-  characters: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-  state: Schema.Literal("running", "exited", "interrupted"),
+  characters: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  state: Schema.Literals(["running", "exited", "interrupted"]),
   exitCode: Schema.optional(Schema.NullOr(Schema.Int)),
-}).annotations(strict);
+});
 export type CodeTerminalLiveFrame = typeof CodeTerminalLiveFrame.Type;
 
 const TerminalGeometry = {
-  columns: Schema.Int.pipe(Schema.between(1, 500)),
-  rows: Schema.Int.pipe(Schema.between(1, 500)),
+  columns: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+  rows: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
 } as const;
-const CredentialReference = Schema.String.pipe(Schema.pattern(/^[A-Z_][A-Z0-9_]{0,127}$/));
+const CredentialReference = Schema.String.check(Schema.isPattern(/^[A-Z_][A-Z0-9_]{0,127}$/));
 const GitStateToken = CodeDigest;
-const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
-const GitRemoteName = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._-]{1,255}$/));
-const GitBranchName = Schema.String.pipe(
-  Schema.maxLength(255),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/),
-  Schema.filter(
+const GitObjectId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
+const GitRemoteName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,255}$/));
+const GitBranchName = Schema.String.check(
+  Schema.isMaxLength(255),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/),
+  Schema.makeFilter(
     (value) =>
       !value.includes("..") &&
       !value.includes("//") &&
@@ -243,9 +258,9 @@ const GitBranchName = Schema.String.pipe(
       !value.endsWith(".lock"),
   ),
 );
-const GitBranchRef = Schema.String.pipe(
-  Schema.pattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
-  Schema.filter(
+const GitBranchRef = Schema.String.check(
+  Schema.isPattern(/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]*$/),
+  Schema.makeFilter(
     (value) =>
       !value.includes("..") &&
       !value.includes("//") &&
@@ -254,34 +269,30 @@ const GitBranchRef = Schema.String.pipe(
       !value.endsWith(".lock"),
   ),
 );
-const CodeOperationCheckoutHead = Schema.Union(
+const CodeOperationCheckoutHead = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("branch"),
     name: GitBranchName,
     oid: GitObjectId,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }).annotations(strict),
-  // A checkout with no commits yet points HEAD at a branch that does not exist,
-  // so it has a name but no object to identify.
-  Schema.Struct({ kind: Schema.Literal("unborn"), name: GitBranchName }).annotations(strict),
-);
-const GitStatusCode = Schema.String.pipe(Schema.pattern(/^[ MADRCUT?!]$/));
+  }),
+  Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }),
+  Schema.Struct({ kind: Schema.Literal("unborn"), name: GitBranchName }),
+]);
+const GitStatusCode = Schema.String.check(Schema.isPattern(/^[ MADRCUT?!]$/));
 const GitStatusEntry = Schema.Struct({
   path: CodeRelativePath,
   originalPath: Schema.optional(CodeRelativePath),
   index: GitStatusCode,
   worktree: GitStatusCode,
-}).annotations(strict);
-const GitStagePath = CodeRelativePath.pipe(Schema.filter((path) => !path.startsWith("-")));
-const StagedGitStatusEntry = GitStatusEntry.pipe(
-  Schema.filter((entry) => entry.index !== " " && entry.index !== "?"),
+});
+const GitStagePath = CodeRelativePath.check(Schema.makeFilter((path) => !path.startsWith("-")));
+const StagedGitStatusEntry = GitStatusEntry.check(
+  Schema.makeFilter((entry) => entry.index !== " " && entry.index !== "?"),
 );
-const GitAuthorization = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("approved"), approvalId: CodeApprovalId }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("full-access") }).annotations(strict),
-);
+const GitAuthorization = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("approved"), approvalId: CodeApprovalId }),
+  Schema.Struct({ kind: Schema.Literal("full-access") }),
+]);
 /**
  * What allowed a merge. Besides the approval for one act, the person may have
  * stored a standing choice: the Project's "agents may merge" setting, or a
@@ -289,15 +300,15 @@ const GitAuthorization = Schema.Union(
  * relies on; the host checks it again and refuses a claim the stored choice
  * does not back.
  */
-export const CodeMergeStandingSource = Schema.Literal("project", "routine");
+export const CodeMergeStandingSource = Schema.Literals(["project", "routine"]);
 export type CodeMergeStandingSource = typeof CodeMergeStandingSource.Type;
-const MergeAuthorization = Schema.Union(
+const MergeAuthorization = Schema.Union([
   GitAuthorization,
   Schema.Struct({
     kind: Schema.Literal("standing"),
     allowedBy: CodeMergeStandingSource,
-  }).annotations(strict),
-);
+  }),
+]);
 /**
  * What allowed a comment or a review reply. Besides the approval for one post
  * and Full access, the Project's "Agents may comment on pull requests" switch
@@ -305,61 +316,59 @@ const MergeAuthorization = Schema.Union(
  * names the choice; the host reads it again and refuses a claim it does not
  * back.
  */
-const CommentAuthorization = Schema.Union(
+const CommentAuthorization = Schema.Union([
   GitAuthorization,
   Schema.Struct({
     kind: Schema.Literal("standing"),
     allowedBy: Schema.Literal("project"),
-  }).annotations(strict),
-);
+  }),
+]);
 const GitPushConfirmation = Schema.Struct({
   remote: GitRemoteName,
-  refspec: boundedNonEmptyText(1_024).pipe(
-    Schema.filter((value) => !value.startsWith("+") && !value.includes(" --")),
+  refspec: boundedNonEmptyText(1_024).check(
+    Schema.makeFilter((value) => !value.startsWith("+") && !value.includes(" --")),
   ),
-}).annotations(strict);
-export const CodeReviewLocation = Schema.Union(
+});
+export const CodeReviewLocation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("line"),
-    line: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    line: PositiveInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("selection"),
-    startLine: Schema.Int.pipe(Schema.positive()),
-    startColumn: Schema.Int.pipe(Schema.positive()),
-    endLine: Schema.Int.pipe(Schema.positive()),
-    endColumn: Schema.Int.pipe(Schema.positive()),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (value) =>
-          value.endLine > value.startLine ||
-          (value.endLine === value.startLine && value.endColumn >= value.startColumn),
-      ),
+    startLine: PositiveInt,
+    startColumn: PositiveInt,
+    endLine: PositiveInt,
+    endColumn: PositiveInt,
+  }).check(
+    Schema.makeFilter(
+      (value) =>
+        value.endLine > value.startLine ||
+        (value.endLine === value.startLine && value.endColumn >= value.startColumn),
     ),
-);
+  ),
+]);
 export type CodeReviewLocation = typeof CodeReviewLocation.Type;
 
-export const CodeReviewAuthor = Schema.Union(
+export const CodeReviewAuthor = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("local-user"),
     actorId: boundedNonEmptyText(255),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("agent"),
     providerInstanceId: ProviderInstanceId,
     sessionId: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeReviewAuthor = typeof CodeReviewAuthor.Type;
 
-export const CodeReviewProvenance = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("manual") }).annotations(strict),
+export const CodeReviewProvenance = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("manual") }),
   Schema.Struct({
-    kind: Schema.Literal("provider", "test", "git"),
+    kind: Schema.Literals(["provider", "test", "git"]),
     sourceId: boundedNonEmptyText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-request-reviewer"),
     reviewerId: boundedNonEmptyText(128),
@@ -369,40 +378,40 @@ export const CodeReviewProvenance = Schema.Union(
     modelId: ProviderModelId,
     effort: Schema.optional(boundedNonEmptyText(64)),
     headSha: GitObjectId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeReviewProvenance = typeof CodeReviewProvenance.Type;
 
 /** A host-observed comparison identity; reconstructed hunks are never whole-file snapshots. */
-export const CodeReviewRevision = Schema.Union(
+export const CodeReviewRevision = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("working-tree"),
     stateToken: boundedNonEmptyText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("branch"),
     head: boundedNonEmptyText(128),
     base: Schema.optional(boundedNonEmptyText(128)),
     baseRef: boundedNonEmptyText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("turn-capture"),
     operationId: CodeOperationId,
-    captureCursor: Schema.Int.pipe(Schema.positive()),
-    version: Schema.Int.pipe(Schema.positive()),
+    captureCursor: PositiveInt,
+    version: PositiveInt,
     baseline: GitObjectId,
     tree: GitObjectId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeReviewRevision = typeof CodeReviewRevision.Type;
 export const CodeReviewDiffAnchor = Schema.Struct({
   kind: Schema.Literal("captured-diff"),
   reviewOperationId: CodeOperationId,
   diff: CodeEvidenceReference,
   revision: CodeReviewRevision,
-  side: Schema.Literal("original", "modified"),
+  side: Schema.Literals(["original", "modified"]),
   capturedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeReviewDiffAnchor = typeof CodeReviewDiffAnchor.Type;
 export const CodeReviewTarget = Schema.Struct({
   fileId: CodeFileId,
@@ -411,7 +420,7 @@ export const CodeReviewTarget = Schema.Struct({
   fileDigest: CodeDigest,
   location: CodeReviewLocation,
   anchor: CodeReviewDiffAnchor,
-}).annotations(strict);
+});
 export type CodeReviewTarget = typeof CodeReviewTarget.Type;
 export const MAX_CODE_REVIEW_CORRECTION_FINDINGS = 16;
 export const CodeReviewFindingReference = Schema.Struct({
@@ -420,10 +429,10 @@ export const CodeReviewFindingReference = Schema.Struct({
   findingId: CodeReviewFindingId,
   version: AggregateVersion,
   anchorDigest: CodeDigest,
-}).annotations(strict);
+});
 export type CodeReviewFindingReference = typeof CodeReviewFindingReference.Type;
-export const CodeReviewFindingReferences = Schema.Array(CodeReviewFindingReference).pipe(
-  Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS),
+export const CodeReviewFindingReferences = Schema.Array(CodeReviewFindingReference).check(
+  Schema.isMaxLength(MAX_CODE_REVIEW_CORRECTION_FINDINGS),
 );
 
 export const CodeReviewFinding = Schema.Struct({
@@ -435,29 +444,29 @@ export const CodeReviewFinding = Schema.Struct({
   fileDigest: CodeDigest,
   anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
-  severity: Schema.Literal("note", "warning", "error"),
+  severity: Schema.Literals(["note", "warning", "error"]),
   author: CodeReviewAuthor,
   provenance: CodeReviewProvenance,
   summary: boundedNonEmptyText(4_096),
-  state: Schema.Literal("open", "resolved", "dismissed"),
+  state: Schema.Literals(["open", "resolved", "dismissed"]),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeReviewFinding = typeof CodeReviewFinding.Type;
 
 export const CodeReviewFindingUpdated = Schema.Struct({
   kind: Schema.Literal("review-finding-updated"),
   finding: CodeReviewFinding,
-}).annotations(strict);
+});
 export type CodeReviewFindingUpdated = typeof CodeReviewFindingUpdated.Type;
 
 const ProviderRequestId = boundedNonEmptyText(255);
 /** A provider's question identity as the journal and `answer-provider-input` carry it. */
 export const CodeProviderRequestId = ProviderRequestId;
 export const MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES = 8 * 1024;
-export const CodeOperationFailure = CodeFailure.pipe(
-  Schema.filter(
+export const CodeOperationFailure = CodeFailure.check(
+  Schema.makeFilter(
     (failure) =>
       encoder.encode(failure.message).byteLength <= MAX_CODE_OPERATION_FAILURE_MESSAGE_BYTES,
   ),
@@ -481,7 +490,7 @@ const StartTerminal = Schema.Struct({
    * extra folder, exactly as the Project lists it. Absent means the thread's
    * working directory. The host refuses any other path.
    */
-  folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+  folder: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
   /**
    * Start the thread's provider's own command-line program, interactively,
    * instead of a shell. The host resolves the program, its account folder and
@@ -489,31 +498,31 @@ const StartTerminal = Schema.Struct({
    * them. Only the person may ask: the host refuses it for every other caller.
    */
   program: Schema.optional(Schema.Literal("provider")),
-}).annotations(strict);
+});
 const AttachTerminal = Schema.Struct({
   kind: Schema.Literal("attach-terminal"),
   ...OperationScope,
   terminalId: CodeTerminalId,
-}).annotations(strict);
+});
 const WriteTerminal = Schema.Struct({
   kind: Schema.Literal("write-terminal"),
   ...OperationScope,
   terminalId: CodeTerminalId,
-  data: boundedText(MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES).pipe(
-    Schema.filter((value) => !value.includes("\0")),
+  data: boundedText(MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES).check(
+    Schema.makeFilter((value) => !value.includes("\0")),
   ),
-}).annotations(strict);
+});
 const ResizeTerminal = Schema.Struct({
   kind: Schema.Literal("resize-terminal"),
   ...OperationScope,
   terminalId: CodeTerminalId,
   ...TerminalGeometry,
-}).annotations(strict);
+});
 const StopTerminal = Schema.Struct({
   kind: Schema.Literal("stop-terminal"),
   ...OperationScope,
   terminalId: CodeTerminalId,
-}).annotations(strict);
+});
 /**
  * Switch a live terminal Browser grant off without closing the terminal. It
  * only narrows authority, so it is never gated.
@@ -522,7 +531,7 @@ const RevokeTerminalBrowserGrant = Schema.Struct({
   kind: Schema.Literal("revoke-terminal-browser-grant"),
   ...OperationScope,
   terminalId: CodeTerminalId,
-}).annotations(strict);
+});
 /**
  * The person's word on a pull request update or merge whose outcome a restart
  * left unconfirmed. Octant cannot tell such a step from an earlier one by
@@ -531,25 +540,29 @@ const RevokeTerminalBrowserGrant = Schema.Struct({
  * It changes nothing on GitHub, so it is never gated, but only the person at
  * a local window may send it.
  */
-export const CodeUnconfirmedStepOutcome = Schema.Literal("happened", "did-not-happen", "unknown");
+export const CodeUnconfirmedStepOutcome = Schema.Literals([
+  "happened",
+  "did-not-happen",
+  "unknown",
+]);
 export type CodeUnconfirmedStepOutcome = typeof CodeUnconfirmedStepOutcome.Type;
 const ResolveUnconfirmedStep = Schema.Struct({
   kind: Schema.Literal("resolve-unconfirmed-step"),
   ...OperationScope,
   workId: CodeRuntimeWorkId,
   outcome: CodeUnconfirmedStepOutcome,
-}).annotations(strict);
+});
 const RunRepositoryTest = Schema.Struct({
   kind: Schema.Literal("run-repository-test"),
   ...OperationScope,
   testRunId: CodeTestRunId,
   definition: CodeRepositoryTestDefinition,
-}).annotations(strict);
+});
 const CancelRepositoryTest = Schema.Struct({
   kind: Schema.Literal("cancel-repository-test"),
   ...OperationScope,
   testRunId: CodeTestRunId,
-}).annotations(strict);
+});
 /**
  * Start a curated scaffold in this checkout.
  *
@@ -563,12 +576,12 @@ const RunScaffold = Schema.Struct({
   scaffoldRunId: ScaffoldRunId,
   scaffoldId: ScaffoldId,
   directoryName: ScaffoldDirectoryName,
-}).annotations(strict);
+});
 const ObserveGit = Schema.Struct({
   kind: Schema.Literal("observe-git"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  maxDiffBytes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1024 * 1024 })),
   /** Read the diff with Git's `-w`; only the diff text changes, never the checkout state. */
   ignoreWhitespace: Schema.optional(Schema.Boolean),
   /**
@@ -577,42 +590,42 @@ const ObserveGit = Schema.Struct({
    * switch is consented against changes when one nested file is added.
    */
   untrackedFiles: Schema.optional(Schema.Literal("all")),
-}).annotations(strict);
+});
 const PrepareGitHunks = Schema.Struct({
   kind: Schema.Literal("prepare-git-hunks"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   scope: CodeGitHunkScope,
-}).annotations(strict);
+});
 const SelectedGitHunkFields = {
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   comparisonOperationId: CodeOperationId,
-  selected: uniqueArray(CodeDigest, MAX_CODE_SELECTED_GIT_HUNKS).pipe(Schema.minItems(1)),
+  selected: uniqueArray(CodeDigest, MAX_CODE_SELECTED_GIT_HUNKS).check(Schema.isMinLength(1)),
 };
 const StageGitHunks = Schema.Struct({
   kind: Schema.Literal("stage-git-hunks"),
   ...SelectedGitHunkFields,
-}).annotations(strict);
+});
 const UnstageGitHunks = Schema.Struct({
   kind: Schema.Literal("unstage-git-hunks"),
   ...SelectedGitHunkFields,
-}).annotations(strict);
+});
 const ReverseGitHunks = Schema.Struct({
   kind: Schema.Literal("reverse-git-hunks"),
   ...SelectedGitHunkFields,
-}).annotations(strict);
+});
 const StageGit = Schema.Struct({
   kind: Schema.Literal("stage-git"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  paths: Schema.NonEmptyArray(GitStagePath).pipe(
-    Schema.filter(
+  paths: Schema.NonEmptyArray(GitStagePath).check(
+    Schema.makeFilter(
       (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
     ),
   ),
   expectedStateToken: GitStateToken,
-}).annotations(strict);
+});
 /**
  * Take listed paths back out of the index, leaving the files themselves
  * exactly as they are. Nothing is lost, so this is an ordinary index write
@@ -622,13 +635,13 @@ const UnstageGit = Schema.Struct({
   kind: Schema.Literal("unstage-git"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  paths: Schema.NonEmptyArray(GitStagePath).pipe(
-    Schema.filter(
+  paths: Schema.NonEmptyArray(GitStagePath).check(
+    Schema.makeFilter(
       (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
     ),
   ),
   expectedStateToken: GitStateToken,
-}).annotations(strict);
+});
 /**
  * Ask this thread's own provider to draft delivery text from the change the
  * checkout already shows.
@@ -640,8 +653,8 @@ const UnstageGit = Schema.Struct({
 const DraftGitText = Schema.Struct({
   kind: Schema.Literal("draft-git-text"),
   ...OperationScope,
-  purpose: Schema.Literal("commit-message", "pull-request"),
-}).annotations(strict);
+  purpose: Schema.Literals(["commit-message", "pull-request"]),
+});
 /**
  * Throw away uncommitted work in the checkout. This is the one Git command
  * here that destroys content instead of recording it: what it removes was
@@ -654,25 +667,25 @@ const DiscardGitChanges = Schema.Struct({
   kind: Schema.Literal("discard-git-changes"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  paths: Schema.NonEmptyArray(GitStagePath).pipe(
-    Schema.filter(
+  paths: Schema.NonEmptyArray(GitStagePath).check(
+    Schema.makeFilter(
       (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
     ),
   ),
   expectedStateToken: GitStateToken,
-}).annotations(strict);
+});
 const CommitGit = Schema.Struct({
   kind: Schema.Literal("commit-git"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  message: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES).pipe(
-    Schema.filter((value) => !value.includes("\0")),
+  message: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES).check(
+    Schema.makeFilter((value) => !value.includes("\0")),
   ),
-  stagedSummary: Schema.NonEmptyArray(StagedGitStatusEntry).pipe(
-    Schema.filter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
+  stagedSummary: Schema.NonEmptyArray(StagedGitStatusEntry).check(
+    Schema.makeFilter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
   ),
   expectedStateToken: GitStateToken,
-}).annotations(strict);
+});
 /**
  * Point this thread's checkout at another local branch.
  *
@@ -691,8 +704,8 @@ const SwitchGitBranch = Schema.Struct({
   gitOperationId: CodeGitOperationId,
   branch: GitBranchName,
   expectedStateToken: GitStateToken,
-  dirty: Schema.Literal("refuse", "stash"),
-}).annotations(strict);
+  dirty: Schema.Literals(["refuse", "stash"]),
+});
 const PushGit = Schema.Struct({
   kind: Schema.Literal("push-git"),
   ...OperationScope,
@@ -711,24 +724,22 @@ const PushGit = Schema.Struct({
    * approval for this one act, never on a standing grant.
    */
   force: Schema.optional(
-    Schema.Union(
+    Schema.Union([
       Schema.Struct({
         mode: Schema.Literal("with-lease"),
         expectedRemoteOid: GitObjectId,
-      }).annotations(strict),
-      Schema.Struct({ mode: Schema.Literal("plain") }).annotations(strict),
-    ),
+      }),
+      Schema.Struct({ mode: Schema.Literal("plain") }),
+    ]),
   ),
   authorization: GitAuthorization,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        command.confirmation.remote === command.remote &&
-        command.confirmation.refspec === `${command.localRef}:${command.remoteRef}`,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (command) =>
+      command.confirmation.remote === command.remote &&
+      command.confirmation.refspec === `${command.localRef}:${command.remoteRef}`,
+  ),
+);
 /**
  * The state of a checkout at one moment, recorded as ordinary Git objects so
  * nothing outside the repository has to hold the content.
@@ -743,7 +754,7 @@ export const CodeCheckpoint = Schema.Struct({
   index: GitObjectId,
   /** The commit the checkout was on. Absent in a repository with no commits. */
   head: Schema.optional(GitObjectId),
-}).annotations(strict);
+});
 export type CodeCheckpoint = typeof CodeCheckpoint.Type;
 
 /**
@@ -753,11 +764,11 @@ export type CodeCheckpoint = typeof CodeCheckpoint.Type;
 export const MAX_CODE_TURN_CHANGED_PATHS = 32;
 export const CodeTurnChangedFile = Schema.Struct({
   path: CodeRelativePath,
-  insertions: Schema.Int.pipe(Schema.nonNegative()),
-  deletions: Schema.Int.pipe(Schema.nonNegative()),
+  insertions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  deletions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   /** Git counts no lines in a binary file; both counts are then zero. */
   binary: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CodeTurnChangedFile = typeof CodeTurnChangedFile.Type;
 /**
  * What differed in the checkout between the moment a turn started and the
@@ -775,39 +786,45 @@ export type CodeTurnChangedFile = typeof CodeTurnChangedFile.Type;
  * not the same as a turn that changed nothing.
  */
 export const CodeTurnChangedFiles = Schema.Struct({
-  files: Schema.Array(CodeTurnChangedFile).pipe(Schema.maxItems(MAX_CODE_TURN_CHANGED_PATHS)),
+  files: Schema.Array(CodeTurnChangedFile).check(Schema.isMaxLength(MAX_CODE_TURN_CHANGED_PATHS)),
   /** How many paths changed in all, including those `files` leaves out. */
-  total: Schema.Int.pipe(Schema.nonNegative()),
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeTurnChangedFiles = typeof CodeTurnChangedFiles.Type;
 
 /** A bounded immutable comparison from the turn's original checkpoint, not exclusive authorship. */
 export const CodeTurnReviewCapture = Schema.Struct({
   checkoutId: CodeCheckoutId,
-  version: Schema.Int.pipe(Schema.positive()),
-  cursor: Schema.Int.pipe(Schema.positive()),
+  version: PositiveInt,
+  cursor: PositiveInt,
   baseline: GitObjectId,
   tree: GitObjectId,
   diff: CodeEvidenceReference,
   changedFiles: CodeTurnChangedFiles,
   capturedAt: UtcTimestamp,
   final: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeTurnReviewCapture = typeof CodeTurnReviewCapture.Type;
 export const CodeTurnReviewPreview = Schema.Struct({
-  status: Schema.Literal("capturing", "ready", "unavailable"),
+  status: Schema.Literals(["capturing", "ready", "unavailable"]),
   /** Last valid capture remains readable while a later capture waits or fails. */
   capture: Schema.optional(CodeTurnReviewCapture),
   explanation: boundedNonEmptyText(1_024),
   /** Added by a scoped metadata read from the owning turn's recorded outcome. */
   settled: Schema.optional(Schema.Boolean),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((preview) => preview.status !== "ready" || preview.capture !== undefined));
+}).check(
+  Schema.makeFilter((preview) => preview.status !== "ready" || preview.capture !== undefined),
+);
 export type CodeTurnReviewPreview = typeof CodeTurnReviewPreview.Type;
-export const decodeCodeTurnReviewCapture = Schema.decodeUnknownSync(CodeTurnReviewCapture);
-export const decodeCodeTurnReviewPreview = Schema.decodeUnknownSync(CodeTurnReviewPreview);
+export const decodeCodeTurnReviewCapture = Schema.decodeUnknownSync(
+  CodeTurnReviewCapture,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeTurnReviewPreview = Schema.decodeUnknownSync(
+  CodeTurnReviewPreview,
+  STRICT_DECODE_OPTIONS,
+);
 /**
  * Put the checkout's files back the way a checkpoint recorded them.
  *
@@ -827,13 +844,13 @@ const RestoreGitCheckpoint = Schema.Struct({
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
   checkpoint: CodeCheckpoint,
-}).annotations(strict);
+});
 /**
  * What a rewind takes back. `conversation` removes the named turn and every
  * later one from the thread, `files` puts the checkout back the way it was
  * just before the named turn, and `both` does the two together.
  */
-export const CodeRewindScope = Schema.Literal("conversation", "files", "both");
+export const CodeRewindScope = Schema.Literals(["conversation", "files", "both"]);
 export type CodeRewindScope = typeof CodeRewindScope.Type;
 /**
  * Show what rewinding to just before a turn would change, without changing
@@ -845,7 +862,7 @@ const PreviewCodeRewind = Schema.Struct({
   ...OperationScope,
   /** The first turn the rewind would remove. */
   fromOperationId: CodeOperationId,
-}).annotations(strict);
+});
 /**
  * Rewind a Code thread in place to just before one of its turns.
  *
@@ -862,7 +879,7 @@ const RewindCodeThread = Schema.Struct({
   scope: CodeRewindScope,
   filesOperationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-}).annotations(strict);
+});
 /**
  * What a finished run amounts to, measured against the branch it is meant to
  * come home to.
@@ -878,22 +895,22 @@ export const CodeRunOutcome = Schema.Struct({
   head: GitObjectId,
   /** Absent when the base ref cannot be resolved in this repository. */
   base: Schema.optional(GitObjectId),
-  ahead: Schema.Int.pipe(Schema.nonNegative()),
-  behind: Schema.Int.pipe(Schema.nonNegative()),
-  changedPaths: Schema.Array(CodeRelativePath).pipe(
-    Schema.filter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
+  ahead: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  behind: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  changedPaths: Schema.Array(CodeRelativePath).check(
+    Schema.makeFilter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
   ),
   diff: CodeEvidenceReference,
   /** Files still uncommitted in the run's own worktree, which no merge carries. */
-  uncommittedPaths: Schema.Array(CodeRelativePath).pipe(
-    Schema.filter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
+  uncommittedPaths: Schema.Array(CodeRelativePath).check(
+    Schema.makeFilter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
   ),
   /**
    * Whether the base could take this run as it stands. `unknown` is an honest
    * answer from a Git that could not be asked, never an optimistic one.
    */
-  mergeability: Schema.Literal("clean", "conflicts", "nothing-to-merge", "unknown"),
-}).annotations(strict);
+  mergeability: Schema.Literals(["clean", "conflicts", "nothing-to-merge", "unknown"]),
+});
 export type CodeRunOutcome = typeof CodeRunOutcome.Type;
 
 /**
@@ -904,9 +921,9 @@ const ReviewRun = Schema.Struct({
   kind: Schema.Literal("review-run"),
   ...OperationScope,
   gitOperationId: CodeGitOperationId,
-  maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+  maxDiffBytes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1024 * 1024 })),
   ignoreWhitespace: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 
 /**
  * Bring a finished run home: merge its branch into the base, in the base
@@ -925,9 +942,9 @@ const MergeRun = Schema.Struct({
     branch: GitBranchName,
     baseBranch: GitBranchName,
     expectedHeadOid: GitObjectId,
-  }).annotations(strict),
+  }),
   authorization: GitAuthorization,
-}).annotations(strict);
+});
 
 /**
  * Open the pull request for the thread's own delivery branch. The head is
@@ -948,17 +965,19 @@ const CreatePullRequest = Schema.Struct({
    * by its operation id instead: submissions with one id run once, and the
    * host looks for the thread's pull request before it opens another.
    */
-  idempotencyKey: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/))),
+  idempotencyKey: Schema.optional(
+    Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._:-]{1,255}$/)),
+  ),
   authorization: GitAuthorization,
-}).annotations(strict);
+});
 /**
  * Change the open pull request of the thread's own delivery branch: its
  * title, its body, or whether it is a draft (`draft: false` marks it ready
  * for review). Merging, closing, and every other pull-request change stay
  * out of reach.
  */
-const PullRequestLabelName = Schema.String.pipe(
-  Schema.filter(
+const PullRequestLabelName = Schema.String.check(
+  Schema.makeFilter(
     (value) =>
       value.length >= 1 &&
       value.length <= 50 &&
@@ -974,15 +993,14 @@ const UpdatePullRequest = Schema.Struct({
   body: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
   draft: Schema.optional(Schema.Boolean),
   /** Existing repository labels only; a label the repository lacks is refused. */
-  addLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
-  removeLabels: Schema.optional(Schema.Array(PullRequestLabelName).pipe(Schema.maxItems(20))),
+  addLabels: Schema.optional(Schema.Array(PullRequestLabelName).check(Schema.isMaxLength(20))),
+  removeLabels: Schema.optional(Schema.Array(PullRequestLabelName).check(Schema.isMaxLength(20))),
   /** `closed` closes the open pull request; `open` reopens a closed one. The branch is kept. */
-  state: Schema.optional(Schema.Literal("closed", "open")),
+  state: Schema.optional(Schema.Literals(["closed", "open"])),
   authorization: GitAuthorization,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+}).pipe(
+  Schema.check(
+    Schema.makeFilter(
       (command) =>
         command.title !== undefined ||
         command.body !== undefined ||
@@ -991,8 +1009,9 @@ const UpdatePullRequest = Schema.Struct({
         (command.removeLabels?.length ?? 0) > 0 ||
         command.state !== undefined,
     ),
-    // Closing or reopening is a change of its own, not a side effect of an edit.
-    Schema.filter(
+  ), // Closing or reopening is a change of its own, not a side effect of an edit.
+  Schema.check(
+    Schema.makeFilter(
       (command) =>
         command.state === undefined ||
         (command.title === undefined &&
@@ -1001,7 +1020,8 @@ const UpdatePullRequest = Schema.Struct({
           (command.addLabels?.length ?? 0) === 0 &&
           (command.removeLabels?.length ?? 0) === 0),
     ),
-  );
+  ),
+);
 /**
  * Post a comment on the thread's own pull request, or reply in one of its
  * review threads, under the person's name. Full access posts without asking;
@@ -1012,9 +1032,9 @@ const CommentPullRequest = Schema.Struct({
   kind: Schema.Literal("comment-pull-request"),
   ...OperationScope,
   body: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES),
-  reviewThreadId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/))),
+  reviewThreadId: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_=-]{1,128}$/))),
   authorization: CommentAuthorization,
-}).annotations(strict);
+});
 /**
  * Merge the thread's own open pull request on the person's say. The merge names
  * the head the person saw and the method; the host refuses it unless that head
@@ -1024,15 +1044,15 @@ const CommentPullRequest = Schema.Struct({
 const MergePullRequest = Schema.Struct({
   kind: Schema.Literal("merge-pull-request"),
   ...OperationScope,
-  method: Schema.Literal("merge", "squash", "rebase"),
+  method: Schema.Literals(["merge", "squash", "rebase"]),
   headSha: GitObjectId,
   authorization: MergeAuthorization,
-}).annotations(strict);
+});
 const ObservePullRequest = Schema.Struct({
   kind: Schema.Literal("observe-pull-request"),
   ...OperationScope,
-  maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
-}).annotations(strict);
+  maxDiffBytes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1024 * 1024 })),
+});
 const CreateReviewFinding = Schema.Struct({
   kind: Schema.Literal("create-review-finding"),
   ...OperationScope,
@@ -1042,37 +1062,37 @@ const CreateReviewFinding = Schema.Struct({
   fileDigest: CodeDigest,
   anchor: Schema.optional(CodeReviewDiffAnchor),
   location: CodeReviewLocation,
-  severity: Schema.Literal("note", "warning", "error"),
+  severity: Schema.Literals(["note", "warning", "error"]),
   summary: boundedNonEmptyText(4_096),
-}).annotations(strict);
+});
 const UpdateReviewFinding = Schema.Struct({
   kind: Schema.Literal("update-review-finding"),
   ...OperationScope,
   findingId: CodeReviewFindingId,
   expectedVersion: AggregateVersion,
-  state: Schema.Literal("open", "resolved", "dismissed"),
-}).annotations(strict);
+  state: Schema.Literals(["open", "resolved", "dismissed"]),
+});
 const PrepareReviewTarget = Schema.Struct({
   kind: Schema.Literal("prepare-review-target"),
   ...OperationScope,
   reviewOperationId: CodeOperationId,
   /** Exact immutable preview frame; absent for ordinary captured checkout/branch comparisons. */
-  captureCursor: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  captureCursor: Schema.optional(PositiveInt),
   path: CodeRelativePath,
-  side: Schema.Literal("original", "modified"),
-  line: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  side: Schema.Literals(["original", "modified"]),
+  line: PositiveInt,
+});
 const ObserveTurnReview = Schema.Struct({
   kind: Schema.Literal("observe-turn-review"),
   ...OperationScope,
   turnOperationId: CodeOperationId,
   /** False reads durable metadata only. True explicitly requests a bounded fresh capture of this live turn. */
   refresh: Schema.Boolean,
-}).annotations(strict);
+});
 const ListReviewFindings = Schema.Struct({
   kind: Schema.Literal("list-review-findings"),
   ...OperationScope,
-}).annotations(strict);
+});
 const PrepareReviewCorrection = Schema.Struct({
   kind: Schema.Literal("prepare-review-correction"),
   ...OperationScope,
@@ -1080,9 +1100,9 @@ const PrepareReviewCorrection = Schema.Struct({
     Schema.Struct({
       findingId: CodeReviewFindingId,
       expectedVersion: AggregateVersion,
-    }).annotations(strict),
-  ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CODE_REVIEW_CORRECTION_FINDINGS)),
+});
 /**
  * Pull request whose diff a set of line notes came from. The host resolves
  * the observed pull request's author against the signed-in `gh` viewer login
@@ -1092,8 +1112,8 @@ const PrepareReviewCorrection = Schema.Struct({
 export const CodePullRequestLineNotesSource = Schema.Struct({
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type CodePullRequestLineNotesSource = typeof CodePullRequestLineNotesSource.Type;
 
 const StartProviderTurn = Schema.Struct({
@@ -1111,7 +1131,9 @@ const StartProviderTurn = Schema.Struct({
    * alone and ignores it everywhere else.
    */
   typedByPerson: Schema.optional(Schema.Literal(true)),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   computerUseSelection: Schema.optional(ExtensionSelection),
   /**
    * Where the selected Computer tool acts when not on this Mac: one of the
@@ -1133,7 +1155,7 @@ const StartProviderTurn = Schema.Struct({
    * rather than by content.
    */
   attachmentIds: Schema.optional(
-    Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+    Schema.Array(CodeAttachmentId).check(Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   reviewFindingReferences: Schema.optional(CodeReviewFindingReferences),
@@ -1146,7 +1168,7 @@ const StartProviderTurn = Schema.Struct({
    * A path that escapes is refused before any read.
    */
   fileMentionPaths: Schema.optional(
-    Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    Schema.Array(FileMentionPathInput).check(Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN)),
   ),
   /**
    * The posture this turn asks to run under. The host clamps it to the
@@ -1162,7 +1184,7 @@ const StartProviderTurn = Schema.Struct({
    * journal does not record.
    */
   delivery: Schema.optional(ThreadDeliveryMark),
-}).annotations(strict);
+});
 /** The longest secret answer the host passes on; the same bound on every surface. */
 export const MAX_CODE_SECRET_ANSWER_LENGTH = MAX_SECRET_ANSWER_LENGTH;
 const AnswerProviderInput = Schema.Struct({
@@ -1179,12 +1201,12 @@ const AnswerProviderInput = Schema.Struct({
    * the value.
    */
   secretAnswer: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 const AnswerProviderApproval = Schema.Struct({
   kind: Schema.Literal("answer-provider-approval"),
   ...OperationScope,
   approvalId: CodeApprovalId,
-  decision: Schema.Literal("approved", "denied"),
+  decision: Schema.Literals(["approved", "denied"]),
   /**
    * With `approved`, on an ask whose `approval-requested` offers
    * `canRememberForProject`: the person chose "Remember for this Project".
@@ -1192,12 +1214,12 @@ const AnswerProviderApproval = Schema.Struct({
    * offers it; otherwise the answer allows this one ask.
    */
   rememberForProject: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 const ForceStopProviderTurn = Schema.Struct({
   kind: Schema.Literal("force-stop-provider-turn"),
   ...OperationScope,
   turnOperationId: CodeOperationId,
-}).annotations(strict);
+});
 const CancelProviderTurn = Schema.Struct({
   kind: Schema.Literal("cancel-provider-turn"),
   ...OperationScope,
@@ -1208,7 +1230,7 @@ const CancelProviderTurn = Schema.Struct({
    * Optional so a client built before it existed still stops the live turn.
    */
   turnOperationId: Schema.optional(CodeOperationId),
-}).annotations(strict);
+});
 export const CODE_OPERATION_COMMAND_KINDS = [
   "start-terminal",
   "attach-terminal",
@@ -1247,7 +1269,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "force-stop-provider-turn",
 ] as const;
 
-export const CodeOperationCommand = Schema.Union(
+export const CodeOperationCommand = Schema.Union([
   PrepareReviewTarget,
   ObserveTurnReview,
   ListReviewFindings,
@@ -1291,12 +1313,12 @@ export const CodeOperationCommand = Schema.Union(
   AnswerProviderApproval,
   CancelProviderTurn,
   ForceStopProviderTurn,
-);
+]);
 export type CodeOperationCommand = typeof CodeOperationCommand.Type;
 
-const GitRemoteUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter((value) => {
+const GitRemoteUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return (
@@ -1311,44 +1333,42 @@ const GitRemoteUrl = Schema.String.pipe(
     }
   }),
 );
-const GitRemoteEndpoint = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("network"), url: GitRemoteUrl }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("local") }).annotations(strict),
-);
+const GitRemoteEndpoint = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("network"), url: GitRemoteUrl }),
+  Schema.Struct({ kind: Schema.Literal("local") }),
+]);
 const GitObservation = Schema.Struct({
   reviewScope: Schema.optional(
-    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }),
   ),
   kind: Schema.Literal("git-observed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
   head: CodeOperationCheckoutHead,
   stateToken: GitStateToken,
-  status: Schema.Array(GitStatusEntry).pipe(
-    Schema.filter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
+  status: Schema.Array(GitStatusEntry).check(
+    Schema.makeFilter((entries) => entries.length <= MAX_CODE_OPERATION_PATHS),
   ),
   changedPaths: uniqueArray(CodeRelativePath, MAX_CODE_OPERATION_PATHS),
-  insertions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  deletions: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  insertions: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  deletions: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   diff: CodeEvidenceReference,
   remotes: Schema.Array(
     Schema.Struct({
       name: GitRemoteName,
       fetch: GitRemoteEndpoint,
       push: GitRemoteEndpoint,
-    }).annotations(strict),
-  ).pipe(Schema.filter((remotes) => remotes.length <= 64)),
-  upstream: Schema.NullOr(
-    Schema.Struct({ remote: GitRemoteName, mergeRef: GitBranchRef }).annotations(strict),
-  ),
+    }),
+  ).check(Schema.makeFilter((remotes) => remotes.length <= 64)),
+  upstream: Schema.NullOr(Schema.Struct({ remote: GitRemoteName, mergeRef: GitBranchRef })),
   worktrees: Schema.Array(
     Schema.Struct({
       checkoutId: CodeCheckoutId,
       head: CodeOperationCheckoutHead,
-      state: Schema.Literal("active", "locked", "prunable", "unavailable"),
-    }).annotations(strict),
-  ).pipe(Schema.filter((worktrees) => worktrees.length <= 1_000)),
-}).annotations(strict);
+      state: Schema.Literals(["active", "locked", "prunable", "unavailable"]),
+    }),
+  ).check(Schema.makeFilter((worktrees) => worktrees.length <= 1_000)),
+});
 const GitHunksResult = Schema.Struct({
   kind: Schema.Literal("git-hunks"),
   operationId: CodeOperationId,
@@ -1361,9 +1381,11 @@ const GitHunksResult = Schema.Struct({
   /** Opaque host root/binding witness; never a renderer path or inode. */
   rootDigest: CodeDigest,
   diff: CodeEvidenceReference,
-  hunks: Schema.Array(CodeGitHunk).pipe(Schema.maxItems(MAX_CODE_GIT_HUNKS)),
-  unavailable: Schema.Array(CodeGitHunkUnavailable).pipe(Schema.maxItems(MAX_CODE_OPERATION_PATHS)),
-}).annotations(strict);
+  hunks: Schema.Array(CodeGitHunk).check(Schema.isMaxLength(MAX_CODE_GIT_HUNKS)),
+  unavailable: Schema.Array(CodeGitHunkUnavailable).check(
+    Schema.isMaxLength(MAX_CODE_OPERATION_PATHS),
+  ),
+});
 const TerminalStateFields = {
   operationId: CodeOperationId,
   terminalId: CodeTerminalId,
@@ -1374,45 +1396,45 @@ const TerminalStateFields = {
    */
   browserGrant: Schema.optional(TerminalBrowserGrantOutcome),
 } as const;
-const TerminalStateResult = Schema.Union(
+const TerminalStateResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("terminal-state"),
     ...TerminalStateFields,
     state: Schema.Literal("running"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("terminal-state"),
     ...TerminalStateFields,
     state: Schema.Literal("exited"),
     exitCode: Schema.NullOr(Schema.Int),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("terminal-state"),
     ...TerminalStateFields,
-    state: Schema.Literal("interrupted", "unavailable", "failed"),
-  }).annotations(strict),
-);
+    state: Schema.Literals(["interrupted", "unavailable", "failed"]),
+  }),
+]);
 const RepositoryTestStateFields = {
   operationId: CodeOperationId,
   testRunId: CodeTestRunId,
   evidence: Schema.optional(CodeEvidenceReference),
-  concerns: Schema.Array(CodeRepositoryTestConcern).pipe(
-    Schema.filter((concerns) => new Set(concerns).size === concerns.length),
+  concerns: Schema.Array(CodeRepositoryTestConcern).check(
+    Schema.makeFilter((concerns) => new Set(concerns).size === concerns.length),
   ),
 } as const;
-const RepositoryTestResult = Schema.Union(
+const RepositoryTestResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("repository-test-state"),
     ...RepositoryTestStateFields,
     state: Schema.Literal("completed"),
-    verdict: Schema.Literal("passed", "failed", "cancelled", "inconclusive", "unavailable"),
-  }).annotations(strict),
+    verdict: Schema.Literals(["passed", "failed", "cancelled", "inconclusive", "unavailable"]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("repository-test-state"),
     ...RepositoryTestStateFields,
-    state: Schema.Literal("running", "interrupted", "unavailable", "failed"),
-  }).annotations(strict),
-);
+    state: Schema.Literals(["running", "interrupted", "unavailable", "failed"]),
+  }),
+]);
 /**
  * The newest repository test result the host still holds for a thread's
  * checkout, read when the Tests surface mounts.
@@ -1427,18 +1449,18 @@ export const CodeRepositoryTestStatus = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   result: Schema.optional(RepositoryTestResult),
-}).annotations(strict);
+});
 export type CodeRepositoryTestStatus = typeof CodeRepositoryTestStatus.Type;
 const ScaffoldResult = Schema.Struct({
   kind: Schema.Literal("scaffold-run"),
   operationId: CodeOperationId,
   run: ScaffoldRun,
-}).annotations(strict);
+});
 const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal(
+  mutation: Schema.Literals([
     "stage-hunks",
     "unstage-hunks",
     "reverse-hunks",
@@ -1451,15 +1473,15 @@ const GitMutationResult = Schema.Struct({
     "revert",
     "restore-checkpoint",
     "merge-run",
-  ),
-  state: Schema.Literal("completed", "rejected", "failed"),
+  ]),
+  state: Schema.Literals(["completed", "rejected", "failed"]),
   /**
    * Why a refused mutation was refused, so the pane can say what to do next
    * rather than pointing at the checkout. `identity-missing` names the one
    * refusal whose remedy is not a refresh.
    */
   reason: Schema.optional(
-    Schema.Literal(
+    Schema.Literals([
       "index-locked",
       "invalid-paths",
       "invalid-message",
@@ -1480,14 +1502,14 @@ const GitMutationResult = Schema.Struct({
       "branch-in-use",
       "dirty-checkout",
       "unsupported-git",
-    ),
+    ]),
   ),
   /**
    * Git's own words for a failed mutation, so a missing identity or an unusable
    * index is reported as itself rather than as something to refresh. Absent
    * when the command produced no usable stderr.
    */
-  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(2_048))),
+  detail: Schema.optional(Schema.String.check(Schema.isMaxLength(2_048))),
   /**
    * Set on a failed push whose outcome Git never reported: the connection
    * broke or the command ran out of time after the push started, so the
@@ -1513,10 +1535,10 @@ const GitMutationResult = Schema.Struct({
    * before the host recorded it.
    */
   checkoutId: Schema.optional(CodeCheckoutId),
-}).annotations(strict);
-const PullRequestUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter((value) => {
+});
+const PullRequestUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return url.protocol === "https:" && url.username === "" && url.password === "";
@@ -1525,12 +1547,12 @@ const PullRequestUrl = Schema.String.pipe(
     }
   }),
 );
-const PullRequestResult = Schema.Union(
+const PullRequestResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
     operationId: CodeOperationId,
-    state: Schema.Literal("created", "existing", "merged"),
-    number: Schema.Int.pipe(Schema.positive()),
+    state: Schema.Literals(["created", "existing", "merged"]),
+    number: PositiveInt,
     url: PullRequestUrl,
     headRepository: boundedNonEmptyText(512),
     headBranch: GitBranchName,
@@ -1542,13 +1564,13 @@ const PullRequestResult = Schema.Union(
     pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
     /** GitHub GraphQL node ID of the base repository, when available. */
     baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-request-state"),
     operationId: CodeOperationId,
-    state: Schema.Literal("unavailable", "failed"),
+    state: Schema.Literals(["unavailable", "failed"]),
     failureCode: Schema.optional(
-      Schema.Literal(
+      Schema.Literals([
         "conflict",
         "checks",
         "auth",
@@ -1565,10 +1587,10 @@ const PullRequestResult = Schema.Union(
         "already-merged",
         "checks-not-passing",
         "checks-unknown",
-      ),
+      ]),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export const MAX_CODE_PULL_REQUEST_REVIEW_ITEMS = 500;
 
 /**
@@ -1577,7 +1599,7 @@ export const MAX_CODE_PULL_REQUEST_REVIEW_ITEMS = 500;
  * section is labeled in the UI and can never independently satisfy a delivery
  * target (see the delivery-target policy).
  */
-export const CodePullRequestReviewSection = Schema.Literal(
+export const CodePullRequestReviewSection = Schema.Literals([
   "description",
   "commits",
   "files",
@@ -1585,52 +1607,52 @@ export const CodePullRequestReviewSection = Schema.Literal(
   "checks",
   "reviews",
   "comments",
-);
+]);
 export type CodePullRequestReviewSection = typeof CodePullRequestReviewSection.Type;
 
 export const CodePullRequestReviewCommit = Schema.Struct({
   oid: boundedNonEmptyText(64),
   messageHeadline: boundedText(1_024),
   author: boundedText(255),
-}).annotations(strict);
+});
 export type CodePullRequestReviewCommit = typeof CodePullRequestReviewCommit.Type;
 
 export const CodePullRequestReviewChangedFile = Schema.Struct({
   path: boundedNonEmptyText(4_096),
-  additions: Schema.Int.pipe(Schema.nonNegative()),
-  deletions: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  additions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  deletions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
 export type CodePullRequestReviewChangedFile = typeof CodePullRequestReviewChangedFile.Type;
 
 export const CodePullRequestReviewCheck = Schema.Struct({
   name: boundedNonEmptyText(512),
-  state: Schema.Literal("success", "failure", "pending", "neutral", "unknown"),
-}).annotations(strict);
+  state: Schema.Literals(["success", "failure", "pending", "neutral", "unknown"]),
+});
 export type CodePullRequestReviewCheck = typeof CodePullRequestReviewCheck.Type;
 
 export const CodePullRequestReviewOpinion = Schema.Struct({
   author: boundedText(255),
-  state: Schema.Literal(
+  state: Schema.Literals([
     "approved",
     "changes-requested",
     "commented",
     "dismissed",
     "pending",
     "unknown",
-  ),
+  ]),
   body: boundedText(8_192),
-}).annotations(strict);
+});
 export type CodePullRequestReviewOpinion = typeof CodePullRequestReviewOpinion.Type;
 
 export const CodePullRequestReviewComment = Schema.Struct({
   author: boundedText(255),
   body: boundedText(16_384),
-}).annotations(strict);
+});
 export type CodePullRequestReviewComment = typeof CodePullRequestReviewComment.Type;
 
-const boundedReviewArray = <A, I, R>(schema: Schema.Schema<A, I, R>) =>
-  Schema.Array(schema).pipe(
-    Schema.filter((values) => values.length <= MAX_CODE_PULL_REQUEST_REVIEW_ITEMS),
+const boundedReviewArray = <S extends Schema.Top>(schema: S) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter((values) => values.length <= MAX_CODE_PULL_REQUEST_REVIEW_ITEMS),
   );
 
 /**
@@ -1642,18 +1664,18 @@ const boundedReviewArray = <A, I, R>(schema: Schema.Schema<A, I, R>) =>
  * whenever the observation is stale or otherwise cannot be presented as a
  * settled result, so the window shows `Waiting` rather than `Done`.
  */
-const PullRequestReviewResult = Schema.Union(
+const PullRequestReviewResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
     operationId: CodeOperationId,
     state: Schema.Literal("observed"),
-    freshness: Schema.Literal("fresh", "stale"),
+    freshness: Schema.Literals(["fresh", "stale"]),
     ambiguous: Schema.Boolean,
     staleSections: uniqueArray(CodePullRequestReviewSection, 7),
-    number: Schema.Int.pipe(Schema.positive()),
+    number: PositiveInt,
     url: PullRequestUrl,
     title: boundedText(1_024),
-    pullRequestState: Schema.Literal("open", "merged", "closed", "draft"),
+    pullRequestState: Schema.Literals(["open", "merged", "closed", "draft"]),
     baseRepository: boundedNonEmptyText(512),
     baseBranch: boundedNonEmptyText(255),
     headRepository: boundedText(512),
@@ -1673,40 +1695,40 @@ const PullRequestReviewResult = Schema.Union(
     pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
     /** GitHub GraphQL node ID of the base repository, when available. */
     baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
     operationId: CodeOperationId,
-    state: Schema.Literal("none", "unavailable"),
-    freshness: Schema.Literal("fresh", "stale"),
+    state: Schema.Literals(["none", "unavailable"]),
+    freshness: Schema.Literals(["fresh", "stale"]),
     /**
      * The checkout has no GitHub fetch or push remote, so review cannot be
      * observed or opened from this checkout.
      */
     failureCode: Schema.optional(Schema.Literal("no-remote")),
-  }).annotations(strict),
-);
+  }),
+]);
 export const CodeReviewFindingAssessment = Schema.Struct({
   finding: CodeReviewFinding,
-  anchorState: Schema.Literal("current", "outdated", "unavailable", "legacy"),
+  anchorState: Schema.Literals(["current", "outdated", "unavailable", "legacy"]),
   explanation: boundedNonEmptyText(512),
-}).annotations(strict);
+});
 export type CodeReviewFindingAssessment = typeof CodeReviewFindingAssessment.Type;
 export const CodeReviewCorrectionPrepared = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   text: boundedNonEmptyText(64_000),
   references: CodeReviewFindingReferences,
-  omissions: Schema.Array(boundedNonEmptyText(512)).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  omissions: Schema.Array(boundedNonEmptyText(512)).check(Schema.isMaxLength(16)),
+});
 export type CodeReviewCorrectionPrepared = typeof CodeReviewCorrectionPrepared.Type;
 const ReviewTargetResult = Schema.Struct({
   kind: Schema.Literal("review-target-state"),
   operationId: CodeOperationId,
   target: CodeReviewTarget,
-  anchorState: Schema.Literal("current", "outdated", "unavailable"),
+  anchorState: Schema.Literals(["current", "outdated", "unavailable"]),
   explanation: boundedNonEmptyText(512),
-}).annotations(strict);
+});
 const TurnReviewPreviewResult = Schema.Struct({
   kind: Schema.Literal("turn-review-preview"),
   operationId: CodeOperationId,
@@ -1714,29 +1736,29 @@ const TurnReviewPreviewResult = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   preview: CodeTurnReviewPreview,
-}).annotations(strict);
+});
 const ReviewFindingsResult = Schema.Struct({
   kind: Schema.Literal("review-findings-state"),
   operationId: CodeOperationId,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-  findings: Schema.Array(CodeReviewFindingAssessment).pipe(Schema.maxItems(256)),
+  findings: Schema.Array(CodeReviewFindingAssessment).check(Schema.isMaxLength(256)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 const ReviewCorrectionResult = Schema.Struct({
   kind: Schema.Literal("review-correction-prepared"),
   operationId: CodeOperationId,
   prepared: CodeReviewCorrectionPrepared,
-}).annotations(strict);
+});
 const ReviewFindingResult = Schema.Struct({
   kind: Schema.Literal("review-finding-state"),
   operationId: CodeOperationId,
   finding: CodeReviewFinding,
-}).annotations(strict);
+});
 const ProviderTurnResult = Schema.Struct({
   kind: Schema.Literal("provider-turn-state"),
   operationId: CodeOperationId,
-  state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
+  state: Schema.Literals(["running", "waiting", "completed", "interrupted", "failed"]),
   evidence: Schema.optional(CodeEvidenceReference),
   /** The journaled delivery actually covered, including a prior turn found on replay. */
   delivery: Schema.optional(ThreadDeliveryMark),
@@ -1748,26 +1770,23 @@ const ProviderTurnResult = Schema.Struct({
   failure: Schema.optional(CodeOperationFailure),
   /** The host proved that preparation ended before this attempt could launch. */
   admission: Schema.optional(Schema.Literal("refused")),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (result) =>
-        result.admission === undefined ||
-        (result.state === "failed" && result.failure !== undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (result) =>
+      result.admission === undefined || (result.state === "failed" && result.failure !== undefined),
+  ),
+);
 const OperationAccepted = Schema.Struct({
   kind: Schema.Literal("operation-accepted"),
   operationId: CodeOperationId,
-}).annotations(strict);
+});
 const OperationFailed = Schema.Struct({
   kind: Schema.Literal("operation-failed"),
   operationId: CodeOperationId,
   failure: CodeOperationFailure,
   /** A durable pre-launch refusal permits a new, explicitly authorized attempt. */
   admission: Schema.optional(Schema.Literal("refused")),
-}).annotations(strict);
+});
 
 /**
  * Delivery text a provider drafted from the checkout's own change. Plain
@@ -1777,35 +1796,35 @@ const OperationFailed = Schema.Struct({
 const GitDraftResult = Schema.Struct({
   kind: Schema.Literal("git-draft-state"),
   operationId: CodeOperationId,
-  purpose: Schema.Literal("commit-message", "pull-request"),
-  state: Schema.Literal("completed", "unavailable", "failed"),
+  purpose: Schema.Literals(["commit-message", "pull-request"]),
+  state: Schema.Literals(["completed", "unavailable", "failed"]),
   /** The one-line subject. Absent unless the draft completed. */
   title: Schema.optional(boundedNonEmptyText(512)),
   /** The longer body, when the provider wrote one. */
   body: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES)),
-}).annotations(strict);
+});
 
 const RunReviewResult = Schema.Struct({
   reviewScope: Schema.optional(
-    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }).annotations(strict),
+    Schema.Struct({ threadId: CodeThreadId, checkoutId: CodeCheckoutId }),
   ),
   kind: Schema.Literal("run-reviewed"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
   outcome: CodeRunOutcome,
-}).annotations(strict);
+});
 
 /**
  * Why a rewind's files cannot be put back: a thread on a registered server
  * takes no checkpoints, a Plan thread writes nothing, a turn wrote files the
  * host never recorded, or the checkout could not be read.
  */
-export const CodeRewindFilesUnavailableReason = Schema.Literal(
+export const CodeRewindFilesUnavailableReason = Schema.Literals([
   "server-project",
   "plan",
   "unrecorded",
   "unreadable",
-);
+]);
 export type CodeRewindFilesUnavailableReason = typeof CodeRewindFilesUnavailableReason.Type;
 /**
  * A finer reason beside `reason`: `other-checkout` says the point was recorded
@@ -1828,21 +1847,21 @@ const RewindPreviewResult = Schema.Struct({
   kind: Schema.Literal("rewind-preview"),
   operationId: CodeOperationId,
   fromOperationId: CodeOperationId,
-  removedTurns: Schema.Int.pipe(Schema.positive()),
-  files: Schema.Union(
+  removedTurns: PositiveInt,
+  files: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("changes"),
       changes: CodeTurnChangedFiles,
-    }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("unchanged") }).annotations(strict),
+    }),
+    Schema.Struct({ kind: Schema.Literal("unchanged") }),
     Schema.Struct({
       kind: Schema.Literal("unavailable"),
       reason: CodeRewindFilesUnavailableReason,
       detail: Schema.optional(CodeRewindFilesUnavailableDetail),
-    }).annotations(strict),
-  ),
-  rollback: Schema.Literal("native", "handoff"),
-}).annotations(strict);
+    }),
+  ]),
+  rollback: Schema.Literals(["native", "handoff"]),
+});
 /**
  * A rewind that ran. When it took back the conversation, this result is what
  * removes `fromOperationId` and every later turn from the thread; the person's
@@ -1854,14 +1873,14 @@ const ThreadRewoundResult = Schema.Struct({
   fromOperationId: CodeOperationId,
   scope: CodeRewindScope,
   /** Turns removed from the conversation; 0 when only files were rewound. */
-  removedTurns: Schema.Int.pipe(Schema.nonNegative()),
-  files: Schema.Literal("restored", "unchanged", "not-requested"),
+  removedTurns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  files: Schema.Literals(["restored", "unchanged", "not-requested"]),
   /** The way back from the file restore, as Undo restore offers it. */
   undo: Schema.optional(CodeCheckpoint),
   prompt: Schema.optional(CodeEvidenceReference),
-}).annotations(strict);
+});
 
-export const CodeOperationResult = Schema.Union(
+export const CodeOperationResult = Schema.Union([
   ReviewTargetResult,
   TurnReviewPreviewResult,
   ReviewFindingsResult,
@@ -1882,7 +1901,7 @@ export const CodeOperationResult = Schema.Union(
   RewindPreviewResult,
   ThreadRewoundResult,
   OperationFailed,
-);
+]);
 export type CodeOperationResult = typeof CodeOperationResult.Type;
 
 export type CodePullRequestReview = Extract<
@@ -1896,7 +1915,7 @@ export type CodePullRequestReviewObserved = Extract<
 
 const OperationStateEvent = Schema.Struct({
   kind: Schema.Literal("operation-state"),
-  state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
+  state: Schema.Literals(["running", "waiting", "completed", "interrupted", "failed"]),
   failure: Schema.optional(CodeOperationFailure),
   /**
    * On the provider's own completion: where the turn ends in the runtime's
@@ -1904,7 +1923,7 @@ const OperationStateEvent = Schema.Struct({
    * state, and on turns journaled before Octant recorded it.
    */
   nativeAnchor: Schema.optional(ProviderNativeAnchor),
-}).annotations(strict);
+});
 const ConversationTurnStartedEvent = Schema.Struct({
   toolCatalogHandoff: Schema.optional(Schema.Boolean),
   kind: Schema.Literal("conversation-turn-started"),
@@ -1919,10 +1938,12 @@ const ConversationTurnStartedEvent = Schema.Struct({
   threadMentionIds: Schema.optional(ThreadMentionIds),
   /** The pull requests and issues this turn's message mentioned; absent when it mentioned none. */
   trackerMentions: Schema.optional(TrackerMentions),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
-    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+    Schema.Array(CodeAttachmentReference).check(Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   /**
    * The attached images Sees images described because the thread's model
@@ -1937,8 +1958,8 @@ const ConversationTurnStartedEvent = Schema.Struct({
         name: DescribedImageName,
         describedBy: ImageDescribedBy,
         description: CodeEvidenceReference,
-      }).annotations(strict),
-    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+      }),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   /**
    * The checkout as it stood just before the provider was asked, so the user
@@ -1960,29 +1981,29 @@ const ConversationTurnStartedEvent = Schema.Struct({
    * never mint a second turn.
    */
   delivery: Schema.optional(ThreadDeliveryMark),
-}).annotations(strict);
+});
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
-  channel: Schema.Literal("reasoning", "message"),
+  channel: Schema.Literals(["reasoning", "message"]),
   content: CodeEvidenceReference,
-}).annotations(strict);
+});
 const TerminalOutputEvent = Schema.Struct({
   kind: Schema.Literal("terminal-output"),
   terminalId: CodeTerminalId,
   content: CodeEvidenceReference,
-  replace: Schema.optionalWith(Schema.Boolean, { default: () => false }),
-}).annotations(strict);
+  replace: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
+});
 const TerminalStateChangedEvent = Schema.Struct({
   kind: Schema.Literal("terminal-state-changed"),
   terminalId: CodeTerminalId,
-  state: Schema.Literal("running", "exited", "interrupted"),
+  state: Schema.Literals(["running", "exited", "interrupted"]),
   exitCode: Schema.optional(Schema.NullOr(Schema.Int)),
-}).annotations(strict);
+});
 const ToolEvent = Schema.Struct({
   kind: Schema.Literal("tool-activity"),
   toolCallId: ProviderRequestId,
   toolName: boundedNonEmptyText(255),
-  state: Schema.Literal("started", "running", "completed", "failed"),
+  state: Schema.Literals(["started", "running", "completed", "failed"]),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */
   published: Schema.optional(ThreadPublishedPage),
@@ -1996,7 +2017,7 @@ const ToolEvent = Schema.Struct({
   canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
   /** Present only on a terminal state of a call whose bounds were trusted. */
   timing: Schema.optional(ThreadCallTiming),
-}).annotations(strict);
+});
 /**
  * The bounds a Code approval or question is journaled under. Exported so a
  * read that shows a pending request outside its operation stream carries the
@@ -2010,9 +2031,9 @@ export const MAX_CODE_QUESTION_OPTIONS = 32;
 const OwnerApprovalSettledEvent = Schema.Struct({
   kind: Schema.Literal("owner-approval-settled"),
   approvalId: CodeApprovalId,
-  outcome: Schema.Literal("approved", "denied", "uncertain"),
+  outcome: Schema.Literals(["approved", "denied", "uncertain"]),
   actingPrincipal: OwnerUnlockPrincipal,
-}).annotations(strict);
+});
 /**
  * A person's answer to one approval reached the provider or the tool that
  * asked. Without it a re-read of the turn's stream (a reopened thread, another
@@ -2022,20 +2043,20 @@ const OwnerApprovalSettledEvent = Schema.Struct({
 const ApprovalAnsweredEvent = Schema.Struct({
   kind: Schema.Literal("approval-answered"),
   approvalId: CodeApprovalId,
-  decision: Schema.Literal("approved", "denied"),
+  decision: Schema.Literals(["approved", "denied"]),
   /**
    * On an approved `level-change`: whether the new level applied inside the
    * running turn (`in-place`, entering Plan on a provider that can hold its
    * session to it) or from the next turn, the asking turn ending
    * (`next-turn`). Absent on every other answer and in older journals.
    */
-  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
-}).annotations(strict);
+  levelChangeApplied: Schema.optional(Schema.Literals(["in-place", "next-turn"])),
+});
 
 const ApprovalEvent = Schema.Struct({
   kind: Schema.Literal("approval-requested"),
   approvalId: CodeApprovalId,
-  action: Schema.Literal(
+  action: Schema.Literals([
     "file-mutation",
     "terminal",
     "test",
@@ -2045,7 +2066,7 @@ const ApprovalEvent = Schema.Struct({
     "pull-request-create",
     "provider-tool",
     "level-change",
-  ),
+  ]),
   summary: CodeApprovalSummaryText,
   /**
    * The provider's own identity for the call this ask gates, when the runtime
@@ -2063,7 +2084,7 @@ const ApprovalEvent = Schema.Struct({
     Schema.Struct({
       to: ProviderExecutionPolicy,
       plan: Schema.optional(CodeEvidenceReference),
-    }).annotations(strict),
+    }),
   ),
   /**
    * The ask may be answered with "Remember for this Project" as well as for
@@ -2078,7 +2099,7 @@ const ApprovalEvent = Schema.Struct({
    * decode failure would quarantine that thread on replay.
    */
   localPersonOnly: Schema.optional(Schema.Literal(true)),
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 /**
  * A reviewer answered one approval: what the call was and its decision.
  * Octant Shield's allow or deny settles the call without asking anyone, and
@@ -2090,14 +2111,14 @@ const ApprovalReviewedEvent = Schema.Struct({
   kind: Schema.Literal("approval-reviewed"),
   summary: CodeApprovalSummaryText,
   decision: ReviewDecision,
-}).annotations(strict);
+});
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   questionnaire: Schema.optional(Questionnaire),
   requestId: ProviderRequestId,
   prompt: CodeQuestionPromptText,
-  options: Schema.Array(CodeQuestionOptionText).pipe(
-    Schema.filter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
+  options: Schema.Array(CodeQuestionOptionText).check(
+    Schema.makeFilter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
   ),
   /**
    * The provider asks for a secret: the person answers in a masked field,
@@ -2105,7 +2126,7 @@ const QuestionEvent = Schema.Struct({
    * it was answered is recorded.
    */
   secret: Schema.optional(Schema.Literal(true)),
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 /**
  * Journaled once, just before a turn's terminal state, on every settled
  * outcome: a turn that failed or was interrupted may still have changed files,
@@ -2114,30 +2135,30 @@ const QuestionEvent = Schema.Struct({
 const ConversationTurnChangedFilesEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-changed-files"),
   changedFiles: CodeTurnChangedFiles,
-}).annotations(strict);
+});
 const ConversationTurnReviewPreviewEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-review-preview"),
   preview: CodeTurnReviewPreview,
-}).annotations(strict);
+});
 const FileChangeEvent = Schema.Struct({
   kind: Schema.Literal("file-change"),
   path: CodeRelativePath,
-  change: Schema.Literal("created", "modified", "deleted"),
+  change: Schema.Literals(["created", "modified", "deleted"]),
   reconciled: Schema.Boolean,
-}).annotations(strict);
+});
 const DiffEvent = Schema.Struct({
   kind: Schema.Literal("diff"),
   content: CodeEvidenceReference,
   reconciled: Schema.Boolean,
-}).annotations(strict);
+});
 const TaskProgressEvent = Schema.Struct({
   kind: Schema.Literal("task-progress"),
   taskId: boundedNonEmptyText(255),
-  state: Schema.Literal("pending", "running", "waiting", "completed", "failed"),
+  state: Schema.Literals(["pending", "running", "waiting", "completed", "failed"]),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
   /** The provider's wording while the task runs; absent in journals written before it existed. */
   runningSummary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
-}).annotations(strict);
+});
 /**
  * The provider restated its plan: the turn's tasks are now exactly these ids,
  * in this order. Journals written before it existed carry only
@@ -2145,24 +2166,28 @@ const TaskProgressEvent = Schema.Struct({
  */
 const TaskListEvent = Schema.Struct({
   kind: Schema.Literal("task-list"),
-  taskIds: Schema.Array(boundedNonEmptyText(255)).pipe(Schema.maxItems(MAX_THREAD_TASKS_PER_TURN)),
-}).annotations(strict);
+  taskIds: Schema.Array(boundedNonEmptyText(255)).check(
+    Schema.isMaxLength(MAX_THREAD_TASKS_PER_TURN),
+  ),
+});
 const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
-  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
-  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   /** Absent means the provider did not report cache usage. */
-  cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  cacheReadInputTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  cacheWriteInputTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /** Absent means the provider did not report reasoning tokens, never that it spent none. */
-  reasoningTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 
   /**
    * What the provider says this turn cost, in US dollars. Absent whenever the
    * provider reports no cost: the host never derives one from a price list of
    * its own.
    */
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
   /**
    * The usage ledger's price for this turn, fixed when the report is
    * journaled: the provider's figure, or a standard-rate estimate for a model
@@ -2178,8 +2203,8 @@ const UsageEvent = Schema.Struct({
    * not plan a context for (a CLI it drives) has no other account of the
    * window, so this is what its meter shows.
    */
-  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  contextWindow: Schema.optional(PositiveInt),
+  contextTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * Where the runtime compacts the conversation by itself, in tokens of the
    * window the last request filled. Present only when the runtime said
@@ -2187,13 +2212,13 @@ const UsageEvent = Schema.Struct({
    * said nothing, said it is off, or the host could not read the unit, and
    * no reader may infer a figure from the model's window.
    */
-  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  autoCompactThreshold: Schema.optional(PositiveInt),
   /**
    * What the window held after this report: the runtime's own categories, or
    * the parts Octant counted when it reported none. Absent means neither.
    */
   contextBreakdown: Schema.optional(ProviderContextBreakdown),
-}).annotations(strict);
+});
 /**
  * How much of a provider usage window this account has spent, as the provider
  * reported it during the turn. Recording it lets a thread show the window
@@ -2202,24 +2227,27 @@ const UsageEvent = Schema.Struct({
 const ProviderLimitEvent = Schema.Struct({
   kind: Schema.Literal("provider-limit"),
   window: boundedNonEmptyText(64),
-  status: Schema.Literal("allowed", "warning", "exhausted"),
-  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  status: Schema.Literals(["allowed", "warning", "exhausted"]),
+  utilization: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
   resetsAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 const ChildActivityEvent = Schema.Struct({
   observation: Schema.optional(ProviderChildActivityEvent),
   kind: Schema.Literal("child-activity"),
   childId: boundedNonEmptyText(255),
-  state: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
+  state: Schema.Literals(["starting", "running", "waiting", "completed", "failed"]),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
-}).annotations(strict);
-const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
-  .annotations(strict)
-  .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
+});
+const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields).check(
+  Schema.makeFilter((event) => event.attempt <= event.maxAttempts),
+);
 /** A provider runtime's own id for a session it keeps; see {@link ProviderNativeSessionId}. */
 export const CodeNativeSessionId = ProviderNativeSessionId;
 export type CodeNativeSessionId = typeof CodeNativeSessionId.Type;
-export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(CodeNativeSessionId);
+export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(
+  CodeNativeSessionId,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The runtime started a turn by itself inside this one: background work the
@@ -2230,12 +2258,12 @@ export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(CodeNativeSess
  */
 const RuntimeTurnStartedEvent = Schema.Struct({
   kind: Schema.Literal("runtime-turn-started"),
-  trigger: Schema.Literal("background-task", "person-message"),
-}).annotations(strict);
+  trigger: Schema.Literals(["background-task", "person-message"]),
+});
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
   result: CodeOperationResult,
-}).annotations(strict);
+});
 /**
  * The person started this thread from a provider session begun outside
  * Octant, on the same account and folder. Journaled ahead of the
@@ -2249,7 +2277,7 @@ const NativeSessionAdoptedEvent = Schema.Struct({
   kind: Schema.Literal("native-session-adopted"),
   nativeSessionId: CodeNativeSessionId,
   providerInstanceId: ProviderInstanceId,
-}).annotations(strict);
+});
 /**
  * The person asked to stop this turn, journaled at the request so a later
  * `interrupted` reads as their cancellation rather than a cut-off. Only an
@@ -2258,7 +2286,7 @@ const NativeSessionAdoptedEvent = Schema.Struct({
  */
 const ConversationTurnStopRequestedEvent = Schema.Struct({
   kind: Schema.Literal("conversation-turn-stop-requested"),
-}).annotations(strict);
+});
 
 /**
  * The turn called the same tool with the same canonical input repeatedly in a
@@ -2269,7 +2297,7 @@ const TurnLoopNoticedEvent = Schema.Struct({
   kind: Schema.Literal("turn-loop-noticed"),
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
-}).annotations(strict);
+});
 
 /**
  * The turn called the same tool with the same canonical input repeatedly in a
@@ -2279,7 +2307,7 @@ const TurnLoopStoppedEvent = Schema.Struct({
   kind: Schema.Literal("turn-loop-stopped"),
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
-}).annotations(strict);
+});
 
 /**
  * The turn stayed silent past the stalled-turn limit outside Strict. The turn
@@ -2287,8 +2315,8 @@ const TurnLoopStoppedEvent = Schema.Struct({
  */
 const TurnStallNoticedEvent = Schema.Struct({
   kind: Schema.Literal("turn-stall-noticed"),
-  idleMs: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  idleMs: PositiveInt,
+});
 
 const ProviderSessionReadyEvent = Schema.Struct({
   kind: Schema.Literal("provider-session-ready"),
@@ -2303,14 +2331,14 @@ const ProviderSessionReadyEvent = Schema.Struct({
    * journaled before the host recorded it.
    */
   strictKept: Schema.optional(StrictKeptProtections),
-}).annotations(strict);
+});
 
 /** The omissions a Code handoff counts; Chat and Work journal the same shape. */
 export const CodeContextHandoffOmissions = ContextHandoffOmissions;
 export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
 
-const handoffMessages = Schema.Int.pipe(
-  Schema.between(1, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1),
+const handoffMessages = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1 }),
 );
 
 /**
@@ -2325,7 +2353,7 @@ const ProviderSwitchHandoff = Schema.Struct({
    * own session back, so the next turn started a fresh session with the kept
    * turns as text. The previous fields then name the session it left behind.
    */
-  reason: Schema.Literal("provider-switch", "rewind"),
+  reason: Schema.Literals(["provider-switch", "rewind"]),
   previousProviderInstanceId: ProviderInstanceId,
   previousModelId: ProviderModelId,
   /** Conversation messages the handoff carried, not counting its summary. */
@@ -2343,10 +2371,12 @@ const ProviderSwitchHandoff = Schema.Struct({
     Schema.Struct({
       forkedFrom: CodeThreadForkOrigin,
       /** Carried messages that came from the source; may be 0 after the budget. */
-      messages: Schema.Int.pipe(Schema.between(0, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1)),
+      messages: Schema.Int.check(
+        Schema.isBetween({ minimum: 0, maximum: MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1 }),
+      ),
       /** Whether the source thread had taken in outside content when it was read. */
       externalContentIngested: Schema.Boolean,
-    }).annotations(strict),
+    }),
   ),
   /**
    * Present when the handoff led with the summary the limit rule wrote with
@@ -2355,7 +2385,7 @@ const ProviderSwitchHandoff = Schema.Struct({
   handoverSummary: Schema.optional(Schema.Literal(true)),
   /** Present when the change was to another account of the same provider: why its session stayed behind. */
   accountMoveTextCause: Schema.optional(AccountMoveTextHandoffCause),
-}).annotations(strict);
+});
 
 /**
  * A fork's first turn read the source thread's conversation through the fork
@@ -2371,7 +2401,7 @@ const ForkTextHandoff = Schema.Struct({
   omissions: CodeContextHandoffOmissions,
   /** Whether the source thread had taken in outside content when it was read. */
   externalContentIngested: Schema.Boolean,
-}).annotations(strict);
+});
 
 /**
  * A fork's first turn resumed a copy of the source's own provider session cut
@@ -2381,7 +2411,7 @@ const ForkTextHandoff = Schema.Struct({
 const ForkNativeSessionHandoff = Schema.Struct({
   reason: Schema.Literal("fork-native-session"),
   forkedFrom: CodeThreadForkOrigin,
-}).annotations(strict);
+});
 
 /**
  * The first turn after a rewind resumed a copy of the thread's own provider
@@ -2392,7 +2422,7 @@ const RewindNativeSessionHandoff = Schema.Struct({
   reason: Schema.Literal("rewind-native-session"),
   previousSessionId: ProviderSessionId,
   throughOperationId: CodeOperationId,
-}).annotations(strict);
+});
 
 /**
  * The first turn after the person moved the thread to another account of the
@@ -2406,7 +2436,7 @@ const AccountMoveNativeSessionHandoff = Schema.Struct({
   previousProviderInstanceId: ProviderInstanceId,
   previousModelId: ProviderModelId,
   previousSessionId: ProviderSessionId,
-}).annotations(strict);
+});
 
 /**
  * The most fork merges one turn carries; any later ones wait for the next
@@ -2432,17 +2462,17 @@ export const CodeForkMergeBack = Schema.Struct({
   omissions: CodeContextHandoffOmissions,
   /** Whether the fork had taken in outside content when it was read. */
   externalContentIngested: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeForkMergeBack = typeof CodeForkMergeBack.Type;
 
 /** What a turn started its session with that it did not write itself, by cause. */
-export const CodeConversationTurnHandoff = Schema.Union(
+export const CodeConversationTurnHandoff = Schema.Union([
   ProviderSwitchHandoff,
   ForkTextHandoff,
   ForkNativeSessionHandoff,
   RewindNativeSessionHandoff,
   AccountMoveNativeSessionHandoff,
-);
+]);
 export type CodeConversationTurnHandoff = typeof CodeConversationTurnHandoff.Type;
 
 /**
@@ -2465,7 +2495,7 @@ const ProviderSwitchHandoffAttachedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 
 /**
  * A fork's first turn started a new session with the source's conversation
@@ -2481,7 +2511,7 @@ const ForkTextHandoffAttachedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 
 /**
  * A fork's first turn started from a copy of the source's own provider session
@@ -2493,7 +2523,7 @@ const ForkNativeSessionHandoffAttachedEvent = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   nativeSessionTransferred: Schema.Literal(true),
-}).annotations(strict);
+});
 
 /**
  * A person merged a fork's conversation back into the thread it was forked
@@ -2508,7 +2538,7 @@ const ForkContextMergedEvent = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 
 /**
  * The source turn that carried a merged fork's conversation, journaled on that
@@ -2519,7 +2549,7 @@ const ForkContextDeliveredEvent = Schema.Struct({
   ...CodeForkMergeBack.fields,
   kind: Schema.Literal("fork-context-delivered"),
   mergeOperationId: CodeOperationId,
-}).annotations(strict);
+});
 
 /** A rewind's first turn resumed the thread's own session cut back at the last kept turn. */
 const RewindNativeSessionHandoffAttachedEvent = Schema.Struct({
@@ -2528,7 +2558,7 @@ const RewindNativeSessionHandoffAttachedEvent = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   nativeSessionTransferred: Schema.Literal(true),
-}).annotations(strict);
+});
 
 /** A moved thread's first turn resumed its own session copied into the new account. */
 const AccountMoveNativeSessionHandoffAttachedEvent = Schema.Struct({
@@ -2537,15 +2567,15 @@ const AccountMoveNativeSessionHandoffAttachedEvent = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   nativeSessionTransferred: Schema.Literal(true),
-}).annotations(strict);
+});
 
-const ContextHandoffAttachedEvent = Schema.Union(
+const ContextHandoffAttachedEvent = Schema.Union([
   ProviderSwitchHandoffAttachedEvent,
   ForkTextHandoffAttachedEvent,
   ForkNativeSessionHandoffAttachedEvent,
   RewindNativeSessionHandoffAttachedEvent,
   AccountMoveNativeSessionHandoffAttachedEvent,
-);
+]);
 
 /**
  * One operation's cumulative reasoning total, journaled when a span closes —
@@ -2555,9 +2585,9 @@ const ContextHandoffAttachedEvent = Schema.Union(
  */
 const ReasoningTimeEvent = Schema.Struct({
   kind: Schema.Literal("reasoning-time"),
-  reasoningMs: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
-export const CodeOperationEvent = Schema.Union(
+  reasoningMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export const CodeOperationEvent = Schema.Union([
   ReasoningTimeEvent,
   ProviderSessionReadyEvent,
   ContextHandoffAttachedEvent,
@@ -2591,16 +2621,16 @@ export const CodeOperationEvent = Schema.Union(
   TurnLoopStoppedEvent,
   TurnStallNoticedEvent,
   ResultEvent,
-);
+]);
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
 
 export const CodeOperationEventFrame = Schema.Struct({
   threadId: CodeThreadId,
   operationId: CodeOperationId,
-  cursor: Schema.Int.pipe(Schema.positive()),
+  cursor: PositiveInt,
   occurredAt: UtcTimestamp,
   event: CodeOperationEvent,
-}).annotations(strict);
+});
 export type CodeOperationEventFrame = typeof CodeOperationEventFrame.Type;
 
 /**
@@ -2611,7 +2641,7 @@ export type CodeOperationEventFrame = typeof CodeOperationEventFrame.Type;
 export const CodeOperationStreamFrame = Schema.Struct({
   ...CodeOperationEventFrame.fields,
   displayText: Schema.optional(boundedText(MAX_CODE_OPERATION_TEXT_BYTES)),
-}).annotations(strict);
+});
 export type CodeOperationStreamFrame = typeof CodeOperationStreamFrame.Type;
 
 export const MAX_CODE_CONVERSATION_PAGE_SIZE = 100;
@@ -2633,12 +2663,12 @@ export const MAX_CODE_CONVERSATION_TURN_STEPS = 64;
  * shows; recording them on the turn is what lets a reopened thread show the
  * same rows instead of a bare message.
  */
-export const CodeConversationStep = Schema.Union(
+export const CodeConversationStep = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("tool"),
     toolCallId: ProviderRequestId,
     toolName: boundedNonEmptyText(255),
-    state: Schema.Literal("started", "running", "completed", "failed"),
+    state: Schema.Literals(["started", "running", "completed", "failed"]),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
@@ -2646,32 +2676,33 @@ export const CodeConversationStep = Schema.Union(
     canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
     /** Present only on a completed step whose bounds were trusted. */
     timing: Schema.optional(ThreadCallTiming),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
     content: CodeEvidenceReference,
-  }).annotations(strict),
-  /** An approval Octant Shield answered, shown in the turn beside its tool rows. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("review"),
     summary: CodeApprovalSummaryText,
     decision: ReviewDecision,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeConversationStep = typeof CodeConversationStep.Type;
 
 export const CodeConversationTurnUsage = Schema.Struct({
-  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
-  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   /** Absent means the provider did not report cache usage. */
-  cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  cacheReadInputTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  cacheWriteInputTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 
   /** The provider's own price for the turn. Never one the host derived. */
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
   /** The window and its fill after this turn, when the provider reported them. */
-  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  contextWindow: Schema.optional(PositiveInt),
+  contextTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * Where the runtime compacts the conversation by itself, in tokens of the
    * window the last request filled. Present only when the runtime said
@@ -2679,13 +2710,13 @@ export const CodeConversationTurnUsage = Schema.Struct({
    * said nothing, said it is off, or the host could not read the unit, and
    * no reader may infer a figure from the model's window.
    */
-  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  autoCompactThreshold: Schema.optional(PositiveInt),
   /**
    * What the window held after this report: the runtime's own categories, or
    * the parts Octant counted when it reported none. Absent means neither.
    */
   contextBreakdown: Schema.optional(ProviderContextBreakdown),
-}).annotations(strict);
+});
 export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
 
 /**
@@ -2694,10 +2725,10 @@ export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
  */
 export const CodeProviderLimit = Schema.Struct({
   window: boundedNonEmptyText(64),
-  status: Schema.Literal("allowed", "warning", "exhausted"),
-  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  status: Schema.Literals(["allowed", "warning", "exhausted"]),
+  utilization: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
   resetsAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeProviderLimit = typeof CodeProviderLimit.Type;
 
 export const CodeConversationTurn = Schema.Struct({
@@ -2715,7 +2746,7 @@ export const CodeConversationTurn = Schema.Struct({
   reviewPreview: Schema.optional(CodeTurnReviewPreview),
   /** Images the user attached to this turn. Absent when it attached none. */
   attachments: Schema.optional(
-    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+    Schema.Array(CodeAttachmentReference).check(Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   /** The attached images a Sees images model described, and which model. */
   describedImages: Schema.optional(DescribedTurnImages),
@@ -2731,13 +2762,13 @@ export const CodeConversationTurn = Schema.Struct({
    * whose provider reported nothing, which is not the same as zero.
    */
   usage: Schema.optional(CodeConversationTurnUsage),
-  assistant: Schema.Array(CodeEvidenceReference).pipe(
-    Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
+  assistant: Schema.Array(CodeEvidenceReference).check(
+    Schema.makeFilter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),
   /** Bounded, in arrival order. Absent on a turn that recorded no steps. */
   steps: Schema.optional(
-    Schema.Array(CodeConversationStep).pipe(
-      Schema.filter((steps) => steps.length <= MAX_CODE_CONVERSATION_TURN_STEPS),
+    Schema.Array(CodeConversationStep).check(
+      Schema.makeFilter((steps) => steps.length <= MAX_CODE_CONVERSATION_TURN_STEPS),
     ),
   ),
   /** Whether the turn journaled more steps than `steps` carries. */
@@ -2747,7 +2778,7 @@ export const CodeConversationTurn = Schema.Struct({
    * journaled `reasoning-time` totals. Absent on turns that recorded none and
    * every turn journaled before them.
    */
-  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningMs: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * What this turn's new provider session started with beyond its own prompt:
    * a provider switch's text handoff, or a fork's text handoff or copied
@@ -2769,7 +2800,7 @@ export const CodeConversationTurn = Schema.Struct({
    * person merged it back, oldest first. Absent on every other turn.
    */
   forkMergeBacks: Schema.optional(
-    Schema.Array(CodeForkMergeBack).pipe(Schema.maxItems(MAX_CODE_FORK_MERGE_BACKS_PER_TURN)),
+    Schema.Array(CodeForkMergeBack).check(Schema.isMaxLength(MAX_CODE_FORK_MERGE_BACKS_PER_TURN)),
   ),
   /**
    * What changed in the checkout while this turn ran. Absent when the host
@@ -2793,7 +2824,7 @@ export const CodeConversationTurn = Schema.Struct({
    * attribute the message to the report rather than to the person.
    */
   delivery: Schema.optional(ThreadDeliveryMark),
-  status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
+  status: Schema.Literals(["waiting", "completed", "interrupted", "failed", "incomplete"]),
   /**
    * Why a failed turn failed, or the usage limit a waiting turn stopped at, as
    * the provider or the host reported it. Absent on a turn that did neither,
@@ -2802,7 +2833,7 @@ export const CodeConversationTurn = Schema.Struct({
   failure: Schema.optional(CodeOperationFailure),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeConversationTurn = typeof CodeConversationTurn.Type;
 
 export const CodeConversationPage = Schema.Struct({
@@ -2814,16 +2845,16 @@ export const CodeConversationPage = Schema.Struct({
    */
   version: Schema.Literal(3),
   threadId: CodeThreadId,
-  turns: Schema.Array(CodeConversationTurn).pipe(
-    Schema.filter((turns) => turns.length <= MAX_CODE_CONVERSATION_PAGE_SIZE),
+  turns: Schema.Array(CodeConversationTurn).check(
+    Schema.makeFilter((turns) => turns.length <= MAX_CODE_CONVERSATION_PAGE_SIZE),
   ),
-  nextCursor: Schema.Int.pipe(Schema.nonNegative()),
+  nextCursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   hasMore: Schema.Boolean,
   /**
    * The provider usage windows this thread last heard about, most recent
    * report per window. Absent when the provider reported none.
    */
-  limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
+  limits: Schema.optional(Schema.Array(CodeProviderLimit).check(Schema.isMaxLength(8))),
   /**
    * What this thread's most recent restore replaced, as the host recorded it
    * before overwriting the checkout. Thread state rather than turn state, so it
@@ -2833,7 +2864,7 @@ export const CodeConversationPage = Schema.Struct({
    * replaced nothing.
    */
   restoreUndo: Schema.optional(CodeCheckpoint),
-}).annotations(strict);
+});
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 
 /**
@@ -2846,25 +2877,27 @@ export type CodeConversationPage = typeof CodeConversationPage.Type;
  */
 export const CodeConversationUsageTotals = Schema.Struct({
   /** Turns whose provider reported usage; never zero, the fold is absent then. */
-  reportedTurns: Schema.Int.pipe(Schema.positive()),
-  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
-  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  reportedTurns: PositiveInt,
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   cacheRead: Schema.Struct({
-    measuredTurns: Schema.Int.pipe(Schema.nonNegative()),
-    measuredTokens: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
+    measuredTurns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    measuredTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
   cacheWrite: Schema.Struct({
-    measuredTurns: Schema.Int.pipe(Schema.nonNegative()),
-    measuredTokens: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
+    measuredTurns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    measuredTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
   /** Absent when no folded turn reported a price. */
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
-  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
+  contextWindow: Schema.optional(PositiveInt),
+  contextTokens: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /** The latest reporting turn's figure, absent when that turn named none. */
-  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  autoCompactThreshold: Schema.optional(PositiveInt),
   contextBreakdown: Schema.optional(ProviderContextBreakdown),
-}).annotations(strict);
+});
 export type CodeConversationUsageTotals = typeof CodeConversationUsageTotals.Type;
 
 /**
@@ -2879,22 +2912,26 @@ export type CodeConversationUsageTotals = typeof CodeConversationUsageTotals.Typ
 export const CodeConversationWindow = Schema.Struct({
   version: Schema.Literal(1),
   threadId: CodeThreadId,
-  turns: Schema.Array(CodeConversationTurn).pipe(Schema.maxItems(MAX_CODE_CONVERSATION_PAGE_SIZE)),
+  turns: Schema.Array(CodeConversationTurn).check(
+    Schema.isMaxLength(MAX_CODE_CONVERSATION_PAGE_SIZE),
+  ),
   ...ThreadWindowBoundsFields,
   earlierUsage: Schema.optional(CodeConversationUsageTotals),
-  limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
+  limits: Schema.optional(Schema.Array(CodeProviderLimit).check(Schema.isMaxLength(8))),
   restoreUndo: Schema.optional(CodeCheckpoint),
-}).annotations(strict);
+});
 export type CodeConversationWindow = typeof CodeConversationWindow.Type;
 
 /** What a window read asks for: a page size and at most one anchor turn of the thread. */
 export const CodeConversationWindowRequest = Schema.Struct({
-  limit: Schema.Int.pipe(Schema.between(1, MAX_CODE_CONVERSATION_PAGE_SIZE)),
+  limit: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_CODE_CONVERSATION_PAGE_SIZE }),
+  ),
   before: Schema.optional(CodeOperationId),
   through: Schema.optional(CodeOperationId),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((request) => request.before === undefined || request.through === undefined));
+}).check(
+  Schema.makeFilter((request) => request.before === undefined || request.through === undefined),
+);
 export type CodeConversationWindowRequest = typeof CodeConversationWindowRequest.Type;
 
 // At the per-item text ceiling, 64 items remain below the authenticated
@@ -2908,9 +2945,9 @@ export const CodeEvidenceBatchRequest = Schema.Struct({
     Schema.Struct({
       operationId: CodeOperationId,
       contentId: CodeEvidenceContentId,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
+});
 export type CodeEvidenceBatchRequest = typeof CodeEvidenceBatchRequest.Type;
 
 export const CodeEvidenceBatchResponse = Schema.Struct({
@@ -2920,9 +2957,9 @@ export const CodeEvidenceBatchResponse = Schema.Struct({
       operationId: CodeOperationId,
       contentId: CodeEvidenceContentId,
       text: boundedText(MAX_CODE_OPERATION_TEXT_BYTES),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(MAX_CODE_EVIDENCE_BATCH_ITEMS)),
+});
 export type CodeEvidenceBatchResponse = typeof CodeEvidenceBatchResponse.Type;
 
 export const MAX_CODE_THREAD_METADATA_VIEW_SIZE = 5_000;
@@ -2934,7 +2971,7 @@ export const MAX_CODE_THREAD_METADATA_RECOVERY_REASONS = 8;
  * (`stale`). Stale GitHub metadata is surfaced to the user but can never
  * independently satisfy a delivery target (see the delivery-target policy).
  */
-export const CodeMetadataFreshness = Schema.Literal("fresh", "stale");
+export const CodeMetadataFreshness = Schema.Literals(["fresh", "stale"]);
 export type CodeMetadataFreshness = typeof CodeMetadataFreshness.Type;
 
 /**
@@ -2942,19 +2979,19 @@ export type CodeMetadataFreshness = typeof CodeMetadataFreshness.Type;
  * managed worktree could not be observed this projection; its Git-derived
  * metadata is therefore treated as stale.
  */
-export const CodeThreadWorktreeMetadata = Schema.Union(
+export const CodeThreadWorktreeMetadata = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("available"),
     checkoutId: CodeCheckoutId,
     path: boundedNonEmptyText(4_096),
     head: CodeCheckoutHead,
     receiptId: Schema.optional(WorktreeReceiptId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     checkoutId: CodeCheckoutId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeThreadWorktreeMetadata = typeof CodeThreadWorktreeMetadata.Type;
 
 /**
@@ -2964,24 +3001,24 @@ export type CodeThreadWorktreeMetadata = typeof CodeThreadWorktreeMetadata.Type;
  * `unavailable` means the worktree could not be observed and therefore carries
  * no counts.
  */
-export const CodeThreadChangedFileState = Schema.Union(
+export const CodeThreadChangedFileState = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("observed"),
     freshness: CodeMetadataFreshness,
-    changedPathCount: Schema.Int.pipe(Schema.nonNegative()),
-    stagedCount: Schema.Int.pipe(Schema.nonNegative()),
-    committedAhead: Schema.Int.pipe(Schema.nonNegative()),
+    changedPathCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    stagedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    committedAhead: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     workingTreeClean: Schema.Boolean,
-    insertions: Schema.Int.pipe(Schema.nonNegative()),
-    deletions: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
+    insertions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    deletions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeThreadChangedFileState = typeof CodeThreadChangedFileState.Type;
 
-export const CodeThreadPullRequestState = Schema.Literal("open", "merged", "closed");
+export const CodeThreadPullRequestState = Schema.Literals(["open", "merged", "closed"]);
 export type CodeThreadPullRequestState = typeof CodeThreadPullRequestState.Type;
 
 /**
@@ -2990,35 +3027,35 @@ export type CodeThreadPullRequestState = typeof CodeThreadPullRequestState.Type;
  * observation succeeded; a `stale` linked PR is shown but cannot satisfy a
  * delivery target on its own.
  */
-export const CodeThreadLinkedPullRequest = Schema.Union(
+export const CodeThreadLinkedPullRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("linked"),
     freshness: CodeMetadataFreshness,
-    number: Schema.Int.pipe(Schema.positive()),
+    number: PositiveInt,
     url: PullRequestUrl,
     baseRepository: boundedNonEmptyText(512),
     baseBranch: boundedNonEmptyText(255),
     headBranch: boundedNonEmptyText(255),
     state: CodeThreadPullRequestState,
     matchesDeliveryBranch: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("none"),
     freshness: CodeMetadataFreshness,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeThreadLinkedPullRequest = typeof CodeThreadLinkedPullRequest.Type;
 
 export const CodeThreadCheckState = Schema.Struct({
   freshness: CodeMetadataFreshness,
-  state: Schema.Literal("unknown", "pending", "passing", "failing"),
-}).annotations(strict);
+  state: Schema.Literals(["unknown", "pending", "passing", "failing"]),
+});
 export type CodeThreadCheckState = typeof CodeThreadCheckState.Type;
 
 export const CodeThreadReviewState = Schema.Struct({
   freshness: CodeMetadataFreshness,
-  state: Schema.Literal("unknown", "none", "pending", "approved", "changes-requested"),
-}).annotations(strict);
+  state: Schema.Literals(["unknown", "none", "pending", "approved", "changes-requested"]),
+});
 export type CodeThreadReviewState = typeof CodeThreadReviewState.Type;
 
 /**
@@ -3029,19 +3066,19 @@ export type CodeThreadReviewState = typeof CodeThreadReviewState.Type;
  * target in `waiting`.
  */
 export const CodeThreadChildAgentSummary = Schema.Struct({
-  active: Schema.Int.pipe(Schema.nonNegative()),
-  completed: Schema.Int.pipe(Schema.nonNegative()),
-  failed: Schema.Int.pipe(Schema.nonNegative()),
-  unacknowledgedResults: Schema.Int.pipe(Schema.nonNegative()),
+  active: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  completed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  failed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  unacknowledgedResults: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   latestSummary: Schema.optional(boundedNonEmptyText(2_048)),
   latestActivityAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeThreadChildAgentSummary = typeof CodeThreadChildAgentSummary.Type;
 
-export const CodeThreadMetadataRecoveryReason = Schema.Literal(
+export const CodeThreadMetadataRecoveryReason = Schema.Literals([
   "project-projection-missing",
   "operation-journal-rebuild-required",
-);
+]);
 export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecoveryReason.Type;
 
 /**
@@ -3051,14 +3088,14 @@ export type CodeThreadMetadataRecoveryReason = typeof CodeThreadMetadataRecovery
  * onto the board; step titles, rationale, and per-step status stay in the
  * thread's own Plan dock.
  */
-export const CodeBoardPlanProgress = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const CodeBoardPlanProgress = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("present"),
-    done: Schema.Int.pipe(Schema.nonNegative()),
-    total: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-);
+    done: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
+]);
 export type CodeBoardPlanProgress = typeof CodeBoardPlanProgress.Type;
 
 /**
@@ -3067,19 +3104,19 @@ export type CodeBoardPlanProgress = typeof CodeBoardPlanProgress.Type;
  * reasons (e.g. a temporarily missing Project projection) instead of dropping
  * the card.
  */
-export const CodeThreadMetadataRecovery = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("ok") }).annotations(strict),
+export const CodeThreadMetadataRecovery = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("ok") }),
   Schema.Struct({
     kind: Schema.Literal("recovering"),
-    reasons: Schema.NonEmptyArray(CodeThreadMetadataRecoveryReason).pipe(
-      Schema.filter(
+    reasons: Schema.NonEmptyArray(CodeThreadMetadataRecoveryReason).check(
+      Schema.makeFilter(
         (reasons) =>
           reasons.length <= MAX_CODE_THREAD_METADATA_RECOVERY_REASONS &&
           new Set(reasons).size === reasons.length,
       ),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeThreadMetadataRecovery = typeof CodeThreadMetadataRecovery.Type;
 
 /**
@@ -3087,7 +3124,7 @@ export type CodeThreadMetadataRecovery = typeof CodeThreadMetadataRecovery.Type;
  * target. Mirrors the delivery-target policy's `pending`/`waiting`/`done`:
  * ambiguous or stale evidence resolves to `waiting`, never `done`.
  */
-export const CodeThreadDeliverySatisfaction = Schema.Literal("pending", "waiting", "done");
+export const CodeThreadDeliverySatisfaction = Schema.Literals(["pending", "waiting", "done"]);
 export type CodeThreadDeliverySatisfaction = typeof CodeThreadDeliverySatisfaction.Type;
 
 /**
@@ -3114,22 +3151,22 @@ export const CodeThreadOperationalMetadata = Schema.Struct({
   deliverySatisfaction: CodeThreadDeliverySatisfaction,
   recovery: CodeThreadMetadataRecovery,
   rebuiltFromJournal: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeThreadOperationalMetadata = typeof CodeThreadOperationalMetadata.Type;
 
 export const CodeThreadOperationalMetadataView = Schema.Struct({
   version: Schema.Literal(1),
-  threads: Schema.Array(CodeThreadOperationalMetadata).pipe(
-    Schema.filter(
+  threads: Schema.Array(CodeThreadOperationalMetadata).check(
+    Schema.makeFilter(
       (threads) =>
         threads.length <= MAX_CODE_THREAD_METADATA_VIEW_SIZE &&
         new Set(threads.map((thread) => thread.threadId)).size === threads.length,
     ),
   ),
-}).annotations(strict);
+});
 export type CodeThreadOperationalMetadataView = typeof CodeThreadOperationalMetadataView.Type;
 
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * Persistent follow-up marker for a single Code thread. It is a user obligation
@@ -3141,14 +3178,14 @@ const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
  */
 export const CodeThreadFollowUp = Schema.Struct({
   threadId: CodeThreadId,
-  state: Schema.Literal("open", "completed"),
-  origin: Schema.Literal("manual", "automatic"),
-  reason: Schema.NonEmptyTrimmedString,
+  state: Schema.Literals(["open", "completed"]),
+  origin: Schema.Literals(["manual", "automatic"]),
+  reason: NonEmptyTrimmedString,
   triggerSequence: NonNegativeInt,
   acknowledgedThroughSequence: NonNegativeInt,
   createdAt: UtcTimestamp,
   completedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeThreadFollowUp = typeof CodeThreadFollowUp.Type;
 
 /**
@@ -3163,10 +3200,10 @@ export const OpenCodeFollowUpCommand = Schema.Struct({
   kind: Schema.Literal("open-code-follow-up"),
   threadId: CodeThreadId,
   expectedVersion: AggregateVersion,
-  reason: Schema.NonEmptyTrimmedString,
-  origin: Schema.Literal("manual", "automatic"),
+  reason: NonEmptyTrimmedString,
+  origin: Schema.Literals(["manual", "automatic"]),
   triggerSequence: NonNegativeInt,
-}).annotations(strict);
+});
 export type OpenCodeFollowUpCommand = typeof OpenCodeFollowUpCommand.Type;
 
 /**
@@ -3179,30 +3216,30 @@ export const CompleteCodeFollowUpCommand = Schema.Struct({
   threadId: CodeThreadId,
   expectedVersion: AggregateVersion,
   acknowledgedThroughSequence: NonNegativeInt,
-}).annotations(strict);
+});
 export type CompleteCodeFollowUpCommand = typeof CompleteCodeFollowUpCommand.Type;
 
-export const CodeFollowUpCommand = Schema.Union(
+export const CodeFollowUpCommand = Schema.Union([
   OpenCodeFollowUpCommand,
   CompleteCodeFollowUpCommand,
-);
+]);
 export type CodeFollowUpCommand = typeof CodeFollowUpCommand.Type;
 
 export const CodeThreadFollowUpUpdated = Schema.Struct({
   kind: Schema.Literal("follow-up-updated"),
   followUp: CodeThreadFollowUp,
-}).annotations(strict);
+});
 export type CodeThreadFollowUpUpdated = typeof CodeThreadFollowUpUpdated.Type;
 
 /** Replay-only compatibility for events emitted before the payload kind was
  * aligned with the other mode-specific follow-up event contracts. */
-export const PersistedCodeThreadFollowUpUpdated = Schema.Union(
+export const PersistedCodeThreadFollowUpUpdated = Schema.Union([
   CodeThreadFollowUpUpdated,
   Schema.Struct({
     kind: Schema.Literal("code-follow-up-updated"),
     followUp: CodeThreadFollowUp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type PersistedCodeThreadFollowUpUpdated = typeof PersistedCodeThreadFollowUpUpdated.Type;
 
 /**
@@ -3214,7 +3251,7 @@ export const CodeThreadFollowUpView = Schema.Struct({
   threadId: CodeThreadId,
   followUpVersion: AggregateVersion,
   followUp: Schema.optional(CodeThreadFollowUp),
-}).annotations(strict);
+});
 export type CodeThreadFollowUpView = typeof CodeThreadFollowUpView.Type;
 
 export const MAX_CODE_BOARD_SEARCH_BYTES = 1_024;
@@ -3239,23 +3276,23 @@ export type CodeBoardStatusReason = ThreadBoardReason;
  * `linked` matches any linked PR; `none` matches threads with no linked PR; the
  * remaining values match a linked PR in that GitHub state.
  */
-export const CodeBoardPullRequestFilter = Schema.Literal(
+export const CodeBoardPullRequestFilter = Schema.Literals([
   "any",
   "linked",
   "none",
   "open",
   "merged",
   "closed",
-);
+]);
 export type CodeBoardPullRequestFilter = typeof CodeBoardPullRequestFilter.Type;
 
-export const CodeBoardCheckFilter = Schema.Literal(
+export const CodeBoardCheckFilter = Schema.Literals([
   "any",
   "unknown",
   "pending",
   "passing",
   "failing",
-);
+]);
 export type CodeBoardCheckFilter = typeof CodeBoardCheckFilter.Type;
 
 /**
@@ -3263,7 +3300,7 @@ export type CodeBoardCheckFilter = typeof CodeBoardCheckFilter.Type;
  * follow-up; `excluded` hides them. Follow-up remains independent of runtime
  * status (a Done card may still carry follow-up).
  */
-export const CodeBoardFollowUpFilter = Schema.Literal("any", "only", "excluded");
+export const CodeBoardFollowUpFilter = Schema.Literals(["any", "only", "excluded"]);
 export type CodeBoardFollowUpFilter = typeof CodeBoardFollowUpFilter.Type;
 
 /**
@@ -3287,7 +3324,7 @@ export const CodeBoardQuery = Schema.Struct({
   followUp: Schema.optional(CodeBoardFollowUpFilter),
   /** Keeps only the workers one coordinator started (docs/design/coordinator-threads.md). */
   coordinatorThreadId: Schema.optional(CodeThreadId),
-}).annotations(strict);
+});
 export type CodeBoardQuery = typeof CodeBoardQuery.Type;
 
 /**
@@ -3304,12 +3341,12 @@ export const CodeBoardCard = Schema.Struct({
   threadId: CodeThreadId,
   projectId: ProjectId,
   checkoutId: CodeCheckoutId,
-  checkoutKind: Schema.Literal(
+  checkoutKind: Schema.Literals([
     "existing-worktree",
     "managed-worktree",
     "plain-folder",
     "remote-root",
-  ),
+  ]),
   title: boundedNonEmptyText(512),
   status: CodeBoardStatus,
   statusReason: CodeBoardStatusReason,
@@ -3338,9 +3375,9 @@ export const CodeBoardCard = Schema.Struct({
     Schema.Array(
       Schema.Struct({
         workId: CodeRuntimeWorkId,
-        action: Schema.Literal("update", "merge"),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(16)),
+        action: Schema.Literals(["update", "merge"]),
+      }),
+    ).check(Schema.isMaxLength(16)),
   ),
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
@@ -3350,7 +3387,7 @@ export const CodeBoardCard = Schema.Struct({
    * it. Absent on an unmarked thread. The card carries a small mark; it never
    * asks or blocks.
    */
-  outsideContent: Schema.optional(Schema.Literal("read", "flagged")),
+  outsideContent: Schema.optional(Schema.Literals(["read", "flagged"])),
   /**
    * The coordinator that started this worker, as the host recorded it at
    * creation. Absent on a thread no coordinator started. A coordinator itself
@@ -3359,7 +3396,7 @@ export const CodeBoardCard = Schema.Struct({
   coordinatorThreadId: Schema.optional(CodeThreadId),
   /** Fresh finished-with-proof mark; absent when none exists or when stale. Never moves the column. */
   finishedReceipt: Schema.optional(ThreadBoardFinishedMark),
-}).annotations(strict);
+});
 export type CodeBoardCard = typeof CodeBoardCard.Type;
 
 /**
@@ -3371,15 +3408,15 @@ export type CodeBoardCard = typeof CodeBoardCard.Type;
 export const CodeBoardView = Schema.Struct({
   version: Schema.Literal(1),
   query: CodeBoardQuery,
-  cards: Schema.Array(CodeBoardCard).pipe(
-    Schema.filter(
+  cards: Schema.Array(CodeBoardCard).check(
+    Schema.makeFilter(
       (cards) =>
         cards.length <= MAX_CODE_BOARD_CARDS &&
         new Set(cards.map((card) => card.threadId)).size === cards.length,
     ),
   ),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeBoardView = typeof CodeBoardView.Type;
 
 /**
@@ -3416,56 +3453,58 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "update-review-finding",
 ]);
 
-export const CodeApprovalEffect = Schema.Union(
+export const CodeApprovalEffect = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("operation"),
-    command: CodeOperationCommand.pipe(
-      Schema.filter((command) => APPROVAL_GATED_OPERATION_KINDS.has(command.kind)),
+    command: CodeOperationCommand.check(
+      Schema.makeFilter((command) => APPROVAL_GATED_OPERATION_KINDS.has(command.kind)),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-action"),
     request: AppleActionRequest,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("android-action"),
     request: AndroidEmulatorRequest,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),
-    thread: CodeThread.pipe(Schema.filter((thread) => thread.executionPolicy === "full-access")),
-  }).annotations(strict),
+    thread: CodeThread.check(
+      Schema.makeFilter((thread) => thread.executionPolicy === "full-access"),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("create-managed-code-thread-full-access"),
-    command: CreateManagedCodeThreadCommand.pipe(
-      Schema.filter((command) => command.executionPolicy === "full-access"),
+    command: CreateManagedCodeThreadCommand.check(
+      Schema.makeFilter((command) => command.executionPolicy === "full-access"),
     ),
     source: Schema.optional(
       Schema.Struct({
-        bindingRevisionId: Schema.UUID,
+        bindingRevisionId: GuidString,
         repositoryId: CodeRepositoryId,
         checkoutId: CodeCheckoutId,
         checkoutHead: CodeCheckoutHead,
-      }).annotations(strict),
+      }),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-thread-full-access"),
     threadId: CodeThreadId,
     expectedVersion: AggregateVersion,
     permissionPersistence: PermissionPersistence,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeApprovalEffect = typeof CodeApprovalEffect.Type;
 
 export const CodeOperationApprovalRequest = Schema.Struct({
   effect: CodeApprovalEffect,
-}).annotations(strict);
+});
 export type CodeOperationApprovalRequest = typeof CodeOperationApprovalRequest.Type;
 
 export const CodeOperationApprovalReceipt = Schema.Struct({
   approvalId: CodeApprovalId,
-}).annotations(strict);
+});
 export type CodeOperationApprovalReceipt = typeof CodeOperationApprovalReceipt.Type;
 
 export const CodeOperationApprovalChallenge = Schema.Struct({
@@ -3483,89 +3522,186 @@ export const CodeOperationApprovalChallenge = Schema.Struct({
       baseRepository: boundedNonEmptyText(512),
       baseBranch: boundedNonEmptyText(255),
       head: boundedNonEmptyText(255),
-    }).annotations(strict),
+    }),
   ),
   message: boundedNonEmptyText(512),
   // A challenge includes the full bounded effect plus authoritative scope metadata.
   detail: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES + 4_096),
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 export type CodeOperationApprovalChallenge = typeof CodeOperationApprovalChallenge.Type;
 
 export const CodeOperationApprovalConfirmation = Schema.Struct({
   challengeId: CodeApprovalId,
-}).annotations(strict);
+});
 export type CodeOperationApprovalConfirmation = typeof CodeOperationApprovalConfirmation.Type;
 
-export const decodeCodeOperationId = Schema.decodeUnknownSync(CodeOperationId);
+export const decodeCodeOperationId = Schema.decodeUnknownSync(
+  CodeOperationId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeTerminalInspectionRequest = Schema.decodeUnknownSync(
   CodeTerminalInspectionRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeTerminalInspection = Schema.decodeUnknownSync(CodeTerminalInspection);
-export const decodeCodeTerminalLiveFrame = Schema.decodeUnknownSync(CodeTerminalLiveFrame);
-export const decodeCodeTerminalLiveRequest = Schema.decodeUnknownSync(CodeTerminalLiveRequest);
-export const decodeCodeApprovalId = Schema.decodeUnknownSync(CodeApprovalId);
-export const decodeCodeEvidenceReference = Schema.decodeUnknownSync(CodeEvidenceReference);
+export const decodeCodeTerminalInspection = Schema.decodeUnknownSync(
+  CodeTerminalInspection,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeTerminalLiveFrame = Schema.decodeUnknownSync(
+  CodeTerminalLiveFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeTerminalLiveRequest = Schema.decodeUnknownSync(
+  CodeTerminalLiveRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeApprovalId = Schema.decodeUnknownSync(CodeApprovalId, STRICT_DECODE_OPTIONS);
+export const decodeCodeEvidenceReference = Schema.decodeUnknownSync(
+  CodeEvidenceReference,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeFileOpenResultEnvelope = Schema.decodeUnknownSync(
   CodeFileOpenResultEnvelope,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeOperationCommand = Schema.decodeUnknownSync(CodeOperationCommand);
-export const decodeCodeRunOutcome = Schema.decodeUnknownSync(CodeRunOutcome);
-export const decodeCodeOperationResult = Schema.decodeUnknownSync(CodeOperationResult);
-export const decodeCodeRepositoryTestStatus = Schema.decodeUnknownSync(CodeRepositoryTestStatus);
-export const decodeCodeOperationEvent = Schema.decodeUnknownSync(CodeOperationEvent);
-export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(CodeOperationEventFrame);
-export const decodeCodeOperationStreamFrame = Schema.decodeUnknownSync(CodeOperationStreamFrame);
-export const decodeCodeConversationTurn = Schema.decodeUnknownSync(CodeConversationTurn);
-export const decodeCodeConversationPage = Schema.decodeUnknownSync(CodeConversationPage);
-export const decodeCodeConversationWindow = Schema.decodeUnknownSync(CodeConversationWindow);
+export const decodeCodeOperationCommand = Schema.decodeUnknownSync(
+  CodeOperationCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRunOutcome = Schema.decodeUnknownSync(CodeRunOutcome, STRICT_DECODE_OPTIONS);
+export const decodeCodeOperationResult = Schema.decodeUnknownSync(
+  CodeOperationResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeRepositoryTestStatus = Schema.decodeUnknownSync(
+  CodeRepositoryTestStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeOperationEvent = Schema.decodeUnknownSync(
+  CodeOperationEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(
+  CodeOperationEventFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeOperationStreamFrame = Schema.decodeUnknownSync(
+  CodeOperationStreamFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeConversationTurn = Schema.decodeUnknownSync(
+  CodeConversationTurn,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeConversationPage = Schema.decodeUnknownSync(
+  CodeConversationPage,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeConversationWindow = Schema.decodeUnknownSync(
+  CodeConversationWindow,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeConversationWindowRequest = Schema.decodeUnknownSync(
   CodeConversationWindowRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeConversationUsageTotals = Schema.decodeUnknownSync(
   CodeConversationUsageTotals,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeEvidenceBatchRequest = Schema.decodeUnknownSync(CodeEvidenceBatchRequest);
-export const decodeCodeEvidenceBatchResponse = Schema.decodeUnknownSync(CodeEvidenceBatchResponse);
+export const decodeCodeEvidenceBatchRequest = Schema.decodeUnknownSync(
+  CodeEvidenceBatchRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeEvidenceBatchResponse = Schema.decodeUnknownSync(
+  CodeEvidenceBatchResponse,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeOperationApprovalRequest = Schema.decodeUnknownSync(
   CodeOperationApprovalRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeOperationApprovalReceipt = Schema.decodeUnknownSync(
   CodeOperationApprovalReceipt,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeOperationApprovalChallenge = Schema.decodeUnknownSync(
   CodeOperationApprovalChallenge,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeOperationApprovalConfirmation = Schema.decodeUnknownSync(
   CodeOperationApprovalConfirmation,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeThreadOperationalMetadata = Schema.decodeUnknownSync(
   CodeThreadOperationalMetadata,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeThreadOperationalMetadataView = Schema.decodeUnknownSync(
   CodeThreadOperationalMetadataView,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeBoardStatus = Schema.decodeUnknownSync(CodeBoardStatus);
-export const decodeCodeBoardStatusReason = Schema.decodeUnknownSync(CodeBoardStatusReason);
-export const decodeCodeBoardQuery = Schema.decodeUnknownSync(CodeBoardQuery);
-export const decodeCodeBoardCard = Schema.decodeUnknownSync(CodeBoardCard);
-export const decodeCodeBoardView = Schema.decodeUnknownSync(CodeBoardView);
-export const decodeCodeReviewLocation = Schema.decodeUnknownSync(CodeReviewLocation);
-export const decodeCodeReviewAuthor = Schema.decodeUnknownSync(CodeReviewAuthor);
-export const decodeCodeReviewProvenance = Schema.decodeUnknownSync(CodeReviewProvenance);
-export const decodeCodeReviewFinding = Schema.decodeUnknownSync(CodeReviewFinding);
-export const decodeCodeReviewFindingUpdated = Schema.decodeUnknownSync(CodeReviewFindingUpdated);
-export const decodeCodeThreadFollowUp = Schema.decodeUnknownSync(CodeThreadFollowUp);
-export const decodeCodeFollowUpCommand = Schema.decodeUnknownSync(CodeFollowUpCommand);
-export const decodeCodeThreadFollowUpUpdated = Schema.decodeUnknownSync(CodeThreadFollowUpUpdated);
+export const decodeCodeBoardStatus = Schema.decodeUnknownSync(
+  CodeBoardStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeBoardStatusReason = Schema.decodeUnknownSync(
+  CodeBoardStatusReason,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeBoardQuery = Schema.decodeUnknownSync(CodeBoardQuery, STRICT_DECODE_OPTIONS);
+export const decodeCodeBoardCard = Schema.decodeUnknownSync(CodeBoardCard, STRICT_DECODE_OPTIONS);
+export const decodeCodeBoardView = Schema.decodeUnknownSync(CodeBoardView, STRICT_DECODE_OPTIONS);
+export const decodeCodeReviewLocation = Schema.decodeUnknownSync(
+  CodeReviewLocation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeReviewAuthor = Schema.decodeUnknownSync(
+  CodeReviewAuthor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeReviewProvenance = Schema.decodeUnknownSync(
+  CodeReviewProvenance,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeReviewFinding = Schema.decodeUnknownSync(
+  CodeReviewFinding,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeReviewFindingUpdated = Schema.decodeUnknownSync(
+  CodeReviewFindingUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadFollowUp = Schema.decodeUnknownSync(
+  CodeThreadFollowUp,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeFollowUpCommand = Schema.decodeUnknownSync(
+  CodeFollowUpCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeThreadFollowUpUpdated = Schema.decodeUnknownSync(
+  CodeThreadFollowUpUpdated,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePersistedCodeThreadFollowUpUpdated = Schema.decodeUnknownSync(
   PersistedCodeThreadFollowUpUpdated,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeThreadFollowUpView = Schema.decodeUnknownSync(CodeThreadFollowUpView);
+export const decodeCodeThreadFollowUpView = Schema.decodeUnknownSync(
+  CodeThreadFollowUpView,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeCodeReviewTarget = Schema.decodeUnknownSync(CodeReviewTarget);
+export const decodeCodeReviewTarget = Schema.decodeUnknownSync(
+  CodeReviewTarget,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeReviewFindingReferences = Schema.decodeUnknownSync(
   CodeReviewFindingReferences,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeReviewCorrectionPrepared = Schema.decodeUnknownSync(
   CodeReviewCorrectionPrepared,
+  STRICT_DECODE_OPTIONS,
 );

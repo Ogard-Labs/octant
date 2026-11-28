@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   AppleActionRequest,
   AppleBuildEvidence,
@@ -14,13 +15,11 @@ import {
 import { CodeCheckoutId, CodeThreadId } from "./code";
 import { ToolActionAuthority, ToolActionCancellation } from "./toolActions";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 export const AppleAuthorityScopeRequest = Schema.Struct({
   authority: ToolActionAuthority,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-}).annotations(strict);
+});
 export type AppleAuthorityScopeRequest = typeof AppleAuthorityScopeRequest.Type;
 
 export const AppleCancelRequest = Schema.Struct({
@@ -28,7 +27,7 @@ export const AppleCancelRequest = Schema.Struct({
   cancellation: ToolActionCancellation,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-}).annotations(strict);
+});
 export type AppleCancelRequest = typeof AppleCancelRequest.Type;
 
 export const AppleSnapshotRequest = Schema.Struct({
@@ -36,7 +35,7 @@ export const AppleSnapshotRequest = Schema.Struct({
   authority: ToolActionAuthority,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-}).annotations(strict);
+});
 export type AppleSnapshotRequest = typeof AppleSnapshotRequest.Type;
 
 export const AppleArtifactRequest = Schema.Struct({
@@ -45,7 +44,7 @@ export const AppleArtifactRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   reference: AppleEvidenceReference,
-}).annotations(strict);
+});
 export type AppleArtifactRequest = typeof AppleArtifactRequest.Type;
 
 /**
@@ -59,56 +58,75 @@ export const AppleScreenStreamRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   simulatorId: AppleSimulatorId,
-}).annotations(strict);
+});
 export type AppleScreenStreamRequest = typeof AppleScreenStreamRequest.Type;
 
 export const AppleDiscoverySnapshot = Schema.Struct({
   toolchain: AppleToolchainDiscovery,
   workspace: AppleWorkspaceDiscovery,
-  simulators: Schema.Array(AppleSimulatorRecord).pipe(Schema.maxItems(256)),
-}).annotations(strict);
+  simulators: Schema.Array(AppleSimulatorRecord).check(Schema.isMaxLength(256)),
+});
 export type AppleDiscoverySnapshot = typeof AppleDiscoverySnapshot.Type;
 
-export const AppleRpcEnvelope = Schema.Union(
+export const AppleRpcEnvelope = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("apple-discovery-request"),
     request: AppleDiscoveryRequest,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-action-request"),
     request: AppleActionRequest,
-  }).annotations(strict),
+  }),
   AppleCancelRequest,
   AppleSnapshotRequest,
   Schema.Struct({
     kind: Schema.Literal("apple-discovery-snapshot"),
     snapshot: AppleDiscoverySnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-action-evidence"),
     evidence: AppleBuildEvidence,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-runtime-snapshot"),
     snapshot: AppleRuntimeSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-cancelled"),
     cancelled: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apple-failure"),
     failure: AppleToolchainFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AppleRpcEnvelope = typeof AppleRpcEnvelope.Type;
 
 export const decodeAppleAuthorityScopeRequest = Schema.decodeUnknownSync(
   AppleAuthorityScopeRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAppleCancelRequest = Schema.decodeUnknownSync(AppleCancelRequest);
-export const decodeAppleSnapshotRequest = Schema.decodeUnknownSync(AppleSnapshotRequest);
-export const decodeAppleArtifactRequest = Schema.decodeUnknownSync(AppleArtifactRequest);
-export const decodeAppleScreenStreamRequest = Schema.decodeUnknownSync(AppleScreenStreamRequest);
-export const decodeAppleDiscoverySnapshot = Schema.decodeUnknownSync(AppleDiscoverySnapshot);
-export const decodeAppleRpcEnvelope = Schema.decodeUnknownSync(AppleRpcEnvelope);
+export const decodeAppleCancelRequest = Schema.decodeUnknownSync(
+  AppleCancelRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppleSnapshotRequest = Schema.decodeUnknownSync(
+  AppleSnapshotRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppleArtifactRequest = Schema.decodeUnknownSync(
+  AppleArtifactRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppleScreenStreamRequest = Schema.decodeUnknownSync(
+  AppleScreenStreamRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppleDiscoverySnapshot = Schema.decodeUnknownSync(
+  AppleDiscoverySnapshot,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppleRpcEnvelope = Schema.decodeUnknownSync(
+  AppleRpcEnvelope,
+  STRICT_DECODE_OPTIONS,
+);

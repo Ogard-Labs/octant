@@ -189,7 +189,7 @@ function committed(
  * that rename fail here instead.
  */
 type Shape<T> =
-  T extends Brand.Brand<string | symbol>
+  T extends Brand.Brand<string>
     ? string
     : T extends string | number | boolean
       ? T

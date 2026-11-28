@@ -12,6 +12,7 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeRelativePath, CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
@@ -19,12 +20,11 @@ import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 import { TurnUsage } from "./turnMetrics";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 
 const boundedText = (minimumChars: number, maximumBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) =>
         value.trim().length >= minimumChars &&
         encoder.encode(value).byteLength <= maximumBytes &&
@@ -32,7 +32,7 @@ const boundedText = (minimumChars: number, maximumBytes: number) =>
     ),
   );
 
-const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
+const GitObjectId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
 
 /** Stops one guide may hold. */
 export const MAX_PULL_REQUEST_GUIDE_STOPS = 30;
@@ -58,49 +58,52 @@ export const PullRequestGuideTarget = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type PullRequestGuideTarget = typeof PullRequestGuideTarget.Type;
 
-export const PullRequestGuideId = Schema.UUID.pipe(Schema.brand("PullRequestGuideId"));
+export const PullRequestGuideId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PullRequestGuideId"),
+);
 export type PullRequestGuideId = typeof PullRequestGuideId.Type;
 
 /** A line range on the head side of the diff, at the guide's head commit. */
 export const PullRequestGuideAnchor = Schema.Struct({
   path: CodeRelativePath,
-  startLine: Schema.Int.pipe(Schema.positive()),
-  endLine: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  startLine: PositiveInt,
+  endLine: PositiveInt,
+});
 export type PullRequestGuideAnchor = typeof PullRequestGuideAnchor.Type;
 
 /** One stop. A stop whose anchors the host all dropped is kept and reads as unanchored. */
 export const PullRequestGuideStop = Schema.Struct({
-  id: Schema.String.pipe(Schema.pattern(/^[a-z0-9-]{1,64}$/)),
-  title: boundedText(1, MAX_PULL_REQUEST_GUIDE_TITLE_CHARS * 4).pipe(
-    Schema.filter((value) => [...value].length <= MAX_PULL_REQUEST_GUIDE_TITLE_CHARS),
+  id: Schema.String.check(Schema.isPattern(/^[a-z0-9-]{1,64}$/)),
+  title: boundedText(1, MAX_PULL_REQUEST_GUIDE_TITLE_CHARS * 4).check(
+    Schema.makeFilter((value) => [...value].length <= MAX_PULL_REQUEST_GUIDE_TITLE_CHARS),
   ),
   why: boundedText(0, MAX_PULL_REQUEST_GUIDE_WHY_BYTES),
   needsDecision: Schema.Boolean,
-  anchors: Schema.Array(PullRequestGuideAnchor).pipe(
-    Schema.maxItems(MAX_PULL_REQUEST_GUIDE_ANCHORS),
+  anchors: Schema.Array(PullRequestGuideAnchor).check(
+    Schema.isMaxLength(MAX_PULL_REQUEST_GUIDE_ANCHORS),
   ),
-}).annotations(strict);
+});
 export type PullRequestGuideStop = typeof PullRequestGuideStop.Type;
 
-export const PullRequestGuideRequester = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("person") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("agent"), threadId: CodeThreadId }).annotations(strict),
-);
+export const PullRequestGuideRequester = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("person") }),
+  Schema.Struct({ kind: Schema.Literal("agent"), threadId: CodeThreadId }),
+]);
 export type PullRequestGuideRequester = typeof PullRequestGuideRequester.Type;
 
-export const PullRequestGuideFailureReason = Schema.Literal(
+export const PullRequestGuideFailureReason = Schema.Literals([
   "no-model",
   "spend-ceiling",
   "head-stale",
   "invalid-output",
   "cancelled",
   "unavailable",
-);
+]);
 export type PullRequestGuideFailureReason = typeof PullRequestGuideFailureReason.Type;
 
 /** Journal aggregate type and event names; one aggregate per pull-request link. */
@@ -115,29 +118,29 @@ export const PullRequestGuideRunStartedEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-guide-run-started"),
   guideId: PullRequestGuideId,
   /** The pull-request link's key: Project, repository and number. */
-  linkId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(512)),
+  linkId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
   headSha: GitObjectId,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   requestedBy: PullRequestGuideRequester,
-  reservationId: Schema.UUID,
-}).annotations(strict);
+  reservationId: GuidString,
+});
 export type PullRequestGuideRunStartedEvent = typeof PullRequestGuideRunStartedEvent.Type;
 
 export const PullRequestGuideRecordedEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-guide-recorded"),
   guideId: PullRequestGuideId,
   headSha: GitObjectId,
-  stops: Schema.Array(PullRequestGuideStop).pipe(Schema.maxItems(MAX_PULL_REQUEST_GUIDE_STOPS)),
+  stops: Schema.Array(PullRequestGuideStop).check(Schema.isMaxLength(MAX_PULL_REQUEST_GUIDE_STOPS)),
   usage: Schema.optional(TurnUsage),
-}).annotations(strict);
+});
 export type PullRequestGuideRecordedEvent = typeof PullRequestGuideRecordedEvent.Type;
 
 export const PullRequestGuideRunFailedEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-guide-run-failed"),
   guideId: PullRequestGuideId,
   reason: PullRequestGuideFailureReason,
-}).annotations(strict);
+});
 export type PullRequestGuideRunFailedEvent = typeof PullRequestGuideRunFailedEvent.Type;
 
 /** The guide a reader sees: the latest one written for this link. */
@@ -146,9 +149,9 @@ export const PullRequestGuide = Schema.Struct({
   headSha: GitObjectId,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  stops: Schema.Array(PullRequestGuideStop).pipe(Schema.maxItems(MAX_PULL_REQUEST_GUIDE_STOPS)),
+  stops: Schema.Array(PullRequestGuideStop).check(Schema.isMaxLength(MAX_PULL_REQUEST_GUIDE_STOPS)),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PullRequestGuide = typeof PullRequestGuide.Type;
 
 export const PullRequestGuideView = Schema.Struct({
@@ -159,35 +162,35 @@ export const PullRequestGuideView = Schema.Struct({
   lastFailure: Schema.optional(PullRequestGuideFailureReason),
   /** Whether this Project has a guide model; without one nothing runs. */
   modelPicked: Schema.Boolean,
-}).annotations(strict);
+});
 export type PullRequestGuideView = typeof PullRequestGuideView.Type;
 
 export const PullRequestGuideQuery = Schema.Struct({
   target: PullRequestGuideTarget,
   /** The head the reader shows; the guide reads stale against it. */
   headSha: Schema.optional(GitObjectId),
-}).annotations(strict);
+});
 export type PullRequestGuideQuery = typeof PullRequestGuideQuery.Type;
 
 export const PullRequestGuideWriteCommand = Schema.Struct({
   target: PullRequestGuideTarget,
-}).annotations(strict);
+});
 export type PullRequestGuideWriteCommand = typeof PullRequestGuideWriteCommand.Type;
 
 /** GitHub's `viewerViewedState`; `changed` is GitHub's DISMISSED: the file moved after it was viewed. */
-export const PullRequestViewedState = Schema.Literal("viewed", "unviewed", "changed");
+export const PullRequestViewedState = Schema.Literals(["viewed", "unviewed", "changed"]);
 export type PullRequestViewedState = typeof PullRequestViewedState.Type;
 
 export const PullRequestViewedView = Schema.Struct({
   files: Schema.Array(
-    Schema.Struct({ path: CodeRelativePath, state: PullRequestViewedState }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_PULL_REQUEST_VIEWED_FILES)),
-}).annotations(strict);
+    Schema.Struct({ path: CodeRelativePath, state: PullRequestViewedState }),
+  ).check(Schema.isMaxLength(MAX_PULL_REQUEST_VIEWED_FILES)),
+});
 export type PullRequestViewedView = typeof PullRequestViewedView.Type;
 
 export const PullRequestViewedQuery = Schema.Struct({
   target: PullRequestGuideTarget,
-}).annotations(strict);
+});
 export type PullRequestViewedQuery = typeof PullRequestViewedQuery.Type;
 
 export const PullRequestViewedCommand = Schema.Struct({
@@ -200,16 +203,38 @@ export const PullRequestViewedCommand = Schema.Struct({
    * newer changes were seen.
    */
   headSha: Schema.optional(GitObjectId),
-}).annotations(strict);
+});
 export type PullRequestViewedCommand = typeof PullRequestViewedCommand.Type;
 
-export const decodePullRequestGuideId = Schema.decodeUnknownSync(PullRequestGuideId);
-export const decodePullRequestGuideStop = Schema.decodeUnknownSync(PullRequestGuideStop);
-export const decodePullRequestGuideView = Schema.decodeUnknownSync(PullRequestGuideView);
-export const decodePullRequestGuideQuery = Schema.decodeUnknownSync(PullRequestGuideQuery);
+export const decodePullRequestGuideId = Schema.decodeUnknownSync(
+  PullRequestGuideId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestGuideStop = Schema.decodeUnknownSync(
+  PullRequestGuideStop,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestGuideView = Schema.decodeUnknownSync(
+  PullRequestGuideView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestGuideQuery = Schema.decodeUnknownSync(
+  PullRequestGuideQuery,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePullRequestGuideWriteCommand = Schema.decodeUnknownSync(
   PullRequestGuideWriteCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodePullRequestViewedView = Schema.decodeUnknownSync(PullRequestViewedView);
-export const decodePullRequestViewedQuery = Schema.decodeUnknownSync(PullRequestViewedQuery);
-export const decodePullRequestViewedCommand = Schema.decodeUnknownSync(PullRequestViewedCommand);
+export const decodePullRequestViewedView = Schema.decodeUnknownSync(
+  PullRequestViewedView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestViewedQuery = Schema.decodeUnknownSync(
+  PullRequestViewedQuery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestViewedCommand = Schema.decodeUnknownSync(
+  PullRequestViewedCommand,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,8 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** Longest tool label a navigation row carries; the host truncates before this. */
 export const MAX_LIVE_STEP_TOOL_LENGTH = 80;
 /** Longest redacted argument a navigation row carries. */
@@ -15,19 +13,19 @@ export const MAX_LIVE_STEP_ARGUMENT_LENGTH = 160;
  * command, a checkout-relative path). `waiting` is the turn parked on the
  * person. Neither ever carries file contents, a secret, or an absolute path.
  */
-export const ThreadLiveStep = Schema.Union(
+export const ThreadLiveStep = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("tool"),
-    tool: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_LIVE_STEP_TOOL_LENGTH)),
+    tool: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_LIVE_STEP_TOOL_LENGTH)),
     argument: Schema.optional(
-      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_LIVE_STEP_ARGUMENT_LENGTH)),
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_LIVE_STEP_ARGUMENT_LENGTH)),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("waiting"),
-    reason: Schema.Literal("approval", "user-input"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["approval", "user-input"]),
+  }),
+]);
 export type ThreadLiveStep = typeof ThreadLiveStep.Type;
 
 /**

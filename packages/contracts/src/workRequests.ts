@@ -1,4 +1,5 @@
 import { personDecides } from "./hostAnswer";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -6,8 +7,8 @@ import { MAX_PROVIDER_PLAN_CHARACTERS, ProviderInstanceId, ProviderSessionId } f
 import { WorkAccess, WorkThreadId } from "./workThreads";
 import { Questionnaire, QuestionnaireResponse } from "./questionnaire";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Branded identity for one durable Work pending-approval or user-input
@@ -23,9 +24,12 @@ export type WorkRequestId = typeof WorkRequestId.Type;
  * snippet, or authority URL from an untrusted provider payload can never
  * reach the renderer-facing contract. Mirrors `WorkPromotionSummaryText`.
  */
-export const WorkRequestSanitizedText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(2_000),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/(?:^|\s|[[({<])(file|https?):/i.test(value)),
+export const WorkRequestSanitizedText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_000),
+  Schema.makeFilter(
+    (value) => !/[\\/]/.test(value) && !/(?:^|\s|[[({<])(file|https?):/i.test(value),
+  ),
 );
 
 /**
@@ -34,8 +38,9 @@ export const WorkRequestSanitizedText = Schema.NonEmptyTrimmedString.pipe(
  * the Octant request id so an untrusted provider cannot use this field to
  * disclose a credential, path, or authority URL.
  */
-export const WorkRequestProviderRequestId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
+export const WorkRequestProviderRequestId = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
 );
 export type WorkRequestProviderRequestId = typeof WorkRequestProviderRequestId.Type;
 
@@ -46,9 +51,9 @@ export type WorkRequestProviderRequestId = typeof WorkRequestProviderRequestId.T
  * exactly because callback values are opaque provider data, but bound it so a
  * provider cannot make the private journal unbounded.
  */
-const WorkRequestProviderCallbackId = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(16_384),
+const WorkRequestProviderCallbackId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(16_384),
 );
 
 /**
@@ -57,12 +62,12 @@ const WorkRequestProviderCallbackId = Schema.String.pipe(
  * callback value after restart. It is deliberately absent from WorkRequest
  * and every HTTP contract.
  */
-const WorkRequestProviderOptionValue = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(16_384),
+const WorkRequestProviderOptionValue = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(16_384),
 );
-const WorkRequestProviderOptionValues = Schema.Array(WorkRequestProviderOptionValue).pipe(
-  Schema.maxItems(8),
+const WorkRequestProviderOptionValues = Schema.Array(WorkRequestProviderOptionValue).check(
+  Schema.isMaxLength(8),
 );
 export type WorkRequestProviderOptionValues = typeof WorkRequestProviderOptionValues.Type;
 
@@ -76,24 +81,24 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
-export const WorkRequestKind = Schema.Literal("approval", "user-input");
+export const WorkRequestKind = Schema.Literals(["approval", "user-input"]);
 export type WorkRequestKind = typeof WorkRequestKind.Type;
 
-export const WorkRequestStatus = Schema.Literal(
+export const WorkRequestStatus = Schema.Literals([
   "pending",
   "resolved",
   "cancelled",
   "interrupted",
   "expired",
-);
+]);
 export type WorkRequestStatus = typeof WorkRequestStatus.Type;
 
 export const MAX_WORK_REQUEST_OPTIONS = 8;
 
 const safeQuestionId = (id: string) => /^[A-Za-z0-9_-]{1,64}$/.test(id);
 const safeRequestText = Schema.is(WorkRequestSanitizedText);
-export const WorkQuestionnaire = Questionnaire.pipe(
-  Schema.filter(({ questions }) =>
+export const WorkQuestionnaire = Questionnaire.check(
+  Schema.makeFilter(({ questions }) =>
     questions.every(
       (question) =>
         safeQuestionId(question.id) &&
@@ -107,8 +112,8 @@ export const WorkQuestionnaire = Questionnaire.pipe(
     ),
   ),
 );
-export const WorkQuestionnaireResponse = QuestionnaireResponse.pipe(
-  Schema.filter(
+export const WorkQuestionnaireResponse = QuestionnaireResponse.check(
+  Schema.makeFilter(
     (response) =>
       (response.comment === undefined || safeRequestText(response.comment)) &&
       response.answers.every(
@@ -119,7 +124,10 @@ export const WorkQuestionnaireResponse = QuestionnaireResponse.pipe(
       ),
   ),
 );
-export const decodeWorkQuestionnaireResponse = Schema.decodeUnknownSync(WorkQuestionnaireResponse);
+export const decodeWorkQuestionnaireResponse = Schema.decodeUnknownSync(
+  WorkQuestionnaireResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The plan an agent asks the person to approve when it asks to leave Plan,
@@ -128,9 +136,10 @@ export const decodeWorkQuestionnaireResponse = Schema.decodeUnknownSync(WorkQues
  * what they approve. The host redacts known secret formats before recording
  * it, and it is bounded as a runtime's plan is.
  */
-export const WorkLevelChangePlan = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_PROVIDER_PLAN_CHARACTERS),
-  Schema.filter((value) => !hasControlCharacter(value)),
+export const WorkLevelChangePlan = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_PROVIDER_PLAN_CHARACTERS),
+  Schema.makeFilter((value) => !hasControlCharacter(value)),
 );
 export type WorkLevelChangePlan = typeof WorkLevelChangePlan.Type;
 
@@ -142,17 +151,12 @@ export type WorkLevelChangePlan = typeof WorkLevelChangePlan.Type;
 export const WorkLevelChangeRequest = Schema.Struct({
   to: WorkAccess,
   plan: Schema.optional(WorkLevelChangePlan),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (change) =>
-        change.to !== "full-access" && (change.to !== "plan" || change.plan === undefined),
-      {
-        jsonSchema: {},
-      },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (change) => change.to !== "full-access" && (change.to !== "plan" || change.plan === undefined),
+    { jsonSchema: {} },
+  ),
+);
 export type WorkLevelChangeRequest = typeof WorkLevelChangeRequest.Type;
 
 /**
@@ -163,17 +167,19 @@ export type WorkLevelChangeRequest = typeof WorkLevelChangeRequest.Type;
  * prompt and options are sanitized free text with no path/URL leakage; only
  * up to 8 options are retained.
  */
-export const WorkRequestDetail = Schema.Union(
+export const WorkRequestDetail = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("approval"),
     action: WorkRequestSanitizedText,
     description: WorkRequestSanitizedText,
     levelChange: Schema.optional(WorkLevelChangeRequest),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("user-input"),
     prompt: WorkRequestSanitizedText,
-    options: Schema.Array(WorkRequestSanitizedText).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    options: Schema.Array(WorkRequestSanitizedText).check(
+      Schema.isMaxLength(MAX_WORK_REQUEST_OPTIONS),
+    ),
     questionnaire: Schema.optional(WorkQuestionnaire),
     /**
      * The provider asks for a secret: the person answers in a masked field,
@@ -181,8 +187,8 @@ export const WorkRequestDetail = Schema.Union(
      * only that a secret answer was given.
      */
     secret: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkRequestDetail = typeof WorkRequestDetail.Type;
 
 /**
@@ -190,22 +196,17 @@ export type WorkRequestDetail = typeof WorkRequestDetail.Type;
  * request's `detail.kind`; a mismatched pairing is rejected structurally so
  * an approval can never be "resolved" with a user-input answer or vice versa.
  */
-export const WorkRequestResolution = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("approval"), approved: Schema.Boolean }).annotations(strict),
+export const WorkRequestResolution = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("approval"), approved: Schema.Boolean }),
   Schema.Struct({
     kind: Schema.Literal("user-input"),
-    answer: Schema.Union(WorkRequestSanitizedText, WorkQuestionnaireResponse),
-  }).annotations(strict),
-  /**
-   * A secret question's answer, given and handed to the provider in memory.
-   * The value travels beside the resolution as the command's `secretAnswer`,
-   * so neither the delivery intent nor the settled request ever holds it.
-   */
+    answer: Schema.Union([WorkRequestSanitizedText, WorkQuestionnaireResponse]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("user-input"),
     secret: Schema.Literal(true),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkRequestResolution = typeof WorkRequestResolution.Type;
 
 /**
@@ -217,19 +218,19 @@ export type WorkRequestResolution = typeof WorkRequestResolution.Type;
  * removed only by the terminal request frame (or a failed-delivery release
  * frame).
  */
-export const WorkRequestDelivery = Schema.Union(
+export const WorkRequestDelivery = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("resolve"),
     resolution: WorkRequestResolution,
     /** The provider accepted this intent and that acknowledgement is journaled. */
     confirmed: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel"),
     /** The provider accepted this intent and that acknowledgement is journaled. */
     confirmed: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkRequestDelivery = typeof WorkRequestDelivery.Type;
 
 /**
@@ -257,15 +258,14 @@ export const WorkRequest = Schema.Struct({
    * ending (`next-turn`). Set by the host, never by an answer; absent on
    * every other request and in older journals.
    */
-  levelChangeApplied: Schema.optional(Schema.Literal("in-place", "next-turn")),
+  levelChangeApplied: Schema.optional(Schema.Literals(["in-place", "next-turn"])),
   delivery: Schema.optional(WorkRequestDelivery),
   requestedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
   version: AggregateVersion,
 })
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (request) => {
         if (request.status === "pending") {
           return (
@@ -294,7 +294,7 @@ export const WorkRequest = Schema.Struct({
       { jsonSchema: {} },
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type WorkRequest = typeof WorkRequest.Type;
 
 const RequestTransitionFields = {
@@ -308,7 +308,7 @@ const RequestTransitionFields = {
  * and are not exposed on this wire command, so a window can never fabricate
  * a request or force a system-only transition.
  */
-export const WorkRequestCommand = Schema.Union(
+export const WorkRequestCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("resolve-work-request"),
     ...RequestTransitionFields,
@@ -320,44 +320,42 @@ export const WorkRequestCommand = Schema.Union(
      * the bound and the question, so a decode failure never prints it.
      */
     secretAnswer: Schema.optional(Schema.String),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-work-request"),
     ...RequestTransitionFields,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkRequestCommand = typeof WorkRequestCommand.Type;
 
-export const WorkRequestCommandResult = Schema.Union(
+export const WorkRequestCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("work-request-resolved"),
     request: WorkRequest,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((result) => result.request.status === "resolved", { jsonSchema: {} })),
+  }).check(Schema.makeFilter((result) => result.request.status === "resolved", { jsonSchema: {} })),
   Schema.Struct({
     kind: Schema.Literal("work-request-cancelled"),
     request: WorkRequest,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((result) => result.request.status === "cancelled", { jsonSchema: {} })),
-);
+  }).check(
+    Schema.makeFilter((result) => result.request.status === "cancelled", { jsonSchema: {} }),
+  ),
+]);
 export type WorkRequestCommandResult = typeof WorkRequestCommandResult.Type;
 
-export const WorkRequestFailureCode = Schema.Literal(
+export const WorkRequestFailureCode = Schema.Literals([
   "invalid",
   "unauthorized",
   "stale",
   "not-found",
   "conflict",
   "unavailable",
-);
+]);
 export type WorkRequestFailureCode = typeof WorkRequestFailureCode.Type;
 
 export const WorkRequestFailure = Schema.Struct({
   code: WorkRequestFailureCode,
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  message: NonEmptyTrimmedString,
+});
 export type WorkRequestFailure = typeof WorkRequestFailure.Type;
 
 /**
@@ -366,8 +364,8 @@ export type WorkRequestFailure = typeof WorkRequestFailure.Type;
  * renderer with an unbounded backlog.
  */
 export const WorkRequestList = Schema.Struct({
-  requests: Schema.Array(WorkRequest).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+  requests: Schema.Array(WorkRequest).check(Schema.isMaxLength(128)),
+});
 export type WorkRequestList = typeof WorkRequestList.Type;
 
 /**
@@ -379,67 +377,59 @@ export type WorkRequestList = typeof WorkRequestList.Type;
  * out-of-order frame fails closed at decode time rather than corrupting the
  * rebuildable projection.
  */
-export const WorkRequestFrame = Schema.Union(
+export const WorkRequestFrame = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("requested"),
     request: WorkRequest,
     /** Private provider callback id; absent only in legacy request frames. */
     providerCallbackId: Schema.optional(WorkRequestProviderCallbackId),
     providerOptionValues: Schema.optional(WorkRequestProviderOptionValues),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (frame) =>
-          frame.request.status === "pending" &&
-          frame.request.delivery === undefined &&
-          (frame.providerOptionValues === undefined
-            ? true
-            : frame.request.detail.kind === "user-input" &&
-              frame.providerOptionValues.length === frame.request.detail.options.length),
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (frame) =>
+        frame.request.status === "pending" &&
+        frame.request.delivery === undefined &&
+        (frame.providerOptionValues === undefined
+          ? true
+          : frame.request.detail.kind === "user-input" &&
+            frame.providerOptionValues.length === frame.request.detail.options.length),
+      { jsonSchema: {} },
     ),
-  Schema.Struct({ kind: Schema.Literal("delivery-requested"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (frame) =>
-          frame.request.status === "pending" &&
-          frame.request.delivery !== undefined &&
-          frame.request.delivery.confirmed === undefined,
-        { jsonSchema: {} },
-      ),
+  ),
+  Schema.Struct({ kind: Schema.Literal("delivery-requested"), request: WorkRequest }).check(
+    Schema.makeFilter(
+      (frame) =>
+        frame.request.status === "pending" &&
+        frame.request.delivery !== undefined &&
+        frame.request.delivery.confirmed === undefined,
+      { jsonSchema: {} },
     ),
-  Schema.Struct({ kind: Schema.Literal("delivery-confirmed"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (frame) => frame.request.status === "pending" && frame.request.delivery?.confirmed === true,
-        { jsonSchema: {} },
-      ),
+  ),
+  Schema.Struct({ kind: Schema.Literal("delivery-confirmed"), request: WorkRequest }).check(
+    Schema.makeFilter(
+      (frame) => frame.request.status === "pending" && frame.request.delivery?.confirmed === true,
+      { jsonSchema: {} },
     ),
-  Schema.Struct({ kind: Schema.Literal("delivery-released"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (frame) => frame.request.status === "pending" && frame.request.delivery === undefined,
-        { jsonSchema: {} },
-      ),
+  ),
+  Schema.Struct({ kind: Schema.Literal("delivery-released"), request: WorkRequest }).check(
+    Schema.makeFilter(
+      (frame) => frame.request.status === "pending" && frame.request.delivery === undefined,
+      { jsonSchema: {} },
     ),
-  Schema.Struct({ kind: Schema.Literal("resolved"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.request.status === "resolved", { jsonSchema: {} })),
-  Schema.Struct({ kind: Schema.Literal("cancelled"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.request.status === "cancelled", { jsonSchema: {} })),
-  Schema.Struct({ kind: Schema.Literal("interrupted"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.request.status === "interrupted", { jsonSchema: {} })),
-  Schema.Struct({ kind: Schema.Literal("expired"), request: WorkRequest })
-    .annotations(strict)
-    .pipe(Schema.filter((frame) => frame.request.status === "expired", { jsonSchema: {} })),
-);
+  ),
+  Schema.Struct({ kind: Schema.Literal("resolved"), request: WorkRequest }).check(
+    Schema.makeFilter((frame) => frame.request.status === "resolved", { jsonSchema: {} }),
+  ),
+  Schema.Struct({ kind: Schema.Literal("cancelled"), request: WorkRequest }).check(
+    Schema.makeFilter((frame) => frame.request.status === "cancelled", { jsonSchema: {} }),
+  ),
+  Schema.Struct({ kind: Schema.Literal("interrupted"), request: WorkRequest }).check(
+    Schema.makeFilter((frame) => frame.request.status === "interrupted", { jsonSchema: {} }),
+  ),
+  Schema.Struct({ kind: Schema.Literal("expired"), request: WorkRequest }).check(
+    Schema.makeFilter((frame) => frame.request.status === "expired", { jsonSchema: {} }),
+  ),
+]);
 export type WorkRequestFrame = typeof WorkRequestFrame.Type;
 
 export const WORK_REQUEST_EVENT_NAMES = ["work.request-recorded@1"] as const;
@@ -462,19 +452,43 @@ export const WorkRequestRecordInput = Schema.Struct({
   detail: WorkRequestDetail,
   /** Private, bounded provider values aligned with sanitized user-input options. */
   providerOptionValues: Schema.optional(WorkRequestProviderOptionValues),
-}).annotations(strict);
+});
 export type WorkRequestRecordInput = typeof WorkRequestRecordInput.Type;
 
-export const decodeWorkRequestId = Schema.decodeUnknownSync(WorkRequestId);
-export const decodeWorkRequestDetail = Schema.decodeUnknownSync(WorkRequestDetail);
-export const decodeWorkRequestResolution = Schema.decodeUnknownSync(WorkRequestResolution);
-export const decodeWorkRequest = Schema.decodeUnknownSync(WorkRequest);
-export const decodeWorkRequestCommand = Schema.decodeUnknownSync(WorkRequestCommand);
-export const decodeWorkRequestCommandResult = Schema.decodeUnknownSync(WorkRequestCommandResult);
-export const decodeWorkRequestFailure = Schema.decodeUnknownSync(WorkRequestFailure);
-export const decodeWorkRequestList = Schema.decodeUnknownSync(WorkRequestList);
-export const decodeWorkRequestFrame = Schema.decodeUnknownSync(WorkRequestFrame);
-export const decodeWorkRequestRecordInput = Schema.decodeUnknownSync(WorkRequestRecordInput);
+export const decodeWorkRequestId = Schema.decodeUnknownSync(WorkRequestId, STRICT_DECODE_OPTIONS);
+export const decodeWorkRequestDetail = Schema.decodeUnknownSync(
+  WorkRequestDetail,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestResolution = Schema.decodeUnknownSync(
+  WorkRequestResolution,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequest = Schema.decodeUnknownSync(WorkRequest, STRICT_DECODE_OPTIONS);
+export const decodeWorkRequestCommand = Schema.decodeUnknownSync(
+  WorkRequestCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestCommandResult = Schema.decodeUnknownSync(
+  WorkRequestCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestFailure = Schema.decodeUnknownSync(
+  WorkRequestFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestList = Schema.decodeUnknownSync(
+  WorkRequestList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestFrame = Schema.decodeUnknownSync(
+  WorkRequestFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkRequestRecordInput = Schema.decodeUnknownSync(
+  WorkRequestRecordInput,
+  STRICT_DECODE_OPTIONS,
+);
 
 export function decodeWorkRequestEventPayload(
   eventName: WorkRequestEventName | string,

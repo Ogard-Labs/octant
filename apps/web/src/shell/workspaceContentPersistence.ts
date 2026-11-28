@@ -15,10 +15,10 @@ const SavedContent = Schema.Struct({
   panes: Schema.Array(
     Schema.Struct({
       paneId: PaneId,
-      mode: Schema.Literal(...modes),
-      tabs: Schema.Array(WorkspaceTab).pipe(Schema.maxItems(128)),
+      mode: Schema.Literals(modes),
+      tabs: Schema.Array(WorkspaceTab).pipe(Schema.check(Schema.isMaxLength(128))),
     }),
-  ).pipe(Schema.maxItems(64)),
+  ).pipe(Schema.check(Schema.isMaxLength(64))),
 });
 function paneIds(layout: WorkspaceLayoutNode): ReadonlyArray<PaneId> {
   return layout.kind === "pane"

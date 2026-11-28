@@ -1,63 +1,74 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { ProjectId } from "./projects";
 import { WindowId } from "./shell";
 import { UtcTimestamp } from "./events";
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const BindingId = Schema.UUID.pipe(Schema.brand("CommandCredentialBindingId"));
-const RequestId = Schema.UUID.pipe(Schema.brand("CommandCredentialRequestId"));
-const OperationId = Schema.UUID.pipe(Schema.brand("CommandCredentialOperationId"));
-const Text = Schema.String.pipe(
-  Schema.maxLength(1024),
-  // eslint-disable-next-line no-control-regex -- References cannot carry terminal control characters.
-  Schema.filter((value) => !/[\x00-\x1f\x7f]/.test(value)),
+const BindingId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CommandCredentialBindingId"),
 );
-const ImmutableId = Schema.String.pipe(Schema.pattern(/^[a-z0-9]{26}$/i));
-const FieldId = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,128}$/));
+const RequestId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CommandCredentialRequestId"),
+);
+const OperationId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CommandCredentialOperationId"),
+);
+const Text = Schema.String.pipe(
+  Schema.check(Schema.isMaxLength(1024)), // eslint-disable-next-line no-control-regex -- References cannot carry terminal control characters.
+  Schema.check(Schema.makeFilter((value) => !/[\x00-\x1f\x7f]/.test(value))),
+);
+const ImmutableId = Schema.String.check(Schema.isPattern(/^[a-z0-9]{26}$/i));
+const FieldId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/));
 export const CommandCredentialField = Schema.Struct({
-  name: Schema.String.pipe(Schema.pattern(/^[A-Z_][A-Z0-9_]{0,63}$/)),
+  name: Schema.String.check(Schema.isPattern(/^[A-Z_][A-Z0-9_]{0,63}$/)),
   vaultId: ImmutableId,
   itemId: ImmutableId,
   sectionId: Schema.optional(FieldId),
   fieldId: FieldId,
-}).annotations(strict);
+});
 export const CommandCredentialDefinition = Schema.Struct({
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80)),
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(80)),
   projectId: ProjectId,
-  executable: Text.pipe(Schema.minLength(1)),
-  args: Schema.Array(Text).pipe(Schema.maxItems(32)),
+  executable: Text.check(Schema.isMinLength(1)),
+  args: Schema.Array(Text).check(Schema.isMaxLength(32)),
   directory: Text,
   accountId: ImmutableId,
-  environment: Schema.Array(CommandCredentialField).pipe(Schema.minItems(1), Schema.maxItems(8)),
-  timeoutMs: Schema.Int.pipe(Schema.between(100, 300_000)),
-}).annotations(strict);
+  environment: Schema.Array(CommandCredentialField).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
+  timeoutMs: Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 300_000 })),
+});
 export type CommandCredentialDefinition = typeof CommandCredentialDefinition.Type;
 export const CommandCredentialBinding = Schema.Struct({
   kind: Schema.Literal("command-credential-binding"),
   bindingId: BindingId,
-  revision: Schema.Int.pipe(Schema.positive()),
-  credentialExecutable: Text.pipe(Schema.minLength(1)),
-  credentialExecutableDigest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-  credentialVersion: Schema.String.pipe(Schema.pattern(/^2\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/)),
+  revision: PositiveInt,
+  credentialExecutable: Text.check(Schema.isMinLength(1)),
+  credentialExecutableDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  credentialVersion: Schema.String.check(Schema.isPattern(/^2\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/)),
   definition: CommandCredentialDefinition,
-  executableDigest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-}).annotations(strict);
+  executableDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+});
 export type CommandCredentialBinding = typeof CommandCredentialBinding.Type;
 export const CommandCredentialRequest = Schema.Struct({
   requestId: RequestId,
   binding: CommandCredentialBinding,
   threadId: CodeThreadId,
   expiresAt: UtcTimestamp,
-  executionPolicy: Schema.Literal("full-access", "approval-gated", "auto-accept-edits"),
+  executionPolicy: Schema.Literals(["full-access", "approval-gated", "auto-accept-edits"]),
   strict: Schema.optional(Schema.Boolean),
   legacySandbox: Schema.optional(Schema.Boolean),
-  state: Schema.Literal("pending", "running", "settled"),
-}).annotations(strict);
+  state: Schema.Literals(["pending", "running", "settled"]),
+});
 export type CommandCredentialRequest = typeof CommandCredentialRequest.Type;
 export const CommandCredentialReceipt = Schema.Struct({
   kind: Schema.Literal("command-credential-receipt"),
   requestId: RequestId,
-  status: Schema.Literal(
+  status: Schema.Literals([
     "exited",
     "cancelled",
     "timed-out",
@@ -66,50 +77,50 @@ export const CommandCredentialReceipt = Schema.Struct({
     "refused",
     "expired",
     "denied",
-  ),
-  effect: Schema.Literal("none", "possible", "completed"),
+  ]),
+  effect: Schema.Literals(["none", "possible", "completed"]),
   exitCode: Schema.optional(Schema.Int),
-  output: Schema.String.pipe(Schema.maxLength(24 * 1024)),
+  output: Schema.String.check(Schema.isMaxLength(24 * 1024)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type CommandCredentialReceipt = typeof CommandCredentialReceipt.Type;
-export const CommandCredentialCommand = Schema.Union(
+export const CommandCredentialCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("save"),
     definition: CommandCredentialDefinition,
     bindingId: Schema.optional(BindingId),
-    expectedRevision: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
+    expectedRevision: Schema.optional(PositiveInt),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remove"),
     bindingId: BindingId,
-    expectedRevision: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    expectedRevision: PositiveInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("review"),
     bindingId: BindingId,
     threadId: CodeThreadId,
     operationId: OperationId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("approve", "deny", "cancel"),
+    kind: Schema.Literals(["approve", "deny", "cancel"]),
     requestId: RequestId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CommandCredentialCommand = typeof CommandCredentialCommand.Type;
 export const CommandCredentialView = Schema.Struct({
   kind: Schema.Literal("command-credential-view"),
-  bindings: Schema.Array(CommandCredentialBinding).pipe(Schema.maxItems(64)),
-  requests: Schema.Array(CommandCredentialRequest).pipe(Schema.maxItems(64)),
-  receipts: Schema.Array(CommandCredentialReceipt).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  bindings: Schema.Array(CommandCredentialBinding).check(Schema.isMaxLength(64)),
+  requests: Schema.Array(CommandCredentialRequest).check(Schema.isMaxLength(64)),
+  receipts: Schema.Array(CommandCredentialReceipt).check(Schema.isMaxLength(64)),
+});
 export type CommandCredentialView = typeof CommandCredentialView.Type;
-export const CommandCredentialResult = Schema.Union(
+export const CommandCredentialResult = Schema.Union([
   CommandCredentialView,
   CommandCredentialReceipt,
   Schema.Struct({
     kind: Schema.Literal("command-credential-refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "unauthorized",
       "posture-unsupported",
       "invalid",
@@ -118,31 +129,31 @@ export const CommandCredentialResult = Schema.Union(
       "unavailable",
       "limit",
       "journal-unavailable",
-    ),
-    message: Schema.String.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    ]),
+    message: Schema.String.check(Schema.isMaxLength(512)),
+  }),
+]);
 export type CommandCredentialResult = typeof CommandCredentialResult.Type;
-export const CommandCredentialJournalRecord = Schema.Union(
+export const CommandCredentialJournalRecord = Schema.Union([
   Schema.Struct({
     name: Schema.Literal("command-binding.saved"),
     binding: CommandCredentialBinding,
     windowId: WindowId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("command-binding.removed"),
     bindingId: BindingId,
-    revision: Schema.Int.pipe(Schema.positive()),
+    revision: PositiveInt,
     windowId: WindowId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     name: Schema.Literal("command-binding.run"),
     requestId: RequestId,
     bindingId: BindingId,
-    revision: Schema.Int.pipe(Schema.positive()),
+    revision: PositiveInt,
     threadId: CodeThreadId,
     windowId: WindowId,
-    status: Schema.Literal(
+    status: Schema.Literals([
       "approved",
       "started",
       "exited",
@@ -153,46 +164,70 @@ export const CommandCredentialJournalRecord = Schema.Union(
       "refused",
       "expired",
       "denied",
-    ),
-    effect: Schema.Literal("none", "possible", "completed"),
+    ]),
+    effect: Schema.Literals(["none", "possible", "completed"]),
     exitCode: Schema.optional(Schema.Int),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CommandCredentialJournalRecord = typeof CommandCredentialJournalRecord.Type;
 export const decodeCommandCredentialDefinition = Schema.decodeUnknownSync(
   CommandCredentialDefinition,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCommandCredentialBinding = Schema.decodeUnknownSync(CommandCredentialBinding);
-export const decodeCommandCredentialCommand = Schema.decodeUnknownSync(CommandCredentialCommand);
-export const decodeCommandCredentialResult = Schema.decodeUnknownSync(CommandCredentialResult);
+export const decodeCommandCredentialBinding = Schema.decodeUnknownSync(
+  CommandCredentialBinding,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCommandCredentialCommand = Schema.decodeUnknownSync(
+  CommandCredentialCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCommandCredentialResult = Schema.decodeUnknownSync(
+  CommandCredentialResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCommandCredentialJournalRecord = Schema.decodeUnknownSync(
   CommandCredentialJournalRecord,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const decodeCommandCredentialRequest = Schema.decodeUnknownSync(CommandCredentialRequest);
-export const decodeCommandCredentialReceipt = Schema.decodeUnknownSync(CommandCredentialReceipt);
+export const decodeCommandCredentialRequest = Schema.decodeUnknownSync(
+  CommandCredentialRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCommandCredentialReceipt = Schema.decodeUnknownSync(
+  CommandCredentialReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const CommandCredentialHostRequest = Schema.Struct({
   requestId: RequestId,
   bindingId: BindingId,
   accountId: ImmutableId,
-  environment: Schema.Array(CommandCredentialField).pipe(Schema.minItems(1), Schema.maxItems(8)),
-  expectedRevision: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
-}).annotations(strict);
+  environment: Schema.Array(CommandCredentialField).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
+  expectedRevision: Schema.optional(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  ),
+});
 export type CommandCredentialHostRequest = typeof CommandCredentialHostRequest.Type;
-export const CommandCredentialHostResult = Schema.Union(
+export const CommandCredentialHostResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("authorized"),
-    revision: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  }).annotations(strict),
+    revision: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  }),
   Schema.Struct({
-    status: Schema.Literal("not-linked", "changed", "invalid", "unavailable"),
-  }).annotations(strict),
-);
+    status: Schema.Literals(["not-linked", "changed", "invalid", "unavailable"]),
+  }),
+]);
 export type CommandCredentialHostResult = typeof CommandCredentialHostResult.Type;
 export const decodeCommandCredentialHostRequest = Schema.decodeUnknownSync(
   CommandCredentialHostRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCommandCredentialHostResult = Schema.decodeUnknownSync(
   CommandCredentialHostResult,
+  STRICT_DECODE_OPTIONS,
 );

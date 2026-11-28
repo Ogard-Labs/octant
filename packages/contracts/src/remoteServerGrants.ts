@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import {
   LocalServerHealth,
@@ -8,8 +9,6 @@ import {
 } from "./localServers";
 import { ProjectId } from "./projects";
 import { DeviceId } from "./remoteAccess";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Opaque grant to open one Octant-owned dev server on another computer.
@@ -21,7 +20,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * still checked against the device proof and the host's record of the grant.
  */
 export const RemoteServerGrantId = Schema.String.pipe(
-  Schema.pattern(/^rsg_[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^rsg_[a-f0-9]{64}$/)),
   Schema.brand("RemoteServerGrantId"),
 );
 export type RemoteServerGrantId = typeof RemoteServerGrantId.Type;
@@ -33,18 +32,18 @@ export type RemoteServerGrantId = typeof RemoteServerGrantId.Type;
  * no thread or Project, exactly as its own commands do: the host learns the
  * thread from the row it re-observes, never from the client.
  */
-export const RemoteServerGrantSource = Schema.Union(
+export const RemoteServerGrantSource = Schema.Union([
   Schema.Struct({
     surface: Schema.Literal("local-servers"),
     threadId: CodeThreadId,
     projectId: ProjectId,
     listenerId: LocalServerListenerId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     surface: Schema.Literal("running-services"),
     listenerId: LocalServerListenerId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type RemoteServerGrantSource = typeof RemoteServerGrantSource.Type;
 
 /**
@@ -56,7 +55,7 @@ export const RemoteServerGrantRequest = Schema.Struct({
   kind: Schema.Literal("open-remote-server-grant"),
   requestId: LocalServerRequestId,
   source: RemoteServerGrantSource,
-}).annotations(strict);
+});
 export type RemoteServerGrantRequest = typeof RemoteServerGrantRequest.Type;
 
 /**
@@ -69,7 +68,7 @@ export const RemoteServerGrant = Schema.Struct({
   grantId: RemoteServerGrantId,
   threadId: CodeThreadId,
   port: LocalServerPort,
-}).annotations(strict);
+});
 export type RemoteServerGrant = typeof RemoteServerGrant.Type;
 
 /**
@@ -96,9 +95,9 @@ export type RemoteServerGrant = typeof RemoteServerGrant.Type;
  *   {@link REMOTE_SERVER_GRANTS_PER_HOST}. Asked last, so it never hides a
  *   refusal that says why the server itself cannot open.
  */
-export const RemoteServerGrantRefusal = Schema.Union(
+export const RemoteServerGrantRefusal = Schema.Union([
   Schema.Struct({
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "local-principal",
       "thread-unreadable",
       "not-found",
@@ -106,19 +105,19 @@ export const RemoteServerGrantRefusal = Schema.Union(
       "not-in-thread",
       "open-denied",
       "grant-limit",
-    ),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    ]),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     reason: Schema.Literal("not-listening"),
-    health: LocalServerHealth.pipe(
-      Schema.filter((health) => health !== "listening", {
-        message: () => "A listening server is not a reason to refuse a grant.",
+    health: LocalServerHealth.check(
+      Schema.makeFilter((health) => health !== "listening", {
+        message: "A listening server is not a reason to refuse a grant.",
       }),
     ),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type RemoteServerGrantRefusal = typeof RemoteServerGrantRefusal.Type;
 export type RemoteServerGrantRefusalReason = RemoteServerGrantRefusal["reason"];
 
@@ -127,18 +126,18 @@ export const REMOTE_SERVER_GRANTS_PER_DEVICE = 8;
 /** How many grants the host holds open at once, across every paired device. */
 export const REMOTE_SERVER_GRANTS_PER_HOST = 32;
 
-export const RemoteServerGrantResult = Schema.Union(
+export const RemoteServerGrantResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("remote-server-grant-opened"),
     requestId: LocalServerRequestId,
     grant: RemoteServerGrant,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remote-server-grant-refused"),
     requestId: LocalServerRequestId,
     refusal: RemoteServerGrantRefusal,
-  }).annotations(strict),
-);
+  }),
+]);
 export type RemoteServerGrantResult = typeof RemoteServerGrantResult.Type;
 
 export const REMOTE_SERVER_GRANT_OPENED = "remote-server.grant-opened@1" as const;
@@ -161,7 +160,7 @@ const GrantEventFields = {
   port: LocalServerPort,
 } as const;
 
-export const RemoteServerGrantOpenedPayload = Schema.Struct(GrantEventFields).annotations(strict);
+export const RemoteServerGrantOpenedPayload = Schema.Struct(GrantEventFields);
 export type RemoteServerGrantOpenedPayload = typeof RemoteServerGrantOpenedPayload.Type;
 
 /**
@@ -169,7 +168,7 @@ export type RemoteServerGrantOpenedPayload = typeof RemoteServerGrantOpenedPaylo
  * to: the device's standing, the proxy session, the listener, the thread, Code
  * itself, or the process that held the port.
  */
-export const RemoteServerGrantCloseReason = Schema.Literal(
+export const RemoteServerGrantCloseReason = Schema.Literals([
   "device-revoked",
   "device-credential-rotated",
   "device-credential-expired",
@@ -181,13 +180,13 @@ export const RemoteServerGrantCloseReason = Schema.Literal(
   "code-disabled",
   "server-stopped",
   "server-changed-hands",
-);
+]);
 export type RemoteServerGrantCloseReason = typeof RemoteServerGrantCloseReason.Type;
 
 export const RemoteServerGrantClosedPayload = Schema.Struct({
   ...GrantEventFields,
   reason: RemoteServerGrantCloseReason,
-}).annotations(strict);
+});
 export type RemoteServerGrantClosedPayload = typeof RemoteServerGrantClosedPayload.Type;
 
 /**
@@ -218,22 +217,36 @@ export const REMOTE_SERVER_PROXY_RELAYED = "relayed" as const;
  */
 export const RemoteServerProxyRefusal = Schema.Struct({
   kind: Schema.Literal("remote-server-proxy-refused"),
-  reason: Schema.Literal("grant-closed", "server-unreachable", "upgrade-refused"),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  reason: Schema.Literals(["grant-closed", "server-unreachable", "upgrade-refused"]),
+  message: NonEmptyTrimmedString,
+});
 export type RemoteServerProxyRefusal = typeof RemoteServerProxyRefusal.Type;
 export type RemoteServerProxyRefusalReason = RemoteServerProxyRefusal["reason"];
 
-export const decodeRemoteServerProxyRefusal = Schema.decodeUnknownSync(RemoteServerProxyRefusal);
+export const decodeRemoteServerProxyRefusal = Schema.decodeUnknownSync(
+  RemoteServerProxyRefusal,
+  STRICT_DECODE_OPTIONS,
+);
 export const encodeRemoteServerProxyRefusal = Schema.encodeSync(RemoteServerProxyRefusal);
 
-export const decodeRemoteServerGrantId = Schema.decodeUnknownSync(RemoteServerGrantId);
-export const decodeRemoteServerGrantRequest = Schema.decodeUnknownSync(RemoteServerGrantRequest);
-export const decodeRemoteServerGrantResult = Schema.decodeUnknownSync(RemoteServerGrantResult);
+export const decodeRemoteServerGrantId = Schema.decodeUnknownSync(
+  RemoteServerGrantId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteServerGrantRequest = Schema.decodeUnknownSync(
+  RemoteServerGrantRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteServerGrantResult = Schema.decodeUnknownSync(
+  RemoteServerGrantResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const encodeRemoteServerGrantResult = Schema.encodeSync(RemoteServerGrantResult);
 export const decodeRemoteServerGrantOpenedPayload = Schema.decodeUnknownSync(
   RemoteServerGrantOpenedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemoteServerGrantClosedPayload = Schema.decodeUnknownSync(
   RemoteServerGrantClosedPayload,
+  STRICT_DECODE_OPTIONS,
 );

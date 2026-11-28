@@ -23,8 +23,10 @@ const SIDECAR_TEMP_FILE = "sidecars.json.tmp";
 const StoredSideChatSidecar = Schema.Struct({
   ...SideChatSidecar.fields,
   pendingInheritance: Schema.optional(Schema.Literal(true)),
-}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
-const decodeStoredSideChatSidecar = Schema.decodeUnknownSync(StoredSideChatSidecar);
+});
+const decodeStoredSideChatSidecar = Schema.decodeUnknownSync(StoredSideChatSidecar, {
+  onExcessProperty: "error",
+});
 
 interface RegisteredSidecar {
   readonly link: SideChatSidecar;

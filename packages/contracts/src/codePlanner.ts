@@ -1,4 +1,5 @@
 import { personDecides } from "./hostAnswer";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import {
   CodeCommandResult,
@@ -12,9 +13,10 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderExecutionPolicy, ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-export const CodePlannerProposalId = Schema.UUID.pipe(Schema.brand("CodePlannerProposalId"));
+export const CodePlannerProposalId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("CodePlannerProposalId"),
+);
 export type CodePlannerProposalId = typeof CodePlannerProposalId.Type;
 
 /**
@@ -40,31 +42,38 @@ export const MAX_PENDING_CODE_PLANNER_PROPOSALS = 10;
  * designation lives on its own Project-scoped aggregate so replay rebuilds it
  * without touching the Project or thread records.
  */
-export const CodePlannerDesignation = Schema.Union(
+export const CodePlannerDesignation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("designated"),
     projectId: ProjectId,
     plannerThreadId: CodeThreadId,
     designatedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("none"),
     projectId: ProjectId,
     updatedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodePlannerDesignation = typeof CodePlannerDesignation.Type;
 
 const CodePlannerProposalFields = {
   id: CodePlannerProposalId,
   projectId: ProjectId,
   plannerThreadId: CodeThreadId,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_THREAD_TITLE_LENGTH)),
-  intent: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH),
+  title: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_CODE_THREAD_TITLE_LENGTH),
+  ),
+  intent: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_CODE_PLANNER_PROPOSAL_INTENT_LENGTH),
   ),
   rationale: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_PLANNER_PROPOSAL_RATIONALE_LENGTH)),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(MAX_CODE_PLANNER_PROPOSAL_RATIONALE_LENGTH),
+    ),
   ),
   proposedAt: UtcTimestamp,
   /**
@@ -90,7 +99,9 @@ const CodePlannerProposalFields = {
        */
       choice: Schema.optional(CoordinatorWorkerChoice),
       /** The model's name as its provider reports it, for the card. */
-      modelName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+      modelName: Schema.optional(
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+      ),
       /**
        * The request's filters, kept so **Use Builder instead** applies them
        * again: the work needs images, and the provider family a review must
@@ -98,18 +109,20 @@ const CodePlannerProposalFields = {
        */
       needsImages: Schema.optional(Schema.Literal(true)),
       reviewedProviderKind: Schema.optional(
-        Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
       ),
-    }).annotations(strict),
+    }),
   ),
   /** Host-authored admission; a draft cannot assert that creation did not start. */
   creationAttempt: Schema.optional(
     Schema.Struct({
       threadId: CodeThreadId,
-      status: Schema.Literal("creating", "failed"),
+      status: Schema.Literals(["creating", "failed"]),
       admittedAt: UtcTimestamp,
-      message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
-    }).annotations(strict),
+      message: Schema.optional(
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+      ),
+    }),
   ),
 } as const;
 
@@ -119,23 +132,23 @@ const CodePlannerProposalFields = {
  * ordinary thread-creation command, and declining discards it. The proposal
  * itself can never create, start, or redirect anything.
  */
-export const CodePlannerWorkProposal = Schema.Union(
+export const CodePlannerWorkProposal = Schema.Union([
   Schema.Struct({
     ...CodePlannerProposalFields,
     status: Schema.Literal("pending"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...CodePlannerProposalFields,
     status: Schema.Literal("confirmed"),
     resolvedAt: UtcTimestamp,
     createdThreadId: CodeThreadId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...CodePlannerProposalFields,
     status: Schema.Literal("declined"),
     resolvedAt: UtcTimestamp,
-  }).annotations(strict),
-).annotations(personDecides);
+  }),
+]).annotate(personDecides);
 export type CodePlannerWorkProposal = typeof CodePlannerWorkProposal.Type;
 
 /** What a planner agent submits; identity and timestamps are server-stamped. */
@@ -143,22 +156,22 @@ export const CodePlannerProposalDraft = Schema.Struct({
   title: CodePlannerProposalFields.title,
   intent: CodePlannerProposalFields.intent,
   rationale: CodePlannerProposalFields.rationale,
-}).annotations(strict);
+});
 export type CodePlannerProposalDraft = typeof CodePlannerProposalDraft.Type;
 
-export const CodePlannerCommand = Schema.Union(
+export const CodePlannerCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("designate-code-planner-thread"),
     projectId: ProjectId,
     threadId: CodeThreadId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("undesignate-code-planner-thread"),
     projectId: ProjectId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodePlannerCommand = typeof CodePlannerCommand.Type;
 
 /**
@@ -166,38 +179,36 @@ export type CodePlannerCommand = typeof CodePlannerCommand.Type;
  * caller must handle, never an exception: the thread may live in another
  * Project, may not exist, or the Project may already have its one planner.
  */
-export const CodePlannerDesignationRefusalReason = Schema.Literal(
+export const CodePlannerDesignationRefusalReason = Schema.Literals([
   "project-unavailable",
   "thread-not-found",
   "thread-in-another-project",
   "thread-archived",
-  /** A worker thread follows its coordinator and cannot read as one. */
   "thread-is-worker",
-  /** The planner reads as a coordinator, and the Project already has its four. */
   "coordinator-limit-reached",
   "planner-already-designated",
   "no-planner-designated",
   "designation-changed",
-);
+]);
 export type CodePlannerDesignationRefusalReason = typeof CodePlannerDesignationRefusalReason.Type;
 
-export const CodePlannerCommandOutcome = Schema.Union(
+export const CodePlannerCommandOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("designated"),
     designation: CodePlannerDesignation,
     designationVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("undesignated"),
     designation: CodePlannerDesignation,
     designationVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodePlannerDesignationRefusalReason,
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type CodePlannerCommandOutcome = typeof CodePlannerCommandOutcome.Type;
 
 /**
@@ -205,69 +216,63 @@ export type CodePlannerCommandOutcome = typeof CodePlannerCommandOutcome.Type;
  * the exact contracts the create dialog already sends, so confirming a
  * proposal takes no shortcut the user could not take by hand.
  */
-export const CodePlannerThreadCreation = Schema.Union(
+export const CodePlannerThreadCreation = Schema.Union([
   CreateManagedCodeThreadCommand,
   CreateCodeThreadCommand,
-);
+]);
 export type CodePlannerThreadCreation = typeof CodePlannerThreadCreation.Type;
 
-export const CodePlannerProposalCommand = Schema.Union(
+export const CodePlannerProposalCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("confirm-planner-work-proposal"),
     proposalId: CodePlannerProposalId,
     expectedVersion: AggregateVersion,
     creation: CodePlannerThreadCreation,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("decline-planner-work-proposal"),
     proposalId: CodePlannerProposalId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-  /**
-   * **Use Builder instead** on a coordinator proposal the roles chose: the
-   * host runs the choice again in the Builder role and keeps the proposal
-   * pending on that model.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("use-builder-for-planner-work-proposal"),
     proposalId: CodePlannerProposalId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodePlannerProposalCommand = typeof CodePlannerProposalCommand.Type;
 
-export const CodePlannerProposalRefusalReason = Schema.Literal(
+export const CodePlannerProposalRefusalReason = Schema.Literals([
   "proposal-not-found",
   "proposal-not-pending",
   "creation-project-mismatch",
   "creation-above-proposed-level",
   "proposal-changed",
   "creation-not-started",
-  /** Use Builder instead found no eligible Builder model, or the proposal was not chosen from roles. */
   "builder-unavailable",
-);
+]);
 export type CodePlannerProposalRefusalReason = typeof CodePlannerProposalRefusalReason.Type;
 
-export const CodePlannerProposalOutcome = Schema.Union(
+export const CodePlannerProposalOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("confirmed"),
     proposal: CodePlannerWorkProposal,
     creation: CodeCommandResult,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("declined"),
     proposal: CodePlannerWorkProposal,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("rechosen"),
     proposal: CodePlannerWorkProposal,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodePlannerProposalRefusalReason,
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type CodePlannerProposalOutcome = typeof CodePlannerProposalOutcome.Type;
 
 /**
@@ -282,39 +287,64 @@ export const CodePlannerView = Schema.Struct({
     Schema.Struct({
       proposal: CodePlannerWorkProposal,
       proposalVersion: AggregateVersion,
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type CodePlannerView = typeof CodePlannerView.Type;
 
 export const CodePlannerDesignationUpdated = Schema.Struct({
   kind: Schema.Literal("planner-designation-updated"),
   designation: CodePlannerDesignation,
-}).annotations(strict);
+});
 export type CodePlannerDesignationUpdated = typeof CodePlannerDesignationUpdated.Type;
 
 export const CodePlannerProposalUpdated = Schema.Struct({
   kind: Schema.Literal("planner-proposal-updated"),
   proposal: CodePlannerWorkProposal,
-}).annotations(strict);
+});
 export type CodePlannerProposalUpdated = typeof CodePlannerProposalUpdated.Type;
 
-export const decodeCodePlannerProposalId = Schema.decodeUnknownSync(CodePlannerProposalId);
-export const decodeCodePlannerDesignation = Schema.decodeUnknownSync(CodePlannerDesignation);
-export const decodeCodePlannerWorkProposal = Schema.decodeUnknownSync(CodePlannerWorkProposal);
-export const decodeCodePlannerProposalDraft = Schema.decodeUnknownSync(CodePlannerProposalDraft);
-export const decodeCodePlannerCommand = Schema.decodeUnknownSync(CodePlannerCommand);
-export const decodeCodePlannerCommandOutcome = Schema.decodeUnknownSync(CodePlannerCommandOutcome);
+export const decodeCodePlannerProposalId = Schema.decodeUnknownSync(
+  CodePlannerProposalId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodePlannerDesignation = Schema.decodeUnknownSync(
+  CodePlannerDesignation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodePlannerWorkProposal = Schema.decodeUnknownSync(
+  CodePlannerWorkProposal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodePlannerProposalDraft = Schema.decodeUnknownSync(
+  CodePlannerProposalDraft,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodePlannerCommand = Schema.decodeUnknownSync(
+  CodePlannerCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodePlannerCommandOutcome = Schema.decodeUnknownSync(
+  CodePlannerCommandOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodePlannerProposalCommand = Schema.decodeUnknownSync(
   CodePlannerProposalCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePlannerProposalOutcome = Schema.decodeUnknownSync(
   CodePlannerProposalOutcome,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodePlannerView = Schema.decodeUnknownSync(CodePlannerView);
+export const decodeCodePlannerView = Schema.decodeUnknownSync(
+  CodePlannerView,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodePlannerDesignationUpdated = Schema.decodeUnknownSync(
   CodePlannerDesignationUpdated,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePlannerProposalUpdated = Schema.decodeUnknownSync(
   CodePlannerProposalUpdated,
+  STRICT_DECODE_OPTIONS,
 );

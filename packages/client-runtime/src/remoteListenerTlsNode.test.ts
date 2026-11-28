@@ -1,5 +1,5 @@
 import { createHash, sign, X509Certificate } from "node:crypto";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { ListenerKeyTransition } from "@octant/contracts";
 import {
   LISTENER_KEY_TRANSITION_HEADER,
@@ -473,7 +473,9 @@ describe("a fetch held to a listener's trust", () => {
   }
 
   it("records a signed transition under the old TLS key, persists promotion and refuses missed or expired windows", async () => {
-    const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+    const unsigned = Schema.decodeUnknownSync(
+      ListenerKeyTransition.mapFields(Struct.omit(["signature"])),
+    )({
       version: 1,
       hostId: "11111111-1111-4111-8111-111111111111",
       origin: ORIGIN,

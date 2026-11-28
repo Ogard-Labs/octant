@@ -9,31 +9,37 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { HubMemberId } from "./hubAndSpokes";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const bounded = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
 
-export const ThreadMoveId = Schema.UUID.pipe(Schema.brand("ThreadMoveId"));
+export const ThreadMoveId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ThreadMoveId"),
+);
 export type ThreadMoveId = typeof ThreadMoveId.Type;
 
-export const HandoverId = Schema.UUID.pipe(Schema.brand("HandoverId"));
+export const HandoverId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("HandoverId"),
+);
 export type HandoverId = typeof HandoverId.Type;
 
 /** A Git commit id, SHA-1 or SHA-256. */
-const CommitId = Schema.String.pipe(Schema.pattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/));
+const CommitId = Schema.String.check(Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/));
 
 /** A thread named by its mode and its id; each mode brands its own id. */
 export const MovedThreadReference = Schema.Struct({
   mode: OctantMode,
-  threadId: Schema.UUID,
-}).annotations(strict);
+  threadId: GuidString,
+});
 export type MovedThreadReference = typeof MovedThreadReference.Type;
 
 /**
@@ -53,11 +59,11 @@ export const THREAD_MOVE_FAILURE_REASONS = [
   /** The destination has no provider of the kind the thread ran on, so it cannot continue it. */
   "no-matching-provider",
 ] as const;
-export const ThreadMoveFailureReason = Schema.Literal(...THREAD_MOVE_FAILURE_REASONS);
+export const ThreadMoveFailureReason = Schema.Literals(THREAD_MOVE_FAILURE_REASONS);
 export type ThreadMoveFailureReason = typeof ThreadMoveFailureReason.Type;
 
 /** Why a handover finished without reaching any other computer. */
-export const HandoverShortfall = Schema.Literal("push-failed", "no-remote");
+export const HandoverShortfall = Schema.Literals(["push-failed", "no-remote"]);
 export type HandoverShortfall = typeof HandoverShortfall.Type;
 
 /**
@@ -65,7 +71,12 @@ export type HandoverShortfall = typeof HandoverShortfall.Type;
  * the note, or the note went without it because the provider was not ready,
  * the turn failed, or it ran past its bound and was cancelled.
  */
-export const HandoverAgentSummary = Schema.Literal("added", "unavailable", "failed", "timed-out");
+export const HandoverAgentSummary = Schema.Literals([
+  "added",
+  "unavailable",
+  "failed",
+  "timed-out",
+]);
 export type HandoverAgentSummary = typeof HandoverAgentSummary.Type;
 
 /**
@@ -76,7 +87,7 @@ export type HandoverAgentSummary = typeof HandoverAgentSummary.Type;
  * file list gives each file its own size and digest, so the offer stays one
  * manifest row however many files the folder holds.
  */
-export const ThreadMovePartKind = Schema.Literal(
+export const ThreadMovePartKind = Schema.Literals([
   "thread-bundle",
   "attachment",
   "original-input",
@@ -85,7 +96,7 @@ export const ThreadMovePartKind = Schema.Literal(
   "canvas",
   "git-bundle",
   "work-files",
-);
+]);
 export type ThreadMovePartKind = typeof ThreadMovePartKind.Type;
 
 export const ThreadMovePart = Schema.Struct({
@@ -93,25 +104,25 @@ export const ThreadMovePart = Schema.Struct({
   kind: ThreadMovePartKind,
   bytes: NonNegativeInt,
   sha256: digest,
-}).annotations(strict);
+});
 export type ThreadMovePart = typeof ThreadMovePart.Type;
 
 /** Every part of one move, with its size and digest. There is no size limit. */
 export const ThreadMoveManifest = Schema.Struct({
-  parts: Schema.Array(ThreadMovePart).pipe(
-    Schema.minItems(1),
-    Schema.filter((parts) =>
+  parts: Schema.Array(ThreadMovePart).check(
+    Schema.isMinLength(1),
+    Schema.makeFilter((parts) =>
       new Set(parts.map((part) => part.partId)).size === parts.length
         ? true
         : "Part ids must not repeat.",
     ),
-    Schema.filter((parts) =>
+    Schema.makeFilter((parts) =>
       parts.filter((part) => part.kind === "thread-bundle").length === 1
         ? true
         : "A move carries exactly one thread bundle.",
     ),
   ),
-}).annotations(strict);
+});
 export type ThreadMoveManifest = typeof ThreadMoveManifest.Type;
 
 /**
@@ -124,22 +135,20 @@ export const ThreadMoveOffer = Schema.Struct({
   title: bounded(256),
   destinationProjectId: Schema.optional(ProjectId),
   /** For Code: the remote URLs the source checkout has, to match the destination's clone. */
-  repositoryRemotes: Schema.optional(Schema.Array(bounded(2_048)).pipe(Schema.maxItems(16))),
+  repositoryRemotes: Schema.optional(Schema.Array(bounded(2_048)).check(Schema.isMaxLength(16))),
   manifest: ThreadMoveManifest,
-})
-  .pipe(
-    Schema.filter((offer) =>
-      offer.source.mode === "chat" || offer.destinationProjectId !== undefined
-        ? true
-        : "A Work or Code thread moves into a Project.",
-    ),
-    Schema.filter((offer) =>
-      offer.source.mode !== "code" || (offer.repositoryRemotes?.length ?? 0) > 0
-        ? true
-        : "A Code thread names the repository it belongs to.",
-    ),
-  )
-  .annotations(strict);
+}).check(
+  Schema.makeFilter((offer) =>
+    offer.source.mode === "chat" || offer.destinationProjectId !== undefined
+      ? true
+      : "A Work or Code thread moves into a Project.",
+  ),
+  Schema.makeFilter((offer) =>
+    offer.source.mode !== "code" || (offer.repositoryRemotes?.length ?? 0) > 0
+      ? true
+      : "A Code thread names the repository it belongs to.",
+  ),
+);
 export type ThreadMoveOffer = typeof ThreadMoveOffer.Type;
 
 /** The destination's answers, one per step; every one names the move. */
@@ -148,34 +157,34 @@ export const ThreadMoveReady = Schema.Struct({
   moveId: ThreadMoveId,
   /** A one-use receiving ticket bound to this move id. */
   ticket: bounded(128),
-}).annotations(strict);
+});
 export type ThreadMoveReady = typeof ThreadMoveReady.Type;
 
 export const ThreadMoveRefused = Schema.Struct({
   status: Schema.Literal("refused"),
   moveId: ThreadMoveId,
-  reason: Schema.Literal(
+  reason: Schema.Literals([
     "refused",
     "unlock-required",
     "no-eligible-project",
     "transfer-failed",
     "no-matching-provider",
-  ),
-}).annotations(strict);
+  ]),
+});
 export type ThreadMoveRefused = typeof ThreadMoveRefused.Type;
 
 export const ThreadMoveArrived = Schema.Struct({
   status: Schema.Literal("arrived"),
   moveId: ThreadMoveId,
   thread: MovedThreadReference,
-}).annotations(strict);
+});
 export type ThreadMoveArrived = typeof ThreadMoveArrived.Type;
 
 export const ThreadMoveCommitted = Schema.Struct({
   status: Schema.Literal("committed"),
   moveId: ThreadMoveId,
   thread: MovedThreadReference,
-}).annotations(strict);
+});
 export type ThreadMoveCommitted = typeof ThreadMoveCommitted.Type;
 
 /**
@@ -183,24 +192,22 @@ export type ThreadMoveCommitted = typeof ThreadMoveCommitted.Type;
  * or restarted. `receiving` names the chunks already acknowledged so the
  * transfer resumes after the last of them.
  */
-export const ThreadMoveDestinationState = Schema.Union(
+export const ThreadMoveDestinationState = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("receiving"),
     moveId: ThreadMoveId,
-    acknowledged: Schema.Array(
-      Schema.Struct({ partId: bounded(64), chunks: NonNegativeInt }).annotations(strict),
-    ),
-  }).annotations(strict),
+    acknowledged: Schema.Array(Schema.Struct({ partId: bounded(64), chunks: NonNegativeInt })),
+  }),
   Schema.Struct({
-    state: Schema.Literal("arrived", "committed"),
+    state: Schema.Literals(["arrived", "committed"]),
     moveId: ThreadMoveId,
     thread: MovedThreadReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    state: Schema.Literal("discarded", "unknown"),
+    state: Schema.Literals(["discarded", "unknown"]),
     moveId: ThreadMoveId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadMoveDestinationState = typeof ThreadMoveDestinationState.Type;
 
 /** A handover notice: where the person can continue the work, never the work itself. */
@@ -212,17 +219,17 @@ export const HandoverNotice = Schema.Struct({
   /** The provider kind and model the thread ran on, so the destination continues on its own of that kind. */
   providerDriverKind: Schema.optional(bounded(64)),
   modelId: Schema.optional(bounded(256)),
-}).annotations(strict);
+});
 export type HandoverNotice = typeof HandoverNotice.Type;
 
 /** What a person chooses for one thread in Prepare to shut down. */
-export const ShutdownChoice = Schema.Literal(
+export const ShutdownChoice = Schema.Literals([
   "move",
   "move-after-turn",
   "stop-and-move",
   "hand-over",
   "leave-here",
-);
+]);
 export type ShutdownChoice = typeof ShutdownChoice.Type;
 
 export const THREAD_MOVE_EVENT_NAMES = {
@@ -241,7 +248,7 @@ export const ThreadMoveStarted = Schema.Struct({
   thread: MovedThreadReference,
   destinationMemberId: HubMemberId,
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMoveStarted = typeof ThreadMoveStarted.Type;
 
 /** The destination opened what arrived as a new thread; it adopts no journal. */
@@ -251,20 +258,20 @@ export const ThreadMovedIn = Schema.Struct({
   origin: Schema.Struct({
     memberId: HubMemberId,
     thread: MovedThreadReference,
-  }).annotations(strict),
+  }),
   /** The owner device whose unlock signed the move. */
   ownerMemberId: HubMemberId,
   arrivedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMovedIn = typeof ThreadMovedIn.Type;
 
 export const ThreadMoveCommittedEvent = Schema.Struct({
   moveId: ThreadMoveId,
   thread: MovedThreadReference,
   /** `source` when the source sent the commit; `activated-anyway` when a person on the destination did. */
-  by: Schema.Literal("source", "activated-anyway"),
+  by: Schema.Literals(["source", "activated-anyway"]),
   committedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMoveCommittedEvent = typeof ThreadMoveCommittedEvent.Type;
 
 /** The source learned `committed`; the erase follows through the ordinary purge. */
@@ -274,11 +281,11 @@ export const ThreadMovedOut = Schema.Struct({
   destination: Schema.Struct({
     memberId: HubMemberId,
     thread: MovedThreadReference,
-  }).annotations(strict),
+  }),
   /** True when the managed worktree stays because it holds files that did not move. */
   worktreeKept: Schema.Boolean,
   movedOutAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMovedOut = typeof ThreadMovedOut.Type;
 
 export const ThreadMoveFailed = Schema.Struct({
@@ -286,7 +293,7 @@ export const ThreadMoveFailed = Schema.Struct({
   thread: MovedThreadReference,
   reason: ThreadMoveFailureReason,
   failedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMoveFailed = typeof ThreadMoveFailed.Type;
 
 export const ThreadHandoverStarted = Schema.Struct({
@@ -296,7 +303,7 @@ export const ThreadHandoverStarted = Schema.Struct({
   /** Absent when the person did not ask for the agent's summary, and on handovers recorded before it existed. */
   agentSummary: Schema.optional(HandoverAgentSummary),
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadHandoverStarted = typeof ThreadHandoverStarted.Type;
 
 /** A person removed the worktree a moved-out thread left beside the managed folder. */
@@ -305,7 +312,7 @@ export const ThreadMovedOutWorktreeRemoved = Schema.Struct({
   thread: MovedThreadReference,
   worktree: bounded(4_096),
   removedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMovedOutWorktreeRemoved = typeof ThreadMovedOutWorktreeRemoved.Type;
 
 /**
@@ -320,29 +327,29 @@ export const THREAD_MOVED_HISTORY_EVENT_NAMES = {
 } as const;
 
 export const MovedHistoryEntry = Schema.Struct({
-  role: Schema.Literal("person", "assistant"),
-  text: Schema.String.pipe(Schema.maxLength(1_000_000)),
+  role: Schema.Literals(["person", "assistant"]),
+  text: Schema.String.check(Schema.isMaxLength(1_000_000)),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type MovedHistoryEntry = typeof MovedHistoryEntry.Type;
 
 export const MovedHistoryImported = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   moveId: ThreadMoveId,
-  entries: Schema.Array(MovedHistoryEntry).pipe(Schema.maxItems(10_000)),
+  entries: Schema.Array(MovedHistoryEntry).check(Schema.isMaxLength(10_000)),
   importedAt: UtcTimestamp,
   /**
    * Set when the entry is a handover note read from a Git branch, which the
    * first turn reads framed as outside content. Absent: a moved conversation.
    */
   origin: Schema.optional(Schema.Literal("handover-note")),
-}).annotations(strict);
+});
 export type MovedHistoryImported = typeof MovedHistoryImported.Type;
 
 export const MovedHistoryDelivered = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   deliveredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type MovedHistoryDelivered = typeof MovedHistoryDelivered.Type;
 
 /**
@@ -363,12 +370,12 @@ export const OwnerThreadMoveTicketRequest = Schema.Struct({
    * once. Absent, the ticket opens one move of any thread from that source.
    */
   threads: Schema.optional(
-    Schema.Array(MovedThreadReference).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(SHUTDOWN_BATCH_MAX),
+    Schema.Array(MovedThreadReference).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(SHUTDOWN_BATCH_MAX),
     ),
   ),
-}).annotations(strict);
+});
 export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.Type;
 
 /**
@@ -378,22 +385,22 @@ export type OwnerThreadMoveTicketRequest = typeof OwnerThreadMoveTicketRequest.T
  */
 export const ThreadMoveProjectsRequest = Schema.Struct({
   mode: OctantMode,
-  repositoryRemotes: Schema.optional(Schema.Array(bounded(2_048)).pipe(Schema.maxItems(16))),
-}).annotations(strict);
+  repositoryRemotes: Schema.optional(Schema.Array(bounded(2_048)).check(Schema.isMaxLength(16))),
+});
 export type ThreadMoveProjectsRequest = typeof ThreadMoveProjectsRequest.Type;
 
 export const ThreadMoveProjectChoice = Schema.Struct({
   projectId: ProjectId,
   title: bounded(256),
-}).annotations(strict);
+});
 export type ThreadMoveProjectChoice = typeof ThreadMoveProjectChoice.Type;
 
 export const ThreadMoveProjects = Schema.Struct({
   status: Schema.Literal("listed"),
-  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  projects: Schema.Array(ThreadMoveProjectChoice).check(Schema.isMaxLength(256)),
   /** A Chat thread may also arrive in no Project. */
   noProjectAllowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadMoveProjects = typeof ThreadMoveProjects.Type;
 
 // ── Window routes ──────────────────────────────────────────────────────────
@@ -402,36 +409,36 @@ export type ThreadMoveProjects = typeof ThreadMoveProjects.Type;
 /** The thread a window's Environment tool shows. */
 export const ThreadMoveThreadRequest = Schema.Struct({
   thread: MovedThreadReference,
-}).annotations(strict);
+});
 export type ThreadMoveThreadRequest = typeof ThreadMoveThreadRequest.Type;
 
 /** One member computer as the Computer card lists it for one thread. */
 export const ThreadMoveDestination = Schema.Struct({
   memberId: HubMemberId,
   name: bounded(256),
-  role: Schema.Literal("hub", "spoke"),
+  role: Schema.Literals(["hub", "spoke"]),
   /** Whether it answered just now. */
   reachable: Schema.Boolean,
   /** Set when it answered but cannot take this thread. */
-  refusal: Schema.optional(Schema.Literal("refused", "no-eligible-project")),
-  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  refusal: Schema.optional(Schema.Literals(["refused", "no-eligible-project"])),
+  projects: Schema.Array(ThreadMoveProjectChoice).check(Schema.isMaxLength(256)),
   noProjectAllowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadMoveDestination = typeof ThreadMoveDestination.Type;
 
 export const ThreadMoveDestinations = Schema.Struct({
   status: Schema.Literal("listed"),
   /** Why the thread cannot move from here at all, before any destination is asked. */
-  blocked: Schema.optional(Schema.Literal("busy", "delegated", "refused")),
+  blocked: Schema.optional(Schema.Literals(["busy", "delegated", "refused"])),
   /** A turn runs or the thread waits on the person: Move after this turn is offered. */
   busy: Schema.Boolean,
-  destinations: Schema.Array(ThreadMoveDestination).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  destinations: Schema.Array(ThreadMoveDestination).check(Schema.isMaxLength(64)),
+});
 export type ThreadMoveDestinations = typeof ThreadMoveDestinations.Type;
 
 export const ThreadMoveChallengeRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
-}).annotations(strict);
+});
 export type ThreadMoveChallengeRequest = typeof ThreadMoveChallengeRequest.Type;
 
 /**
@@ -439,24 +446,24 @@ export type ThreadMoveChallengeRequest = typeof ThreadMoveChallengeRequest.Type;
  * unlock key signs, so this Mac's Touch ID prompt signs exactly that one action.
  */
 export const ThreadMoveUnlockChallenge = Schema.Struct({
-  challengeId: Schema.UUID,
+  challengeId: GuidString,
   nonce: bounded(64),
   hostMemberId: HubMemberId,
   ownerMemberId: HubMemberId,
   method: Schema.Literal("POST"),
   path: bounded(128),
   bodyHash: digest,
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  expiresAt: PositiveInt,
+});
 export type ThreadMoveUnlockChallenge = typeof ThreadMoveUnlockChallenge.Type;
 
-export const ThreadMoveChallengeOutcome = Schema.Union(
+export const ThreadMoveChallengeOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("challenge"), challenge: ThreadMoveUnlockChallenge }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    kind: Schema.Literal("unlock-required", "destination-unreachable", "refused"),
+    kind: Schema.Literals(["unlock-required", "destination-unreachable", "refused"]),
   }),
-);
+]);
 export type ThreadMoveChallengeOutcome = typeof ThreadMoveChallengeOutcome.Type;
 
 /**
@@ -464,7 +471,7 @@ export type ThreadMoveChallengeOutcome = typeof ThreadMoveChallengeOutcome.Type;
  * the running turn, its child runs, and its pending approvals and questions
  * (Stop and move, only ever the person's explicit choice).
  */
-export const ThreadMoveTiming = Schema.Literal("now", "after-turn", "stop-and-move");
+export const ThreadMoveTiming = Schema.Literals(["now", "after-turn", "stop-and-move"]);
 export type ThreadMoveTiming = typeof ThreadMoveTiming.Type;
 
 export const ThreadMoveStartRequest = Schema.Struct({
@@ -474,21 +481,21 @@ export const ThreadMoveStartRequest = Schema.Struct({
   timing: ThreadMoveTiming,
   /** The raw ES256 signature this Mac's unlock key made over the challenge. */
   unlock: Schema.Struct({
-    challengeId: Schema.UUID,
-    signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
-  }).annotations(strict),
-}).annotations(strict);
+    challengeId: GuidString,
+    signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/)),
+  }),
+});
 export type ThreadMoveStartRequest = typeof ThreadMoveStartRequest.Type;
 
-export const ThreadMoveStartOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("started", "waiting-for-turn") }),
+export const ThreadMoveStartOutcome = Schema.Union([
+  Schema.Struct({ status: Schema.Literals(["started", "waiting-for-turn"]) }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
-);
+]);
 export type ThreadMoveStartOutcome = typeof ThreadMoveStartOutcome.Type;
 
 export const ThreadMoveControlRequest = Schema.Struct({
   moveId: ThreadMoveId,
-}).annotations(strict);
+});
 export type ThreadMoveControlRequest = typeof ThreadMoveControlRequest.Type;
 
 /** A thread handed over from this host: frozen, with its branch, until it is continued or taken back. */
@@ -505,9 +512,9 @@ export const HandedOverThread = Schema.Struct({
    * this thread. Absent in a record written before it was kept.
    */
   commit: Schema.optional(CommitId),
-  refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
+  refusedFiles: Schema.Array(bounded(4_096)).check(Schema.isMaxLength(1_000)),
   handedOverAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HandedOverThread = typeof HandedOverThread.Type;
 
 /** How many of the files a kept worktree held a departure names. */
@@ -518,7 +525,7 @@ export const KEPT_FILES_LISTED = 200;
  * with a space, so it is not trimmed: one such name refused here would make the
  * whole move state unreadable.
  */
-const KeptFilePath = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096));
+const KeptFilePath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096));
 
 /** The longest name a receipt keeps for a part left behind. */
 export const THREAD_MOVE_PART_NAME_LENGTH = 512;
@@ -538,7 +545,7 @@ export const THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED = 1_000;
 export const ThreadMovePartLeftBehind = Schema.Struct({
   kind: ThreadMovePartKind,
   name: bounded(THREAD_MOVE_PART_NAME_LENGTH),
-}).annotations(strict);
+});
 export type ThreadMovePartLeftBehind = typeof ThreadMovePartLeftBehind.Type;
 
 /** A thread that moved away from this host, for its "Moved to" tombstone. */
@@ -560,7 +567,9 @@ export const ThreadMoveDeparture = Schema.Struct({
    * relative to it: the first `KEPT_FILES_LISTED`, with `keptFileCount`
    * counting them all.
    */
-  keptFiles: Schema.optional(Schema.Array(KeptFilePath).pipe(Schema.maxItems(KEPT_FILES_LISTED))),
+  keptFiles: Schema.optional(
+    Schema.Array(KeptFilePath).check(Schema.isMaxLength(KEPT_FILES_LISTED)),
+  ),
   keptFileCount: Schema.optional(NonNegativeInt),
   /** A person removed the kept worktree, so nothing of it is left on this computer. */
   keptWorktreeRemovedAt: Schema.optional(UtcTimestamp),
@@ -568,14 +577,14 @@ export const ThreadMoveDeparture = Schema.Struct({
   changesRemainInCheckout: Schema.Boolean,
   /** Parts the move could not carry, the first ones named; absent when every part travelled. */
   partsLeftBehind: Schema.optional(
-    Schema.Array(ThreadMovePartLeftBehind).pipe(
-      Schema.maxItems(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED),
+    Schema.Array(ThreadMovePartLeftBehind).check(
+      Schema.isMaxLength(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED),
     ),
   ),
   /** How many parts the move could not carry, named or not. */
-  partsLeftBehindCount: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  partsLeftBehindCount: Schema.optional(PositiveInt),
   movedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMoveDeparture = typeof ThreadMoveDeparture.Type;
 
 /** Where one thread stands, as its Environment tool and its notices show it. */
@@ -587,11 +596,11 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       moveId: ThreadMoveId,
       destinationMemberId: HubMemberId,
       destinationName: bounded(256),
-      state: Schema.Literal("frozen", "offered", "arrived", "committed"),
+      state: Schema.Literals(["frozen", "offered", "arrived", "committed"]),
       bytesSent: NonNegativeInt,
       bytesTotal: NonNegativeInt,
       startedAt: UtcTimestamp,
-    }).annotations(strict),
+    }),
   ),
   /** Set to move once the running turn ends. */
   waiting: Schema.optional(
@@ -600,15 +609,15 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       destinationName: bounded(256),
       /** The person chose Stop and move: the turn was told to stop, and the move starts once it has. */
       stopping: Schema.optional(Schema.Boolean),
-    }).annotations(strict),
+    }),
   ),
   /** Held until an owner phone confirms the move, or the wait runs out. */
   waitingForPhone: Schema.optional(
     Schema.Struct({
       destinationMemberId: HubMemberId,
       destinationName: bounded(256),
-      expiresAt: Schema.Int.pipe(Schema.positive()),
-    }).annotations(strict),
+      expiresAt: PositiveInt,
+    }),
   ),
   /**
    * The last move or wait a window started for this thread has ended: it
@@ -616,7 +625,7 @@ export const ThreadMoveThreadStatus = Schema.Struct({
    * thread starts another move and never dismissed, so a batch that named the
    * thread reads that it ended even after its failure notice is put away.
    */
-  settled: Schema.optional(Schema.Struct({ settledAt: UtcTimestamp }).annotations(strict)),
+  settled: Schema.optional(Schema.Struct({ settledAt: UtcTimestamp })),
   /** Arrived here and not yet committed by its source. */
   arriving: Schema.optional(
     Schema.Struct({
@@ -625,7 +634,7 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       originName: bounded(256),
       /** The source has been silent for five minutes: Activate anyway is offered. */
       mayActivateAnyway: Schema.Boolean,
-    }).annotations(strict),
+    }),
   ),
   /** The last move of this thread that could not finish, until the person dismisses it. */
   failure: Schema.optional(
@@ -633,7 +642,7 @@ export const ThreadMoveThreadStatus = Schema.Struct({
       moveId: ThreadMoveId,
       reason: ThreadMoveFailureReason,
       failedAt: UtcTimestamp,
-    }).annotations(strict),
+    }),
   ),
   /** Handed over through its branch: frozen here until continued elsewhere or taken back. */
   handedOver: Schema.optional(HandedOverThread),
@@ -648,9 +657,9 @@ export const ThreadMoveThreadStatus = Schema.Struct({
        * serves no web app. Open there opens the moved thread on it.
        */
       destinationWebOrigin: Schema.optional(bounded(512)),
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
 
 /**
@@ -660,10 +669,11 @@ export type ThreadMoveThreadStatus = typeof ThreadMoveThreadStatus.Type;
  */
 export const HubAcceptMovedThreadsRequest = Schema.Struct({
   enabled: Schema.Boolean,
-}).annotations(strict);
+});
 export type HubAcceptMovedThreadsRequest = typeof HubAcceptMovedThreadsRequest.Type;
 export const decodeHubAcceptMovedThreadsRequest = Schema.decodeUnknownSync(
   HubAcceptMovedThreadsRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 // ── Prepare to shut down ───────────────────────────────────────────────────
@@ -672,19 +682,19 @@ export const decodeHubAcceptMovedThreadsRequest = Schema.decodeUnknownSync(
 export const ShutdownListedMember = Schema.Struct({
   memberId: HubMemberId,
   name: bounded(256),
-  role: Schema.Literal("hub", "spoke"),
+  role: Schema.Literals(["hub", "spoke"]),
   reachable: Schema.Boolean,
   refusal: Schema.optional(Schema.Literal("refused")),
-}).annotations(strict);
+});
 export type ShutdownListedMember = typeof ShutdownListedMember.Type;
 
 /** Whether one member can take one listed thread, and into which Projects. */
 export const ShutdownPlacement = Schema.Struct({
   memberId: HubMemberId,
   reason: Schema.optional(ThreadMoveFailureReason),
-  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  projects: Schema.Array(ThreadMoveProjectChoice).check(Schema.isMaxLength(256)),
   noProjectAllowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type ShutdownPlacement = typeof ShutdownPlacement.Type;
 
 export const ShutdownThreadRow = Schema.Struct({
@@ -695,50 +705,50 @@ export const ShutdownThreadRow = Schema.Struct({
   busy: Schema.Boolean,
   /** Open, but with no turn in the last 14 days: folded under Older threads. */
   older: Schema.Boolean,
-  placements: Schema.Array(ShutdownPlacement).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  placements: Schema.Array(ShutdownPlacement).check(Schema.isMaxLength(64)),
+});
 export type ShutdownThreadRow = typeof ShutdownThreadRow.Type;
 
 export const ShutdownListing = Schema.Struct({
   status: Schema.Literal("listed"),
-  members: Schema.Array(ShutdownListedMember).pipe(Schema.maxItems(64)),
-  rows: Schema.Array(ShutdownThreadRow).pipe(Schema.maxItems(2_000)),
+  members: Schema.Array(ShutdownListedMember).check(Schema.isMaxLength(64)),
+  rows: Schema.Array(ShutdownThreadRow).check(Schema.isMaxLength(2_000)),
   /** The member the person last moved a thread to, for the starting destination. */
   lastMovedTo: Schema.optional(HubMemberId),
-}).annotations(strict);
+});
 export type ShutdownListing = typeof ShutdownListing.Type;
 
-const BatchThreads = Schema.Array(MovedThreadReference).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(SHUTDOWN_BATCH_MAX),
+const BatchThreads = Schema.Array(MovedThreadReference).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(SHUTDOWN_BATCH_MAX),
 );
 
 /** The challenge for one destination's batch: one unlock covers exactly these threads. */
 export const ShutdownChallengeRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
   threads: BatchThreads,
-}).annotations(strict);
+});
 export type ShutdownChallengeRequest = typeof ShutdownChallengeRequest.Type;
 
 export const ShutdownBatchRow = Schema.Struct({
   thread: MovedThreadReference,
   destinationProjectId: Schema.optional(ProjectId),
   timing: ThreadMoveTiming,
-}).annotations(strict);
+});
 export type ShutdownBatchRow = typeof ShutdownBatchRow.Type;
 
 /** One destination's batch, unlocked once; the rows must name exactly the challenged threads. */
 export const ShutdownStartRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
-  rows: Schema.Array(ShutdownBatchRow).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(SHUTDOWN_BATCH_MAX),
+  rows: Schema.Array(ShutdownBatchRow).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(SHUTDOWN_BATCH_MAX),
   ),
   unlock: Schema.Struct({
-    challengeId: Schema.UUID,
-    signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
-  }).annotations(strict),
-}).annotations(strict);
+    challengeId: GuidString,
+    signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/)),
+  }),
+});
 export type ShutdownStartRequest = typeof ShutdownStartRequest.Type;
 
 /**
@@ -749,15 +759,15 @@ export type ShutdownStartRequest = typeof ShutdownStartRequest.Type;
 export const ShutdownRowLeftOut = Schema.Struct({
   thread: MovedThreadReference,
   reason: ThreadMoveFailureReason,
-}).annotations(strict);
+});
 export type ShutdownRowLeftOut = typeof ShutdownRowLeftOut.Type;
 
-const RowsLeftOut = Schema.Array(ShutdownRowLeftOut).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX));
+const RowsLeftOut = Schema.Array(ShutdownRowLeftOut).check(Schema.isMaxLength(SHUTDOWN_BATCH_MAX));
 
-export const ShutdownStartOutcome = Schema.Union(
+export const ShutdownStartOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("started"), leftOut: Schema.optional(RowsLeftOut) }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
-);
+]);
 export type ShutdownStartOutcome = typeof ShutdownStartOutcome.Type;
 
 // ── Confirming a move on an owner phone ────────────────────────────────────
@@ -775,48 +785,49 @@ export const ThreadMovePhoneAskRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
   destinationProjectId: Schema.optional(ProjectId),
   timing: ThreadMoveTiming,
-}).annotations(strict);
+});
 export type ThreadMovePhoneAskRequest = typeof ThreadMovePhoneAskRequest.Type;
 
 /** Prepare to shut down asks the phone to confirm one destination's batch. */
 export const ShutdownPhoneAskRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
-  rows: Schema.Array(ShutdownBatchRow).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(SHUTDOWN_BATCH_MAX),
+  rows: Schema.Array(ShutdownBatchRow).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(SHUTDOWN_BATCH_MAX),
   ),
-}).annotations(strict);
+});
 export type ShutdownPhoneAskRequest = typeof ShutdownPhoneAskRequest.Type;
 
-export const ThreadMovePhoneAskOutcome = Schema.Union(
+export const ThreadMovePhoneAskOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("waiting-for-phone"),
-    expiresAt: Schema.Int.pipe(Schema.positive()),
+    expiresAt: PositiveInt,
     /** The threads held for the phone. */
-    held: Schema.Array(MovedThreadReference).pipe(Schema.maxItems(SHUTDOWN_BATCH_MAX)),
+    held: Schema.Array(MovedThreadReference).check(Schema.isMaxLength(SHUTDOWN_BATCH_MAX)),
     /** Requested threads not held, each with why. */
     leftOut: RowsLeftOut,
   }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: ThreadMoveFailureReason }),
-);
+]);
 export type ThreadMovePhoneAskOutcome = typeof ThreadMovePhoneAskOutcome.Type;
 
 /** One move waiting on this host for an owner phone, as the phone lists it. */
 export const ThreadMovePhoneConfirmation = Schema.Struct({
-  confirmationId: Schema.UUID,
+  confirmationId: GuidString,
   destinationMemberId: HubMemberId,
   destinationName: bounded(256),
-  threads: Schema.Array(
-    Schema.Struct({ thread: MovedThreadReference, title: bounded(256) }).annotations(strict),
-  ).pipe(Schema.minItems(1), Schema.maxItems(SHUTDOWN_BATCH_MAX)),
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  threads: Schema.Array(Schema.Struct({ thread: MovedThreadReference, title: bounded(256) })).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(SHUTDOWN_BATCH_MAX),
+  ),
+  expiresAt: PositiveInt,
+});
 export type ThreadMovePhoneConfirmation = typeof ThreadMovePhoneConfirmation.Type;
 
 export const ThreadMovePhoneConfirmations = Schema.Struct({
   status: Schema.Literal("listed"),
-  confirmations: Schema.Array(ThreadMovePhoneConfirmation).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  confirmations: Schema.Array(ThreadMovePhoneConfirmation).check(Schema.isMaxLength(16)),
+});
 export type ThreadMovePhoneConfirmations = typeof ThreadMovePhoneConfirmations.Type;
 
 /**
@@ -825,16 +836,16 @@ export type ThreadMovePhoneConfirmations = typeof ThreadMovePhoneConfirmations.T
  * confirmation; the phone cannot change them.
  */
 export const OwnerThreadMoveConfirmRequest = Schema.Struct({
-  confirmationId: Schema.UUID,
-  ticketId: Schema.UUID,
-}).annotations(strict);
+  confirmationId: GuidString,
+  ticketId: GuidString,
+});
 export type OwnerThreadMoveConfirmRequest = typeof OwnerThreadMoveConfirmRequest.Type;
 
 // ── Sizes and an estimate ──────────────────────────────────────────────────
 
 const ThreadMovePartSizes = Schema.Array(
-  Schema.Struct({ kind: ThreadMovePartKind, bytes: NonNegativeInt }).annotations(strict),
-).pipe(Schema.maxItems(16));
+  Schema.Struct({ kind: ThreadMovePartKind, bytes: NonNegativeInt }),
+).check(Schema.isMaxLength(16));
 
 /**
  * How much a move of one thread would send now, read without packing or
@@ -843,20 +854,23 @@ const ThreadMovePartSizes = Schema.Array(
  * `unknownParts` names the kinds left out. `unknown` when the thread could not
  * be measured. Neither ever stops a move.
  */
-export const ThreadMoveSize = Schema.Union(
+export const ThreadMoveSize = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("measured"),
     bytes: NonNegativeInt,
     parts: ThreadMovePartSizes,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("partly-measured"),
     bytes: NonNegativeInt,
     parts: ThreadMovePartSizes,
-    unknownParts: Schema.Array(ThreadMovePartKind).pipe(Schema.minItems(1), Schema.maxItems(16)),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("unknown") }).annotations(strict),
-);
+    unknownParts: Schema.Array(ThreadMovePartKind).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(16),
+    ),
+  }),
+  Schema.Struct({ status: Schema.Literal("unknown") }),
+]);
 export type ThreadMoveSize = typeof ThreadMoveSize.Type;
 
 /**
@@ -864,9 +878,9 @@ export type ThreadMoveSize = typeof ThreadMoveSize.Type;
  * that member measured, or the stated conservative default when none did.
  */
 export const ThreadMoveRate = Schema.Struct({
-  basis: Schema.Literal("measured", "assumed"),
-  bytesPerSecond: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  basis: Schema.Literals(["measured", "assumed"]),
+  bytesPerSecond: PositiveInt,
+});
 export type ThreadMoveRate = typeof ThreadMoveRate.Type;
 
 /** The most threads one sizes request names; the request body stays under the route's cap. */
@@ -875,20 +889,20 @@ export const THREAD_MOVE_SIZES_MAX = 512;
 /** The threads a window would move to one member, to size before the move. */
 export const ThreadMoveSizesRequest = Schema.Struct({
   destinationMemberId: HubMemberId,
-  threads: Schema.Array(MovedThreadReference).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(THREAD_MOVE_SIZES_MAX),
+  threads: Schema.Array(MovedThreadReference).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(THREAD_MOVE_SIZES_MAX),
   ),
-}).annotations(strict);
+});
 export type ThreadMoveSizesRequest = typeof ThreadMoveSizesRequest.Type;
 
 export const ThreadMoveSizes = Schema.Struct({
   status: Schema.Literal("read"),
   rate: ThreadMoveRate,
-  rows: Schema.Array(
-    Schema.Struct({ thread: MovedThreadReference, size: ThreadMoveSize }).annotations(strict),
-  ).pipe(Schema.maxItems(THREAD_MOVE_SIZES_MAX)),
-}).annotations(strict);
+  rows: Schema.Array(Schema.Struct({ thread: MovedThreadReference, size: ThreadMoveSize })).check(
+    Schema.isMaxLength(THREAD_MOVE_SIZES_MAX),
+  ),
+});
 export type ThreadMoveSizes = typeof ThreadMoveSizes.Type;
 
 // ── Handover ───────────────────────────────────────────────────────────────
@@ -904,7 +918,7 @@ export const HandoverRequest = Schema.Struct({
    * without it spends no provider turn.
    */
   summarize: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type HandoverRequest = typeof HandoverRequest.Type;
 
 /**
@@ -916,7 +930,7 @@ export type HandoverRequest = typeof HandoverRequest.Type;
 export const ShutdownHandoverRequest = Schema.Struct({
   thread: MovedThreadReference,
   destinationMemberId: HubMemberId,
-}).annotations(strict);
+});
 export type ShutdownHandoverRequest = typeof ShutdownHandoverRequest.Type;
 
 /** What a handover would do, before anything is frozen or written. */
@@ -927,20 +941,20 @@ export const HandoverPreview = Schema.Struct({
   newBranch: Schema.Boolean,
   /** The remote it pushes to; absent when the checkout has none. */
   remote: Schema.optional(bounded(255)),
-  note: Schema.String.pipe(Schema.maxLength(32 * 1024)),
-}).annotations(strict);
+  note: Schema.String.check(Schema.isMaxLength(32 * 1024)),
+});
 export type HandoverPreview = typeof HandoverPreview.Type;
 
-export const HandoverRefusal = Schema.Literal(
+export const HandoverRefusal = Schema.Literals([
   "busy",
   "delegated",
   "refused",
   "nothing-to-hand-over",
   "commit-failed",
-);
+]);
 export type HandoverRefusal = typeof HandoverRefusal.Type;
 
-export const HandoverOutcome = Schema.Union(
+export const HandoverOutcome = Schema.Union([
   HandoverPreview,
   Schema.Struct({
     status: Schema.Literal("handed-over"),
@@ -948,15 +962,15 @@ export const HandoverOutcome = Schema.Union(
     branch: bounded(255),
     pushed: Schema.Boolean,
     shortfall: Schema.optional(HandoverShortfall),
-    refusedFiles: Schema.Array(bounded(4_096)).pipe(Schema.maxItems(1_000)),
+    refusedFiles: Schema.Array(bounded(4_096)).check(Schema.isMaxLength(1_000)),
   }),
   Schema.Struct({ status: Schema.Literal("refused"), reason: HandoverRefusal }),
-);
+]);
 export type HandoverOutcome = typeof HandoverOutcome.Type;
 
 export const HandoverControlRequest = Schema.Struct({
   handoverId: HandoverId,
-}).annotations(strict);
+});
 export type HandoverControlRequest = typeof HandoverControlRequest.Type;
 
 /** The destination tells the source it continued a handover, so the source erases its frozen copy. */
@@ -965,7 +979,7 @@ export const HandoverContinuedReport = Schema.Struct({
   thread: MovedThreadReference,
   /** The commit the destination continued from, whose note named this handover. */
   commit: Schema.optional(CommitId),
-}).annotations(strict);
+});
 export type HandoverContinuedReport = typeof HandoverContinuedReport.Type;
 
 /** A handover a member told this computer about, as the Handovers card lists it. */
@@ -981,35 +995,35 @@ export const ReceivedHandoverView = Schema.Struct({
   originMemberId: Schema.optional(HubMemberId),
   originName: bounded(256),
   /** Code Projects here bound to a clone of the same repository. */
-  projects: Schema.Array(ThreadMoveProjectChoice).pipe(Schema.maxItems(256)),
+  projects: Schema.Array(ThreadMoveProjectChoice).check(Schema.isMaxLength(256)),
   receivedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ReceivedHandoverView = typeof ReceivedHandoverView.Type;
 
 export const HandoverListing = Schema.Struct({
   status: Schema.Literal("listed"),
-  handovers: Schema.Array(ReceivedHandoverView).pipe(Schema.maxItems(256)),
-}).annotations(strict);
+  handovers: Schema.Array(ReceivedHandoverView).check(Schema.isMaxLength(256)),
+});
 export type HandoverListing = typeof HandoverListing.Type;
 
 export const HandoverContinueRequest = Schema.Struct({
   handoverId: HandoverId,
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type HandoverContinueRequest = typeof HandoverContinueRequest.Type;
 
-export const HandoverContinueOutcome = Schema.Union(
+export const HandoverContinueOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("continued"), thread: MovedThreadReference }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "refused",
       "no-eligible-project",
       "no-matching-provider",
       "transfer-failed",
-    ),
+    ]),
   }),
-);
+]);
 export type HandoverContinueOutcome = typeof HandoverContinueOutcome.Type;
 
 /**
@@ -1017,58 +1031,145 @@ export type HandoverContinueOutcome = typeof HandoverContinueOutcome.Type;
  * answers a move that kept no worktree here; `remove-failed` a folder that is
  * no longer a linked worktree of its repository, which is left as it is.
  */
-export const KeptWorktreeRemoveOutcome = Schema.Union(
+export const KeptWorktreeRemoveOutcome = Schema.Union([
   Schema.Struct({ status: Schema.Literal("removed") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    kind: Schema.Literal("not-kept-worktree", "remove-failed"),
+    kind: Schema.Literals(["not-kept-worktree", "remove-failed"]),
   }),
-);
+]);
 export type KeptWorktreeRemoveOutcome = typeof KeptWorktreeRemoveOutcome.Type;
 
 export const decodeOwnerThreadMoveTicketRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveTicketRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadMoveOffer = Schema.decodeUnknownSync(ThreadMoveOffer);
+export const decodeThreadMoveOffer = Schema.decodeUnknownSync(
+  ThreadMoveOffer,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMoveDestinationState = Schema.decodeUnknownSync(
   ThreadMoveDestinationState,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeHandoverNotice = Schema.decodeUnknownSync(HandoverNotice);
-export const decodeThreadMoveProjectsRequest = Schema.decodeUnknownSync(ThreadMoveProjectsRequest);
-export const decodeThreadMoveProjects = Schema.decodeUnknownSync(ThreadMoveProjects);
-export const decodeThreadMoveThreadRequest = Schema.decodeUnknownSync(ThreadMoveThreadRequest);
+export const decodeHandoverNotice = Schema.decodeUnknownSync(HandoverNotice, STRICT_DECODE_OPTIONS);
+export const decodeThreadMoveProjectsRequest = Schema.decodeUnknownSync(
+  ThreadMoveProjectsRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveProjects = Schema.decodeUnknownSync(
+  ThreadMoveProjects,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveThreadRequest = Schema.decodeUnknownSync(
+  ThreadMoveThreadRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMoveChallengeRequest = Schema.decodeUnknownSync(
   ThreadMoveChallengeRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadMoveStartRequest = Schema.decodeUnknownSync(ThreadMoveStartRequest);
-export const decodeThreadMoveControlRequest = Schema.decodeUnknownSync(ThreadMoveControlRequest);
-export const decodeThreadMoveDestinations = Schema.decodeUnknownSync(ThreadMoveDestinations);
+export const decodeThreadMoveStartRequest = Schema.decodeUnknownSync(
+  ThreadMoveStartRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveControlRequest = Schema.decodeUnknownSync(
+  ThreadMoveControlRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveDestinations = Schema.decodeUnknownSync(
+  ThreadMoveDestinations,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMoveChallengeOutcome = Schema.decodeUnknownSync(
   ThreadMoveChallengeOutcome,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadMoveStartOutcome = Schema.decodeUnknownSync(ThreadMoveStartOutcome);
-export const decodeThreadMoveThreadStatus = Schema.decodeUnknownSync(ThreadMoveThreadStatus);
-export const decodeShutdownListing = Schema.decodeUnknownSync(ShutdownListing);
-export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(ShutdownChallengeRequest);
-export const decodeShutdownStartRequest = Schema.decodeUnknownSync(ShutdownStartRequest);
-export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(ShutdownStartOutcome);
-export const decodeThreadMovePhoneAskRequest = Schema.decodeUnknownSync(ThreadMovePhoneAskRequest);
-export const decodeShutdownPhoneAskRequest = Schema.decodeUnknownSync(ShutdownPhoneAskRequest);
-export const decodeThreadMovePhoneAskOutcome = Schema.decodeUnknownSync(ThreadMovePhoneAskOutcome);
+export const decodeThreadMoveStartOutcome = Schema.decodeUnknownSync(
+  ThreadMoveStartOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveThreadStatus = Schema.decodeUnknownSync(
+  ThreadMoveThreadStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownListing = Schema.decodeUnknownSync(
+  ShutdownListing,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownChallengeRequest = Schema.decodeUnknownSync(
+  ShutdownChallengeRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownStartRequest = Schema.decodeUnknownSync(
+  ShutdownStartRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownStartOutcome = Schema.decodeUnknownSync(
+  ShutdownStartOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMovePhoneAskRequest = Schema.decodeUnknownSync(
+  ThreadMovePhoneAskRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownPhoneAskRequest = Schema.decodeUnknownSync(
+  ShutdownPhoneAskRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMovePhoneAskOutcome = Schema.decodeUnknownSync(
+  ThreadMovePhoneAskOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMovePhoneConfirmations = Schema.decodeUnknownSync(
   ThreadMovePhoneConfirmations,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeOwnerThreadMoveConfirmRequest = Schema.decodeUnknownSync(
   OwnerThreadMoveConfirmRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeHandoverRequest = Schema.decodeUnknownSync(HandoverRequest);
-export const decodeShutdownHandoverRequest = Schema.decodeUnknownSync(ShutdownHandoverRequest);
-export const decodeHandoverOutcome = Schema.decodeUnknownSync(HandoverOutcome);
-export const decodeHandoverControlRequest = Schema.decodeUnknownSync(HandoverControlRequest);
-export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(HandoverContinuedReport);
-export const decodeHandoverListing = Schema.decodeUnknownSync(HandoverListing);
-export const decodeHandoverContinueRequest = Schema.decodeUnknownSync(HandoverContinueRequest);
-export const decodeHandoverContinueOutcome = Schema.decodeUnknownSync(HandoverContinueOutcome);
-export const decodeKeptWorktreeRemoveOutcome = Schema.decodeUnknownSync(KeptWorktreeRemoveOutcome);
-export const decodeThreadMoveSizesRequest = Schema.decodeUnknownSync(ThreadMoveSizesRequest);
-export const decodeThreadMoveSizes = Schema.decodeUnknownSync(ThreadMoveSizes);
+export const decodeHandoverRequest = Schema.decodeUnknownSync(
+  HandoverRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShutdownHandoverRequest = Schema.decodeUnknownSync(
+  ShutdownHandoverRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverOutcome = Schema.decodeUnknownSync(
+  HandoverOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverControlRequest = Schema.decodeUnknownSync(
+  HandoverControlRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverContinuedReport = Schema.decodeUnknownSync(
+  HandoverContinuedReport,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverListing = Schema.decodeUnknownSync(
+  HandoverListing,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverContinueRequest = Schema.decodeUnknownSync(
+  HandoverContinueRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHandoverContinueOutcome = Schema.decodeUnknownSync(
+  HandoverContinueOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeKeptWorktreeRemoveOutcome = Schema.decodeUnknownSync(
+  KeptWorktreeRemoveOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveSizesRequest = Schema.decodeUnknownSync(
+  ThreadMoveSizesRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMoveSizes = Schema.decodeUnknownSync(
+  ThreadMoveSizes,
+  STRICT_DECODE_OPTIONS,
+);

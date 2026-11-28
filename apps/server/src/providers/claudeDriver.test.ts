@@ -1145,7 +1145,7 @@ describe("Claude execution policy", () => {
       const shell = { command: "git status" };
       const approvalEvent = Effect.runPromise(
         Stream.runHead(
-          Stream.unwrapScoped(gated.acquired.connection.subscribe).pipe(
+          Stream.unwrap(gated.acquired.connection.subscribe).pipe(
             Stream.filter((event) => event.kind === "approval-request"),
           ),
         ),
@@ -1214,7 +1214,7 @@ describe("Claude execution policy", () => {
       try {
         const approvalEvent = Effect.runPromise(
           Stream.runHead(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "approval-request"),
             ),
           ),
@@ -1278,7 +1278,7 @@ describe("Claude execution policy", () => {
         const open = f.opens[0]!;
         const approvalEvent = Effect.runPromise(
           Stream.runHead(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "approval-request"),
             ),
           ),
@@ -1336,7 +1336,7 @@ describe("Claude execution policy", () => {
       const outside = { file_path: "/tmp/octant-claude-outside/notes.md" };
       const approvalEvent = Effect.runPromise(
         Stream.runHead(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.unwrap(acquired.connection.subscribe).pipe(
             Stream.filter((event) => event.kind === "approval-request"),
           ),
         ),
@@ -1422,7 +1422,7 @@ describe("Claude execution policy", () => {
     const approvals: unknown[] = [];
     const watched = Effect.runFork(
       Stream.runForEach(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
         (event) => Effect.sync(() => approvals.push(event)),
@@ -1776,7 +1776,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -1889,7 +1889,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -2259,7 +2259,7 @@ describe("Claude execution policy", () => {
     const acquired = await acquire(f.driver);
     const children: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "child-agent-activity") children.push(event);
         }),
@@ -2323,7 +2323,7 @@ describe("Claude execution policy", () => {
     const acquired = await acquire(f.driver);
     const children: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "child-agent-activity") children.push(event);
         }),
@@ -2412,7 +2412,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const input = { file_path: `${projectRoot}/README.md` };
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
@@ -2456,7 +2456,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -2530,7 +2530,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -2600,7 +2600,7 @@ describe("Claude execution policy", () => {
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "long", attachments: [], tools: [] }),
@@ -2700,7 +2700,7 @@ describe("Claude execution policy", () => {
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "held", attachments: [], tools: [] }),
@@ -2748,7 +2748,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     for (let turn = 0; turn < 5; turn += 1) {
       const terminalEvent = Effect.runPromise(
-        collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+        collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
       );
       await Effect.runPromise(
         acquired.connection.send({ sessionId, prompt: `turn-${turn}`, attachments: [], tools: [] }),
@@ -3033,7 +3033,7 @@ describe("Claude execution policy", () => {
     const input = { file_path: `${projectRoot}/greet.js`, old_string: "a", new_string: "b" };
     const approvalEvent = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -3086,7 +3086,7 @@ describe("Claude execution policy", () => {
     const input = { command: "git status", description: "Show working tree status" };
     const approvalEvent = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -3150,7 +3150,7 @@ describe("Claude execution policy", () => {
         expect(read).toEqual({ behavior: "ask" });
         const approvalEvent = Effect.runPromise(
           Stream.runHead(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "approval-request"),
             ),
           ),
@@ -3259,7 +3259,7 @@ describe("Claude execution policy", () => {
         }> = [];
         const watched = Effect.runFork(
           Stream.runForEach(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "approval-request"),
             ),
             (event) =>
@@ -3404,7 +3404,7 @@ describe("Claude execution policy", () => {
     const input = { command, cwd: projectRoot };
     const approvalEvent = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -3461,7 +3461,7 @@ describe("Claude execution policy", () => {
       const nextApproval = () =>
         Effect.runPromise(
           Stream.runHead(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter(
                 (event) => event.sessionId === sessionId && event.kind === "approval-request",
               ),
@@ -3525,7 +3525,7 @@ describe("Claude execution policy", () => {
           const ask = async (toolUseId: string) => {
             const approval = Effect.runPromise(
               Stream.runHead(
-                Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+                Stream.unwrap(acquired.connection.subscribe).pipe(
                   Stream.filter(
                     (event) => event.sessionId === sessionId && event.kind === "approval-request",
                   ),
@@ -3579,7 +3579,7 @@ describe("Claude execution policy", () => {
       };
       const collectApproval = Effect.runPromise(
         Stream.runHead(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.unwrap(acquired.connection.subscribe).pipe(
             Stream.filter(
               (event) => event.sessionId === sessionId && event.kind === "approval-request",
             ),
@@ -3657,7 +3657,7 @@ describe("Claude execution policy", () => {
         persistence === "project-default"
           ? Effect.runPromise(
               Stream.runHead(
-                Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+                Stream.unwrap(acquired.connection.subscribe).pipe(
                   Stream.filter(
                     (candidate) =>
                       candidate.sessionId === sessionId && candidate.kind === "approval-request",
@@ -3678,7 +3678,7 @@ describe("Claude execution policy", () => {
         const nextInput = { ...input, new_string: "different-approved-input" };
         const collectNextApproval = Effect.runPromise(
           Stream.runHead(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter(
                 (candidate) =>
                   candidate.sessionId === sessionId && candidate.kind === "approval-request",
@@ -3833,7 +3833,7 @@ describe("Claude execution policy", () => {
     };
     const collectQuestion = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter(
             (event) => event.sessionId === sessionId && event.kind === "user-input-request",
           ),
@@ -3917,7 +3917,7 @@ describe("Claude execution policy", () => {
     };
     const collectRetriedQuestion = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter(
             (candidate) =>
               candidate.sessionId === sessionId && candidate.kind === "user-input-request",
@@ -3990,7 +3990,7 @@ describe("Claude execution policy", () => {
         };
         const collected = Effect.runPromise(
           Stream.runCollect(
-            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.unwrap(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "user-input-request"),
               Stream.take(2),
             ),
@@ -4078,7 +4078,7 @@ describe("Claude execution policy", () => {
     const signal = new AbortController().signal;
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -4153,7 +4153,7 @@ describe("Claude execution policy", () => {
     };
     const collect = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "user-input-request"),
         ),
       ),
@@ -4292,7 +4292,7 @@ describe("Claude execution policy", () => {
     ).resolves.toMatchObject({ behavior: "deny" });
     const collect = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "user-input-request"),
         ),
       ),
@@ -4603,7 +4603,7 @@ describe("Claude execution policy", () => {
     );
     const events: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           events.push(event);
         }),
@@ -4676,7 +4676,7 @@ describe("Claude execution policy", () => {
     );
     const usage: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "usage") usage.push(event);
         }),
@@ -4739,7 +4739,7 @@ describe("Claude execution policy", () => {
       }),
     );
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
@@ -4914,7 +4914,7 @@ describe("Claude execution policy", () => {
       stuckConnection.connection.send({ sessionId, prompt: "hang", attachments: [], tools: [] }),
     );
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(stuckConnection.connection.subscribe)),
+      collectTerminal(Stream.unwrap(stuckConnection.connection.subscribe)),
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
     await Effect.runPromise(stuckConnection.connection.forceStop!(sessionId));
@@ -4973,7 +4973,7 @@ describe("Claude execution policy", () => {
       signal,
     });
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(interruptedConnection.connection.subscribe)),
+      collectTerminal(Stream.unwrap(interruptedConnection.connection.subscribe)),
     );
     const interruptExit = Effect.runPromise(
       Effect.exit(interruptedConnection.connection.interrupt(sessionId)),
@@ -5107,7 +5107,7 @@ describe("Claude execution policy", () => {
       signal,
     });
     const terminalEvent = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await f.queries[0]!.end();
     const terminalResult = await terminalEvent;
@@ -5339,7 +5339,7 @@ describe("Claude artifact delivery", () => {
       const acquired = await acquire(f.driver, "code");
       try {
         const result = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             acquired.connection.start({
               sessionId,
               modelId,
@@ -5357,7 +5357,7 @@ describe("Claude artifact delivery", () => {
             }),
           ),
         );
-        expect(result._tag).toBe("Right");
+        expect(result._tag).toBe("Success");
         expect(f.opens).toHaveLength(1);
         expect(f.opens[0]?.nativeSetup).toMatchObject({
           hooks: false,
@@ -5380,7 +5380,7 @@ describe("Claude artifact delivery", () => {
     const acquired = await acquire(f.driver, "code");
     try {
       const protectedRun = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           acquired.connection.start({
             sessionId,
             modelId,
@@ -5390,8 +5390,11 @@ describe("Claude artifact delivery", () => {
         ),
       );
       expect(protectedRun).toMatchObject({
-        _tag: "Left",
-        left: { category: "unsupported", message: expect.stringContaining("protected-file rule") },
+        _tag: "Failure",
+        failure: {
+          category: "unsupported",
+          message: expect.stringContaining("protected-file rule"),
+        },
       });
       expect(f.opens).toHaveLength(0);
       await Effect.runPromise(
@@ -5722,7 +5725,7 @@ describe("Claude artifact delivery", () => {
     const acquired = await acquire(f.driver, "code");
     const approvals: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "approval-request") approvals.push(event);
         }),
@@ -5761,7 +5764,7 @@ describe("Claude artifact delivery", () => {
     const acquired = await acquire(f.driver, "work");
     const approval = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -5854,7 +5857,7 @@ describe("Claude artifact delivery", () => {
     const acquired = await acquire(f.driver, "work");
     const approval = Effect.runPromise(
       Stream.runHead(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.kind === "approval-request"),
         ),
       ),
@@ -5952,7 +5955,7 @@ describe("Claude artifact delivery", () => {
     const published: ProviderRuntimeEvent[] = [];
     const approvals: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "tool-success") published.push(event);
           if (event.kind === "approval-request") approvals.push(event);
@@ -6627,7 +6630,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -7043,7 +7046,7 @@ describe("Claude session lifecycle", () => {
       );
       const events: ProviderRuntimeEvent[] = [];
       const subscription = Effect.runFork(
-        Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
           Effect.sync(() => {
             events.push(event);
           }),
@@ -7094,7 +7097,7 @@ describe("Claude session lifecycle", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -7102,7 +7105,7 @@ describe("Claude session lifecycle", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
     const terminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
@@ -7135,7 +7138,7 @@ describe("Claude session lifecycle", () => {
     );
 
     const firstTerminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
@@ -7145,7 +7148,7 @@ describe("Claude session lifecycle", () => {
     expect(f.queries[0]!.close).not.toHaveBeenCalled();
 
     const secondTerminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
@@ -7168,7 +7171,7 @@ describe("Claude session lifecycle", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -7214,7 +7217,7 @@ describe("Claude session lifecycle", () => {
       }),
     );
     const terminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "interrupt me", attachments: [], tools: [] }),
@@ -7234,7 +7237,7 @@ describe("Claude session lifecycle", () => {
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     const terminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "accepted", attachments: [], tools: [] }),
@@ -7271,7 +7274,7 @@ describe("Claude session lifecycle", () => {
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     const terminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
     await f.queries[0]!.end();
     await expect(terminal).resolves.toMatchObject({ value: { kind: "waiting" } });
@@ -7296,7 +7299,7 @@ describe("Claude session lifecycle", () => {
   it("fails exactly once and revokes authority when the decoded permission mode drifts", async () => {
     const f = harness();
     let failStream!: () => void;
-    const permissionDrift = Effect.async<never, ProviderFailure>((resume) => {
+    const permissionDrift = Effect.callback<never, ProviderFailure>((resume) => {
       failStream = () =>
         resume(
           Effect.fail({
@@ -7320,7 +7323,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -7330,7 +7333,7 @@ describe("Claude session lifecycle", () => {
       acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
     );
     const terminal = Effect.runPromise(
-      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+      collectTerminal(Stream.unwrap(acquired.connection.subscribe)),
     );
 
     failStream();
@@ -7394,7 +7397,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -7491,7 +7494,7 @@ describe("Claude session lifecycle", () => {
     const acquired = await acquire(f.driver);
     const events = Effect.runPromise(
       Stream.runCollect(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.sessionId === sessionId),
           Stream.take(2),
         ),
@@ -7754,7 +7757,7 @@ describe("Claude's own plan mode as level changes", () => {
     );
     const seen: ProviderRuntimeEvent[] = [];
     const scope = Effect.runSync(Scope.make());
-    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    const events = await Effect.runPromise(Scope.provide(acquired.connection.subscribe, scope));
     Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
@@ -7850,7 +7853,7 @@ describe("Claude's own plan mode as level changes", () => {
     );
     const seen: ProviderRuntimeEvent[] = [];
     const scope = Effect.runSync(Scope.make());
-    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    const events = await Effect.runPromise(Scope.provide(acquired.connection.subscribe, scope));
     Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "fix it", attachments: [], tools: [] }),
@@ -8262,7 +8265,7 @@ describe("Claude exact resume", () => {
     );
     const observed: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           observed.push(event);
         }),
@@ -8489,7 +8492,7 @@ describe("Claude exact resume", () => {
       );
       const turnEvents = Effect.runPromise(
         Stream.runCollect(
-          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.unwrap(acquired.connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === sessionId),
             Stream.takeUntil((event) => event.kind === "completed"),
           ),
@@ -8952,9 +8955,9 @@ describe("Claude account sign-in", () => {
     const facts = subscription.driver.contextFacts;
     if (facts === undefined) throw new Error("Claude exposes context facts.");
     const result = await Effect.runPromise(
-      Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand: true }))),
+      Effect.scoped(Effect.result(facts.observeServiceLimits({ instanceId, onDemand: true }))),
     );
-    expect(result._tag === "Left" ? result.left : undefined).toMatchObject({
+    expect(result._tag === "Failure" ? result.failure : undefined).toMatchObject({
       category: "unavailable",
       message: "Claude plan usage is unavailable.",
     });
@@ -8988,9 +8991,9 @@ describe("Claude account sign-in", () => {
     // The schedule and the Chat send path ask without `onDemand`. The reading
     // starts a `claude` process, so that question is answered without one.
     const unasked = await Effect.runPromise(
-      Effect.scoped(Effect.either(facts!.observeServiceLimits({ instanceId }))),
+      Effect.scoped(Effect.result(facts!.observeServiceLimits({ instanceId }))),
     );
-    expect(unasked._tag === "Left" ? unasked.left : undefined).toMatchObject({
+    expect(unasked._tag === "Failure" ? unasked.failure : undefined).toMatchObject({
       category: "unavailable",
     });
     expect(subscription.queries).toHaveLength(0);
@@ -9008,11 +9011,11 @@ describe("Claude account sign-in", () => {
     });
     const apiFacts = apiKey.driver.contextFacts;
     const exit = await Effect.runPromise(
-      Effect.scoped(Effect.either(apiFacts!.observeServiceLimits({ instanceId, onDemand: true }))),
+      Effect.scoped(Effect.result(apiFacts!.observeServiceLimits({ instanceId, onDemand: true }))),
     );
-    expect(exit._tag).toBe("Left");
-    if (exit._tag === "Left") {
-      expect(exit.left).toMatchObject({
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(exit.failure).toMatchObject({
         category: "unsupported",
         message: "Plan limits do not apply.",
       });
@@ -9034,7 +9037,7 @@ describe("compacting a Claude session", () => {
     );
     const events: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           events.push(event);
         }),
@@ -9345,7 +9348,7 @@ describe("Claude background work", () => {
     const seen: ProviderRuntimeEvent[] = [];
     const collected = Effect.runPromise(
       Stream.runForEach(
-        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+        Stream.unwrap(acquired.connection.subscribe).pipe(
           Stream.filter((event) => event.sessionId === sessionId),
           Stream.takeUntil((event) =>
             ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
@@ -9683,7 +9686,7 @@ describe("Claude background work", () => {
       // Subscribes before it returns, as a turn runner does before it sends.
       const follow = async () => {
         const scope = Effect.runSync(Scope.make());
-        const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+        const events = await Effect.runPromise(Scope.provide(acquired.connection.subscribe, scope));
         const done = Effect.runPromise(
           Stream.runForEach(
             events.pipe(
@@ -10340,7 +10343,7 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
     const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
     const approvals: ProviderRuntimeEvent[] = [];
     const subscriber = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "approval-request") approvals.push(event);
         }),
@@ -10476,7 +10479,7 @@ describe("Claude artifacts outside Strict", () => {
     const acquired = await acquire(f.driver, "work");
     const published: ProviderRuntimeEvent[] = [];
     const subscription = Effect.runFork(
-      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+      Stream.runForEach(Stream.unwrap(acquired.connection.subscribe), (event) =>
         Effect.sync(() => {
           if (event.kind === "tool-success") published.push(event);
         }),

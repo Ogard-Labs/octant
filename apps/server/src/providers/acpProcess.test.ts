@@ -19,7 +19,7 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { decodeProviderInstance } from "@octant/contracts";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   acpNegotiationAccepted,
@@ -185,10 +185,10 @@ function isRunning(pid: number): boolean {
 }
 
 async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 const passthroughConfinement: AcpConfinementPort = {
@@ -961,7 +961,7 @@ describe("ACP child-server profiles", () => {
       readonly nativeSetup?: ProviderNativeSetup;
     }) =>
       Effect.runPromise(
-        Effect.either(
+        Effect.result(
           confinement.prepare({
             profile: kilo,
             binaryPath: target.binaryPath,
@@ -982,8 +982,8 @@ describe("ACP child-server profiles", () => {
       { mode: "chat", executionPolicy: "approval-gated", strict: false },
     ] as const) {
       expect(await prepare(level)).toMatchObject({
-        _tag: "Right",
-        right: { command: target.binaryPath, cwd: target.canonicalRoot },
+        _tag: "Success",
+        success: { command: target.binaryPath, cwd: target.canonicalRoot },
       });
     }
     for (const [level, message] of [
@@ -997,8 +997,8 @@ describe("ACP child-server profiles", () => {
       [{ mode: "chat", executionPolicy: "approval-gated" }, WINDOWS_STRICT_CHAT_REFUSAL],
     ] as const) {
       expect(await prepare(level)).toMatchObject({
-        _tag: "Left",
-        left: { category: "incompatible", message },
+        _tag: "Failure",
+        failure: { category: "incompatible", message },
       });
     }
   });
@@ -1019,7 +1019,7 @@ describe("ACP child-server profiles", () => {
     }) => {
       const target = fixture(kimi);
       return Effect.runPromise(
-        Effect.either(
+        Effect.result(
           makeAcpConfinementLive({
             platform: "win32",
             hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
@@ -1046,8 +1046,8 @@ describe("ACP child-server profiles", () => {
         { mode: "chat", executionPolicy: "approval-gated" },
       ] as const) {
         expect(await prepareKimi(level)).toMatchObject({
-          _tag: "Left",
-          left: {
+          _tag: "Failure",
+          failure: {
             category: "incompatible",
             message: acpWindowsSetupOffRefusal(kimi, level.mode ?? "code"),
           },
@@ -1096,8 +1096,8 @@ describe("ACP child-server profiles", () => {
         { mode: "chat", executionPolicy: "approval-gated", nativeSetup: ownSetup },
       ] as const) {
         expect(await prepareKimi(level)).toMatchObject({
-          _tag: "Right",
-          right: { command: expect.stringContaining("agent-fixture") },
+          _tag: "Success",
+          success: { command: expect.stringContaining("agent-fixture") },
         });
       }
     });
@@ -1106,7 +1106,7 @@ describe("ACP child-server profiles", () => {
       const target = fixture(kilo);
       expect(
         await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             makeAcpConfinementLive({
               platform: "win32",
               hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
@@ -1122,14 +1122,14 @@ describe("ACP child-server profiles", () => {
             }),
           ),
         ),
-      ).toMatchObject({ _tag: "Right", right: { command: target.binaryPath } });
+      ).toMatchObject({ _tag: "Success", success: { command: target.binaryPath } });
     });
 
     it("starts a setup-off launch below Full access of an agent that holds nothing back", async () => {
       const target = fixture(antigravity);
       expect(
         await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             makeAcpConfinementLive({
               platform: "win32",
               hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
@@ -1145,7 +1145,7 @@ describe("ACP child-server profiles", () => {
             }),
           ),
         ),
-      ).toMatchObject({ _tag: "Right", right: { command: target.binaryPath } });
+      ).toMatchObject({ _tag: "Success", success: { command: target.binaryPath } });
     });
   });
 
@@ -1526,7 +1526,7 @@ describe("Google Antigravity's data directory on a sign-in Octant passes", () =>
       const target = fixture(antigravity);
       const dataDirectory = join(target.canonicalRoot, "absent-gemini-home");
       const prepared = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           makeAcpConfinementLive({
             platform: "darwin",
             sandboxPath: target.sandboxPath,
@@ -1553,13 +1553,13 @@ describe("Google Antigravity's data directory on a sign-in Octant passes", () =>
         ),
       );
       if ("octantSignIn" in signIn) {
-        expect(Either.isRight(prepared)).toBe(true);
+        expect(Result.isSuccess(prepared)).toBe(true);
         expect(existsSync(dataDirectory)).toBe(true);
         expect(statSync(dataDirectory).mode & 0o777).toBe(0o700);
       } else {
         // The personal sign-in still needs the CLI's own login first.
         expect(prepared).toEqual(
-          Either.left({
+          Result.fail({
             category: "unauthenticated",
             message: `Google Antigravity provider-owned authentication is unavailable. ${directoryHostAuthentication(antigravity).loginHint}`,
           }),
@@ -1630,7 +1630,7 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
       },
     );
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         makeAcpConfinementLive({
           platform: "darwin",
           sandboxPath: target.sandboxPath,
@@ -1672,9 +1672,10 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
 
   it("points the child at the native profile without granting the real home", async () => {
     const prepared = await prepareHostLaunch({ executionPolicy: "approval-gated" });
-    expect(Either.isRight(prepared.result)).toBe(true);
-    if (Either.isLeft(prepared.result)) throw new Error("Expected a confined host-profile launch.");
-    const launch = prepared.result.right;
+    expect(Result.isSuccess(prepared.result)).toBe(true);
+    if (Result.isFailure(prepared.result))
+      throw new Error("Expected a confined host-profile launch.");
+    const launch = prepared.result.success;
     const hostEnv =
       directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
     expect(launch.environment).toMatchObject(hostEnv);
@@ -1699,7 +1700,7 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
       hostPresent: false,
     });
     expect(prepared.result).toEqual(
-      Either.left({
+      Result.fail({
         category: "unauthenticated",
         message: `${profile.displayName} provider-owned authentication is unavailable. ${directoryHostAuthentication(profile).loginHint}`,
       }),
@@ -1708,10 +1709,10 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
 
   it("keeps the native profile environment for explicit Full access", async () => {
     const prepared = await prepareHostLaunch({ executionPolicy: "full-access" });
-    expect(Either.isRight(prepared.result)).toBe(true);
-    if (Either.isLeft(prepared.result))
+    expect(Result.isSuccess(prepared.result)).toBe(true);
+    if (Result.isFailure(prepared.result))
       throw new Error("Expected a Full access host-profile launch.");
-    const launch = prepared.result.right;
+    const launch = prepared.result.success;
     const hostEnv =
       directoryHostAuthentication(profile).environment?.(prepared.hostAuthenticationPath) ?? {};
     expect(launch.command).toBe(prepared.target.binaryPath);
@@ -1723,21 +1724,22 @@ describe.each(directoryHostProfiles)("ACP host-profile contract ($displayName)",
   it("injects an API key only when that mode is selected", async () => {
     const variable = apiKeyVariables[profile.kind];
     const withoutKey = await prepareHostLaunch({ executionPolicy: "approval-gated" });
-    expect(Either.isRight(withoutKey.result)).toBe(true);
-    if (Either.isLeft(withoutKey.result)) throw new Error("Expected a host-profile launch.");
+    expect(Result.isSuccess(withoutKey.result)).toBe(true);
+    if (Result.isFailure(withoutKey.result)) throw new Error("Expected a host-profile launch.");
     if (variable === undefined) {
-      expect(JSON.stringify(withoutKey.result.right.environment)).not.toContain("selected-key");
+      expect(JSON.stringify(withoutKey.result.success.environment)).not.toContain("selected-key");
       return;
     }
-    expect(withoutKey.result.right.environment[variable]).toBeUndefined();
+    expect(withoutKey.result.success.environment[variable]).toBeUndefined();
     const withKey = await prepareHostLaunch({
       executionPolicy: "approval-gated",
       apiKey: "selected-key",
     });
-    expect(Either.isRight(withKey.result)).toBe(true);
-    if (Either.isLeft(withKey.result)) throw new Error("Expected an API-key host-profile launch.");
-    expect(withKey.result.right.environment[variable]).toBe("selected-key");
-    const redacted = { ...withKey.result.right.environment, [variable]: "redacted" };
+    expect(Result.isSuccess(withKey.result)).toBe(true);
+    if (Result.isFailure(withKey.result))
+      throw new Error("Expected an API-key host-profile launch.");
+    expect(withKey.result.success.environment[variable]).toBe("selected-key");
+    const redacted = { ...withKey.result.success.environment, [variable]: "redacted" };
     expect(JSON.stringify(redacted)).not.toContain("selected-key");
   });
 });
@@ -2886,7 +2888,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
       );
     }
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         makeAcpConfinementLive({
           platform: input.platform ?? "darwin",
           sandboxPath:
@@ -2925,19 +2927,19 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
         strict: false,
         agentPlatformSignIn: true,
       });
-      if (Either.isLeft(result)) throw new Error(result.left.message);
+      if (Result.isFailure(result)) throw new Error(result.failure.message);
       // Code outside Strict starts unconfined and needs no grant at all.
       if (mode === "code") {
-        expect(result.right.args).not.toContain(credentials);
+        expect(result.success.args).not.toContain(credentials);
         continue;
       }
-      expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+      expect(gcloudAllows(seatbeltProfile(result.success))).toEqual([
         `(allow file-read* (literal "${credentials}"))`,
       ]);
     }
     const linux = await prepared({ platform: "linux", strict: false, agentPlatformSignIn: true });
-    if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
-    const args = linux.result.right.args;
+    if (Result.isFailure(linux.result)) throw new Error(linux.result.failure.message);
+    const args = linux.result.success.args;
     const bound = args.flatMap((arg, index) =>
       arg === "--ro-bind" && String(args[index + 1]).includes(".config/gcloud")
         ? [String(args[index + 1])]
@@ -2951,8 +2953,8 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
 
   it("Check connection for an Agent Platform instance reads that one file, so it can reach Ready", async () => {
     const { result, credentials } = await prepared({ purpose: "probe", agentPlatformSignIn: true });
-    if (Either.isLeft(result)) throw new Error(result.left.message);
-    expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([
+    if (Result.isFailure(result)) throw new Error(result.failure.message);
+    expect(gcloudAllows(seatbeltProfile(result.success))).toEqual([
       `(allow file-read* (literal "${credentials}"))`,
     ]);
   });
@@ -2961,7 +2963,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     for (const mode of ["chat", "code"] as const) {
       const { result } = await prepared({ mode, agentPlatformSignIn: true });
       expect(result).toEqual(
-        Either.left({
+        Result.fail({
           category: "unauthorized",
           message:
             "Google Antigravity can't sign in to Agent Platform under Strict, because Strict doesn't let it read your Application Default Credentials. Turn Strict off for this thread, or switch this provider to a Gemini API key.",
@@ -2974,7 +2976,7 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
       fullAccessSandbox: true,
       agentPlatformSignIn: true,
     });
-    expect(Either.isLeft(kept.result) && kept.result.left.message).toContain(
+    expect(Result.isFailure(kept.result) && kept.result.failure.message).toContain(
       "inside the sandbox this thread keeps",
     );
   });
@@ -2988,8 +2990,8 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
         protect: covering,
       });
       try {
-        if (Either.isLeft(linux.result)) throw new Error(linux.result.left.message);
-        const args = linux.result.right.args;
+        if (Result.isFailure(linux.result)) throw new Error(linux.result.failure.message);
+        const args = linux.result.success.args;
         const readable = args.some(
           (arg, index) =>
             (arg === "--ro-bind" || arg === "--bind") && args[index + 1] === linux.credentials,
@@ -3008,9 +3010,9 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
       protect: "folder",
     });
     try {
-      if (Either.isLeft(result)) throw new Error(result.left.message);
+      if (Result.isFailure(result)) throw new Error(result.failure.message);
       // The person's own protection wins: the one-file grant is not made.
-      expect(seatbeltProfile(result.right)).not.toContain(
+      expect(seatbeltProfile(result.success)).not.toContain(
         `(allow file-read* (literal "${credentials}"))`,
       );
     } finally {
@@ -3041,11 +3043,15 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
             ...(covering === undefined ? {} : { protect: covering }),
           });
           try {
-            if (Either.isLeft(attempt.result)) throw new Error(attempt.result.left.message);
-            const run = spawnSync(attempt.result.right.command, [...attempt.result.right.args], {
-              encoding: "utf8",
-              timeout: 10_000,
-            });
+            if (Result.isFailure(attempt.result)) throw new Error(attempt.result.failure.message);
+            const run = spawnSync(
+              attempt.result.success.command,
+              [...attempt.result.success.args],
+              {
+                encoding: "utf8",
+                timeout: 10_000,
+              },
+            );
             // The child really ran inside the sandbox: a confinement that
             // never started prints nothing and cannot pass as a denial.
             expect(run.stdout, `${covering ?? "unprotected"}: ${run.stderr}`).toContain(
@@ -3070,8 +3076,8 @@ describe("Google Antigravity's Agent Platform credentials file", () => {
     for (const signIn of [{}, { octantSignIn: true }] as const) {
       for (const launch of [{ strict: false }, { purpose: "probe" as const }]) {
         const { result } = await prepared({ ...launch, ...signIn });
-        if (Either.isLeft(result)) throw new Error(result.left.message);
-        expect(gcloudAllows(seatbeltProfile(result.right))).toEqual([]);
+        if (Result.isFailure(result)) throw new Error(result.failure.message);
+        expect(gcloudAllows(seatbeltProfile(result.success))).toEqual([]);
       }
     }
   });

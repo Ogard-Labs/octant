@@ -61,9 +61,9 @@ export async function draftGitText(
     await Effect.runPromise(
       Effect.scoped(
         runDraft(options, request, state).pipe(
-          Effect.timeoutFail({
+          Effect.timeoutOrElse({
             duration: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-            onTimeout: () => new Error("The provider did not draft within its deadline."),
+            orElse: () => Effect.fail(new Error("The provider did not draft within its deadline.")),
           }),
         ),
       ),
@@ -99,7 +99,7 @@ function runDraft(
     yield* Effect.addFinalizer(() =>
       connection.stop(options.sessionId).pipe(
         Effect.timeout(options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS),
-        Effect.catchAll(() => Effect.void),
+        Effect.catch(() => Effect.void),
       ),
     );
     yield* connection.start({

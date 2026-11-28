@@ -17,7 +17,7 @@ import {
   WorkThreadBootstrap,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { ParseResult } from "effect";
+import { Schema } from "effect";
 import {
   MAX_WAITING_ASK_TEXT_LENGTH,
   PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
@@ -178,7 +178,7 @@ async function decodeJson<T>(
   try {
     return decode(await response.json());
   } catch (cause) {
-    if (ParseResult.isParseError(cause)) {
+    if (Schema.isSchemaError(cause)) {
       throw new MobileInboxFailure(
         "incompatible",
         `${failureMessage} The host sent thread data this app version can't read. Update the app or the host.`,

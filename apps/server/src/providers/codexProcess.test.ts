@@ -24,7 +24,7 @@ import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
-import { Effect, Either, Exit, Fiber, Scope } from "effect";
+import { Effect, Result, Exit, Fiber, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -128,10 +128,10 @@ async function waitForPids(root: string, count: number): Promise<number[]> {
 }
 
 async function failureOf<A>(effect: Effect.Effect<A, ProviderFailure, never>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 function makePort(overrides: CodexProcessOptions = {}) {
@@ -867,7 +867,7 @@ describe("CodexProcessPort", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
+          const fiber = yield* Effect.forkChild(
             makePort({ startupTimeoutMs: 10_000 }).start({
               binaryPath: target.binaryPath,
               authority: UNWRAPPED,

@@ -33,9 +33,7 @@ describe("attachProviderRuntimeUsageLimits", () => {
     const connection = await Effect.runPromise(
       Effect.scoped(attached.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
     );
-    const events = await Effect.runPromise(
-      Stream.runCollect(Stream.unwrapScoped(connection.subscribe)),
-    );
+    const events = await Effect.runPromise(Stream.runCollect(Stream.unwrap(connection.subscribe)));
 
     expect(Array.from(events)).toEqual([event]);
     expect(store.windows(instanceId)).toEqual([
@@ -62,7 +60,7 @@ describe("attachProviderRuntimeUsageLimits", () => {
     const connection = await Effect.runPromise(
       Effect.scoped(attached.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
     );
-    await Effect.runPromise(Stream.runCollect(Stream.unwrapScoped(connection.subscribe)));
+    await Effect.runPromise(Stream.runCollect(Stream.unwrap(connection.subscribe)));
 
     expect(store.windows(instanceId)).toEqual([]);
     expect(store.windows(otherInstanceId)).toEqual([]);

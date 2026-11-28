@@ -1,7 +1,6 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Host control wire contract for the shared web shell's Settings host card.
@@ -12,71 +11,73 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * local diagnostic tooling, never on this wire.
  */
 
-const BoundedLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
-const BoundedText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
-const BoundedCount = Schema.Int.pipe(Schema.between(0, 1_000_000));
-const BoundedUptimeSeconds = Schema.Int.pipe(Schema.between(0, 31_536_000));
+const BoundedLabel = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64));
+const BoundedText = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
+const BoundedCount = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1_000_000 }));
+const BoundedUptimeSeconds = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 31_536_000 }),
+);
 
 /** Owner service modes a running host may report. `maintenance` owners never
  *  serve the web shell, so the report cannot claim that mode. */
-export const HostControlServiceMode = Schema.Literal("desktop", "foreground", "web", "service");
+export const HostControlServiceMode = Schema.Literals(["desktop", "foreground", "web", "service"]);
 export type HostControlServiceMode = typeof HostControlServiceMode.Type;
 
 export const HostControlIdentity = Schema.Struct({
   hostId: BoundedLabel,
   instanceId: BoundedLabel,
   serviceMode: HostControlServiceMode,
-}).annotations(strict);
+});
 export type HostControlIdentity = typeof HostControlIdentity.Type;
 
 export const HostControlVersions = Schema.Struct({
   server: BoundedLabel,
   wire: BoundedLabel,
-}).annotations(strict);
+});
 export type HostControlVersions = typeof HostControlVersions.Type;
 
 /** Service policy is reported honestly: a read failure is `unavailable`,
  *  never guessed as enabled or disabled. */
-export const HostControlPolicy = Schema.Union(
+export const HostControlPolicy = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("known"),
     enabled: Schema.Boolean,
     updatedAt: BoundedText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     reason: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostControlPolicy = typeof HostControlPolicy.Type;
 
 export const HostControlReadiness = Schema.Struct({
   store: Schema.Struct({
     state: BoundedLabel,
     integrity: BoundedLabel,
-  }).annotations(strict),
+  }),
   replay: Schema.Struct({
     journalHead: BoundedCount,
     projections: BoundedCount,
-  }).annotations(strict),
+  }),
   clientsConnected: BoundedCount,
   uptimeSeconds: BoundedUptimeSeconds,
-}).annotations(strict);
+});
 export type HostControlReadiness = typeof HostControlReadiness.Type;
 
-export const HostLifecycleControlAvailability = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("available") }).annotations(strict),
+export const HostLifecycleControlAvailability = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("available") }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     reason: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostLifecycleControlAvailability = typeof HostLifecycleControlAvailability.Type;
 
-export const HostMemoryPressureLevel = Schema.Literal("normal", "elevated", "critical");
+export const HostMemoryPressureLevel = Schema.Literals(["normal", "elevated", "critical"]);
 export type HostMemoryPressureLevel = typeof HostMemoryPressureLevel.Type;
 
-const BoundedMegabytes = Schema.Int.pipe(Schema.between(0, 16_777_216));
+const BoundedMegabytes = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 16_777_216 }));
 
 /**
  * What the host did the last time memory ran short. Counts and flags only:
@@ -86,13 +87,13 @@ const BoundedMegabytes = Schema.Int.pipe(Schema.between(0, 16_777_216));
  */
 export const HostMemoryRelief = Schema.Struct({
   at: BoundedText,
-  pressure: Schema.Literal("elevated", "critical"),
-  source: Schema.Literal("system", "process", "both"),
+  pressure: Schema.Literals(["elevated", "critical"]),
+  source: Schema.Literals(["system", "process", "both"]),
   idleProviderRuntimesStopped: BoundedCount,
   idleSessionsReleased: BoundedCount,
   cachesTrimmed: Schema.Boolean,
   activeTurnsKept: BoundedCount,
-}).annotations(strict);
+});
 export type HostMemoryRelief = typeof HostMemoryRelief.Type;
 
 /**
@@ -105,18 +106,16 @@ export const HostPreviousStop = Schema.Struct({
   pressure: HostMemoryPressureLevel,
   processMegabytes: BoundedMegabytes,
   /** The local crash record kept for that exit, when one could be kept. */
-  crashRecord: Schema.optional(
-    Schema.Struct({ recordedAt: BoundedText, exitReason: BoundedText }).annotations(strict),
-  ),
-}).annotations(strict);
+  crashRecord: Schema.optional(Schema.Struct({ recordedAt: BoundedText, exitReason: BoundedText })),
+});
 export type HostPreviousStop = typeof HostPreviousStop.Type;
 
 /** Bounds of a custom memory limit, in GB of 1024 MB each. */
 export const HOST_MEMORY_LIMIT_MIN_GB = 0.5;
 export const HOST_MEMORY_LIMIT_MAX_GB = 64;
 
-const LimitGb = Schema.Number.pipe(
-  Schema.between(HOST_MEMORY_LIMIT_MIN_GB, HOST_MEMORY_LIMIT_MAX_GB),
+const LimitGb = Schema.Number.check(
+  Schema.isBetween({ minimum: HOST_MEMORY_LIMIT_MIN_GB, maximum: HOST_MEMORY_LIMIT_MAX_GB }),
 );
 
 /**
@@ -125,29 +124,27 @@ const LimitGb = Schema.Number.pipe(
  * used exactly as given. Critical must sit above pressured so the host never
  * reaches the harder level first.
  */
-export const HostMemoryLimits = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("automatic") }).annotations(strict),
+export const HostMemoryLimits = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("automatic") }),
   Schema.Struct({
     kind: Schema.Literal("custom"),
     pressuredGb: LimitGb,
     criticalGb: LimitGb,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter((limits) =>
-        limits.criticalGb > limits.pressuredGb
-          ? true
-          : "The critical limit must be above the pressured limit.",
-      ),
+  }).check(
+    Schema.makeFilter((limits) =>
+      limits.criticalGb > limits.pressuredGb
+        ? true
+        : "The critical limit must be above the pressured limit.",
     ),
-);
+  ),
+]);
 export type HostMemoryLimits = typeof HostMemoryLimits.Type;
 
 /** The limits the guard is applying right now, resolved for this machine. */
 export const HostMemoryEffectiveLimits = Schema.Struct({
   pressuredMegabytes: BoundedMegabytes,
   criticalMegabytes: BoundedMegabytes,
-}).annotations(strict);
+});
 export type HostMemoryEffectiveLimits = typeof HostMemoryEffectiveLimits.Type;
 
 /**
@@ -156,35 +153,35 @@ export type HostMemoryEffectiveLimits = typeof HostMemoryEffectiveLimits.Type;
  * message rather than as a malformed request.
  */
 export const SetHostMemoryLimitsRequest = Schema.Struct({
-  limits: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("automatic") }).annotations(strict),
+  limits: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("automatic") }),
     Schema.Struct({
       kind: Schema.Literal("custom"),
       pressuredGb: Schema.Number,
       criticalGb: Schema.Number,
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+  ]),
+});
 export type SetHostMemoryLimitsRequest = typeof SetHostMemoryLimitsRequest.Type;
 
-export const HostMemoryLimitsRefusalCode = Schema.Literal(
+export const HostMemoryLimitsRefusalCode = Schema.Literals([
   "out-of-range",
   "critical-not-above-pressured",
   "unauthorized",
-);
+]);
 export type HostMemoryLimitsRefusalCode = typeof HostMemoryLimitsRefusalCode.Type;
 
-export const SetHostMemoryLimitsOutcome = Schema.Union(
+export const SetHostMemoryLimitsOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("saved"),
     limits: HostMemoryLimits,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     code: HostMemoryLimitsRefusalCode,
     message: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type SetHostMemoryLimitsOutcome = typeof SetHostMemoryLimitsOutcome.Type;
 
 export const HOST_MEMORY_LIMITS_AGGREGATE_TYPE = "host-memory-limits";
@@ -199,9 +196,9 @@ export const HostMemoryLimitsChanged = Schema.Struct({
   kind: Schema.Literal("memory-limits-changed"),
   previous: HostMemoryLimits,
   next: HostMemoryLimits,
-  changedBy: Schema.Literal("local-window", "remote-device"),
+  changedBy: Schema.Literals(["local-window", "remote-device"]),
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HostMemoryLimitsChanged = typeof HostMemoryLimitsChanged.Type;
 
 export const HostMemoryStatus = Schema.Struct({
@@ -211,7 +208,7 @@ export const HostMemoryStatus = Schema.Struct({
   effectiveLimits: HostMemoryEffectiveLimits,
   lastRelief: Schema.optional(HostMemoryRelief),
   previousStop: Schema.optional(HostPreviousStop),
-}).annotations(strict);
+});
 export type HostMemoryStatus = typeof HostMemoryStatus.Type;
 
 /**
@@ -225,7 +222,7 @@ export type HostMemoryStatus = typeof HostMemoryStatus.Type;
  * the system restarted. `other` is never sent: it is what a client reads when
  * a later host names a reason this build does not know.
  */
-export const HostRestartRecoveryHold = Schema.Literal(
+export const HostRestartRecoveryHold = Schema.Literals([
   "turned-off",
   "opted-out",
   "uncertain-external-action",
@@ -235,7 +232,7 @@ export const HostRestartRecoveryHold = Schema.Literal(
   "cannot-resume",
   "refused",
   "other",
-);
+]);
 export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
 
 /**
@@ -246,13 +243,17 @@ export type HostRestartRecoveryHold = typeof HostRestartRecoveryHold.Type;
  * 0.1.0-preview.20261113.2 or earlier reads the reasons as a closed list and
  * refuses the whole status of a host that reports one.)
  */
-const RestartRecoveryHoldOnWire = Schema.transform(BoundedLabel, HostRestartRecoveryHold, {
-  strict: true,
-  decode: (reason) => (Schema.is(HostRestartRecoveryHold)(reason) ? reason : "other"),
-  encode: (reason) => reason,
-});
+const RestartRecoveryHoldOnWire = BoundedLabel.pipe(
+  Schema.decodeTo(
+    HostRestartRecoveryHold,
+    SchemaTransformation.transform({
+      decode: (reason) => (Schema.is(HostRestartRecoveryHold)(reason) ? reason : "other"),
+      encode: (reason) => reason,
+    }),
+  ),
+);
 
-const RestartRecoveryMode = Schema.Literal("chat", "work", "code");
+const RestartRecoveryMode = Schema.Literals(["chat", "work", "code"]);
 const MAX_RESTART_RECOVERY_THREADS = 500;
 
 /**
@@ -264,17 +265,17 @@ const MAX_RESTART_RECOVERY_THREADS = 500;
 export const HostRestartRecovery = Schema.Struct({
   at: UtcTimestamp,
   continued: Schema.Array(
-    Schema.Struct({ mode: RestartRecoveryMode, threadId: BoundedLabel }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_RESTART_RECOVERY_THREADS)),
+    Schema.Struct({ mode: RestartRecoveryMode, threadId: BoundedLabel }),
+  ).check(Schema.isMaxLength(MAX_RESTART_RECOVERY_THREADS)),
   held: Schema.Array(
     Schema.Struct({
       mode: RestartRecoveryMode,
       threadId: BoundedLabel,
       reason: RestartRecoveryHoldOnWire,
       detail: BoundedText,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_RESTART_RECOVERY_THREADS)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(MAX_RESTART_RECOVERY_THREADS)),
+});
 export type HostRestartRecovery = typeof HostRestartRecovery.Type;
 
 export const HostControlStatus = Schema.Struct({
@@ -282,11 +283,11 @@ export const HostControlStatus = Schema.Struct({
   versions: HostControlVersions,
   policy: HostControlPolicy,
   readiness: HostControlReadiness,
-  capabilities: Schema.Array(BoundedLabel).pipe(Schema.maxItems(64)),
+  capabilities: Schema.Array(BoundedLabel).check(Schema.isMaxLength(64)),
   work: Schema.Struct({
     active: BoundedCount,
     attentionRequired: Schema.Boolean,
-  }).annotations(strict),
+  }),
   /** Absent while the host runs without a memory guard (a test seam). */
   memory: Schema.optional(HostMemoryStatus),
   restartRecovery: Schema.optional(HostRestartRecovery),
@@ -295,71 +296,72 @@ export const HostControlStatus = Schema.Struct({
     restart: HostLifecycleControlAvailability,
     enable: HostLifecycleControlAvailability,
     disable: HostLifecycleControlAvailability,
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type HostControlStatus = typeof HostControlStatus.Type;
 
 // ── Lifecycle command ───────────────────────────────────────────────────────
 
 export const HOST_LIFECYCLE_ACTIONS = ["stop", "restart", "enable", "disable"] as const;
 
-export const HostLifecycleAction = Schema.Literal(...HOST_LIFECYCLE_ACTIONS);
+export const HostLifecycleAction = Schema.Literals(HOST_LIFECYCLE_ACTIONS);
 export type HostLifecycleAction = typeof HostLifecycleAction.Type;
 
 export const HostLifecycleRequest = Schema.Struct({
   action: HostLifecycleAction,
-}).annotations(strict);
+});
 export type HostLifecycleRequest = typeof HostLifecycleRequest.Type;
 
-export const HostLifecycleRefusalCode = Schema.Literal(
+export const HostLifecycleRefusalCode = Schema.Literals([
   "restart-unavailable",
   "policy-unavailable",
   "unsupported",
-);
+]);
 export type HostLifecycleRefusalCode = typeof HostLifecycleRefusalCode.Type;
 
-export const HostLifecycleOutcome = Schema.Union(
+export const HostLifecycleOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     action: HostLifecycleAction,
     message: BoundedText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     action: HostLifecycleAction,
     code: HostLifecycleRefusalCode,
     guidance: BoundedText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostLifecycleOutcome = typeof HostLifecycleOutcome.Type;
 
 // ── Backup and recovery ─────────────────────────────────────────────────────
 
 export const HostBackupRequest = Schema.Struct({
   label: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(64),
-      Schema.pattern(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(64),
+      Schema.isPattern(/^[a-z0-9][a-z0-9._-]{0,63}$/),
     ),
   ),
-}).annotations(strict);
+});
 export type HostBackupRequest = typeof HostBackupRequest.Type;
 
 /** Backup receipts on this wire are path-free: the snapshot is confined to
  *  the host data directory and located through local tooling. */
-export const HostBackupOutcome = Schema.Union(
+export const HostBackupOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("created"),
     label: BoundedLabel,
     migrationVersion: BoundedCount,
     journalHead: BoundedCount,
-    byteLength: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
-  }).annotations(strict),
+    byteLength: NonNegativeInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     code: BoundedLabel,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostBackupOutcome = typeof HostBackupOutcome.Type;
 
 /** Destructive restore never runs against a live store; the online surface
@@ -367,7 +369,7 @@ export type HostBackupOutcome = typeof HostBackupOutcome.Type;
 export const HostRestoreOutcome = Schema.Struct({
   kind: Schema.Literal("refused-online"),
   guidance: BoundedText,
-}).annotations(strict);
+});
 export type HostRestoreOutcome = typeof HostRestoreOutcome.Type;
 
 // ── Drain before an update ──────────────────────────────────────────────────
@@ -381,29 +383,29 @@ export const HOST_DRAIN_MAX_MINUTES = 60;
  * lifting admits new turns again. Canonical: docs/architecture.md
  * § Draining before an update.
  */
-export const HostDrainRequest = Schema.Union(
+export const HostDrainRequest = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("drain"),
-    minutes: Schema.Int.pipe(Schema.between(1, HOST_DRAIN_MAX_MINUTES)),
-  }).annotations(strict),
-  Schema.Struct({ action: Schema.Literal("read") }).annotations(strict),
-  Schema.Struct({ action: Schema.Literal("lift") }).annotations(strict),
-);
+    minutes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: HOST_DRAIN_MAX_MINUTES })),
+  }),
+  Schema.Struct({ action: Schema.Literal("read") }),
+  Schema.Struct({ action: Schema.Literal("lift") }),
+]);
 export type HostDrainRequest = typeof HostDrainRequest.Type;
 
-const RunningTurns = Schema.Int.pipe(Schema.between(1, 100_000));
+const RunningTurns = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100_000 }));
 
 /**
  * How a drain stands. `drained` once no turn runs; `timed-out` once the wait
  * the drain was given passed with turns still running. Both keep refusing
  * new turns until the host stops or the drain lifts.
  */
-export const HostDrainStatus = Schema.Union(
-  Schema.Struct({ state: Schema.Literal("not-draining") }).annotations(strict),
-  Schema.Struct({ state: Schema.Literal("draining"), running: RunningTurns }).annotations(strict),
-  Schema.Struct({ state: Schema.Literal("drained") }).annotations(strict),
-  Schema.Struct({ state: Schema.Literal("timed-out"), running: RunningTurns }).annotations(strict),
-);
+export const HostDrainStatus = Schema.Union([
+  Schema.Struct({ state: Schema.Literal("not-draining") }),
+  Schema.Struct({ state: Schema.Literal("draining"), running: RunningTurns }),
+  Schema.Struct({ state: Schema.Literal("drained") }),
+  Schema.Struct({ state: Schema.Literal("timed-out"), running: RunningTurns }),
+]);
 export type HostDrainStatus = typeof HostDrainStatus.Type;
 
 // ── Decoders ────────────────────────────────────────────────────────────────
@@ -431,11 +433,11 @@ export const decodeHostMemoryLimits = Schema.decodeUnknownSync(HostMemoryLimits,
 });
 export const decodeSetHostMemoryLimitsRequest = Schema.decodeUnknownSync(
   SetHostMemoryLimitsRequest,
-  { onExcessProperty: "error" },
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeSetHostMemoryLimitsOutcome = Schema.decodeUnknownSync(
   SetHostMemoryLimitsOutcome,
-  { onExcessProperty: "error" },
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeHostMemoryLimitsChanged = Schema.decodeUnknownSync(HostMemoryLimitsChanged, {
   onExcessProperty: "error",

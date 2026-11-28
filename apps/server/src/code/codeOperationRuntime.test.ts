@@ -1173,7 +1173,7 @@ describe("CodeOperationRuntime", () => {
     for (let run = 0; run < runs; run += 1) {
       // A provider streaming as fast as it can: every pull is answered at once.
       let streamed = 0;
-      const flood = Stream.repeatEffect(
+      const flood = Stream.fromEffectRepeat(
         Effect.sync(() => {
           streamed += 1;
           return providerEvent({ kind: "text-delta", text: "x" });
@@ -2217,7 +2217,10 @@ describe("CodeOperationRuntime", () => {
       send: vi.fn<ProviderConnection["send"]>(() =>
         Effect.tryPromise({
           try: () => acknowledgement.promise,
-          catch: () => ({ category: "provider-failed", message: "Send acknowledgement lost." }),
+          catch: () => ({
+            category: "provider-failed" as const,
+            message: "Send acknowledgement lost.",
+          }),
         }),
       ),
     };
@@ -7839,7 +7842,7 @@ describe("CodeOperationRuntime", () => {
     const outside = decodeCodeNativeSessionId("outside-session-1");
     let finish: (() => void) | undefined;
     const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
-      Effect.async<ProviderResumeCursor>((resume) => {
+      Effect.callback<ProviderResumeCursor>((resume) => {
         finish = () => resume(Effect.succeed({ driverKind: "codex", value: `resumed-${outside}` }));
       }),
     );
@@ -8187,7 +8190,7 @@ describe("CodeOperationRuntime", () => {
       ...base,
       changeLevelInPlace,
       answerApproval: (answer) =>
-        Effect.sync(() => order.push("answer")).pipe(Effect.zipRight(base.answerApproval(answer))),
+        Effect.sync(() => order.push("answer")).pipe(Effect.andThen(base.answerApproval(answer))),
     };
     const changeThreadLevel = vi.fn(async () => true);
     const onPlanApproved = vi.fn(async () => undefined);
@@ -11511,6 +11514,9 @@ describe("CodeOperationRuntime", () => {
           threadId,
           checkoutId,
         });
+        await vi.waitFor(() =>
+          expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+        );
         await expect(
           fixture.runtime.execute(
             windowId,
@@ -16758,7 +16764,7 @@ it("reports an explicit recipient receipt through the real turn tool path after 
     send: vi.fn<ProviderConnection["send"]>(() =>
       Effect.tryPromise({
         try: () => accepted.promise,
-        catch: () => ({ category: "provider-failed", message: "Unavailable" }),
+        catch: () => ({ category: "provider-failed" as const, message: "Unavailable" }),
       }),
     ),
   };
@@ -16878,7 +16884,10 @@ it("records an agent message delivered once the provider accepted the turn that 
       send: vi.fn<ProviderConnection["send"]>(() =>
         Effect.tryPromise({
           try: () => accepted.promise,
-          catch: () => ({ category: "provider-failed", message: "The provider went away." }),
+          catch: () => ({
+            category: "provider-failed" as const,
+            message: "The provider went away.",
+          }),
         }),
       ),
     };
@@ -21128,6 +21137,7 @@ describe("pull request line notes runtime admission", () => {
           checkoutId,
         }),
       ).resolves.toMatchObject({ state: "interrupted" });
+      await vi.waitFor(() => expect(host.runtime.turnInProgress?.(String(threadId))).toBe(false));
 
       await expect(
         host.runtime.execute(windowId, {

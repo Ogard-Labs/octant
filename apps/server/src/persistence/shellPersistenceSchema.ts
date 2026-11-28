@@ -8,60 +8,52 @@ import {
   WindowWorkspace,
   WorkspaceLayoutReplaced,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Schema, SchemaGetter } from "effect";
 
-const PersistedShellSettings = Schema.transform(Schema.Unknown, ShellSettings, {
-  strict: false,
-  decode: upcastPersistedShellSettings,
-  encode: (_encoded, settings) => settings,
-});
+const upcast = <S extends Schema.Top>(target: S, decode: (value: unknown) => unknown) =>
+  Schema.Unknown.pipe(
+    Schema.decodeTo(target, {
+      decode: SchemaGetter.transform(decode),
+      encode: SchemaGetter.passthrough({ strict: false }),
+    }),
+  );
 
-export const PersistedShellSettingsReplaced = Schema.transform(
-  Schema.Unknown,
+const PersistedShellSettings = upcast(ShellSettings, upcastPersistedShellSettings);
+
+export const PersistedShellSettingsReplaced = upcast(
   ShellSettingsReplaced,
-  {
-    strict: false,
-    decode: upcastPersistedShellSettingsEvent,
-    encode: (_encoded, event) => event,
-  },
+  upcastPersistedShellSettingsEvent,
 );
 
-const PersistedWindowWorkspace = Schema.transform(Schema.Unknown, WindowWorkspace, {
-  strict: false,
-  decode: sanitizePersistedWorkspace,
-  encode: (_encoded, workspace) => workspace,
-});
+const PersistedWindowWorkspace = upcast(WindowWorkspace, sanitizePersistedWorkspace);
 
-export const PersistedWorkspaceLayoutReplaced = Schema.transform(
-  Schema.Unknown,
+export const PersistedWorkspaceLayoutReplaced = upcast(
   WorkspaceLayoutReplaced,
-  {
-    strict: false,
-    decode: sanitizePersistedWorkspaceEvent,
-    encode: (_encoded, event) => event,
-  },
+  sanitizePersistedWorkspaceEvent,
 );
 
-export const PersistedEnvironmentPresentationReplaced = Schema.transform(
-  Schema.Unknown,
+export const PersistedEnvironmentPresentationReplaced = upcast(
   EnvironmentPresentationReplaced,
-  {
-    strict: false,
-    decode: upcastPersistedEnvironmentPresentationEvent,
-    encode: (_encoded, event) => event,
-  },
+  upcastPersistedEnvironmentPresentationEvent,
 );
 
-export const decodePersistedShellSettings = Schema.decodeUnknownSync(PersistedShellSettings);
+export const decodePersistedShellSettings = Schema.decodeUnknownSync(PersistedShellSettings, {
+  onExcessProperty: "error",
+});
 export const decodePersistedShellSettingsReplaced = Schema.decodeUnknownSync(
   PersistedShellSettingsReplaced,
+  { onExcessProperty: "error" },
 );
-export const decodePersistedWindowWorkspace = Schema.decodeUnknownSync(PersistedWindowWorkspace);
+export const decodePersistedWindowWorkspace = Schema.decodeUnknownSync(PersistedWindowWorkspace, {
+  onExcessProperty: "error",
+});
 export const decodePersistedWorkspaceLayoutReplaced = Schema.decodeUnknownSync(
   PersistedWorkspaceLayoutReplaced,
+  { onExcessProperty: "error" },
 );
 export const decodePersistedEnvironmentPresentationReplaced = Schema.decodeUnknownSync(
   PersistedEnvironmentPresentationReplaced,
+  { onExcessProperty: "error" },
 );
 
 function upcastPersistedShellSettingsEvent(value: unknown): unknown {

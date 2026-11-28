@@ -1,13 +1,14 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { WorkThreadId } from "./workThreads";
 import { ThreadWorkingDirectory, ProjectWorkingFolderId } from "./workingDirectory";
 import { EventActor, UtcTimestamp } from "./events";
 import { PreviewSourceVersion, PreviewTarget } from "./previews";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 /**
  * Branded identity for a Work artifact. Stable across revisions; the
@@ -36,7 +37,7 @@ export type WorkMutationRequestId = typeof WorkMutationRequestId.Type;
  * Representative Work artifact formats. Slice A defines the format
  * vocabulary only; format-specific production arrives in slices C-F.
  */
-export const WorkArtifactFormat = Schema.Literal(
+export const WorkArtifactFormat = Schema.Literals([
   "markdown",
   "docx",
   "csv",
@@ -45,7 +46,7 @@ export const WorkArtifactFormat = Schema.Literal(
   "markdown-deck",
   "pdf",
   "image",
-);
+]);
 export type WorkArtifactFormat = typeof WorkArtifactFormat.Type;
 
 /**
@@ -57,8 +58,11 @@ export type WorkArtifactFormat = typeof WorkArtifactFormat.Type;
  * so a mutation result feeds the existing preview target without a
  * parallel path.
  */
-export const WorkArtifactRef = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+export const WorkArtifactRef = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+  ),
   Schema.brand("WorkArtifactRef"),
 );
 export type WorkArtifactRef = typeof WorkArtifactRef.Type;
@@ -67,8 +71,9 @@ export type WorkArtifactRef = typeof WorkArtifactRef.Type;
  * Display name shown to the user. Constrained to a basename (no path
  * separators) so a directory path can never reach the renderer through it.
  */
-const WorkArtifactDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value)),
+const WorkArtifactDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value)),
 );
 
 /**
@@ -89,9 +94,11 @@ export const WorkArtifactIdentity = Schema.Struct({
    * means the root. The host sets it from the thread the artifact was made
    * for; it is never a host path.
    */
-  directory: Schema.optional(ThreadWorkingDirectory.pipe(Schema.filter((value) => value !== "."))),
+  directory: Schema.optional(
+    ThreadWorkingDirectory.check(Schema.makeFilter((value) => value !== ".")),
+  ),
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkArtifactIdentity = typeof WorkArtifactIdentity.Type;
 
 /**
@@ -110,7 +117,7 @@ export const WorkArtifactVersion = Schema.Struct({
   createdBy: EventActor,
   createdAt: UtcTimestamp,
   sequence: PositiveInt,
-}).annotations(strict);
+});
 export type WorkArtifactVersion = typeof WorkArtifactVersion.Type;
 
 /**
@@ -127,10 +134,10 @@ export const WorkCapabilityFlags = Schema.Struct({
   canRoundTrip: Schema.Boolean,
   canExport: Schema.Boolean,
   canVersion: Schema.Boolean,
-}).annotations(strict);
+});
 export type WorkCapabilityFlags = typeof WorkCapabilityFlags.Type;
 
-export const WorkFidelityLevel = Schema.Literal("full", "limited");
+export const WorkFidelityLevel = Schema.Literals(["full", "limited"]);
 export type WorkFidelityLevel = typeof WorkFidelityLevel.Type;
 
 /**
@@ -141,14 +148,12 @@ export type WorkFidelityLevel = typeof WorkFidelityLevel.Type;
  */
 export const WorkFidelity = Schema.Struct({
   level: WorkFidelityLevel,
-  notice: Schema.optional(Schema.NonEmptyTrimmedString),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((fidelity) => fidelity.level === "full" || fidelity.notice !== undefined, {
-      jsonSchema: {},
-    }),
-  );
+  notice: Schema.optional(NonEmptyTrimmedString),
+}).check(
+  Schema.makeFilter((fidelity) => fidelity.level === "full" || fidelity.notice !== undefined, {
+    jsonSchema: {},
+  }),
+);
 export type WorkFidelity = typeof WorkFidelity.Type;
 
 /**
@@ -162,7 +167,7 @@ export const WorkCapabilityReport = Schema.Struct({
   capabilities: WorkCapabilityFlags,
   fidelity: WorkFidelity,
   exportFormats: Schema.Array(WorkArtifactFormat),
-}).annotations(strict);
+});
 export type WorkCapabilityReport = typeof WorkCapabilityReport.Type;
 
 const MutationRequestCommon = {
@@ -185,68 +190,69 @@ const MutationRequestCommon = {
  * version silently. `confirmed` is required for destructive and lossy
  * mutations; the server never infers approval from the transport.
  */
-export const WorkMutationRequest = Schema.Union(
+export const WorkMutationRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("create-artifact"),
     ...MutationRequestCommon,
     format: WorkArtifactFormat,
     displayName: WorkArtifactDisplayName,
-    content: Schema.NonEmptyTrimmedString,
+    content: NonEmptyTrimmedString,
     /**
      * The Work thread the artifact is made for. The host places the file in
      * the folder that thread works in; absent, it goes to the Project's main
      * folder. The request never names a path.
      */
     threadId: Schema.optional(WorkThreadId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revise-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
-    content: Schema.NonEmptyTrimmedString,
+    content: NonEmptyTrimmedString,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("transform-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
     targetFormat: WorkArtifactFormat,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("rename-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
     displayName: WorkArtifactDisplayName,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("delete-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("version-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("export-artifact"),
     ...MutationRequestCommon,
     artifactId: WorkArtifactId,
     exportFormat: WorkArtifactFormat,
     expectedArtifactVersion: PositiveInt,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkMutationRequest = typeof WorkMutationRequest.Type;
 
-export const WorkExportHandoffKind = Schema.Literal("in-app-version", "external-handoff");
+export const WorkExportHandoffKind = Schema.Literals(["in-app-version", "external-handoff"]);
 export type WorkExportHandoffKind = typeof WorkExportHandoffKind.Type;
 
-const WorkExportRef = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+const WorkExportRef = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
 );
 
 /**
@@ -259,7 +265,7 @@ const WorkExportRef = Schema.NonEmptyTrimmedString.pipe(
  * two variants are a discriminated union so an external handoff can never
  * carry another Project's version metadata or preview target.
  */
-export const WorkExportHandoff = Schema.Union(
+export const WorkExportHandoff = Schema.Union([
   Schema.Struct({
     requestId: WorkMutationRequestId,
     artifactId: WorkArtifactId,
@@ -268,18 +274,16 @@ export const WorkExportHandoff = Schema.Union(
     producedVersion: WorkArtifactVersion,
     previewTarget: PreviewTarget,
     producedAt: UtcTimestamp,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (handoff) =>
-          handoff.producedVersion.artifactId === handoff.artifactId &&
-          handoff.producedVersion.format === handoff.exportFormat &&
-          handoff.previewTarget.kind === "artifact-version" &&
-          handoff.previewTarget.projectId === handoff.producedVersion.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (handoff) =>
+        handoff.producedVersion.artifactId === handoff.artifactId &&
+        handoff.producedVersion.format === handoff.exportFormat &&
+        handoff.previewTarget.kind === "artifact-version" &&
+        handoff.previewTarget.projectId === handoff.producedVersion.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     requestId: WorkMutationRequestId,
     artifactId: WorkArtifactId,
@@ -287,8 +291,8 @@ export const WorkExportHandoff = Schema.Union(
     handoffKind: Schema.Literal("external-handoff"),
     exportRef: WorkExportRef,
     producedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkExportHandoff = typeof WorkExportHandoff.Type;
 
 /**
@@ -296,7 +300,7 @@ export type WorkExportHandoff = typeof WorkExportHandoff.Type;
  * messages never cross the wire through `reason`; an optional sanitized
  * `message` may accompany the code when a human-readable hint is safe.
  */
-export const WorkMutationFailureCode = Schema.Literal(
+export const WorkMutationFailureCode = Schema.Literals([
   "decode-failed",
   "read-failed",
   "write-failed",
@@ -304,7 +308,7 @@ export const WorkMutationFailureCode = Schema.Literal(
   "oversize",
   "cancelled",
   "unknown",
-);
+]);
 export type WorkMutationFailureCode = typeof WorkMutationFailureCode.Type;
 
 /**
@@ -313,8 +317,9 @@ export type WorkMutationFailureCode = typeof WorkMutationFailureCode.Type;
  * authority tokens cannot leak through failure messages. Mirrors
  * `PreviewSafeDiagnostic`.
  */
-const WorkSafeDiagnostic = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+const WorkSafeDiagnostic = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
 );
 
 const createdOrRevisedOutcome = (literal: "created" | "revised") =>
@@ -323,20 +328,18 @@ const createdOrRevisedOutcome = (literal: "created" | "revised") =>
     artifact: WorkArtifactIdentity,
     version: WorkArtifactVersion,
     previewTarget: PreviewTarget,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (outcome) =>
-          outcome.version.artifactId === outcome.artifact.artifactId &&
-          outcome.version.projectId === outcome.artifact.projectId &&
-          outcome.version.format === outcome.artifact.format &&
-          outcome.previewTarget.kind === "artifact-version" &&
-          outcome.previewTarget.projectId === outcome.artifact.projectId &&
-          outcome.previewTarget.displayName === outcome.artifact.displayName,
-        { jsonSchema: {} },
-      ),
-    );
+  }).check(
+    Schema.makeFilter(
+      (outcome) =>
+        outcome.version.artifactId === outcome.artifact.artifactId &&
+        outcome.version.projectId === outcome.artifact.projectId &&
+        outcome.version.format === outcome.artifact.format &&
+        outcome.previewTarget.kind === "artifact-version" &&
+        outcome.previewTarget.projectId === outcome.artifact.projectId &&
+        outcome.previewTarget.displayName === outcome.artifact.displayName,
+      { jsonSchema: {} },
+    ),
+  );
 
 /**
  * Typed Work mutation outcome. Success variants (`created`, `revised`,
@@ -351,60 +354,58 @@ const createdOrRevisedOutcome = (literal: "created" | "revised") =>
  * optional opaque ids; never content-derived metadata, display name, or media
  * type.
  */
-export const WorkMutationOutcome = Schema.Union(
+export const WorkMutationOutcome = Schema.Union([
   createdOrRevisedOutcome("created"),
   createdOrRevisedOutcome("revised"),
   Schema.Struct({
     kind: Schema.Literal("exported"),
     handoff: WorkExportHandoff,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("deleted"),
     artifactId: WorkArtifactId,
     projectId: ProjectId,
     lastVersion: WorkArtifactVersion,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (outcome) =>
-          outcome.lastVersion.artifactId === outcome.artifactId &&
-          outcome.lastVersion.projectId === outcome.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (outcome) =>
+        outcome.lastVersion.artifactId === outcome.artifactId &&
+        outcome.lastVersion.projectId === outcome.projectId,
+      { jsonSchema: {} },
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("unsupported"),
     artifactId: Schema.optional(WorkArtifactId),
     format: WorkArtifactFormat,
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("locked"),
     artifactId: WorkArtifactId,
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("stale"),
     artifactId: WorkArtifactId,
     knownVersion: PreviewSourceVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unauthorized"),
     artifactId: Schema.optional(WorkArtifactId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("interrupted"),
     artifactId: Schema.optional(WorkArtifactId),
     canRetry: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     artifactId: Schema.optional(WorkArtifactId),
     reason: WorkMutationFailureCode,
     message: Schema.optional(WorkSafeDiagnostic),
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkMutationOutcome = typeof WorkMutationOutcome.Type;
 
 /**
@@ -414,29 +415,27 @@ export type WorkMutationOutcome = typeof WorkMutationOutcome.Type;
  * never change artifact state and are not journaled. Projections rebuild
  * artifact state from this success-only stream.
  */
-export const WorkMutationSuccessOutcome = Schema.Union(
+export const WorkMutationSuccessOutcome = Schema.Union([
   createdOrRevisedOutcome("created"),
   createdOrRevisedOutcome("revised"),
   Schema.Struct({
     kind: Schema.Literal("exported"),
     handoff: WorkExportHandoff,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("deleted"),
     artifactId: WorkArtifactId,
     projectId: ProjectId,
     lastVersion: WorkArtifactVersion,
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (outcome) =>
-          outcome.lastVersion.artifactId === outcome.artifactId &&
-          outcome.lastVersion.projectId === outcome.projectId,
-        { jsonSchema: {} },
-      ),
+  }).check(
+    Schema.makeFilter(
+      (outcome) =>
+        outcome.lastVersion.artifactId === outcome.artifactId &&
+        outcome.lastVersion.projectId === outcome.projectId,
+      { jsonSchema: {} },
     ),
-);
+  ),
+]);
 export type WorkMutationSuccessOutcome = typeof WorkMutationSuccessOutcome.Type;
 
 /**
@@ -460,32 +459,30 @@ export const WorkArtifactMutationFrame = Schema.Struct({
   sequence: PositiveInt,
   occurredAt: UtcTimestamp,
   outcome: WorkMutationSuccessOutcome,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (frame) => {
-        switch (frame.outcome.kind) {
-          case "created":
-          case "revised":
-            if (frame.outcome.artifact.projectId !== frame.projectId) return false;
-            if (frame.outcome.version.sequence !== frame.sequence) return false;
-            return true;
-          case "deleted":
-            if (frame.outcome.projectId !== frame.projectId) return false;
-            if (frame.outcome.lastVersion.sequence !== frame.sequence) return false;
-            return true;
-          case "exported":
-            if (frame.outcome.handoff.handoffKind === "in-app-version") {
-              if (frame.outcome.handoff.producedVersion.projectId !== frame.projectId) return false;
-              if (frame.outcome.handoff.producedVersion.sequence !== frame.sequence) return false;
-            }
-            return true;
-        }
-      },
-      { jsonSchema: {} },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (frame) => {
+      switch (frame.outcome.kind) {
+        case "created":
+        case "revised":
+          if (frame.outcome.artifact.projectId !== frame.projectId) return false;
+          if (frame.outcome.version.sequence !== frame.sequence) return false;
+          return true;
+        case "deleted":
+          if (frame.outcome.projectId !== frame.projectId) return false;
+          if (frame.outcome.lastVersion.sequence !== frame.sequence) return false;
+          return true;
+        case "exported":
+          if (frame.outcome.handoff.handoffKind === "in-app-version") {
+            if (frame.outcome.handoff.producedVersion.projectId !== frame.projectId) return false;
+            if (frame.outcome.handoff.producedVersion.sequence !== frame.sequence) return false;
+          }
+          return true;
+      }
+    },
+    { jsonSchema: {} },
+  ),
+);
 export type WorkArtifactMutationFrame = typeof WorkArtifactMutationFrame.Type;
 
 /**
@@ -522,44 +519,79 @@ export const WorkMutationReply = Schema.Struct({
   requestId: WorkMutationRequestId,
   outcome: WorkMutationOutcome,
   capability: Schema.optional(WorkCapabilityReport),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (reply) => {
-        if (
-          reply.outcome.kind === "exported" &&
-          reply.outcome.handoff.requestId !== reply.requestId
-        ) {
+}).check(
+  Schema.makeFilter(
+    (reply) => {
+      if (
+        reply.outcome.kind === "exported" &&
+        reply.outcome.handoff.requestId !== reply.requestId
+      ) {
+        return false;
+      }
+      if (reply.capability !== undefined) {
+        const touched = outcomeTouchedFormat(reply.outcome);
+        if (touched === undefined || reply.capability.format !== touched) {
           return false;
         }
-        if (reply.capability !== undefined) {
-          const touched = outcomeTouchedFormat(reply.outcome);
-          if (touched === undefined || reply.capability.format !== touched) {
-            return false;
-          }
-        }
-        return true;
-      },
-      { jsonSchema: {} },
-    ),
-  );
+      }
+      return true;
+    },
+    { jsonSchema: {} },
+  ),
+);
 export type WorkMutationReply = typeof WorkMutationReply.Type;
 
-export const decodeWorkArtifactId = Schema.decodeUnknownSync(WorkArtifactId);
-export const decodeWorkArtifactVersionId = Schema.decodeUnknownSync(WorkArtifactVersionId);
-export const decodeWorkMutationRequestId = Schema.decodeUnknownSync(WorkMutationRequestId);
-export const decodeWorkArtifactRef = Schema.decodeUnknownSync(WorkArtifactRef);
-export const decodeWorkArtifactIdentity = Schema.decodeUnknownSync(WorkArtifactIdentity);
-export const decodeWorkArtifactVersion = Schema.decodeUnknownSync(WorkArtifactVersion);
-export const decodeWorkCapabilityFlags = Schema.decodeUnknownSync(WorkCapabilityFlags);
-export const decodeWorkFidelity = Schema.decodeUnknownSync(WorkFidelity);
-export const decodeWorkCapabilityReport = Schema.decodeUnknownSync(WorkCapabilityReport);
-export const decodeWorkMutationRequest = Schema.decodeUnknownSync(WorkMutationRequest);
-export const decodeWorkExportHandoff = Schema.decodeUnknownSync(WorkExportHandoff);
-export const decodeWorkMutationOutcome = Schema.decodeUnknownSync(WorkMutationOutcome);
+export const decodeWorkArtifactId = Schema.decodeUnknownSync(WorkArtifactId, STRICT_DECODE_OPTIONS);
+export const decodeWorkArtifactVersionId = Schema.decodeUnknownSync(
+  WorkArtifactVersionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkMutationRequestId = Schema.decodeUnknownSync(
+  WorkMutationRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkArtifactRef = Schema.decodeUnknownSync(
+  WorkArtifactRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkArtifactIdentity = Schema.decodeUnknownSync(
+  WorkArtifactIdentity,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkArtifactVersion = Schema.decodeUnknownSync(
+  WorkArtifactVersion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkCapabilityFlags = Schema.decodeUnknownSync(
+  WorkCapabilityFlags,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkFidelity = Schema.decodeUnknownSync(WorkFidelity, STRICT_DECODE_OPTIONS);
+export const decodeWorkCapabilityReport = Schema.decodeUnknownSync(
+  WorkCapabilityReport,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkMutationRequest = Schema.decodeUnknownSync(
+  WorkMutationRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkExportHandoff = Schema.decodeUnknownSync(
+  WorkExportHandoff,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkMutationOutcome = Schema.decodeUnknownSync(
+  WorkMutationOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkMutationSuccessOutcome = Schema.decodeUnknownSync(
   WorkMutationSuccessOutcome,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkArtifactMutationFrame = Schema.decodeUnknownSync(WorkArtifactMutationFrame);
-export const decodeWorkMutationReply = Schema.decodeUnknownSync(WorkMutationReply);
+export const decodeWorkArtifactMutationFrame = Schema.decodeUnknownSync(
+  WorkArtifactMutationFrame,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkMutationReply = Schema.decodeUnknownSync(
+  WorkMutationReply,
+  STRICT_DECODE_OPTIONS,
+);

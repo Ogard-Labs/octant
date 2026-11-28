@@ -1,39 +1,45 @@
 import { Schema } from "effect";
+import { GuidString, NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 export const SpendCeilingReservationId = brandedUuid("SpendCeilingReservationId");
 export type SpendCeilingReservationId = typeof SpendCeilingReservationId.Type;
 
-export const SpendCeilingThreadType = Schema.Literal("chat-thread", "work-thread", "code-thread");
+export const SpendCeilingThreadType = Schema.Literals([
+  "chat-thread",
+  "work-thread",
+  "code-thread",
+]);
 export type SpendCeilingThreadType = typeof SpendCeilingThreadType.Type;
 
-export const SpendCeilingScope = Schema.Union(
+export const SpendCeilingScope = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("project"),
     projectId: ProjectId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("thread"),
     threadType: SpendCeilingThreadType,
-    threadId: Schema.UUID,
-  }).annotations(strict),
-);
+    threadId: GuidString,
+  }),
+]);
 export type SpendCeilingScope = typeof SpendCeilingScope.Type;
 
 /**
  * IANA time zone used for a Project calendar window. Invalid identifiers fail
  * closed so a ceiling never counts against the wrong day.
  */
-export const SpendCeilingTimeZone = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.filter((value) => {
+export const SpendCeilingTimeZone = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.makeFilter((value) => {
     try {
       Intl.DateTimeFormat("en-US", { timeZone: value }).format();
       return true;
@@ -44,7 +50,7 @@ export const SpendCeilingTimeZone = Schema.NonEmptyTrimmedString.pipe(
 );
 export type SpendCeilingTimeZone = typeof SpendCeilingTimeZone.Type;
 
-export const SpendCeilingCalendarPeriod = Schema.Literal("day", "week", "month");
+export const SpendCeilingCalendarPeriod = Schema.Literals(["day", "week", "month"]);
 export type SpendCeilingCalendarPeriod = typeof SpendCeilingCalendarPeriod.Type;
 
 /**
@@ -52,23 +58,23 @@ export type SpendCeilingCalendarPeriod = typeof SpendCeilingCalendarPeriod.Type;
  * arithmetic. A fractional amount is refused rather than rounded: a rounded
  * ceiling is a different ceiling than the person set.
  */
-export const PositiveUsdCents = Schema.Number.pipe(
-  Schema.positive(),
-  Schema.finite(),
-  Schema.filter((value) => Number.isSafeInteger(value), {
-    message: () => "A monetary budget must be whole US cents.",
+export const PositiveUsdCents = Schema.Number.check(
+  Schema.isGreaterThan(0),
+  Schema.isFinite(),
+  Schema.makeFilter((value) => Number.isSafeInteger(value), {
+    message: "A monetary budget must be whole US cents.",
   }),
 );
 export type PositiveUsdCents = typeof PositiveUsdCents.Type;
 
-export const SpendCeilingWindow = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("lifetime") }).annotations(strict),
+export const SpendCeilingWindow = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("lifetime") }),
   Schema.Struct({
     kind: Schema.Literal("calendar"),
     period: SpendCeilingCalendarPeriod,
     timeZone: SpendCeilingTimeZone,
-  }).annotations(strict),
-);
+  }),
+]);
 export type SpendCeilingWindow = typeof SpendCeilingWindow.Type;
 
 /**
@@ -90,25 +96,23 @@ export const SpendCeilingPolicy = Schema.Struct({
   runTimeBudgetSeconds: Schema.optional(PositiveInt),
   /** Settled spend from provider-recorded costs or standard-rate API estimates. */
   costBudgetUsdCents: Schema.optional(PositiveUsdCents),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (policy) =>
-        policy.tokenBudget !== undefined ||
-        policy.turnBudget !== undefined ||
-        policy.runTimeBudgetSeconds !== undefined ||
-        policy.costBudgetUsdCents !== undefined ||
-        "A spend ceiling needs a token, turn, run-time, or money budget.",
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (policy) =>
+      policy.tokenBudget !== undefined ||
+      policy.turnBudget !== undefined ||
+      policy.runTimeBudgetSeconds !== undefined ||
+      policy.costBudgetUsdCents !== undefined ||
+      "A spend ceiling needs a token, turn, run-time, or money budget.",
+  ),
+);
 export type SpendCeilingPolicy = typeof SpendCeilingPolicy.Type;
 
 export const SpendCeilingOverrun = Schema.Struct({
   reservedTokens: NonNegativeInt,
   observedTokens: NonNegativeInt,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SpendCeilingOverrun = typeof SpendCeilingOverrun.Type;
 
 export const SpendCeilingState = Schema.Struct({
@@ -119,7 +123,7 @@ export const SpendCeilingState = Schema.Struct({
   setAt: UtcTimestamp,
   setBy: EventActor,
   overrun: Schema.optional(SpendCeilingOverrun),
-}).annotations(strict);
+});
 export type SpendCeilingState = typeof SpendCeilingState.Type;
 
 const SpendCeilingCommandFields = {
@@ -132,7 +136,7 @@ export const SetSpendCeilingCommand = Schema.Struct({
   ...SpendCeilingCommandFields,
   policy: SpendCeilingPolicy,
   window: SpendCeilingWindow,
-}).annotations(strict);
+});
 export type SetSpendCeilingCommand = typeof SetSpendCeilingCommand.Type;
 
 export const RaiseSpendCeilingCommand = Schema.Struct({
@@ -142,36 +146,34 @@ export const RaiseSpendCeilingCommand = Schema.Struct({
   turnBudget: Schema.optional(PositiveInt),
   runTimeBudgetSeconds: Schema.optional(PositiveInt),
   costBudgetUsdCents: Schema.optional(PositiveUsdCents),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        command.tokenBudget !== undefined ||
-        command.turnBudget !== undefined ||
-        command.runTimeBudgetSeconds !== undefined ||
-        command.costBudgetUsdCents !== undefined ||
-        "Raising a spend ceiling needs a new token, turn, run-time, or money budget.",
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (command) =>
+      command.tokenBudget !== undefined ||
+      command.turnBudget !== undefined ||
+      command.runTimeBudgetSeconds !== undefined ||
+      command.costBudgetUsdCents !== undefined ||
+      "Raising a spend ceiling needs a new token, turn, run-time, or money budget.",
+  ),
+);
 export type RaiseSpendCeilingCommand = typeof RaiseSpendCeilingCommand.Type;
 
 export const ClearSpendCeilingCommand = Schema.Struct({
   kind: Schema.Literal("clear-spend-ceiling"),
   ...SpendCeilingCommandFields,
-}).annotations(strict);
+});
 export type ClearSpendCeilingCommand = typeof ClearSpendCeilingCommand.Type;
 
-export const SpendCeilingCommand = Schema.Union(
+export const SpendCeilingCommand = Schema.Union([
   SetSpendCeilingCommand,
   RaiseSpendCeilingCommand,
   ClearSpendCeilingCommand,
-);
+]);
 export type SpendCeilingCommand = typeof SpendCeilingCommand.Type;
 
 export const SpendCeilingSet = Schema.Struct({
   ceiling: SpendCeilingState,
-}).annotations(strict);
+});
 export type SpendCeilingSet = typeof SpendCeilingSet.Type;
 
 export const SpendCeilingRaised = Schema.Struct({
@@ -180,13 +182,13 @@ export const SpendCeilingRaised = Schema.Struct({
   previousTurnBudget: Schema.optional(PositiveInt),
   previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
   previousCostBudgetUsdCents: Schema.optional(PositiveUsdCents),
-}).annotations(strict);
+});
 export type SpendCeilingRaised = typeof SpendCeilingRaised.Type;
 
 export const SpendCeilingCleared = Schema.Struct({
   scope: SpendCeilingScope,
   clearedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SpendCeilingCleared = typeof SpendCeilingCleared.Type;
 
 export const SpendCeilingOverrunRecorded = Schema.Struct({
@@ -194,7 +196,7 @@ export const SpendCeilingOverrunRecorded = Schema.Struct({
   reservedTokens: NonNegativeInt,
   observedTokens: NonNegativeInt,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SpendCeilingOverrunRecorded = typeof SpendCeilingOverrunRecorded.Type;
 
 export const SPEND_CEILING_AGGREGATE_TYPE = "spend-ceiling";
@@ -208,12 +210,12 @@ export const SPEND_TURN_AGGREGATE_TYPE = "spend-turn";
 export const SpendTurnRecorded = Schema.Struct({
   reservationId: SpendCeilingReservationId,
   threadType: SpendCeilingThreadType,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   projectId: Schema.optional(ProjectId),
   startedAt: UtcTimestamp,
   settledAt: UtcTimestamp,
   runTimeMs: NonNegativeInt,
-}).annotations(strict);
+});
 export type SpendTurnRecorded = typeof SpendTurnRecorded.Type;
 
 export const SPEND_CEILING_EVENT_NAMES = {
@@ -224,20 +226,20 @@ export const SPEND_CEILING_EVENT_NAMES = {
   turnRecorded: "spend.turn-recorded@1",
 } as const;
 
-export const SpendCeilingRefusalKind = Schema.Literal(
+export const SpendCeilingRefusalKind = Schema.Literals([
   "exhausted",
   "unknown-spend",
   "missing-turn-bound",
   "overrun",
-);
+]);
 export type SpendCeilingRefusalKind = typeof SpendCeilingRefusalKind.Type;
 
-export const SpendCeilingRecovery = Schema.Literal(
+export const SpendCeilingRecovery = Schema.Literals([
   "raise-ceiling",
   "clear-ceiling",
   "open-usage",
   "pause-work",
-);
+]);
 export type SpendCeilingRecovery = typeof SpendCeilingRecovery.Type;
 
 /**
@@ -246,9 +248,9 @@ export type SpendCeilingRecovery = typeof SpendCeilingRecovery.Type;
  */
 export const SpendCeilingRefusal = Schema.Struct({
   kind: SpendCeilingRefusalKind,
-  scopeKind: Schema.Literal("project", "thread"),
-  scopeId: Schema.UUID,
-  dimension: Schema.Literal("tokens", "turns", "run-time", "monetary"),
+  scopeKind: Schema.Literals(["project", "thread"]),
+  scopeId: GuidString,
+  dimension: Schema.Literals(["tokens", "turns", "run-time", "monetary"]),
   remainingTokens: Schema.optional(NonNegativeInt),
   overrunTokens: Schema.optional(PositiveInt),
   ceilingTokens: Schema.optional(PositiveInt),
@@ -258,9 +260,9 @@ export const SpendCeilingRefusal = Schema.Struct({
   ceilingRunTimeSeconds: Schema.optional(PositiveInt),
   remainingUsdCents: Schema.optional(NonNegativeInt),
   ceilingUsdCents: Schema.optional(PositiveInt),
-  recovery: Schema.Array(SpendCeilingRecovery).pipe(Schema.minItems(1), Schema.maxItems(4)),
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-}).annotations(strict);
+  recovery: Schema.Array(SpendCeilingRecovery).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
+  message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+});
 export type SpendCeilingRefusal = typeof SpendCeilingRefusal.Type;
 
 /**
@@ -270,8 +272,8 @@ export type SpendCeilingRefusal = typeof SpendCeilingRefusal.Type;
  */
 export const SpendCeilingNotMeasuredProvider = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
-  displayName: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  displayName: NonEmptyTrimmedString,
+});
 export type SpendCeilingNotMeasuredProvider = typeof SpendCeilingNotMeasuredProvider.Type;
 
 /**
@@ -293,8 +295,8 @@ export const SpendCeilingRemaining = Schema.Struct({
   usedUsdCents: Schema.optional(NonNegativeInt),
   remainingUsdCents: Schema.optional(NonNegativeInt),
   notMeasuredProviders: Schema.optional(
-    Schema.Array(SpendCeilingNotMeasuredProvider).pipe(
-      Schema.filter(
+    Schema.Array(SpendCeilingNotMeasuredProvider).check(
+      Schema.makeFilter(
         (providers) =>
           new Set(providers.map(({ providerInstanceId }) => String(providerInstanceId))).size ===
           providers.length,
@@ -304,7 +306,7 @@ export const SpendCeilingRemaining = Schema.Struct({
   window: SpendCeilingWindow,
   overrun: Schema.optional(SpendCeilingOverrun),
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type SpendCeilingRemaining = typeof SpendCeilingRemaining.Type;
 
 export const SpendCeilingSnapshot = Schema.Struct({
@@ -313,30 +315,30 @@ export const SpendCeilingSnapshot = Schema.Struct({
   threadRemaining: Schema.optional(SpendCeilingRemaining),
   projectRemaining: Schema.optional(SpendCeilingRemaining),
   refusal: Schema.optional(SpendCeilingRefusal),
-}).annotations(strict);
+});
 export type SpendCeilingSnapshot = typeof SpendCeilingSnapshot.Type;
 
-export const SpendCeilingCommandRefusalKind = Schema.Literal(
+export const SpendCeilingCommandRefusalKind = Schema.Literals([
   "unauthorized",
   "unknown-scope",
   "version-conflict",
   "ceiling-not-set",
   "not-a-raise",
   "invalid-window",
-);
+]);
 export type SpendCeilingCommandRefusalKind = typeof SpendCeilingCommandRefusalKind.Type;
 
 export const SpendCeilingCommandRefusal = Schema.Struct({
   kind: SpendCeilingCommandRefusalKind,
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-}).annotations(strict);
+  message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+});
 export type SpendCeilingCommandRefusal = typeof SpendCeilingCommandRefusal.Type;
 
-export const SpendCeilingCommandResult = Schema.Union(
+export const SpendCeilingCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("set"),
     ceiling: SpendCeilingState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("raised"),
     ceiling: SpendCeilingState,
@@ -344,35 +346,79 @@ export const SpendCeilingCommandResult = Schema.Union(
     previousTurnBudget: Schema.optional(PositiveInt),
     previousRunTimeBudgetSeconds: Schema.optional(PositiveInt),
     previousCostBudgetUsdCents: Schema.optional(PositiveUsdCents),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cleared"),
     scope: SpendCeilingScope,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     refusal: SpendCeilingCommandRefusal,
-  }).annotations(strict),
-);
+  }),
+]);
 export type SpendCeilingCommandResult = typeof SpendCeilingCommandResult.Type;
 
-export const decodeSpendCeilingThreadType = Schema.decodeUnknownSync(SpendCeilingThreadType);
-export const decodeSpendCeilingReservationId = Schema.decodeUnknownSync(SpendCeilingReservationId);
-export const decodeSpendCeilingScope = Schema.decodeUnknownSync(SpendCeilingScope);
-export const decodeSpendCeilingWindow = Schema.decodeUnknownSync(SpendCeilingWindow);
-export const decodeSpendCeilingPolicy = Schema.decodeUnknownSync(SpendCeilingPolicy);
-export const decodeSpendCeilingState = Schema.decodeUnknownSync(SpendCeilingState);
-export const decodeSpendCeilingCommand = Schema.decodeUnknownSync(SpendCeilingCommand);
-export const decodeSpendCeilingSet = Schema.decodeUnknownSync(SpendCeilingSet);
-export const decodeSpendCeilingRaised = Schema.decodeUnknownSync(SpendCeilingRaised);
-export const decodeSpendCeilingCleared = Schema.decodeUnknownSync(SpendCeilingCleared);
+export const decodeSpendCeilingThreadType = Schema.decodeUnknownSync(
+  SpendCeilingThreadType,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingReservationId = Schema.decodeUnknownSync(
+  SpendCeilingReservationId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingScope = Schema.decodeUnknownSync(
+  SpendCeilingScope,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingWindow = Schema.decodeUnknownSync(
+  SpendCeilingWindow,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingPolicy = Schema.decodeUnknownSync(
+  SpendCeilingPolicy,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingState = Schema.decodeUnknownSync(
+  SpendCeilingState,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingCommand = Schema.decodeUnknownSync(
+  SpendCeilingCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingSet = Schema.decodeUnknownSync(
+  SpendCeilingSet,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingRaised = Schema.decodeUnknownSync(
+  SpendCeilingRaised,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingCleared = Schema.decodeUnknownSync(
+  SpendCeilingCleared,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeSpendCeilingOverrunRecorded = Schema.decodeUnknownSync(
   SpendCeilingOverrunRecorded,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeSpendTurnRecorded = Schema.decodeUnknownSync(SpendTurnRecorded);
-export const decodeSpendCeilingRefusal = Schema.decodeUnknownSync(SpendCeilingRefusal);
-export const decodeSpendCeilingSnapshot = Schema.decodeUnknownSync(SpendCeilingSnapshot);
+export const decodeSpendTurnRecorded = Schema.decodeUnknownSync(
+  SpendTurnRecorded,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingRefusal = Schema.decodeUnknownSync(
+  SpendCeilingRefusal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSpendCeilingSnapshot = Schema.decodeUnknownSync(
+  SpendCeilingSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeSpendCeilingCommandRefusal = Schema.decodeUnknownSync(
   SpendCeilingCommandRefusal,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeSpendCeilingCommandResult = Schema.decodeUnknownSync(SpendCeilingCommandResult);
+export const decodeSpendCeilingCommandResult = Schema.decodeUnknownSync(
+  SpendCeilingCommandResult,
+  STRICT_DECODE_OPTIONS,
+);

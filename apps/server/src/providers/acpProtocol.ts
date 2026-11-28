@@ -1,7 +1,7 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
 import type { Readable, Writable } from "node:stream";
-const decode = <A, I>(schema: Schema.Schema<A, I>) => Schema.decodeUnknownSync(schema);
-const RpcId = Schema.Union(Schema.String, Schema.Int);
+const decode = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeUnknownSync(schema);
+const RpcId = Schema.Union([Schema.String, Schema.Int]);
 type RpcId = typeof RpcId.Type;
 
 const InitializeResult = Schema.Struct({
@@ -24,27 +24,27 @@ const InitializeResult = Schema.Struct({
     ),
     sessionCapabilities: Schema.optional(
       Schema.Struct({
-        list: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-        resume: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+        list: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+        resume: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
       }),
     ),
   }),
   authMethods: Schema.optional(
     Schema.Array(
       Schema.Struct({
-        id: Schema.NonEmptyTrimmedString,
-        type: Schema.optional(Schema.NonEmptyTrimmedString),
+        id: Schema.Trimmed.check(Schema.isNonEmpty()),
+        type: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
         args: Schema.optional(Schema.Array(Schema.String)),
       }),
     ),
   ),
   agentInfo: Schema.optional(
     Schema.Struct({
-      name: Schema.NonEmptyTrimmedString,
-      version: Schema.NonEmptyTrimmedString,
+      name: Schema.Trimmed.check(Schema.isNonEmpty()),
+      version: Schema.Trimmed.check(Schema.isNonEmpty()),
     }),
   ),
-  _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+  _meta: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
 export type AcpInitializeResult = typeof InitializeResult.Type;
 
@@ -84,14 +84,14 @@ export interface AcpMcpHttpServer {
 }
 
 const SessionConfigSelectOption = Schema.Struct({
-  value: Schema.NonEmptyTrimmedString,
-  name: Schema.NonEmptyTrimmedString,
+  value: Schema.Trimmed.check(Schema.isNonEmpty()),
+  name: Schema.Trimmed.check(Schema.isNonEmpty()),
   description: Schema.optional(Schema.String),
 });
 const SessionConfigOption = Schema.Struct({
   type: Schema.Literal("select"),
-  id: Schema.NonEmptyTrimmedString,
-  name: Schema.NonEmptyTrimmedString,
+  id: Schema.Trimmed.check(Schema.isNonEmpty()),
+  name: Schema.Trimmed.check(Schema.isNonEmpty()),
   category: Schema.optional(Schema.String),
   currentValue: Schema.String,
   options: Schema.Array(SessionConfigSelectOption),
@@ -104,29 +104,29 @@ export type AcpSessionConfigOption = typeof SessionConfigOption.Type;
  * rather than failing the whole reply it came in.
  */
 const isSelectOption = Schema.is(SessionConfigOption);
-const SessionConfigOptions = Schema.transform(
-  Schema.Array(Schema.Unknown),
-  Schema.Array(SessionConfigOption),
-  {
-    strict: true,
-    decode: (options) => options.filter(isSelectOption),
-    encode: (options) => options,
-  },
+const SessionConfigOptions = Schema.Array(Schema.Unknown).pipe(
+  Schema.decodeTo(
+    Schema.Array(SessionConfigOption),
+    SchemaTransformation.transform({
+      decode: (options): ReadonlyArray<AcpSessionConfigOption> => options.filter(isSelectOption),
+      encode: (options) => options,
+    }),
+  ),
 );
 
 // An agent may report its models as the session's own model state instead of a
 // `model` config option; both are ACP, and an agent that only sends this one
 // would otherwise be read as having no model to select at all.
 const SessionModelState = Schema.Struct({
-  currentModelId: Schema.optional(Schema.NonEmptyTrimmedString),
+  currentModelId: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
   availableModels: Schema.Array(
     Schema.Struct({
-      modelId: Schema.NonEmptyTrimmedString,
-      name: Schema.NonEmptyTrimmedString,
+      modelId: Schema.Trimmed.check(Schema.isNonEmpty()),
+      name: Schema.Trimmed.check(Schema.isNonEmpty()),
       description: Schema.optional(Schema.String),
       // Facts about a model that ACP names no standard field for — the model's
       // own reasoning levels, for one — travel in the extension slot.
-      _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
+      _meta: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
     }),
   ),
 });
@@ -134,7 +134,7 @@ export type AcpSessionModelState = typeof SessionModelState.Type;
 export type AcpSessionModel = AcpSessionModelState["availableModels"][number];
 
 const NewSessionResult = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   configOptions: Schema.optional(SessionConfigOptions),
   models: Schema.optional(SessionModelState),
 });
@@ -148,7 +148,7 @@ const ExistingSessionResult = Schema.Struct({
 });
 
 const PromptResult = Schema.Struct({
-  stopReason: Schema.NonEmptyTrimmedString,
+  stopReason: Schema.Trimmed.check(Schema.isNonEmpty()),
   usage: Schema.optional(Schema.Unknown),
 });
 export type AcpPromptResult = typeof PromptResult.Type;
@@ -158,50 +158,48 @@ const ConfigOptionsResult = Schema.Struct({
 });
 export type AcpConfigOptionsResult = typeof ConfigOptionsResult.Type;
 
-const EmptyResult = Schema.Record({ key: Schema.String, value: Schema.Unknown });
+const EmptyResult = Schema.Record(Schema.String, Schema.Unknown);
 
 const SessionUpdateParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
-  update: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
+  update: Schema.Record(Schema.String, Schema.Unknown),
 });
 
 const PermissionRequestParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   toolCall: Schema.Struct({
-    toolCallId: Schema.NonEmptyTrimmedString,
+    toolCallId: Schema.Trimmed.check(Schema.isNonEmpty()),
     title: Schema.optional(Schema.NullOr(Schema.String)),
-    kind: Schema.optional(Schema.NullOr(Schema.NonEmptyTrimmedString)),
+    kind: Schema.optional(Schema.NullOr(Schema.Trimmed.check(Schema.isNonEmpty()))),
     /** What the agent proposes to run; read for an automatic reviewer only. */
     rawInput: Schema.optional(Schema.Unknown),
     locations: Schema.optional(Schema.NullOr(Schema.Array(Schema.Struct({ path: Schema.String })))),
   }),
   options: Schema.Array(
     Schema.Struct({
-      optionId: Schema.NonEmptyTrimmedString,
-      name: Schema.NonEmptyTrimmedString,
-      kind: Schema.NonEmptyTrimmedString,
+      optionId: Schema.Trimmed.check(Schema.isNonEmpty()),
+      name: Schema.Trimmed.check(Schema.isNonEmpty()),
+      kind: Schema.Trimmed.check(Schema.isNonEmpty()),
     }),
   ),
 });
 
-const AcpClientRequestMeta = Schema.optional(
-  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-);
+const AcpClientRequestMeta = Schema.optional(Schema.Record(Schema.String, Schema.Unknown));
 const AcpClientReadTextFileParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   path: Schema.String,
   line: Schema.optional(Schema.NullOr(Schema.Int)),
   limit: Schema.optional(Schema.NullOr(Schema.Int)),
   _meta: AcpClientRequestMeta,
 });
 const AcpClientWriteTextFileParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   path: Schema.String,
   content: Schema.String,
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalCreateParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   command: Schema.String,
   args: Schema.optional(Schema.Array(Schema.String)),
   env: Schema.optional(
@@ -217,22 +215,22 @@ const AcpClientTerminalCreateParams = Schema.Struct({
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalOutputParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   terminalId: Schema.String,
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalWaitForExitParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   terminalId: Schema.String,
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalKillParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   terminalId: Schema.String,
   _meta: AcpClientRequestMeta,
 });
 const AcpClientTerminalReleaseParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   terminalId: Schema.String,
   _meta: AcpClientRequestMeta,
 });
@@ -240,17 +238,17 @@ const AcpClientTerminalReleaseParams = Schema.Struct({
 const DelegatedBrowserStart = Schema.Struct({
   _meta: Schema.Struct({
     "browser-auth-delegated": Schema.Struct({
-      attemptId: Schema.NonEmptyTrimmedString,
-      expiresAt: Schema.NonEmptyTrimmedString,
-      signInUrl: Schema.NonEmptyTrimmedString,
+      attemptId: Schema.Trimmed.check(Schema.isNonEmpty()),
+      expiresAt: Schema.Trimmed.check(Schema.isNonEmpty()),
+      signInUrl: Schema.Trimmed.check(Schema.isNonEmpty()),
     }),
   }),
 });
 const DelegatedBrowserComplete = Schema.Struct({
   _meta: Schema.Struct({
     "browser-auth-delegated": Schema.Struct({
-      attemptId: Schema.NonEmptyTrimmedString,
-      persistResult: Schema.optional(Schema.NonEmptyTrimmedString),
+      attemptId: Schema.Trimmed.check(Schema.isNonEmpty()),
+      persistResult: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty())),
       status: Schema.Literal("completed"),
     }),
   }),
@@ -323,12 +321,14 @@ export type AcpClientCapabilityRequest =
     };
 
 const AcpElicitationParams = Schema.Struct({
-  sessionId: Schema.NonEmptyTrimmedString,
+  sessionId: Schema.Trimmed.check(Schema.isNonEmpty()),
   mode: Schema.Literal("form"),
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
+  message: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(2_000))),
   requestedSchema: Schema.Unknown,
   toolCallId: Schema.optional(
-    Schema.NullOr(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+    Schema.NullOr(
+      Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+    ),
   ),
 });
 export interface AcpElicitationRequest {

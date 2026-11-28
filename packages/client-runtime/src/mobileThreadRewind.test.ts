@@ -365,25 +365,24 @@ describe("mobile fork and rewind", () => {
   it("still lets a phone built before the detail decode the preview and rewind the conversation", () => {
     // The rewind preview exactly as phones built before the detail decode
     // it: strict structs, and an unavailable files part with no `detail`.
-    const strict = { parseOptions: { onExcessProperty: "error" as const } };
     const OlderPhoneRewindPreview = Schema.Struct({
       kind: Schema.Literal("rewind-preview"),
       operationId: CodeOperationId,
       fromOperationId: CodeOperationId,
-      removedTurns: Schema.Int.pipe(Schema.positive()),
-      files: Schema.Union(
+      removedTurns: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+      files: Schema.Union([
         Schema.Struct({
           kind: Schema.Literal("changes"),
           changes: CodeTurnChangedFiles,
-        }).annotations(strict),
-        Schema.Struct({ kind: Schema.Literal("unchanged") }).annotations(strict),
+        }),
+        Schema.Struct({ kind: Schema.Literal("unchanged") }),
         Schema.Struct({
           kind: Schema.Literal("unavailable"),
           reason: CodeRewindFilesUnavailableReason,
-        }).annotations(strict),
-      ),
-      rollback: Schema.Literal("native", "handoff"),
-    }).annotations(strict);
+        }),
+      ]),
+      rollback: Schema.Literals(["native", "handoff"]),
+    });
     const answer = {
       kind: "rewind-preview",
       operationId: uuid(810),
@@ -395,7 +394,9 @@ describe("mobile fork and rewind", () => {
 
     // Read strictly, the unknown field would refuse the whole preview; a host
     // answer drops it, which is what keeps that phone able to rewind.
-    expect(() => Schema.decodeUnknownSync(OlderPhoneRewindPreview)(answer)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(OlderPhoneRewindPreview, { onExcessProperty: "error" })(answer),
+    ).toThrow();
     const decoded = decodeHostAnswer(OlderPhoneRewindPreview)(answer);
     expect(decoded.files).toEqual({ kind: "unavailable", reason: "unreadable" });
     if (decoded.files.kind !== "unavailable") throw new Error("files");

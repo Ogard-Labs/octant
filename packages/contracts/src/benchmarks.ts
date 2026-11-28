@@ -1,16 +1,17 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { TurnStopReason } from "./turnMetrics";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const NonNegativeNumber = Schema.Number.pipe(Schema.nonNegative(), Schema.finite());
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const NonNegativeNumber = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite());
 
 export const MAX_BENCHMARK_CASES = 100;
 export const MAX_BENCHMARK_CHECKS = 20;
@@ -39,7 +40,7 @@ export type BenchmarkCellId = typeof BenchmarkCellId.Type;
 
 const CheckText = boundedText(2_000);
 
-export const BenchmarkRegexFlags = Schema.Literal("", "i", "m", "s", "im", "is", "ms", "ims");
+export const BenchmarkRegexFlags = Schema.Literals(["", "i", "m", "s", "im", "is", "ms", "ims"]);
 export type BenchmarkRegexFlags = typeof BenchmarkRegexFlags.Type;
 
 /**
@@ -47,38 +48,38 @@ export type BenchmarkRegexFlags = typeof BenchmarkRegexFlags.Type;
  * a prompt case; the last two belong to Code cases and are scored by the
  * runner against the cell's worktree, so a prompt case refuses them.
  */
-export const BenchmarkCheck = Schema.Union(
+export const BenchmarkCheck = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("contains"),
     text: CheckText,
     caseSensitive: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("not-contains"),
     text: CheckText,
     caseSensitive: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("matches"),
     pattern: boundedText(MAX_BENCHMARK_PATTERN_CHARS),
     flags: BenchmarkRegexFlags,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("equals"),
     text: CheckText,
     trim: Schema.Boolean,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("valid-json") }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("valid-json") }),
   Schema.Struct({
     kind: Schema.Literal("command-exits-zero"),
     command: boundedText(1_000),
-    timeoutSeconds: Schema.Int.pipe(Schema.between(1, 600)),
-  }).annotations(strict),
+    timeoutSeconds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 })),
+  }),
   Schema.Struct({
     kind: Schema.Literal("max-files-changed"),
-    count: Schema.Int.pipe(Schema.between(0, 10_000)),
-  }).annotations(strict),
-);
+    count: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 10_000 })),
+  }),
+]);
 export type BenchmarkCheck = typeof BenchmarkCheck.Type;
 
 export const BENCHMARK_CODE_ONLY_CHECK_KINDS: ReadonlyArray<BenchmarkCheck["kind"]> = [
@@ -90,58 +91,56 @@ export const BenchmarkCheckResult = Schema.Struct({
   index: NonNegativeInt,
   passed: Schema.Boolean,
   /** A short reason, never the answer. */
-  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_CHECK_DETAIL_CHARS))),
-}).annotations(strict);
+  detail: Schema.optional(Schema.String.check(Schema.isMaxLength(BENCHMARK_CHECK_DETAIL_CHARS))),
+});
 export type BenchmarkCheckResult = typeof BenchmarkCheckResult.Type;
 
 // ── Suites ─────────────────────────────────────────────────────────────────
 
 export const BenchmarkCase = Schema.Struct({
   caseId: BenchmarkCaseId,
-  kind: Schema.Literal("prompt", "code"),
+  kind: Schema.Literals(["prompt", "code"]),
   title: boundedText(120),
   prompt: boundedText(MAX_BENCHMARK_PROMPT_CHARS),
-  checks: Schema.Array(BenchmarkCheck).pipe(Schema.maxItems(MAX_BENCHMARK_CHECKS)),
+  checks: Schema.Array(BenchmarkCheck).check(Schema.isMaxLength(MAX_BENCHMARK_CHECKS)),
   referenceAnswer: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_BENCHMARK_PROMPT_CHARS)),
+    Schema.String.check(Schema.isMaxLength(MAX_BENCHMARK_PROMPT_CHARS)),
   ),
-  rubric: Schema.optional(Schema.String.pipe(Schema.maxLength(1_000))),
+  rubric: Schema.optional(Schema.String.check(Schema.isMaxLength(1_000))),
   /** Code cases only: the Code Project and the branch or tag the task starts from. */
   code: Schema.optional(
     Schema.Struct({
       codeProjectId: ProjectId,
       ref: boundedText(200),
-    }).annotations(strict),
-  ),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((value) => {
-      if ((value.kind === "code") !== (value.code !== undefined)) {
-        return "A Code case names its Code Project and ref, and a prompt case does not.";
-      }
-      if (
-        value.kind === "prompt" &&
-        value.checks.some((check) => BENCHMARK_CODE_ONLY_CHECK_KINDS.includes(check.kind))
-      ) {
-        return "A prompt case cannot carry a check that runs in a worktree.";
-      }
-      return true;
     }),
-  );
+  ),
+}).check(
+  Schema.makeFilter((value) => {
+    if ((value.kind === "code") !== (value.code !== undefined)) {
+      return "A Code case names its Code Project and ref, and a prompt case does not.";
+    }
+    if (
+      value.kind === "prompt" &&
+      value.checks.some((check) => BENCHMARK_CODE_ONLY_CHECK_KINDS.includes(check.kind))
+    ) {
+      return "A prompt case cannot carry a check that runs in a worktree.";
+    }
+    return true;
+  }),
+);
 export type BenchmarkCase = typeof BenchmarkCase.Type;
 
 export const BenchmarkJudge = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   rubric: boundedText(2_000),
-}).annotations(strict);
+});
 export type BenchmarkJudge = typeof BenchmarkJudge.Type;
 
-const SuiteCases = Schema.Array(BenchmarkCase).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_BENCHMARK_CASES),
-  Schema.filter((cases) =>
+const SuiteCases = Schema.Array(BenchmarkCase).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_BENCHMARK_CASES),
+  Schema.makeFilter((cases) =>
     new Set(cases.map((candidate) => candidate.caseId)).size === cases.length
       ? true
       : "Case ids must be unique within a suite.",
@@ -149,29 +148,32 @@ const SuiteCases = Schema.Array(BenchmarkCase).pipe(
 );
 
 export const DEFAULT_BENCHMARK_PASS_THRESHOLD = 0.8;
-export const BenchmarkSuiteKind = Schema.Literal("chat", "work", "code");
+export const BenchmarkSuiteKind = Schema.Literals(["chat", "work", "code"]);
 export type BenchmarkSuiteKind = typeof BenchmarkSuiteKind.Type;
-const BenchmarkPassThreshold = Schema.Number.pipe(Schema.finite(), Schema.between(0, 1));
+const BenchmarkPassThreshold = Schema.Number.check(
+  Schema.isFinite(),
+  Schema.isBetween({ minimum: 0, maximum: 1 }),
+);
 
 const BenchmarkSuiteV1 = Schema.Struct({
   suiteId: BenchmarkSuiteId,
   revision: PositiveInt,
   name: boundedText(80),
-  description: Schema.optional(Schema.String.pipe(Schema.maxLength(500))),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
   cases: SuiteCases,
   judge: Schema.optional(BenchmarkJudge),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 export const BenchmarkSuite = Schema.Struct({
   ...BenchmarkSuiteV1.fields,
-  passThreshold: Schema.optionalWith(BenchmarkPassThreshold, {
-    default: () => DEFAULT_BENCHMARK_PASS_THRESHOLD,
-  }),
-  kind: Schema.optionalWith(BenchmarkSuiteKind, { default: () => "chat" }),
+  passThreshold: BenchmarkPassThreshold.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_BENCHMARK_PASS_THRESHOLD)),
+  ),
+  kind: BenchmarkSuiteKind.pipe(Schema.withDecodingDefaultType(Effect.succeed("chat"))),
   projectId: Schema.optional(ProjectId),
-}).annotations(strict);
+});
 export type BenchmarkSuite = typeof BenchmarkSuite.Type;
 
 // ── Runs ───────────────────────────────────────────────────────────────────
@@ -180,32 +182,30 @@ export const BenchmarkContender = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   effort: Schema.optional(boundedText(40)),
-}).annotations(strict);
+});
 export type BenchmarkContender = typeof BenchmarkContender.Type;
 
 export const BenchmarkBudget = Schema.Struct({
   maxTokens: Schema.optional(PositiveInt),
-  maxCostUsd: Schema.optional(Schema.Number.pipe(Schema.positive(), Schema.finite())),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((budget) =>
-      budget.maxTokens !== undefined || budget.maxCostUsd !== undefined
-        ? true
-        : "A run needs a token or cost budget.",
-    ),
-  );
+  maxCostUsd: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0), Schema.isFinite())),
+}).check(
+  Schema.makeFilter((budget) =>
+    budget.maxTokens !== undefined || budget.maxCostUsd !== undefined
+      ? true
+      : "A run needs a token or cost budget.",
+  ),
+);
 export type BenchmarkBudget = typeof BenchmarkBudget.Type;
 
 /** Only Code cases use the level; a prompt run carries none. */
-export const BenchmarkExecutionLevel = Schema.Literal("auto", "accept-edits", "full-access");
+export const BenchmarkExecutionLevel = Schema.Literals(["auto", "accept-edits", "full-access"]);
 export type BenchmarkExecutionLevel = typeof BenchmarkExecutionLevel.Type;
 
 /**
  * `answered` means the turn completed with an answer; the checks then score
  * it. The other settled states end the cell without an answer.
  */
-export const BenchmarkCellState = Schema.Literal(
+export const BenchmarkCellState = Schema.Literals([
   "queued",
   "running",
   "answered",
@@ -213,7 +213,7 @@ export const BenchmarkCellState = Schema.Literal(
   "blocked-on-approval",
   "cancelled",
   "skipped-budget",
-);
+]);
 export type BenchmarkCellState = typeof BenchmarkCellState.Type;
 
 export const BENCHMARK_SETTLED_CELL_STATES = [
@@ -223,64 +223,66 @@ export const BENCHMARK_SETTLED_CELL_STATES = [
   "cancelled",
   "skipped-budget",
 ] as const;
-export const BenchmarkSettledCellState = Schema.Literal(...BENCHMARK_SETTLED_CELL_STATES);
+export const BenchmarkSettledCellState = Schema.Literals(BENCHMARK_SETTLED_CELL_STATES);
 export type BenchmarkSettledCellState = typeof BenchmarkSettledCellState.Type;
 
-export const BenchmarkJudgeResult = Schema.Union(
+export const BenchmarkJudgeResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("scored"),
-    score: Schema.Int.pipe(Schema.between(1, 10)),
-    reason: Schema.String.pipe(Schema.maxLength(BENCHMARK_JUDGE_REASON_CHARS)),
-    judgeThreadId: Schema.UUID,
-  }).annotations(strict),
+    score: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10 })),
+    reason: Schema.String.check(Schema.isMaxLength(BENCHMARK_JUDGE_REASON_CHARS)),
+    judgeThreadId: GuidString,
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
-    reason: Schema.String.pipe(Schema.maxLength(BENCHMARK_JUDGE_REASON_CHARS)),
-  }).annotations(strict),
-);
+    reason: Schema.String.check(Schema.isMaxLength(BENCHMARK_JUDGE_REASON_CHARS)),
+  }),
+]);
 export type BenchmarkJudgeResult = typeof BenchmarkJudgeResult.Type;
 
 export const BenchmarkRating = Schema.Struct({
-  stars: Schema.Int.pipe(Schema.between(1, 5)),
-  note: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_STAR_NOTE_CHARS))),
+  stars: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
+  note: Schema.optional(Schema.String.check(Schema.isMaxLength(BENCHMARK_STAR_NOTE_CHARS))),
   ratedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BenchmarkRating = typeof BenchmarkRating.Type;
 
 export const BenchmarkCell = Schema.Struct({
   cellId: BenchmarkCellId,
   caseId: BenchmarkCaseId,
   contenderIndex: NonNegativeInt,
-  repetition: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
+  repetition: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_BENCHMARK_REPETITIONS }),
+  ),
   state: BenchmarkCellState,
-  threadId: Schema.optional(Schema.UUID),
-  turnId: Schema.optional(Schema.UUID),
+  threadId: Schema.optional(GuidString),
+  turnId: Schema.optional(GuidString),
   startedAt: Schema.optional(UtcTimestamp),
   settledAt: Schema.optional(UtcTimestamp),
   failureReason: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(BENCHMARK_FAILURE_REASON_CHARS)),
+    Schema.String.check(Schema.isMaxLength(BENCHMARK_FAILURE_REASON_CHARS)),
   ),
   checks: Schema.Array(BenchmarkCheckResult),
   judge: Schema.optional(BenchmarkJudgeResult),
   rating: Schema.optional(BenchmarkRating),
-}).annotations(strict);
+});
 export type BenchmarkCell = typeof BenchmarkCell.Type;
 
-export const BenchmarkRunStatus = Schema.Literal(
+export const BenchmarkRunStatus = Schema.Literals([
   "running",
   "finished",
   "cancelled",
   "budget-reached",
   "failed",
-);
+]);
 export type BenchmarkRunStatus = typeof BenchmarkRunStatus.Type;
 
-export const BenchmarkRunEndStatus = Schema.Literal(
+export const BenchmarkRunEndStatus = Schema.Literals([
   "finished",
   "cancelled",
   "budget-reached",
   "failed",
-);
+]);
 export type BenchmarkRunEndStatus = typeof BenchmarkRunEndStatus.Type;
 
 /**
@@ -289,8 +291,8 @@ export type BenchmarkRunEndStatus = typeof BenchmarkRunEndStatus.Type;
  */
 export const BenchmarkCodeCommit = Schema.Struct({
   caseId: BenchmarkCaseId,
-  commit: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}$/)),
-}).annotations(strict);
+  commit: Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}$/)),
+});
 export type BenchmarkCodeCommit = typeof BenchmarkCodeCommit.Type;
 
 /**
@@ -305,54 +307,56 @@ export const BenchmarkRun = Schema.Struct({
   suiteName: boundedText(80),
   cases: SuiteCases,
   judge: Schema.optional(BenchmarkJudge),
-  contenders: Schema.Array(BenchmarkContender).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_BENCHMARK_CONTENDERS),
+  contenders: Schema.Array(BenchmarkContender).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_BENCHMARK_CONTENDERS),
   ),
-  repetitions: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
+  repetitions: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_BENCHMARK_REPETITIONS }),
+  ),
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
   /** Absent on a run started before refs were pinned; its cells then resolve the ref each time. */
   codeCommits: Schema.optional(
-    Schema.Array(BenchmarkCodeCommit).pipe(Schema.maxItems(MAX_BENCHMARK_CASES)),
+    Schema.Array(BenchmarkCodeCommit).check(Schema.isMaxLength(MAX_BENCHMARK_CASES)),
   ),
   status: BenchmarkRunStatus,
   startedAt: UtcTimestamp,
   endedAt: Schema.optional(UtcTimestamp),
-  endReason: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_FAILURE_REASON_CHARS))),
-  cells: Schema.Array(BenchmarkCell).pipe(Schema.maxItems(MAX_BENCHMARK_CELLS)),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((run) => {
-      if (run.cells.length !== run.cases.length * run.contenders.length * run.repetitions) {
-        return "A run holds one cell per case, contender, and repetition.";
-      }
-      const caseIds = new Set(run.cases.map((candidate) => String(candidate.caseId)));
-      const cellIds = new Set(run.cells.map((cell) => String(cell.cellId)));
-      if (cellIds.size !== run.cells.length) return "Cell ids must be unique within a run.";
-      const outside = run.cells.some(
-        (cell) =>
-          !caseIds.has(String(cell.caseId)) ||
-          cell.contenderIndex >= run.contenders.length ||
-          cell.repetition > run.repetitions,
-      );
-      if (outside) return "A cell must name a case, contender, and repetition of its run.";
-      const codeCaseIds = new Set(
-        run.cases
-          .filter((candidate) => candidate.kind === "code")
-          .map((candidate) => String(candidate.caseId)),
-      );
-      const pinned = run.codeCommits ?? [];
-      if (
-        new Set(pinned.map((pin) => String(pin.caseId))).size !== pinned.length ||
-        pinned.some((pin) => !codeCaseIds.has(String(pin.caseId)))
-      ) {
-        return "A pinned commit names each Code case of the run at most once.";
-      }
-      return true;
-    }),
-  );
+  endReason: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(BENCHMARK_FAILURE_REASON_CHARS)),
+  ),
+  cells: Schema.Array(BenchmarkCell).check(Schema.isMaxLength(MAX_BENCHMARK_CELLS)),
+}).check(
+  Schema.makeFilter((run) => {
+    if (run.cells.length !== run.cases.length * run.contenders.length * run.repetitions) {
+      return "A run holds one cell per case, contender, and repetition.";
+    }
+    const caseIds = new Set(run.cases.map((candidate) => String(candidate.caseId)));
+    const cellIds = new Set(run.cells.map((cell) => String(cell.cellId)));
+    if (cellIds.size !== run.cells.length) return "Cell ids must be unique within a run.";
+    const outside = run.cells.some(
+      (cell) =>
+        !caseIds.has(String(cell.caseId)) ||
+        cell.contenderIndex >= run.contenders.length ||
+        cell.repetition > run.repetitions,
+    );
+    if (outside) return "A cell must name a case, contender, and repetition of its run.";
+    const codeCaseIds = new Set(
+      run.cases
+        .filter((candidate) => candidate.kind === "code")
+        .map((candidate) => String(candidate.caseId)),
+    );
+    const pinned = run.codeCommits ?? [];
+    if (
+      new Set(pinned.map((pin) => String(pin.caseId))).size !== pinned.length ||
+      pinned.some((pin) => !codeCaseIds.has(String(pin.caseId)))
+    ) {
+      return "A pinned commit names each Code case of the run at most once.";
+    }
+    return true;
+  }),
+);
 export type BenchmarkRun = typeof BenchmarkRun.Type;
 
 // ── Figures ────────────────────────────────────────────────────────────────
@@ -372,7 +376,7 @@ export const BenchmarkCellMetrics = Schema.Struct({
   costUsd: Schema.optional(NonNegativeNumber),
   toolCalls: Schema.optional(NonNegativeInt),
   toolFailures: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 export type BenchmarkCellMetrics = typeof BenchmarkCellMetrics.Type;
 
 export const BenchmarkLeaderboardRow = Schema.Struct({
@@ -380,7 +384,7 @@ export const BenchmarkLeaderboardRow = Schema.Struct({
   cells: NonNegativeInt,
   answered: NonNegativeInt,
   /** Passed checks over all checks, across answered cells; absent when none were scored. */
-  checkPassRate: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  checkPassRate: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
   meanJudgeScore: Schema.optional(NonNegativeNumber),
   meanStars: Schema.optional(NonNegativeNumber),
   firstTokenP50Ms: Schema.optional(NonNegativeNumber),
@@ -391,10 +395,12 @@ export const BenchmarkLeaderboardRow = Schema.Struct({
   meanTokens: Schema.optional(NonNegativeNumber),
   totalCostUsd: Schema.optional(NonNegativeNumber),
   /** Failed tool calls over all tool calls; absent when no tool ran. */
-  toolFailureRate: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  toolFailureRate: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  ),
   failedCount: NonNegativeInt,
   blockedCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type BenchmarkLeaderboardRow = typeof BenchmarkLeaderboardRow.Type;
 
 export const BenchmarkRunSummary = Schema.Struct({
@@ -405,7 +411,9 @@ export const BenchmarkRunSummary = Schema.Struct({
   status: BenchmarkRunStatus,
   startedAt: UtcTimestamp,
   endedAt: Schema.optional(UtcTimestamp),
-  endReason: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_FAILURE_REASON_CHARS))),
+  endReason: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(BENCHMARK_FAILURE_REASON_CHARS)),
+  ),
   contenderCount: PositiveInt,
   repetitions: PositiveInt,
   cellCount: NonNegativeInt,
@@ -413,7 +421,7 @@ export const BenchmarkRunSummary = Schema.Struct({
   settledCount: NonNegativeInt,
   answeredCount: NonNegativeInt,
   failedCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type BenchmarkRunSummary = typeof BenchmarkRunSummary.Type;
 
 // ── Routes ─────────────────────────────────────────────────────────────────
@@ -433,10 +441,10 @@ export const BENCHMARK_ROUTE_PATHS = {
   runsExport: "/api/benchmarks/runs/export",
 } as const;
 
-export const BenchmarkAdviceRequest = Schema.Union(
-  Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(strict),
-  Schema.Struct({ projectId: ProjectId, kind: BenchmarkSuiteKind }).annotations(strict),
-);
+export const BenchmarkAdviceRequest = Schema.Union([
+  Schema.Struct({ suiteId: BenchmarkSuiteId }),
+  Schema.Struct({ projectId: ProjectId, kind: BenchmarkSuiteKind }),
+]);
 export type BenchmarkAdviceRequest = typeof BenchmarkAdviceRequest.Type;
 
 export const BenchmarkModelAdvice = Schema.Struct({
@@ -448,7 +456,7 @@ export const BenchmarkModelAdvice = Schema.Struct({
   medianMs: Schema.optional(NonNegativeNumber),
   runAt: UtcTimestamp,
   stale: Schema.Boolean,
-}).annotations(strict);
+});
 export type BenchmarkModelAdvice = typeof BenchmarkModelAdvice.Type;
 
 export const BenchmarkAdviceResponse = Schema.Struct({
@@ -457,21 +465,27 @@ export const BenchmarkAdviceResponse = Schema.Struct({
       suiteId: BenchmarkSuiteId,
       name: boundedText(80),
       models: Schema.Array(BenchmarkModelAdvice),
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type BenchmarkAdviceResponse = typeof BenchmarkAdviceResponse.Type;
-export const decodeBenchmarkAdviceRequest = Schema.decodeUnknownSync(BenchmarkAdviceRequest);
-export const decodeBenchmarkAdviceResponse = Schema.decodeUnknownSync(BenchmarkAdviceResponse);
+export const decodeBenchmarkAdviceRequest = Schema.decodeUnknownSync(
+  BenchmarkAdviceRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkAdviceResponse = Schema.decodeUnknownSync(
+  BenchmarkAdviceResponse,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The most runs one history read returns, newest first. */
 export const MAX_BENCHMARK_HISTORY_RUNS = 50;
 
-export const BenchmarkSuitesListRequest = Schema.Struct({}).annotations(strict);
+export const BenchmarkSuitesListRequest = Schema.Struct({});
 export type BenchmarkSuitesListRequest = typeof BenchmarkSuitesListRequest.Type;
 export const BenchmarkSuitesListResponse = Schema.Struct({
   suites: Schema.Array(BenchmarkSuite),
-}).annotations(strict);
+});
 export type BenchmarkSuitesListResponse = typeof BenchmarkSuitesListResponse.Type;
 
 /**
@@ -483,38 +497,34 @@ export const BenchmarkSuiteSaveRequest = Schema.Struct({
   suiteId: BenchmarkSuiteId,
   expectedRevision: Schema.optional(PositiveInt),
   name: boundedText(80),
-  description: Schema.optional(Schema.String.pipe(Schema.maxLength(500))),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(500))),
   cases: SuiteCases,
   judge: Schema.optional(BenchmarkJudge),
   passThreshold: Schema.optional(BenchmarkPassThreshold),
   kind: Schema.optional(BenchmarkSuiteKind),
   projectId: Schema.optional(Schema.NullOr(ProjectId)),
-}).annotations(strict);
+});
 export type BenchmarkSuiteSaveRequest = typeof BenchmarkSuiteSaveRequest.Type;
-export const BenchmarkSuiteSaveResponse = Schema.Struct({ suite: BenchmarkSuite }).annotations(
-  strict,
-);
+export const BenchmarkSuiteSaveResponse = Schema.Struct({ suite: BenchmarkSuite });
 export type BenchmarkSuiteSaveResponse = typeof BenchmarkSuiteSaveResponse.Type;
 
-export const BenchmarkSuiteDeleteRequest = Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(
-  strict,
-);
+export const BenchmarkSuiteDeleteRequest = Schema.Struct({ suiteId: BenchmarkSuiteId });
 export type BenchmarkSuiteDeleteRequest = typeof BenchmarkSuiteDeleteRequest.Type;
 export const BenchmarkSuiteDeleteResponse = Schema.Struct({
   suiteId: BenchmarkSuiteId,
-}).annotations(strict);
+});
 export type BenchmarkSuiteDeleteResponse = typeof BenchmarkSuiteDeleteResponse.Type;
 
 export const BenchmarkRunsListRequest = Schema.Struct({
   suiteId: Schema.optional(BenchmarkSuiteId),
-}).annotations(strict);
+});
 export type BenchmarkRunsListRequest = typeof BenchmarkRunsListRequest.Type;
 export const BenchmarkRunsListResponse = Schema.Struct({
   runs: Schema.Array(BenchmarkRunSummary),
-}).annotations(strict);
+});
 export type BenchmarkRunsListResponse = typeof BenchmarkRunsListResponse.Type;
 
-export const BenchmarkRunReadRequest = Schema.Struct({ runId: BenchmarkRunId }).annotations(strict);
+export const BenchmarkRunReadRequest = Schema.Struct({ runId: BenchmarkRunId });
 export type BenchmarkRunReadRequest = typeof BenchmarkRunReadRequest.Type;
 /**
  * What the judge turns cost, kept apart from every contender: judging is the
@@ -525,7 +535,7 @@ export const BenchmarkOverhead = Schema.Struct({
   turns: NonNegativeInt,
   tokens: NonNegativeInt,
   costUsd: NonNegativeNumber,
-}).annotations(strict);
+});
 export type BenchmarkOverhead = typeof BenchmarkOverhead.Type;
 
 export const BenchmarkRunReadResponse = Schema.Struct({
@@ -534,21 +544,19 @@ export const BenchmarkRunReadResponse = Schema.Struct({
   /** Absent from a host that predates judge scoring. */
   overhead: Schema.optional(BenchmarkOverhead),
   cellMetrics: Schema.Array(
-    Schema.Struct({ cellId: BenchmarkCellId, metrics: BenchmarkCellMetrics }).annotations(strict),
+    Schema.Struct({ cellId: BenchmarkCellId, metrics: BenchmarkCellMetrics }),
   ),
-}).annotations(strict);
+});
 export type BenchmarkRunReadResponse = typeof BenchmarkRunReadResponse.Type;
 
-export const BenchmarkHistoryRequest = Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(
-  strict,
-);
+export const BenchmarkHistoryRequest = Schema.Struct({ suiteId: BenchmarkSuiteId });
 export type BenchmarkHistoryRequest = typeof BenchmarkHistoryRequest.Type;
 /** One contender's figures in one run: the leaderboard row without the percentile tails. */
 export const BenchmarkHistoryRow = Schema.Struct({
   contender: BenchmarkContender,
   cells: NonNegativeInt,
   answered: NonNegativeInt,
-  checkPassRate: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  checkPassRate: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
   meanJudgeScore: Schema.optional(NonNegativeNumber),
   meanStars: Schema.optional(NonNegativeNumber),
   firstTokenP50Ms: Schema.optional(NonNegativeNumber),
@@ -556,7 +564,7 @@ export const BenchmarkHistoryRow = Schema.Struct({
   totalTokens: NonNegativeInt,
   totalCostUsd: Schema.optional(NonNegativeNumber),
   failedCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type BenchmarkHistoryRow = typeof BenchmarkHistoryRow.Type;
 export const BenchmarkHistoryRun = Schema.Struct({
   runId: BenchmarkRunId,
@@ -564,38 +572,40 @@ export const BenchmarkHistoryRun = Schema.Struct({
   status: BenchmarkRunStatus,
   suiteRevision: PositiveInt,
   rows: Schema.Array(BenchmarkHistoryRow),
-}).annotations(strict);
+});
 export type BenchmarkHistoryRun = typeof BenchmarkHistoryRun.Type;
 export const BenchmarkHistoryResponse = Schema.Struct({
   suiteId: BenchmarkSuiteId,
-  runs: Schema.Array(BenchmarkHistoryRun).pipe(Schema.maxItems(MAX_BENCHMARK_HISTORY_RUNS)),
-}).annotations(strict);
+  runs: Schema.Array(BenchmarkHistoryRun).check(Schema.isMaxLength(MAX_BENCHMARK_HISTORY_RUNS)),
+});
 export type BenchmarkHistoryResponse = typeof BenchmarkHistoryResponse.Type;
 
-export const BenchmarkExportFormat = Schema.Literal("json", "csv");
+export const BenchmarkExportFormat = Schema.Literals(["json", "csv"]);
 export type BenchmarkExportFormat = typeof BenchmarkExportFormat.Type;
 export const BenchmarkRunExportRequest = Schema.Struct({
   runId: BenchmarkRunId,
   format: BenchmarkExportFormat,
-}).annotations(strict);
+});
 export type BenchmarkRunExportRequest = typeof BenchmarkRunExportRequest.Type;
 /** A file the client saves. It never carries answer text. */
 export const BenchmarkRunExportResponse = Schema.Struct({
-  fileName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(200)),
+  fileName: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   contentType: Schema.String,
   content: Schema.String,
-}).annotations(strict);
+});
 export type BenchmarkRunExportResponse = typeof BenchmarkRunExportResponse.Type;
 
 /** The caller mints `runId`, so a retried start finds the run it already made. */
 export const BenchmarkRunStartRequest = Schema.Struct({
   runId: BenchmarkRunId,
   suiteId: BenchmarkSuiteId,
-  contenders: Schema.Array(BenchmarkContender).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_BENCHMARK_CONTENDERS),
+  contenders: Schema.Array(BenchmarkContender).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_BENCHMARK_CONTENDERS),
   ),
-  repetitions: Schema.Int.pipe(Schema.between(1, MAX_BENCHMARK_REPETITIONS)),
+  repetitions: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_BENCHMARK_REPETITIONS }),
+  ),
   budget: BenchmarkBudget,
   executionLevel: Schema.optional(BenchmarkExecutionLevel),
   /**
@@ -604,40 +614,34 @@ export const BenchmarkRunStartRequest = Schema.Struct({
    * suite's current revision, so an edit after reading needs a new confirmation.
    */
   confirmedSuiteRevision: Schema.optional(PositiveInt),
-}).annotations(strict);
+});
 export type BenchmarkRunStartRequest = typeof BenchmarkRunStartRequest.Type;
-export const BenchmarkRunStartResponse = Schema.Struct({ run: BenchmarkRun }).annotations(strict);
+export const BenchmarkRunStartResponse = Schema.Struct({ run: BenchmarkRun });
 export type BenchmarkRunStartResponse = typeof BenchmarkRunStartResponse.Type;
 
-export const BenchmarkRunCancelRequest = Schema.Struct({ runId: BenchmarkRunId }).annotations(
-  strict,
-);
+export const BenchmarkRunCancelRequest = Schema.Struct({ runId: BenchmarkRunId });
 export type BenchmarkRunCancelRequest = typeof BenchmarkRunCancelRequest.Type;
-export const BenchmarkRunCancelResponse = Schema.Struct({ run: BenchmarkRun }).annotations(strict);
+export const BenchmarkRunCancelResponse = Schema.Struct({ run: BenchmarkRun });
 export type BenchmarkRunCancelResponse = typeof BenchmarkRunCancelResponse.Type;
 
-export const BenchmarkRunPurgeRequest = Schema.Struct({ runId: BenchmarkRunId }).annotations(
-  strict,
-);
+export const BenchmarkRunPurgeRequest = Schema.Struct({ runId: BenchmarkRunId });
 export type BenchmarkRunPurgeRequest = typeof BenchmarkRunPurgeRequest.Type;
-export const BenchmarkRunPurgeResponse = Schema.Struct({ runId: BenchmarkRunId }).annotations(
-  strict,
-);
+export const BenchmarkRunPurgeResponse = Schema.Struct({ runId: BenchmarkRunId });
 export type BenchmarkRunPurgeResponse = typeof BenchmarkRunPurgeResponse.Type;
 
 /** The person's stars for one cell. Rating again replaces the earlier rating. */
 export const BenchmarkCellRateRequest = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
-  stars: Schema.Int.pipe(Schema.between(1, 5)),
-  note: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_STAR_NOTE_CHARS))),
-}).annotations(strict);
+  stars: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
+  note: Schema.optional(Schema.String.check(Schema.isMaxLength(BENCHMARK_STAR_NOTE_CHARS))),
+});
 export type BenchmarkCellRateRequest = typeof BenchmarkCellRateRequest.Type;
 export const BenchmarkCellRateResponse = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
   rating: BenchmarkRating,
-}).annotations(strict);
+});
 export type BenchmarkCellRateResponse = typeof BenchmarkCellRateResponse.Type;
 
 // ── Journal events ─────────────────────────────────────────────────────────
@@ -662,30 +666,28 @@ export const BENCHMARK_EVENT_NAMES = {
  * Prompt text sits in suite and run events because the person wrote it as a
  * definition. An answer never does: it stays in the cell's thread.
  */
-export const BenchmarkSuiteSaved = Schema.Struct({ suite: BenchmarkSuite }).annotations(strict);
+export const BenchmarkSuiteSaved = Schema.Struct({ suite: BenchmarkSuite });
 export type BenchmarkSuiteSaved = typeof BenchmarkSuiteSaved.Type;
-export const BenchmarkSuiteSavedV1 = Schema.Struct({ suite: BenchmarkSuiteV1 }).annotations(strict);
+export const BenchmarkSuiteSavedV1 = Schema.Struct({ suite: BenchmarkSuiteV1 });
 export const BenchmarkSuiteSavedV2 = Schema.Struct({
   suite: Schema.Struct({
     ...BenchmarkSuiteV1.fields,
     passThreshold: BenchmarkPassThreshold,
     kind: BenchmarkSuiteKind,
     projectId: Schema.optional(ProjectId),
-  }).annotations(strict),
-}).annotations(strict);
-export const BenchmarkSuiteDeleted = Schema.Struct({ suiteId: BenchmarkSuiteId }).annotations(
-  strict,
-);
+  }),
+});
+export const BenchmarkSuiteDeleted = Schema.Struct({ suiteId: BenchmarkSuiteId });
 export type BenchmarkSuiteDeleted = typeof BenchmarkSuiteDeleted.Type;
-export const BenchmarkRunStarted = Schema.Struct({ run: BenchmarkRun }).annotations(strict);
+export const BenchmarkRunStarted = Schema.Struct({ run: BenchmarkRun });
 export type BenchmarkRunStarted = typeof BenchmarkRunStarted.Type;
 export const BenchmarkCellStarted = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
-  threadId: Schema.UUID,
-  turnId: Schema.optional(Schema.UUID),
+  threadId: GuidString,
+  turnId: Schema.optional(GuidString),
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BenchmarkCellStarted = typeof BenchmarkCellStarted.Type;
 /**
  * A cell whose turn Chat could not admit for lack of capacity goes back to
@@ -695,81 +697,144 @@ export type BenchmarkCellStarted = typeof BenchmarkCellStarted.Type;
 export const BenchmarkCellRequeued = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
-}).annotations(strict);
+});
 export type BenchmarkCellRequeued = typeof BenchmarkCellRequeued.Type;
 export const BenchmarkCellSettled = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
   state: BenchmarkSettledCellState,
   failureReason: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(BENCHMARK_FAILURE_REASON_CHARS)),
+    Schema.String.check(Schema.isMaxLength(BENCHMARK_FAILURE_REASON_CHARS)),
   ),
   checks: Schema.Array(BenchmarkCheckResult),
   settledAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BenchmarkCellSettled = typeof BenchmarkCellSettled.Type;
 export const BenchmarkCellJudged = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
   judge: BenchmarkJudgeResult,
-}).annotations(strict);
+});
 export type BenchmarkCellJudged = typeof BenchmarkCellJudged.Type;
 export const BenchmarkCellRated = Schema.Struct({
   runId: BenchmarkRunId,
   cellId: BenchmarkCellId,
   rating: BenchmarkRating,
-}).annotations(strict);
+});
 export type BenchmarkCellRated = typeof BenchmarkCellRated.Type;
 export const BenchmarkRunEnded = Schema.Struct({
   runId: BenchmarkRunId,
   status: BenchmarkRunEndStatus,
-  endReason: Schema.optional(Schema.String.pipe(Schema.maxLength(BENCHMARK_FAILURE_REASON_CHARS))),
+  endReason: Schema.optional(
+    Schema.String.check(Schema.isMaxLength(BENCHMARK_FAILURE_REASON_CHARS)),
+  ),
   endedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BenchmarkRunEnded = typeof BenchmarkRunEnded.Type;
-export const BenchmarkRunPurged = Schema.Struct({ runId: BenchmarkRunId }).annotations(strict);
+export const BenchmarkRunPurged = Schema.Struct({ runId: BenchmarkRunId });
 export type BenchmarkRunPurged = typeof BenchmarkRunPurged.Type;
 
-export const decodeBenchmarkSuite = Schema.decodeUnknownSync(BenchmarkSuite);
-export const decodeBenchmarkRun = Schema.decodeUnknownSync(BenchmarkRun);
-export const decodeBenchmarkCheck = Schema.decodeUnknownSync(BenchmarkCheck);
-export const decodeBenchmarkSuiteId = Schema.decodeUnknownSync(BenchmarkSuiteId);
-export const decodeBenchmarkCaseId = Schema.decodeUnknownSync(BenchmarkCaseId);
-export const decodeBenchmarkRunId = Schema.decodeUnknownSync(BenchmarkRunId);
-export const decodeBenchmarkCellId = Schema.decodeUnknownSync(BenchmarkCellId);
+export const decodeBenchmarkSuite = Schema.decodeUnknownSync(BenchmarkSuite, STRICT_DECODE_OPTIONS);
+export const decodeBenchmarkRun = Schema.decodeUnknownSync(BenchmarkRun, STRICT_DECODE_OPTIONS);
+export const decodeBenchmarkCheck = Schema.decodeUnknownSync(BenchmarkCheck, STRICT_DECODE_OPTIONS);
+export const decodeBenchmarkSuiteId = Schema.decodeUnknownSync(
+  BenchmarkSuiteId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkCaseId = Schema.decodeUnknownSync(
+  BenchmarkCaseId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunId = Schema.decodeUnknownSync(BenchmarkRunId, STRICT_DECODE_OPTIONS);
+export const decodeBenchmarkCellId = Schema.decodeUnknownSync(
+  BenchmarkCellId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBenchmarkSuitesListRequest = Schema.decodeUnknownSync(
   BenchmarkSuitesListRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBenchmarkSuitesListResponse = Schema.decodeUnknownSync(
   BenchmarkSuitesListResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBenchmarkSuiteSaveRequest = Schema.decodeUnknownSync(BenchmarkSuiteSaveRequest);
+export const decodeBenchmarkSuiteSaveRequest = Schema.decodeUnknownSync(
+  BenchmarkSuiteSaveRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBenchmarkSuiteSaveResponse = Schema.decodeUnknownSync(
   BenchmarkSuiteSaveResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBenchmarkSuiteDeleteRequest = Schema.decodeUnknownSync(
   BenchmarkSuiteDeleteRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeBenchmarkSuiteDeleteResponse = Schema.decodeUnknownSync(
   BenchmarkSuiteDeleteResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBenchmarkRunsListRequest = Schema.decodeUnknownSync(BenchmarkRunsListRequest);
-export const decodeBenchmarkRunsListResponse = Schema.decodeUnknownSync(BenchmarkRunsListResponse);
-export const decodeBenchmarkRunReadRequest = Schema.decodeUnknownSync(BenchmarkRunReadRequest);
-export const decodeBenchmarkRunReadResponse = Schema.decodeUnknownSync(BenchmarkRunReadResponse);
-export const decodeBenchmarkRunStartRequest = Schema.decodeUnknownSync(BenchmarkRunStartRequest);
-export const decodeBenchmarkRunStartResponse = Schema.decodeUnknownSync(BenchmarkRunStartResponse);
-export const decodeBenchmarkRunCancelRequest = Schema.decodeUnknownSync(BenchmarkRunCancelRequest);
+export const decodeBenchmarkRunsListRequest = Schema.decodeUnknownSync(
+  BenchmarkRunsListRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunsListResponse = Schema.decodeUnknownSync(
+  BenchmarkRunsListResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunReadRequest = Schema.decodeUnknownSync(
+  BenchmarkRunReadRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunReadResponse = Schema.decodeUnknownSync(
+  BenchmarkRunReadResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunStartRequest = Schema.decodeUnknownSync(
+  BenchmarkRunStartRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunStartResponse = Schema.decodeUnknownSync(
+  BenchmarkRunStartResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunCancelRequest = Schema.decodeUnknownSync(
+  BenchmarkRunCancelRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBenchmarkRunCancelResponse = Schema.decodeUnknownSync(
   BenchmarkRunCancelResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBenchmarkRunPurgeRequest = Schema.decodeUnknownSync(BenchmarkRunPurgeRequest);
-export const decodeBenchmarkRunPurgeResponse = Schema.decodeUnknownSync(BenchmarkRunPurgeResponse);
-export const decodeBenchmarkCellRateRequest = Schema.decodeUnknownSync(BenchmarkCellRateRequest);
-export const decodeBenchmarkCellRateResponse = Schema.decodeUnknownSync(BenchmarkCellRateResponse);
-export const decodeBenchmarkHistoryRequest = Schema.decodeUnknownSync(BenchmarkHistoryRequest);
-export const decodeBenchmarkHistoryResponse = Schema.decodeUnknownSync(BenchmarkHistoryResponse);
-export const decodeBenchmarkRunExportRequest = Schema.decodeUnknownSync(BenchmarkRunExportRequest);
+export const decodeBenchmarkRunPurgeRequest = Schema.decodeUnknownSync(
+  BenchmarkRunPurgeRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunPurgeResponse = Schema.decodeUnknownSync(
+  BenchmarkRunPurgeResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkCellRateRequest = Schema.decodeUnknownSync(
+  BenchmarkCellRateRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkCellRateResponse = Schema.decodeUnknownSync(
+  BenchmarkCellRateResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkHistoryRequest = Schema.decodeUnknownSync(
+  BenchmarkHistoryRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkHistoryResponse = Schema.decodeUnknownSync(
+  BenchmarkHistoryResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBenchmarkRunExportRequest = Schema.decodeUnknownSync(
+  BenchmarkRunExportRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBenchmarkRunExportResponse = Schema.decodeUnknownSync(
   BenchmarkRunExportResponse,
+  STRICT_DECODE_OPTIONS,
 );

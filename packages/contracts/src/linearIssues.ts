@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
   /(?:lin_api_[A-Za-z0-9_]+|bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token)\s*[=:]|token=)/i;
 const safeText = (limit: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(limit),
-    Schema.filter((value) => !SECRETISH.test(value) && !value.includes("\0")),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(limit),
+    Schema.makeFilter((value) => !SECRETISH.test(value) && !value.includes("\0")),
   );
 
 const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -14,8 +15,8 @@ const ISSUE_BODY_MAX_BYTES = 8 * 1024;
 
 /** Empty bodies are valid; bound UTF-8 bytes rather than characters. */
 const boundedBody = (maxBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) =>
         !SECRETISH.test(value) && !value.includes("\0") && utf8ByteLength(value) <= maxBytes,
     ),
@@ -25,24 +26,24 @@ const boundedBody = (maxBytes: number) =>
  * Opaque Linear node identity. Names and public identifiers alone are never
  * identity on the wire.
  */
-export const LinearNodeId = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9_-]{1,128}$/.test(value)),
+export const LinearNodeId = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9_-]{1,128}$/.test(value)),
 );
 export type LinearNodeId = typeof LinearNodeId.Type;
 
 /** Public Linear identifier such as ENG-12. */
-export const LinearIssueIdentifier = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Z][A-Z0-9]{0,9}-\d{1,9}$/.test(value)),
+export const LinearIssueIdentifier = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Z][A-Z0-9]{0,9}-\d{1,9}$/.test(value)),
 );
 export type LinearIssueIdentifier = typeof LinearIssueIdentifier.Type;
 
 /** Server-issued opaque cursor; clients replay it without interpreting it. */
-export const LinearIssueCursor = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9+/=_-]{1,600}$/.test(value)),
+export const LinearIssueCursor = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9+/=_-]{1,600}$/.test(value)),
 );
 export type LinearIssueCursor = typeof LinearIssueCursor.Type;
 
-export const LinearIssuePageSize = Schema.Int.pipe(Schema.between(1, 50));
+export const LinearIssuePageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }));
 export type LinearIssuePageSize = typeof LinearIssuePageSize.Type;
 
 export const LINEAR_ISSUE_LIST_OPERATION = "list-issues";
@@ -71,17 +72,17 @@ export const LINEAR_VIEWER_ASSIGNEE_ID = "me";
 export const LinearViewerAssigneeId = Schema.Literal(LINEAR_VIEWER_ASSIGNEE_ID);
 export type LinearViewerAssigneeId = typeof LinearViewerAssigneeId.Type;
 
-export const LinearAssigneeFilterId = Schema.Union(
+export const LinearAssigneeFilterId = Schema.Union([
   LinearViewerAssigneeId,
   LinearNodeId,
   LinearUnassignedAssigneeId,
-);
+]);
 export type LinearAssigneeFilterId = typeof LinearAssigneeFilterId.Type;
 
 /** A Linear issue page on linear.app, with nothing secret-shaped in it. */
-export const LinearIssueUrl = Schema.String.pipe(
-  Schema.maxLength(512),
-  Schema.filter(
+export const LinearIssueUrl = Schema.String.check(
+  Schema.isMaxLength(512),
+  Schema.makeFilter(
     (value) =>
       /^https:\/\/linear\.app\/[A-Za-z0-9_.\-/]*$/.test(value) &&
       !SECRETISH.test(value) &&
@@ -92,7 +93,7 @@ export const LinearIssueUrl = Schema.String.pipe(
 export const LinearIssueState = Schema.Struct({
   name: safeText(64),
   type: safeText(32),
-}).annotations(strict);
+});
 export type LinearIssueState = typeof LinearIssueState.Type;
 
 export const LinearIssueRow = Schema.Struct({
@@ -105,7 +106,7 @@ export const LinearIssueRow = Schema.Struct({
   teamKey: Schema.optional(safeText(16)),
   projectId: Schema.optional(LinearNodeId),
   url: LinearIssueUrl,
-}).annotations(strict);
+});
 export type LinearIssueRow = typeof LinearIssueRow.Type;
 
 const COMMENT_BODY_MAX_BYTES = 2 * 1024;
@@ -115,7 +116,7 @@ export const LinearIssueComment = Schema.Struct({
   createdAt: safeText(64),
   body: boundedBody(COMMENT_BODY_MAX_BYTES),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type LinearIssueComment = typeof LinearIssueComment.Type;
 
 export const LinearIssueDetail = Schema.Struct({
@@ -130,11 +131,11 @@ export const LinearIssueDetail = Schema.Struct({
   url: LinearIssueUrl,
   description: boundedBody(ISSUE_BODY_MAX_BYTES),
   descriptionTruncated: Schema.Boolean,
-  comments: Schema.Array(LinearIssueComment).pipe(Schema.maxItems(10)),
-}).annotations(strict);
+  comments: Schema.Array(LinearIssueComment).check(Schema.isMaxLength(10)),
+});
 export type LinearIssueDetail = typeof LinearIssueDetail.Type;
 
-export const LinearIssueStateCategory = Schema.Literal("open", "closed", "all");
+export const LinearIssueStateCategory = Schema.Literals(["open", "closed", "all"]);
 export type LinearIssueStateCategory = typeof LinearIssueStateCategory.Type;
 
 export const LinearIssueListFilter = Schema.Struct({
@@ -143,7 +144,7 @@ export const LinearIssueListFilter = Schema.Struct({
   stateCategory: Schema.optional(LinearIssueStateCategory),
   assigneeId: Schema.optional(LinearAssigneeFilterId),
   projectId: Schema.optional(LinearNodeId),
-}).annotations(strict);
+});
 export type LinearIssueListFilter = typeof LinearIssueListFilter.Type;
 
 export const LinearIssueListInput = Schema.Struct({
@@ -153,61 +154,77 @@ export const LinearIssueListInput = Schema.Struct({
   filter: Schema.optional(LinearIssueListFilter),
   pageSize: Schema.optional(LinearIssuePageSize),
   cursor: Schema.optional(LinearIssueCursor),
-}).annotations(strict);
+});
 export type LinearIssueListInput = typeof LinearIssueListInput.Type;
 
 export const LinearIssueGetInput = Schema.Struct({
   id: LinearNodeId,
-}).annotations(strict);
+});
 export type LinearIssueGetInput = typeof LinearIssueGetInput.Type;
 
 export const LinearIssueGetByIdentifierInput = Schema.Struct({
   identifier: LinearIssueIdentifier,
-}).annotations(strict);
+});
 export type LinearIssueGetByIdentifierInput = typeof LinearIssueGetByIdentifierInput.Type;
 
 export const LinearIssueListPage = Schema.Struct({
-  rows: Schema.Array(LinearIssueRow).pipe(Schema.maxItems(50)),
+  rows: Schema.Array(LinearIssueRow).check(Schema.isMaxLength(50)),
   hasNextPage: Schema.Boolean,
   endCursor: Schema.optional(LinearIssueCursor),
-}).annotations(strict);
+});
 export type LinearIssueListPage = typeof LinearIssueListPage.Type;
 
 export const LinearIssueFilterOption = Schema.Struct({
-  id: Schema.Union(LinearNodeId, LinearUnassignedAssigneeId),
+  id: Schema.Union([LinearNodeId, LinearUnassignedAssigneeId]),
   label: safeText(128),
   key: Schema.optional(safeText(16)),
   name: Schema.optional(safeText(128)),
-}).annotations(strict);
+});
 export type LinearIssueFilterOption = typeof LinearIssueFilterOption.Type;
 
 export const LinearIssueFilterOptions = Schema.Struct({
-  teams: Schema.Array(LinearIssueFilterOption).pipe(Schema.maxItems(50)),
-  states: Schema.Array(LinearIssueFilterOption).pipe(Schema.maxItems(100)),
-  assignees: Schema.Array(LinearIssueFilterOption).pipe(Schema.maxItems(50)),
-  projects: Schema.Array(LinearIssueFilterOption).pipe(Schema.maxItems(50)),
-}).annotations(strict);
+  teams: Schema.Array(LinearIssueFilterOption).check(Schema.isMaxLength(50)),
+  states: Schema.Array(LinearIssueFilterOption).check(Schema.isMaxLength(100)),
+  assignees: Schema.Array(LinearIssueFilterOption).check(Schema.isMaxLength(50)),
+  projects: Schema.Array(LinearIssueFilterOption).check(Schema.isMaxLength(50)),
+});
 export type LinearIssueFilterOptions = typeof LinearIssueFilterOptions.Type;
 
 /** Decodes an unknown value as a Linear issue list request. */
-export const decodeLinearIssueListInput = Schema.decodeUnknownSync(LinearIssueListInput);
+export const decodeLinearIssueListInput = Schema.decodeUnknownSync(
+  LinearIssueListInput,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Decodes an unknown value as a Linear issue detail request. */
-export const decodeLinearIssueGetInput = Schema.decodeUnknownSync(LinearIssueGetInput);
+export const decodeLinearIssueGetInput = Schema.decodeUnknownSync(
+  LinearIssueGetInput,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Decodes an unknown value as a Linear issue lookup by public identifier. */
 export const decodeLinearIssueGetByIdentifierInput = Schema.decodeUnknownSync(
   LinearIssueGetByIdentifierInput,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** Decodes an unknown value as a Linear issue list page. */
-export const decodeLinearIssueListPage = Schema.decodeUnknownSync(LinearIssueListPage);
+export const decodeLinearIssueListPage = Schema.decodeUnknownSync(
+  LinearIssueListPage,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Decodes an unknown value as a Linear issue detail. */
-export const decodeLinearIssueDetail = Schema.decodeUnknownSync(LinearIssueDetail);
+export const decodeLinearIssueDetail = Schema.decodeUnknownSync(
+  LinearIssueDetail,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Decodes an unknown value as Linear issue filter options. */
-export const decodeLinearIssueFilterOptions = Schema.decodeUnknownSync(LinearIssueFilterOptions);
+export const decodeLinearIssueFilterOptions = Schema.decodeUnknownSync(
+  LinearIssueFilterOptions,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Write operations. They reach Linear only through the plugin's operation
@@ -238,7 +255,7 @@ export const LinearWorkflowState = Schema.Struct({
   name: safeText(64),
   type: safeText(32),
   position: Schema.Number,
-}).annotations(strict);
+});
 export type LinearWorkflowState = typeof LinearWorkflowState.Type;
 
 /** An issue's current state and every state of its team, for choosing where it moves. */
@@ -247,24 +264,34 @@ export const LinearIssueWorkflow = Schema.Struct({
   identifier: LinearIssueIdentifier,
   url: LinearIssueUrl,
   state: LinearWorkflowState,
-  teamStates: Schema.Array(LinearWorkflowState).pipe(Schema.maxItems(100)),
-}).annotations(strict);
+  teamStates: Schema.Array(LinearWorkflowState).check(Schema.isMaxLength(100)),
+});
 export type LinearIssueWorkflow = typeof LinearIssueWorkflow.Type;
 
 export const LinearIssueSetStateInput = Schema.Struct({
   id: LinearNodeId,
   stateId: LinearNodeId,
-}).annotations(strict);
+});
 export type LinearIssueSetStateInput = typeof LinearIssueSetStateInput.Type;
 
 export const LinearIssueCommentInput = Schema.Struct({
   id: LinearNodeId,
-  body: Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => utf8ByteLength(value) <= MAX_TRACKER_COMMENT_BYTES),
+  body: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => utf8ByteLength(value) <= MAX_TRACKER_COMMENT_BYTES),
   ),
-}).annotations(strict);
+});
 export type LinearIssueCommentInput = typeof LinearIssueCommentInput.Type;
 
-export const decodeLinearIssueWorkflow = Schema.decodeUnknownSync(LinearIssueWorkflow);
-export const decodeLinearIssueSetStateInput = Schema.decodeUnknownSync(LinearIssueSetStateInput);
-export const decodeLinearIssueCommentInput = Schema.decodeUnknownSync(LinearIssueCommentInput);
+export const decodeLinearIssueWorkflow = Schema.decodeUnknownSync(
+  LinearIssueWorkflow,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLinearIssueSetStateInput = Schema.decodeUnknownSync(
+  LinearIssueSetStateInput,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLinearIssueCommentInput = Schema.decodeUnknownSync(
+  LinearIssueCommentInput,
+  STRICT_DECODE_OPTIONS,
+);

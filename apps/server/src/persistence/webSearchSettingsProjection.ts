@@ -12,7 +12,7 @@ import type { SqliteConnection } from "./sqlitePort";
 
 /** The one aggregate that holds the host's web search backends and data policy. */
 export const WEB_SEARCH_SETTINGS_AGGREGATE_ID = Schema.decodeUnknownSync(
-  Schema.UUID.pipe(Schema.brand("AggregateId")),
+  Schema.String.check(Schema.isGUID()).pipe(Schema.brand("AggregateId")),
 )("00000000-0000-4000-8000-000000000034");
 
 export class WebSearchSettingsProjection implements Projection {

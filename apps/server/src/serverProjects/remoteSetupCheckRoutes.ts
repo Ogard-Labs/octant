@@ -71,7 +71,7 @@ export function createRemoteSetupCheckRoutes(dependencies: {
     }
     let input: typeof RemoteSetupCheckInput.Type;
     try {
-      input = Schema.decodeUnknownSync(RemoteSetupCheckInput)(body);
+      input = Schema.decodeUnknownSync(RemoteSetupCheckInput, { onExcessProperty: "error" })(body);
     } catch {
       return json({ error: "Invalid setup check." }, 400);
     }

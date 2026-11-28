@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ConversationInputPolicy } from "./conversationInputs";
 import {
   AgentRunCompareGroup,
@@ -19,8 +20,6 @@ import { MultiModelPool } from "./multiModelPool";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * Workspace target for an explicit one-off child creation request.
  *
@@ -30,23 +29,23 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * Work and Code always present the id returned by prepare (and, for Code,
  * confirm).
  */
-export const AgentRunCreationWorkspace = Schema.Union(
+export const AgentRunCreationWorkspace = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat-virtual"),
     mode: Schema.Literal("chat"),
     receiptId: Schema.optional(AgentRunWorkspaceReceiptId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("work-root"),
     mode: Schema.Literal("work"),
     receiptId: AgentRunWorkspaceReceiptId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
     mode: Schema.Literal("code"),
     worktreeReceiptId: WorktreeReceiptId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AgentRunCreationWorkspace = typeof AgentRunCreationWorkspace.Type;
 
 /**
@@ -54,50 +53,50 @@ export type AgentRunCreationWorkspace = typeof AgentRunCreationWorkspace.Type;
  * client-claimed verification are forbidden here; the server resolves them
  * at confirmation and admission.
  */
-export const AgentRunWorkspaceHandle = Schema.Union(
+export const AgentRunWorkspaceHandle = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat-virtual"),
     mode: Schema.Literal("chat"),
     receiptId: AgentRunWorkspaceReceiptId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("work-root"),
     mode: Schema.Literal("work"),
     receiptId: AgentRunWorkspaceReceiptId,
     projectId: ProjectId,
     bindingRevisionId: BindingRevisionId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
     mode: Schema.Literal("code"),
     worktreeReceiptId: WorktreeReceiptId,
-    confirmation: Schema.Literal("prepared", "confirmed"),
-  }).annotations(strict),
-);
+    confirmation: Schema.Literals(["prepared", "confirmed"]),
+  }),
+]);
 export type AgentRunWorkspaceHandle = typeof AgentRunWorkspaceHandle.Type;
 
 export const AgentRunWorkspaceRefused = Schema.Struct({
   status: Schema.Literal("refused"),
   reason: AgentRunWorkspaceRefusalReason,
-}).annotations(strict);
+});
 export type AgentRunWorkspaceRefused = typeof AgentRunWorkspaceRefused.Type;
 
-export const AgentRunWorkspacePreparationResult = Schema.Union(
+export const AgentRunWorkspacePreparationResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("prepared"),
     workspace: AgentRunWorkspaceHandle,
-  }).annotations(strict),
+  }),
   AgentRunWorkspaceRefused,
-);
+]);
 export type AgentRunWorkspacePreparationResult = typeof AgentRunWorkspacePreparationResult.Type;
 
-export const AgentRunWorkspaceConfirmationResult = Schema.Union(
+export const AgentRunWorkspaceConfirmationResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("confirmed"),
     workspace: AgentRunWorkspaceHandle,
-  }).annotations(strict),
+  }),
   AgentRunWorkspaceRefused,
-);
+]);
 export type AgentRunWorkspaceConfirmationResult = typeof AgentRunWorkspaceConfirmationResult.Type;
 
 /**
@@ -116,11 +115,11 @@ export const AgentRunCreationRequest = Schema.Struct({
   dependsOn: Schema.optional(AgentRunDependencies),
   compareGroup: Schema.optional(AgentRunCompareGroup),
   role: AgentRunRole,
-  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
   mode: OctantMode,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  reasoning: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
   requestedAuthority: AgentRunAuthority,
   workspace: AgentRunCreationWorkspace,
   /**
@@ -143,19 +142,17 @@ export const AgentRunCreationRequest = Schema.Struct({
    */
   includeParentContext: Schema.optional(Schema.Boolean),
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((request) => {
-      if (request.mode === "chat") {
-        return request.workspace.kind === "chat-virtual" && request.workspace.mode === "chat";
-      }
-      if (request.mode === "work") {
-        return request.workspace.kind === "work-root" && request.workspace.mode === "work";
-      }
-      return request.workspace.kind === "code-worktree" && request.workspace.mode === "code";
-    }),
-  );
+}).check(
+  Schema.makeFilter((request) => {
+    if (request.mode === "chat") {
+      return request.workspace.kind === "chat-virtual" && request.workspace.mode === "chat";
+    }
+    if (request.mode === "work") {
+      return request.workspace.kind === "work-root" && request.workspace.mode === "work";
+    }
+    return request.workspace.kind === "code-worktree" && request.workspace.mode === "code";
+  }),
+);
 export type AgentRunCreationRequest = typeof AgentRunCreationRequest.Type;
 
 /**
@@ -169,7 +166,7 @@ export const AgentRunControlRequest = Schema.Struct({
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
   role: AgentRunRole,
-  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
   includeParentContext: Schema.optional(Schema.Boolean),
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** Sibling runs this one waits for; see `AgentRun.dependsOn`. */
@@ -182,7 +179,7 @@ export const AgentRunControlRequest = Schema.Struct({
    * renderer-supplied identity.
    */
   pool: Schema.optional(MultiModelPool),
-}).annotations(strict);
+});
 export type AgentRunControlRequest = typeof AgentRunControlRequest.Type;
 
 export const AgentRunControlResolvedFacts = Schema.Struct({
@@ -191,40 +188,62 @@ export const AgentRunControlResolvedFacts = Schema.Struct({
   allowedRoles: Schema.Array(AgentRunRole),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-  workspaceKind: Schema.Literal("chat-virtual", "work-root", "code-worktree"),
+  reasoning: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+  workspaceKind: Schema.Literals(["chat-virtual", "work-root", "code-worktree"]),
   authority: AgentRunAuthority,
   executionKind: AgentRunExecutionKind,
   attemptedExecutionKind: AgentRunExecutionKind,
-  nativeFallbackReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-  capabilityDegradations: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  nativeFallbackReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
+  capabilityDegradations: Schema.Array(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
   creationPosture: AgentRunCreationPosture,
-}).annotations(strict);
+});
 export type AgentRunControlResolvedFacts = typeof AgentRunControlResolvedFacts.Type;
 
 export const AgentRunSteerRequest = Schema.Struct({
   runId: AgentRunId,
-  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
-}).annotations(strict);
+  expectedVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
+});
 export type AgentRunSteerRequest = typeof AgentRunSteerRequest.Type;
 
 export const AgentRunRetryRequest = Schema.Struct({
   runId: AgentRunId,
-  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-}).annotations(strict);
+  expectedVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
 export type AgentRunRetryRequest = typeof AgentRunRetryRequest.Type;
 
 export const AgentRunResumeRequest = Schema.Struct({
   runId: AgentRunId,
-  message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
-  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-}).annotations(strict);
+  message: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096))),
+  expectedVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
 export type AgentRunResumeRequest = typeof AgentRunResumeRequest.Type;
 
-export const decodeAgentRunCreationRequest = Schema.decodeUnknownSync(AgentRunCreationRequest);
-export const decodeAgentRunControlRequest = Schema.decodeUnknownSync(AgentRunControlRequest);
-export const decodeAgentRunSteerRequest = Schema.decodeUnknownSync(AgentRunSteerRequest);
-export const decodeAgentRunRetryRequest = Schema.decodeUnknownSync(AgentRunRetryRequest);
-export const decodeAgentRunResumeRequest = Schema.decodeUnknownSync(AgentRunResumeRequest);
-export const decodeAgentRunWorkspaceHandle = Schema.decodeUnknownSync(AgentRunWorkspaceHandle);
+export const decodeAgentRunCreationRequest = Schema.decodeUnknownSync(
+  AgentRunCreationRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunControlRequest = Schema.decodeUnknownSync(
+  AgentRunControlRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunSteerRequest = Schema.decodeUnknownSync(
+  AgentRunSteerRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunRetryRequest = Schema.decodeUnknownSync(
+  AgentRunRetryRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunResumeRequest = Schema.decodeUnknownSync(
+  AgentRunResumeRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunWorkspaceHandle = Schema.decodeUnknownSync(
+  AgentRunWorkspaceHandle,
+  STRICT_DECODE_OPTIONS,
+);

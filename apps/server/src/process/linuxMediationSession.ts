@@ -51,37 +51,37 @@ export interface LinuxMediationSession {
   readonly endInput: () => void;
   readonly close: () => Promise<LinuxMediationSessionResult>;
 }
-const Message = Schema.Union(
+const Message = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("ready"),
-    relayPid: Schema.Int.pipe(Schema.positive()),
+    relayPid: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   }),
   Schema.Struct({
     status: Schema.Literal("command"),
-    pid: Schema.Int.pipe(Schema.positive()),
+    pid: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   }),
   Schema.Struct({
     status: Schema.Literal("result"),
-    cleanup: Schema.Literal("confirmed", "uncertain"),
-    result: Schema.Union(
+    cleanup: Schema.Literals(["confirmed", "uncertain"]),
+    result: Schema.Union([
       Schema.Struct({
         status: Schema.Literal("exited"),
-        code: Schema.Int.pipe(Schema.between(0, 255)),
+        code: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 255 }))),
       }),
       Schema.Struct({
         status: Schema.Literal("unavailable"),
-        reason: Schema.Literal(
+        reason: Schema.Literals([
           "unsupported-platform",
           "native-unavailable",
           "broker-protocol",
           "policy-unavailable",
           "cancelled",
           "deadline",
-        ),
+        ]),
       }),
-    ),
+    ]),
   }),
-);
+]);
 
 async function within(promise: Promise<unknown>, maximumMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -183,7 +183,9 @@ export async function prepareLinuxMediationSession(input: {
           environment: input.environment,
           secretGuard,
         };
-        const decoded = Schema.decodeUnknownSync(LinuxMediationWorkerConfig)(config, {
+        const decoded = Schema.decodeUnknownSync(LinuxMediationWorkerConfig, {
+          onExcessProperty: "error",
+        })(config, {
           onExcessProperty: "error",
         });
         if (Buffer.byteLength(JSON.stringify(decoded)) > MEDIATION_CONFIG_BYTES)
@@ -489,7 +491,7 @@ export async function prepareLinuxMediationSession(input: {
       }
       sequence = sequence
         .then(async () => {
-          const message = Schema.decodeUnknownSync(Message)(value, {
+          const message = Schema.decodeUnknownSync(Message, { onExcessProperty: "error" })(value, {
             onExcessProperty: "error",
           });
           if (phase === "exited") return;

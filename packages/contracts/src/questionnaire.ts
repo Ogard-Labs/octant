@@ -1,12 +1,12 @@
 import { Schema } from "effect";
 import { personDecides } from "./hostAnswer";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
-const ChoiceCount = Schema.Int.pipe(Schema.between(0, 8));
+const Id = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64));
+const ChoiceCount = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 8 }));
 export const MAX_QUESTIONNAIRE_ANSWER_LENGTH = 16_384;
-export const QuestionnaireAnswerText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_QUESTIONNAIRE_ANSWER_LENGTH),
+export const QuestionnaireAnswerText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_QUESTIONNAIRE_ANSWER_LENGTH),
 );
 /**
  * The longest answer to a provider question that asks for a secret the host
@@ -17,15 +17,15 @@ export const QuestionnaireAnswerText = Schema.NonEmptyTrimmedString.pipe(
 export const MAX_SECRET_ANSWER_LENGTH = 4096;
 const Option = Schema.Struct({
   id: Id,
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  description: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
   recommended: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 const questionFields = {
   id: Id,
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  selection: Schema.Literal("single", "multiple"),
-  options: Schema.Array(Option).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  prompt: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  selection: Schema.Literals(["single", "multiple"]),
+  options: Schema.Array(Option).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   minSelections: Schema.optional(ChoiceCount),
   maxSelections: Schema.optional(ChoiceCount),
   allowCustom: Schema.optional(Schema.Boolean),
@@ -50,9 +50,9 @@ const questionHoldsItsLimits = (question: {
 };
 
 /** One question of the inline `ask-user` questionnaire. */
-export const QuestionnaireQuestion = Schema.Struct(questionFields)
-  .annotations(strict)
-  .pipe(Schema.filter(questionHoldsItsLimits));
+export const QuestionnaireQuestion = Schema.Struct(questionFields).check(
+  Schema.makeFilter(questionHoldsItsLimits),
+);
 
 /** At most this long a note may be, on a Canvas question that takes one. */
 export const MAX_CANVAS_CHOICE_NOTE_LENGTH = 2_000;
@@ -64,9 +64,7 @@ export const MAX_CANVAS_CHOICE_NOTE_LENGTH = 2_000;
 export const CanvasChoiceQuestion = Schema.Struct({
   ...questionFields,
   allowNote: Schema.optional(Schema.Boolean),
-})
-  .annotations(strict)
-  .pipe(Schema.filter(questionHoldsItsLimits));
+}).check(Schema.makeFilter(questionHoldsItsLimits));
 export type CanvasChoiceQuestion = typeof CanvasChoiceQuestion.Type;
 
 export type QuestionnaireQuestion = typeof QuestionnaireQuestion.Type;
@@ -78,50 +76,53 @@ export const MAX_QUESTIONNAIRE_QUESTIONS = 4;
  * Only the inline questionnaire, which interrupts a conversation, stays at
  * {@link MAX_QUESTIONNAIRE_QUESTIONS}.
  */
-export const CanvasChoiceQuestions = Schema.Array(CanvasChoiceQuestion).pipe(
-  Schema.minItems(1),
-  Schema.filter(
+export const CanvasChoiceQuestions = Schema.Array(CanvasChoiceQuestion).check(
+  Schema.isMinLength(1),
+  Schema.makeFilter(
     (questions) => new Set(questions.map((question) => question.id)).size === questions.length,
-    { message: () => "Question ids must be distinct." },
+    { message: "Question ids must be distinct." },
   ),
 );
 
 export const Questionnaire = Schema.Struct({
   /** Absent preserves the app-owned form's existing optional comment. */
   allowComment: Schema.optional(Schema.Boolean),
-  questions: Schema.Array(QuestionnaireQuestion).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_QUESTIONNAIRE_QUESTIONS),
+  questions: Schema.Array(QuestionnaireQuestion).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_QUESTIONNAIRE_QUESTIONS),
   ),
 })
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       ({ questions }) =>
         new Set(questions.map((question) => question.id)).size === questions.length,
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type Questionnaire = typeof Questionnaire.Type;
 
 const QuestionnaireAnswer = Schema.Struct({
   questionId: Id,
-  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(8)),
-  customAnswer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
-}).annotations(strict);
+  selectedOptionIds: Schema.Array(Id).check(Schema.isMaxLength(8)),
+  customAnswer: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
+});
 
-const ResponseComment = Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)));
+const ResponseComment = Schema.optional(
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+);
 
 export const QuestionnaireResponse = Schema.Struct({
   version: Schema.Literal(1),
-  answers: Schema.Array(QuestionnaireAnswer).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  answers: Schema.Array(QuestionnaireAnswer).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
   comment: ResponseComment,
-}).annotations(strict);
+});
 export type QuestionnaireResponse = typeof QuestionnaireResponse.Type;
 
 /** A Canvas choice answer: one entry per question, however many the block asks. */
 export const CanvasChoiceResponse = Schema.Struct({
   version: Schema.Literal(1),
-  answers: Schema.Array(QuestionnaireAnswer).pipe(Schema.minItems(1)),
+  answers: Schema.Array(QuestionnaireAnswer).check(Schema.isMinLength(1)),
   comment: ResponseComment,
-}).annotations(strict);
+});

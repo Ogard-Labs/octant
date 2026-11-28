@@ -9,7 +9,7 @@ import {
   type ProviderInstanceId,
   type WindowId,
 } from "@octant/contracts";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -594,7 +594,7 @@ describe("when a thread was last active", () => {
 
   it("proves a Chat attempt always names its provider session, so the newest attempt event cannot hide it", () => {
     expect(() =>
-      Schema.decodeUnknownSync(ChatAttempt.pipe(Schema.pick("providerSessionId")))({}),
+      Schema.decodeUnknownSync(ChatAttempt.mapFields(Struct.pick(["providerSessionId"])))({}),
     ).toThrow();
   });
 });

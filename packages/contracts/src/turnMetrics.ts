@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
@@ -12,9 +13,8 @@ import {
   ProviderUsageLimit,
 } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 /**
  * What one turn cost, as the provider reported it. `inputTokens` is all input,
@@ -29,12 +29,14 @@ export const TurnUsage = Schema.Struct({
   reasoningTokens: Schema.optional(NonNegativeInt),
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
-  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
   /** Host estimate across known request boundaries; null means incomplete/unpriced. */
   estimatedCostUsd: Schema.optional(
-    Schema.NullOr(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+    Schema.NullOr(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite())),
   ),
-}).annotations(strict);
+});
 export type TurnUsage = typeof TurnUsage.Type;
 
 /**
@@ -50,7 +52,7 @@ export type TurnUsage = typeof TurnUsage.Type;
  *   reasoning to time them against, or delivered the reply in a burst too short
  *   to carry a rate (see `MIN_DECODE_WINDOW_MS`). The figures are absent.
  */
-export const TurnMetricsPrecision = Schema.Literal("exact", "approximate", "unavailable");
+export const TurnMetricsPrecision = Schema.Literals(["exact", "approximate", "unavailable"]);
 export type TurnMetricsPrecision = typeof TurnMetricsPrecision.Type;
 
 /**
@@ -74,25 +76,23 @@ export const TurnMetrics = Schema.Struct({
   modelCalls: Schema.optional(PositiveInt),
   /** Times the endpoint failed in a way that usually passes and was asked again. */
   retries: Schema.optional(PositiveInt),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((metrics) => {
-      const timed =
-        metrics.timeToFirstTokenMs !== undefined &&
-        metrics.decodeOutputTokens !== undefined &&
-        metrics.decodeMs !== undefined &&
-        metrics.toolMs !== undefined &&
-        metrics.modelCalls !== undefined;
-      const untimed =
-        metrics.timeToFirstTokenMs === undefined &&
-        metrics.decodeOutputTokens === undefined &&
-        metrics.decodeMs === undefined &&
-        metrics.toolMs === undefined &&
-        metrics.modelCalls === undefined;
-      return metrics.precision === "unavailable" ? untimed : timed;
-    }),
-  );
+}).check(
+  Schema.makeFilter((metrics) => {
+    const timed =
+      metrics.timeToFirstTokenMs !== undefined &&
+      metrics.decodeOutputTokens !== undefined &&
+      metrics.decodeMs !== undefined &&
+      metrics.toolMs !== undefined &&
+      metrics.modelCalls !== undefined;
+    const untimed =
+      metrics.timeToFirstTokenMs === undefined &&
+      metrics.decodeOutputTokens === undefined &&
+      metrics.decodeMs === undefined &&
+      metrics.toolMs === undefined &&
+      metrics.modelCalls === undefined;
+    return metrics.precision === "unavailable" ? untimed : timed;
+  }),
+);
 export type TurnMetrics = typeof TurnMetrics.Type;
 
 /**
@@ -109,35 +109,33 @@ export const SessionMetrics = Schema.Struct({
   decodeMs: NonNegativeInt,
   toolMs: NonNegativeInt,
   timeToFirstTokenTotalMs: NonNegativeInt,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (metrics) =>
-        metrics.measuredTurns <= metrics.turns &&
-        (metrics.measuredTurns === 0) === (metrics.precision === "unavailable"),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (metrics) =>
+      metrics.measuredTurns <= metrics.turns &&
+      (metrics.measuredTurns === 0) === (metrics.precision === "unavailable"),
+  ),
+);
 export type SessionMetrics = typeof SessionMetrics.Type;
 
 /**
  * Why a turn ended: the provider finished, the reply was cut off at the output
  * limit, a person stopped it, it failed, or its outcome is unknown.
  */
-export const TurnStopReason = Schema.Literal(
+export const TurnStopReason = Schema.Literals([
   "end-of-turn",
   "max-tokens",
   "cancelled",
   "failed",
   "waiting",
-);
+]);
 export type TurnStopReason = typeof TurnStopReason.Type;
 
 export const MAX_TURN_DIAGNOSTIC_TOOLS = 32;
 export const MAX_TURN_FAILURE_MESSAGE_LENGTH = 512;
 
 /** A tool name as the runtime reported it, bounded so a frame stays small. */
-const DiagnosticToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const DiagnosticToolName = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
 
 /**
  * One tool's calls within a turn. `failed` counts `tool-failure` results and
@@ -154,17 +152,20 @@ export const TurnToolTally = Schema.Struct({
   nonZeroExits: Schema.optional(PositiveInt),
   totalMs: NonNegativeInt,
   maxMs: NonNegativeInt,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((tally) => tally.failed + tally.unfinished <= tally.calls));
+}).check(Schema.makeFilter((tally) => tally.failed + tally.unfinished <= tally.calls));
 export type TurnToolTally = typeof TurnToolTally.Type;
 
 /** The retries one reason caused, and how long they made the turn wait. */
 export const TurnRetryTally = Schema.Struct({
-  reason: Schema.Literal("rate-limited", "unavailable", "stream-interrupted", "empty-completion"),
+  reason: Schema.Literals([
+    "rate-limited",
+    "unavailable",
+    "stream-interrupted",
+    "empty-completion",
+  ]),
   count: PositiveInt,
   waitMs: NonNegativeInt,
-}).annotations(strict);
+});
 export type TurnRetryTally = typeof TurnRetryTally.Type;
 
 /**
@@ -176,9 +177,10 @@ export type TurnRetryTally = typeof TurnRetryTally.Type;
  * failure reads first.
  */
 /** One redacted line of a provider's failure message. */
-export const TurnFailureMessage = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_FAILURE_MESSAGE_LENGTH),
-  Schema.pattern(/^[^\n\r]*$/),
+export const TurnFailureMessage = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_FAILURE_MESSAGE_LENGTH),
+  Schema.isPattern(/^[^\n\r]*$/),
 );
 
 export const TurnFailureFacts = Schema.Struct({
@@ -190,12 +192,12 @@ export const TurnFailureFacts = Schema.Struct({
       kind: ProviderProcessDiagnostic.fields.kind,
       exitCode: ProviderProcessDiagnostic.fields.exitCode,
       signal: ProviderProcessDiagnostic.fields.signal,
-    }).annotations(strict),
+    }),
   ),
   usageLimit: Schema.optional(ProviderUsageLimit.fields.kind),
   retryAfterMs: Schema.optional(PositiveInt),
   message: Schema.optional(TurnFailureMessage),
-}).annotations(strict);
+});
 export type TurnFailureFacts = typeof TurnFailureFacts.Type;
 
 /**
@@ -212,11 +214,11 @@ export const TurnDiagnostics = Schema.Struct({
   toolFailures: NonNegativeInt,
   /** Per-tool tallies, the most-called first, cut to `MAX_TURN_DIAGNOSTIC_TOOLS`. */
   tools: Schema.optional(
-    Schema.Array(TurnToolTally).pipe(Schema.maxItems(MAX_TURN_DIAGNOSTIC_TOOLS)),
+    Schema.Array(TurnToolTally).check(Schema.isMaxLength(MAX_TURN_DIAGNOSTIC_TOOLS)),
   ),
   /** Set when more distinct tools ran than `tools` holds; the totals still count them. */
   toolsTruncated: Schema.optional(Schema.Literal(true)),
-  retries: Schema.optional(Schema.Array(TurnRetryTally).pipe(Schema.maxItems(4))),
+  retries: Schema.optional(Schema.Array(TurnRetryTally).check(Schema.isMaxLength(4))),
   approvalRequests: Schema.optional(PositiveInt),
   inputRequests: Schema.optional(PositiveInt),
   /** Rolling-window or bucket reports at warning or exhausted while the turn ran. */
@@ -227,9 +229,7 @@ export const TurnDiagnostics = Schema.Struct({
   outputStopReason: Schema.optional(ProviderOutputStopReason),
   /** Present when the provider ended the turn with a structured failure. */
   failure: Schema.optional(TurnFailureFacts),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((diagnostics) => diagnostics.toolFailures <= diagnostics.toolCalls));
+}).check(Schema.makeFilter((diagnostics) => diagnostics.toolFailures <= diagnostics.toolCalls));
 export type TurnDiagnostics = typeof TurnDiagnostics.Type;
 
 /**
@@ -238,7 +238,7 @@ export type TurnDiagnostics = typeof TurnDiagnostics.Type;
  * the host. Two turns that sent the same prompt on this host share a digest;
  * the prompt text cannot be read back from it or matched on another machine.
  */
-export const PromptDigest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+export const PromptDigest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 export type PromptDigest = typeof PromptDigest.Type;
 
 /**
@@ -247,7 +247,7 @@ export type PromptDigest = typeof PromptDigest.Type;
  * long they ran still happened.
  */
 export const TurnMetricsRecord = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
   providerInstanceId: ProviderInstanceId,
@@ -262,9 +262,7 @@ export const TurnMetricsRecord = Schema.Struct({
   promptDigest: Schema.optional(PromptDigest),
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((record) => record.endedAt >= record.startedAt));
+}).check(Schema.makeFilter((record) => record.endedAt >= record.startedAt));
 export type TurnMetricsRecord = typeof TurnMetricsRecord.Type;
 
 export const MAX_TURN_METRICS_SUMMARY_TURNS = 50;
@@ -275,12 +273,12 @@ export const MAX_TURN_METRICS_SUMMARY_TURNS = 50;
  * the totals.
  */
 export const TurnMetricsSummary = Schema.Struct({
-  turns: Schema.Array(TurnMetricsRecord).pipe(Schema.maxItems(MAX_TURN_METRICS_SUMMARY_TURNS)),
+  turns: Schema.Array(TurnMetricsRecord).check(Schema.isMaxLength(MAX_TURN_METRICS_SUMMARY_TURNS)),
   turnCount: NonNegativeInt,
   /** Absent when no matching turn reported usage. */
   usage: Schema.optional(TurnUsage),
   metrics: SessionMetrics,
-}).annotations(strict);
+});
 export type TurnMetricsSummary = typeof TurnMetricsSummary.Type;
 
 export const TURN_METRICS_AGGREGATE_TYPE = "thread-turn-metrics";
@@ -288,9 +286,18 @@ export const TURN_METRICS_EVENT_NAMES = {
   recorded: "turn-metrics-recorded@1",
 } as const;
 
-export const decodeTurnUsage = Schema.decodeUnknownSync(TurnUsage);
-export const decodeTurnMetrics = Schema.decodeUnknownSync(TurnMetrics);
-export const decodeSessionMetrics = Schema.decodeUnknownSync(SessionMetrics);
-export const decodeTurnDiagnostics = Schema.decodeUnknownSync(TurnDiagnostics);
-export const decodeTurnMetricsRecord = Schema.decodeUnknownSync(TurnMetricsRecord);
-export const decodeTurnMetricsSummary = Schema.decodeUnknownSync(TurnMetricsSummary);
+export const decodeTurnUsage = Schema.decodeUnknownSync(TurnUsage, STRICT_DECODE_OPTIONS);
+export const decodeTurnMetrics = Schema.decodeUnknownSync(TurnMetrics, STRICT_DECODE_OPTIONS);
+export const decodeSessionMetrics = Schema.decodeUnknownSync(SessionMetrics, STRICT_DECODE_OPTIONS);
+export const decodeTurnDiagnostics = Schema.decodeUnknownSync(
+  TurnDiagnostics,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTurnMetricsRecord = Schema.decodeUnknownSync(
+  TurnMetricsRecord,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTurnMetricsSummary = Schema.decodeUnknownSync(
+  TurnMetricsSummary,
+  STRICT_DECODE_OPTIONS,
+);

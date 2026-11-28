@@ -1,10 +1,11 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Opaque identity for one observed local listener.
@@ -16,7 +17,7 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
  * re-resolves the token to a process only after re-classifying it.
  */
 export const LocalServerListenerId = Schema.String.pipe(
-  Schema.pattern(/^lsn_[a-f0-9]{32}$/),
+  Schema.check(Schema.isPattern(/^lsn_[a-f0-9]{32}$/)),
   Schema.brand("LocalServerListenerId"),
 );
 export type LocalServerListenerId = typeof LocalServerListenerId.Type;
@@ -27,8 +28,7 @@ export type LocalServerRequestId = typeof LocalServerRequestId.Type;
 
 /** TCP port a classified user/dev server holds. */
 export const LocalServerPort = Schema.Int.pipe(
-  Schema.greaterThanOrEqualTo(1),
-  Schema.lessThanOrEqualTo(65_535),
+  Schema.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(65_535)),
   Schema.brand("LocalServerPort"),
 );
 export type LocalServerPort = typeof LocalServerPort.Type;
@@ -47,25 +47,28 @@ const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "[::1]"]);
  * creates a Browser tab allowed to reach exactly this origin, so a widened or
  * non-loopback URL would widen that tab's authority.
  */
-export const LocalServerUrl = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => {
-    let url: URL;
-    try {
-      url = new URL(value);
-    } catch {
-      return false;
-    }
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      LOOPBACK_HOSTNAMES.has(url.hostname) &&
-      url.port !== "" &&
-      url.username === "" &&
-      url.password === "" &&
-      url.search === "" &&
-      url.hash === "" &&
-      url.href === value
-    );
-  }),
+export const LocalServerUrl = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => {
+      let url: URL;
+      try {
+        url = new URL(value);
+      } catch {
+        return false;
+      }
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") &&
+        LOOPBACK_HOSTNAMES.has(url.hostname) &&
+        url.port !== "" &&
+        url.username === "" &&
+        url.password === "" &&
+        url.search === "" &&
+        url.hash === "" &&
+        url.href === value
+      );
+    }),
+  ),
   Schema.brand("LocalServerUrl"),
 );
 export type LocalServerUrl = typeof LocalServerUrl.Type;
@@ -76,18 +79,18 @@ export type LocalServerUrl = typeof LocalServerUrl.Type;
  * or interpreter in a user project); an unclassified process is omitted from
  * the snapshot entirely rather than listed with an unknown source.
  */
-export const LocalServerStartSource = Schema.Literal(
+export const LocalServerStartSource = Schema.Literals([
   "octant",
   "vscode",
   "claude",
   "codex",
   "other-editor",
   "unknown",
-);
+]);
 export type LocalServerStartSource = typeof LocalServerStartSource.Type;
 
 /** Loopback-only versus reachable from the local network. */
-export const LocalServerBindScope = Schema.Literal("loopback", "lan");
+export const LocalServerBindScope = Schema.Literals(["loopback", "lan"]);
 export type LocalServerBindScope = typeof LocalServerBindScope.Type;
 
 /**
@@ -107,11 +110,11 @@ export type LocalServerBindScope = typeof LocalServerBindScope.Type;
  * exactly as it does for a listener proven silent. Surfaces must say the host
  * did not determine it rather than describe the listener's state.
  */
-export const LocalServerHealth = Schema.Literal("listening", "unresponsive", "unknown");
+export const LocalServerHealth = Schema.Literals(["listening", "unresponsive", "unknown"]);
 export type LocalServerHealth = typeof LocalServerHealth.Type;
 
 /** Whether the listener belongs to this Code thread's checkout or is a leftover. */
-export const LocalServerAttribution = Schema.Literal("current-checkout", "other");
+export const LocalServerAttribution = Schema.Literals(["current-checkout", "other"]);
 export type LocalServerAttribution = typeof LocalServerAttribution.Type;
 
 /**
@@ -119,17 +122,17 @@ export type LocalServerAttribution = typeof LocalServerAttribution.Type;
  * exactly what the host classified. `unavailable` carries a reason so the row
  * can explain itself in words rather than by a missing control alone.
  */
-export const LocalServerStopAvailability = Schema.Union(
+export const LocalServerStopAvailability = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    reason: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     status: Schema.Literal("available"),
     /** Leftovers require an explicit confirmation naming process, cwd, and port. */
     confirmationRequired: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type LocalServerStopAvailability = typeof LocalServerStopAvailability.Type;
 
 /**
@@ -144,17 +147,17 @@ export const LocalServerListener = Schema.Struct({
   port: LocalServerPort,
   url: LocalServerUrl,
   /** Process or app name, e.g. `node`, `bun`, `python`. Never a command line. */
-  processName: Schema.NonEmptyTrimmedString,
+  processName: NonEmptyTrimmedString,
   /** Inferred framework when the host recognized one, e.g. `vite`, `next`. */
-  framework: Schema.optional(Schema.NonEmptyTrimmedString),
+  framework: Schema.optional(NonEmptyTrimmedString),
   /**
    * Working directory of the listener when known. Present because leftover
    * Stop confirmation must name process, cwd, and port; a listener whose cwd
    * the host could not read is listed without it rather than with a guess.
    */
-  workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString),
+  workingDirectory: Schema.optional(NonEmptyTrimmedString),
   /** Project or worktree label when the host could attribute the cwd. */
-  workspaceLabel: Schema.optional(Schema.NonEmptyTrimmedString),
+  workspaceLabel: Schema.optional(NonEmptyTrimmedString),
   attribution: LocalServerAttribution,
   startSource: LocalServerStartSource,
   bindScope: LocalServerBindScope,
@@ -162,7 +165,7 @@ export const LocalServerListener = Schema.Struct({
   /** Open is offered for healthy HTTP(S) listeners, including API backends. */
   openAvailable: Schema.Boolean,
   stop: LocalServerStopAvailability,
-}).annotations(strict);
+});
 export type LocalServerListener = typeof LocalServerListener.Type;
 
 /**
@@ -176,7 +179,7 @@ export const LocalServerSnapshot = Schema.Struct({
   currentCheckout: Schema.Array(LocalServerListener),
   other: Schema.Array(LocalServerListener),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type LocalServerSnapshot = typeof LocalServerSnapshot.Type;
 
 /**
@@ -186,10 +189,10 @@ export type LocalServerSnapshot = typeof LocalServerSnapshot.Type;
  * different process that has since taken the port.
  */
 export const LocalServerStopConfirmation = Schema.Struct({
-  acknowledgedProcessName: Schema.NonEmptyTrimmedString,
+  acknowledgedProcessName: NonEmptyTrimmedString,
   acknowledgedPort: LocalServerPort,
-  acknowledgedWorkingDirectory: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  acknowledgedWorkingDirectory: Schema.optional(NonEmptyTrimmedString),
+});
 export type LocalServerStopConfirmation = typeof LocalServerStopConfirmation.Type;
 
 const CommandFields = {
@@ -198,22 +201,20 @@ const CommandFields = {
   projectId: ProjectId,
 } as const;
 
-export const LocalServerCommand = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list-local-servers"), ...CommandFields }).annotations(
-    strict,
-  ),
+export const LocalServerCommand = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("list-local-servers"), ...CommandFields }),
   Schema.Struct({
     kind: Schema.Literal("open-local-server"),
     ...CommandFields,
     listenerId: LocalServerListenerId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("stop-local-server"),
     ...CommandFields,
     listenerId: LocalServerListenerId,
     confirmation: Schema.optional(LocalServerStopConfirmation),
-  }).annotations(strict),
-);
+  }),
+]);
 export type LocalServerCommand = typeof LocalServerCommand.Type;
 
 /**
@@ -223,10 +224,10 @@ export type LocalServerCommand = typeof LocalServerCommand.Type;
  */
 export const LocalServerOpenTarget = Schema.Struct({
   url: LocalServerUrl,
-  allowedOrigin: Schema.NonEmptyTrimmedString,
+  allowedOrigin: NonEmptyTrimmedString,
   /** True when the isolated tab may accept this one localhost certificate. */
   acceptsLocalCertificate: Schema.Boolean,
-}).annotations(strict);
+});
 export type LocalServerOpenTarget = typeof LocalServerOpenTarget.Type;
 
 /**
@@ -236,42 +237,42 @@ export type LocalServerOpenTarget = typeof LocalServerOpenTarget.Type;
  * host rather than from a paired remote device.
  */
 export const LocalServerFailure = Schema.Struct({
-  category: Schema.Literal(
+  category: Schema.Literals([
     "invalid",
     "unauthorized",
     "unavailable",
     "not-found",
     "confirmation-required",
     "local-host-required",
-  ),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  ]),
+  message: NonEmptyTrimmedString,
+});
 export type LocalServerFailure = typeof LocalServerFailure.Type;
 
-export const LocalServerCommandResult = Schema.Union(
+export const LocalServerCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("local-servers-listed"),
     requestId: LocalServerRequestId,
     snapshot: LocalServerSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("local-server-open-prepared"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
     target: LocalServerOpenTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("local-server-stopped"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
     snapshot: LocalServerSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("local-server-rejected"),
     requestId: LocalServerRequestId,
     failure: LocalServerFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type LocalServerCommandResult = typeof LocalServerCommandResult.Type;
 
 /**
@@ -281,7 +282,7 @@ export type LocalServerCommandResult = typeof LocalServerCommandResult.Type;
  * with another agent CLI; Octant cannot tell which, so a surface must not say
  * Octant started it. There is no third value.
  */
-export const RunningServiceOwnership = Schema.Literal("octant-owned", "left-over");
+export const RunningServiceOwnership = Schema.Literals(["octant-owned", "left-over"]);
 export type RunningServiceOwnership = typeof RunningServiceOwnership.Type;
 
 /**
@@ -298,10 +299,10 @@ export const RunningService = Schema.Struct({
   port: LocalServerPort,
   url: LocalServerUrl,
   /** Process or app name, e.g. `node`, `bun`. Never a command line. */
-  processName: Schema.NonEmptyTrimmedString,
-  framework: Schema.optional(Schema.NonEmptyTrimmedString),
+  processName: NonEmptyTrimmedString,
+  framework: Schema.optional(NonEmptyTrimmedString),
   /** Present so a not-owned server's Stop confirmation can name the process, cwd, and port. */
-  workingDirectory: Schema.optional(Schema.NonEmptyTrimmedString),
+  workingDirectory: Schema.optional(NonEmptyTrimmedString),
   ownership: RunningServiceOwnership,
   health: LocalServerHealth,
   openAvailable: Schema.Boolean,
@@ -314,22 +315,18 @@ export const RunningService = Schema.Struct({
   forwardable: Schema.optional(Schema.Boolean),
   stop: LocalServerStopAvailability,
   projectId: ProjectId,
-  projectName: Schema.NonEmptyTrimmedString,
+  projectName: NonEmptyTrimmedString,
   /** The thread whose own worktree the server runs in, when that is knowable. */
-  thread: Schema.optional(
-    Schema.Struct({ threadId: CodeThreadId, title: Schema.NonEmptyTrimmedString }).annotations(
-      strict,
-    ),
-  ),
-  branch: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  thread: Schema.optional(Schema.Struct({ threadId: CodeThreadId, title: NonEmptyTrimmedString })),
+  branch: Schema.optional(NonEmptyTrimmedString),
+});
 export type RunningService = typeof RunningService.Type;
 
 /** Host-wide observation: every Project the window can access, not one thread. */
 export const RunningServicesSnapshot = Schema.Struct({
   services: Schema.Array(RunningService),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RunningServicesSnapshot = typeof RunningServicesSnapshot.Type;
 
 /**
@@ -337,67 +334,98 @@ export type RunningServicesSnapshot = typeof RunningServicesSnapshot.Type;
  * Project: the host resolves what the window may see, re-observes, and
  * re-classifies on every command, so a stale id is a claim and never authority.
  */
-export const RunningServiceCommand = Schema.Union(
+export const RunningServiceCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("list-running-services"),
     requestId: LocalServerRequestId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("open-running-service"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("stop-running-service"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
     confirmation: Schema.optional(LocalServerStopConfirmation),
-  }).annotations(strict),
-);
+  }),
+]);
 export type RunningServiceCommand = typeof RunningServiceCommand.Type;
 
-export const RunningServiceCommandResult = Schema.Union(
+export const RunningServiceCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("running-services-listed"),
     requestId: LocalServerRequestId,
     snapshot: RunningServicesSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("running-service-open-prepared"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
     target: LocalServerOpenTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("running-service-stopped"),
     requestId: LocalServerRequestId,
     listenerId: LocalServerListenerId,
     snapshot: RunningServicesSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("running-service-rejected"),
     requestId: LocalServerRequestId,
     failure: LocalServerFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type RunningServiceCommandResult = typeof RunningServiceCommandResult.Type;
 
-export const decodeRunningService = Schema.decodeUnknownSync(RunningService);
-export const decodeRunningServicesSnapshot = Schema.decodeUnknownSync(RunningServicesSnapshot);
-export const decodeRunningServiceCommand = Schema.decodeUnknownSync(RunningServiceCommand);
+export const decodeRunningService = Schema.decodeUnknownSync(RunningService, STRICT_DECODE_OPTIONS);
+export const decodeRunningServicesSnapshot = Schema.decodeUnknownSync(
+  RunningServicesSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRunningServiceCommand = Schema.decodeUnknownSync(
+  RunningServiceCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRunningServiceCommandResult = Schema.decodeUnknownSync(
   RunningServiceCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const decodeLocalServerListenerId = Schema.decodeUnknownSync(LocalServerListenerId);
-export const decodeLocalServerRequestId = Schema.decodeUnknownSync(LocalServerRequestId);
-export const decodeLocalServerPort = Schema.decodeUnknownSync(LocalServerPort);
-export const decodeLocalServerUrl = Schema.decodeUnknownSync(LocalServerUrl);
-export const decodeLocalServerListener = Schema.decodeUnknownSync(LocalServerListener);
-export const decodeLocalServerSnapshot = Schema.decodeUnknownSync(LocalServerSnapshot);
-export const decodeLocalServerCommand = Schema.decodeUnknownSync(LocalServerCommand);
-export const decodeLocalServerCommandResult = Schema.decodeUnknownSync(LocalServerCommandResult);
-export const decodeLocalServerFailure = Schema.decodeUnknownSync(LocalServerFailure);
+export const decodeLocalServerListenerId = Schema.decodeUnknownSync(
+  LocalServerListenerId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerRequestId = Schema.decodeUnknownSync(
+  LocalServerRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerPort = Schema.decodeUnknownSync(
+  LocalServerPort,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerUrl = Schema.decodeUnknownSync(LocalServerUrl, STRICT_DECODE_OPTIONS);
+export const decodeLocalServerListener = Schema.decodeUnknownSync(
+  LocalServerListener,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerSnapshot = Schema.decodeUnknownSync(
+  LocalServerSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerCommand = Schema.decodeUnknownSync(
+  LocalServerCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerCommandResult = Schema.decodeUnknownSync(
+  LocalServerCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalServerFailure = Schema.decodeUnknownSync(
+  LocalServerFailure,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Bound on one observation so a pathological host cannot flood the renderer. */
 export const MAX_LOCAL_SERVER_LISTENERS = 200;

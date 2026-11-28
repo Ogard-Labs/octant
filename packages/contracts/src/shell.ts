@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Effect, Schema, SchemaTransformation } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AppReleaseRing } from "./appUpdates";
 
 import { AppleProjectPath } from "./appleToolchain";
@@ -92,7 +93,7 @@ import { ComputerUseSettings } from "./computerUseSettings";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
-export const AppUpdateChannel = Schema.Literal("stable", "preview", "nightly");
+export const AppUpdateChannel = Schema.Literals(["stable", "preview", "nightly"]);
 export type AppUpdateChannel = typeof AppUpdateChannel.Type;
 
 /** Native menu contributions carry presentation and opaque action IDs only. */
@@ -154,8 +155,8 @@ export const MAX_SPLIT_RATIO = 0.8;
 
 export const MAX_STOWED_WORKSPACE_LAYOUTS = 12;
 
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const WindowId = brandedUuid("WindowId");
 export type WindowId = typeof WindowId.Type;
@@ -172,11 +173,11 @@ export const WorkspaceContextKey = Schema.Struct({
   host: HostId,
   mode: OctantMode,
   projectId: Schema.NullOr(ProjectId),
-  boundRoot: Schema.NullOr(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  boundRoot: Schema.NullOr(NonEmptyTrimmedString),
+});
 export type WorkspaceContextKey = typeof WorkspaceContextKey.Type;
 
-export const WorkspaceSurfaceKind = Schema.Literal(
+export const WorkspaceSurfaceKind = Schema.Literals([
   "thread",
   "browser",
   "terminal",
@@ -184,27 +185,27 @@ export const WorkspaceSurfaceKind = Schema.Literal(
   "diff",
   "git-review",
   "side-chat",
-);
+]);
 export type WorkspaceSurfaceKind = typeof WorkspaceSurfaceKind.Type;
 
 export const WorkspaceSurfaceDescriptor = Schema.Struct({
   kind: WorkspaceSurfaceKind,
-  label: Schema.NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
   available: Schema.Boolean,
-  unavailableReason: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  unavailableReason: Schema.optional(NonEmptyTrimmedString),
+});
 export type WorkspaceSurfaceDescriptor = typeof WorkspaceSurfaceDescriptor.Type;
 
 export const WorkspaceSurfaceCatalog = Schema.Struct({
   chat: Schema.Array(WorkspaceSurfaceDescriptor),
   work: Schema.Array(WorkspaceSurfaceDescriptor),
   code: Schema.Array(WorkspaceSurfaceDescriptor),
-}).annotations(strict);
+});
 export type WorkspaceSurfaceCatalog = typeof WorkspaceSurfaceCatalog.Type;
 
-export const SidebarWidth = Schema.Number.pipe(
-  Schema.greaterThanOrEqualTo(MIN_SIDEBAR_WIDTH),
-  Schema.lessThanOrEqualTo(MAX_SIDEBAR_WIDTH),
+export const SidebarWidth = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(MIN_SIDEBAR_WIDTH),
+  Schema.isLessThanOrEqualTo(MAX_SIDEBAR_WIDTH),
 );
 export type SidebarWidth = typeof SidebarWidth.Type;
 
@@ -214,33 +215,33 @@ export type SidebarWidth = typeof SidebarWidth.Type;
  * placements — stay in the literal so a stored preference still decodes; the
  * renderer refuses one it no longer offers and simply opens nothing.
  */
-export const ContextSurfaceId = Schema.Literal(
+export const ContextSurfaceId = Schema.Literals([
   "context",
   "project-memory",
   "code-environment",
   "navigator",
   "plan",
   "thread",
-);
+]);
 export type ContextSurfaceId = typeof ContextSurfaceId.Type;
 
-export const ContextSidebarWidth = Schema.Number.pipe(
-  Schema.greaterThanOrEqualTo(MIN_CONTEXT_SIDEBAR_WIDTH),
-  Schema.lessThanOrEqualTo(MAX_CONTEXT_SIDEBAR_WIDTH),
+export const ContextSidebarWidth = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(MIN_CONTEXT_SIDEBAR_WIDTH),
+  Schema.isLessThanOrEqualTo(MAX_CONTEXT_SIDEBAR_WIDTH),
 );
 export type ContextSidebarWidth = typeof ContextSidebarWidth.Type;
 
-export const SplitRatio = Schema.Number.pipe(
-  Schema.greaterThanOrEqualTo(MIN_SPLIT_RATIO),
-  Schema.lessThanOrEqualTo(MAX_SPLIT_RATIO),
+export const SplitRatio = Schema.Number.check(
+  Schema.isGreaterThanOrEqualTo(MIN_SPLIT_RATIO),
+  Schema.isLessThanOrEqualTo(MAX_SPLIT_RATIO),
 );
 export type SplitRatio = typeof SplitRatio.Type;
 
-export const ModeSwitcherPresentation = Schema.Literal("buttons", "dropdown");
+export const ModeSwitcherPresentation = Schema.Literals(["buttons", "dropdown"]);
 export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 
 /** How the sidebar offers its thread filter: behind an icon, or always shown. */
-export const SidebarSearchPresentation = Schema.Literal("icon", "field");
+export const SidebarSearchPresentation = Schema.Literals(["icon", "field"]);
 export type SidebarSearchPresentation = typeof SidebarSearchPresentation.Type;
 
 /** What a collapsed sidebar becomes: an icon rail, or hidden outright. */
@@ -250,7 +251,7 @@ export type SidebarSearchPresentation = typeof SidebarSearchPresentation.Type;
  * (`hidden`). The rail beside the sidebar carries the destinations and counts,
  * so the sidebar itself is left to threads and Projects.
  */
-export const SidebarCollapsedPresentation = Schema.Literal("always", "rail", "hidden");
+export const SidebarCollapsedPresentation = Schema.Literals(["always", "rail", "hidden"]);
 export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.Type;
 
 /**
@@ -258,7 +259,7 @@ export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.T
  * shell wants rather than for the per-mode row that renders it: one
  * "new-thread" destination covers the Chat, Work, and Code creators.
  */
-export const SidebarDestinationId = Schema.Literal(
+export const SidebarDestinationId = Schema.Literals([
   "new-thread",
   "inbox",
   "todos",
@@ -272,16 +273,16 @@ export const SidebarDestinationId = Schema.Literal(
   "artifact-library",
   "image-library",
   "plugins",
-);
+]);
 export type SidebarDestinationId = typeof SidebarDestinationId.Type;
 
-export const SidebarDestinationVisibility = Schema.Literal("shown", "hidden");
+export const SidebarDestinationVisibility = Schema.Literals(["shown", "hidden"]);
 export type SidebarDestinationVisibility = typeof SidebarDestinationVisibility.Type;
 
 export const SidebarDestinationPreference = Schema.Struct({
   id: SidebarDestinationId,
   visibility: SidebarDestinationVisibility,
-}).annotations(strict);
+});
 export type SidebarDestinationPreference = typeof SidebarDestinationPreference.Type;
 
 /**
@@ -294,16 +295,14 @@ export type SidebarDestinationPreference = typeof SidebarDestinationPreference.T
 export const SidebarDestinationCustomization = Schema.Struct({
   order: Schema.Array(SidebarDestinationId),
   visibility: Schema.Array(SidebarDestinationPreference),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (customization) =>
-        new Set(customization.order).size === customization.order.length &&
-        new Set(customization.visibility.map((entry) => entry.id)).size ===
-          customization.visibility.length,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (customization) =>
+      new Set(customization.order).size === customization.order.length &&
+      new Set(customization.visibility.map((entry) => entry.id)).size ===
+        customization.visibility.length,
+  ),
+);
 export type SidebarDestinationCustomization = typeof SidebarDestinationCustomization.Type;
 
 /**
@@ -312,16 +311,16 @@ export type SidebarDestinationCustomization = typeof SidebarDestinationCustomiza
  * touches this contract, and a card an older client does not know is simply
  * ignored by it.
  */
-export const HomeCardId = Schema.String.pipe(
-  Schema.pattern(/^[a-z][a-z0-9-]*$/),
-  Schema.maxLength(48),
+export const HomeCardId = Schema.String.check(
+  Schema.isPattern(/^[a-z][a-z0-9-]*$/),
+  Schema.isMaxLength(48),
 );
 export type HomeCardId = typeof HomeCardId.Type;
 
 export const HomeCardPreference = Schema.Struct({
   id: HomeCardId,
   visible: Schema.Boolean,
-}).annotations(strict);
+});
 export type HomeCardPreference = typeof HomeCardPreference.Type;
 
 /** More than any registry will hold; keeps a hostile or corrupt store bounded. */
@@ -335,8 +334,8 @@ export const MAX_HOME_CARDS = 32;
  * default instead of being switched off by an old choice.
  */
 export const HomeCardCustomization = Schema.Struct({
-  order: Schema.Array(HomeCardId).pipe(Schema.maxItems(MAX_HOME_CARDS)),
-  visibility: Schema.Array(HomeCardPreference).pipe(Schema.maxItems(MAX_HOME_CARDS)),
+  order: Schema.Array(HomeCardId).check(Schema.isMaxLength(MAX_HOME_CARDS)),
+  visibility: Schema.Array(HomeCardPreference).check(Schema.isMaxLength(MAX_HOME_CARDS)),
   /**
    * The activity cards' own choices — shared timeframe, source and pinned
    * ranges. Absent on stores written before the cards shipped; readers use
@@ -346,16 +345,14 @@ export const HomeCardCustomization = Schema.Struct({
    * `activity-runs` inside `order`/`visibility` like any other card.
    */
   activity: Schema.optional(HomeActivityCustomization),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (customization) =>
-        new Set(customization.order).size === customization.order.length &&
-        new Set(customization.visibility.map((entry) => entry.id)).size ===
-          customization.visibility.length,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (customization) =>
+      new Set(customization.order).size === customization.order.length &&
+      new Set(customization.visibility.map((entry) => entry.id)).size ===
+        customization.visibility.length,
+  ),
+);
 export type HomeCardCustomization = typeof HomeCardCustomization.Type;
 
 /**
@@ -372,7 +369,7 @@ export const SidebarRowPropertyVisibility = Schema.Struct({
   pullRequest: Schema.Boolean,
   lastUpdated: Schema.Boolean,
   status: Schema.Boolean,
-}).annotations(strict);
+});
 export type SidebarRowPropertyVisibility = typeof SidebarRowPropertyVisibility.Type;
 
 /**
@@ -383,7 +380,7 @@ export type SidebarRowPropertyVisibility = typeof SidebarRowPropertyVisibility.T
 export const SidebarRowProperties = Schema.Struct({
   projects: SidebarRowPropertyVisibility,
   activity: SidebarRowPropertyVisibility,
-}).annotations(strict);
+});
 export type SidebarRowProperties = typeof SidebarRowProperties.Type;
 
 /**
@@ -397,7 +394,7 @@ export const DEFAULT_SIDEBAR_ROW_PROPERTIES: SidebarRowProperties = {
 };
 
 /** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
-export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
+export const ProjectViewSwitcherPresentation = Schema.Literals(["dropdown", "inline"]);
 export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
 
 /**
@@ -406,32 +403,30 @@ export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresenta
  * A docked panel took width from the surface being read and presented live
  * status as shell chrome, which is not what the panel is for.
  */
-export const EnvironmentPresentation = Schema.Literal("floating", "hidden");
+export const EnvironmentPresentation = Schema.Literals(["floating", "hidden"]);
 export type EnvironmentPresentation = typeof EnvironmentPresentation.Type;
 
 export const EnvironmentTabPresentation = Schema.Struct({
   tabId: WorkspaceTabId,
   presentation: EnvironmentPresentation,
-}).annotations(strict);
+});
 export type EnvironmentTabPresentation = typeof EnvironmentTabPresentation.Type;
 
 export const EnvironmentPresentationByMode = Schema.Struct({
   chat: EnvironmentPresentation,
   work: EnvironmentPresentation,
   code: EnvironmentPresentation,
-}).annotations(strict);
+});
 export type EnvironmentPresentationByMode = typeof EnvironmentPresentationByMode.Type;
 
 export const EnvironmentPresentationState = Schema.Struct({
   byTab: Schema.Array(EnvironmentTabPresentation),
   byMode: EnvironmentPresentationByMode,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (state) => new Set(state.byTab.map((entry) => entry.tabId)).size === state.byTab.length,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (state) => new Set(state.byTab.map((entry) => entry.tabId)).size === state.byTab.length,
+  ),
+);
 export type EnvironmentPresentationState = typeof EnvironmentPresentationState.Type;
 
 export const DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE: EnvironmentPresentationByMode = {
@@ -440,24 +435,24 @@ export const DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE: EnvironmentPresentationBy
   code: "floating",
 };
 
-export const EnvironmentCompactStatus = Schema.Literal(
+export const EnvironmentCompactStatus = Schema.Literals([
   "available",
   "unavailable",
   "stale",
   "disconnected",
   "recovery",
-);
+]);
 export type EnvironmentCompactStatus = typeof EnvironmentCompactStatus.Type;
 
 export const EnvironmentCompactIdentity = Schema.Struct({
   host: HostId,
-  label: Schema.NonEmptyTrimmedString,
-  detail: Schema.NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
+  detail: NonEmptyTrimmedString,
   status: EnvironmentCompactStatus,
-}).annotations(strict);
+});
 export type EnvironmentCompactIdentity = typeof EnvironmentCompactIdentity.Type;
 
-export const EnvironmentSectionId = Schema.Literal(
+export const EnvironmentSectionId = Schema.Literals([
   "project-context",
   "memory",
   "attachments",
@@ -477,15 +472,15 @@ export const EnvironmentSectionId = Schema.Literal(
   "confined-root",
   "artifacts",
   "approvals",
-);
+]);
 export type EnvironmentSectionId = typeof EnvironmentSectionId.Type;
 
 export const EnvironmentSectionDescriptor = Schema.Struct({
   id: EnvironmentSectionId,
-  label: Schema.NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
   available: Schema.Boolean,
-  unavailableReason: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  unavailableReason: Schema.optional(NonEmptyTrimmedString),
+});
 export type EnvironmentSectionDescriptor = typeof EnvironmentSectionDescriptor.Type;
 
 /**
@@ -496,10 +491,10 @@ export type EnvironmentSectionDescriptor = typeof EnvironmentSectionDescriptor.T
  * resolved states stay distinct because completing the walkthrough and
  * deliberately skipping it are different facts about the same host.
  */
-export const FirstRunOnboardingStatus = Schema.Literal("pending", "completed", "skipped");
+export const FirstRunOnboardingStatus = Schema.Literals(["pending", "completed", "skipped"]);
 export type FirstRunOnboardingStatus = typeof FirstRunOnboardingStatus.Type;
 
-export const OpenInApplicationId = Schema.Literal(
+export const OpenInApplicationId = Schema.Literals([
   "vscode",
   "cursor",
   "zed",
@@ -507,7 +502,7 @@ export const OpenInApplicationId = Schema.Literal(
   "terminal",
   "ghostty",
   "xcode",
-);
+]);
 export type OpenInApplicationId = typeof OpenInApplicationId.Type;
 
 export const DEFAULT_OPEN_IN_APPLICATIONS: ReadonlyArray<OpenInApplicationId> = [
@@ -520,8 +515,8 @@ export const DEFAULT_OPEN_IN_APPLICATIONS: ReadonlyArray<OpenInApplicationId> = 
   "xcode",
 ];
 
-export const OpenInApplicationOrder = Schema.Array(OpenInApplicationId).pipe(
-  Schema.filter(
+export const OpenInApplicationOrder = Schema.Array(OpenInApplicationId).check(
+  Schema.makeFilter(
     (applications) =>
       applications.length <= DEFAULT_OPEN_IN_APPLICATIONS.length &&
       new Set(applications).size === applications.length,
@@ -529,12 +524,12 @@ export const OpenInApplicationOrder = Schema.Array(OpenInApplicationId).pipe(
 );
 export type OpenInApplicationOrder = typeof OpenInApplicationOrder.Type;
 
-export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
+export const TranscriptTextSize = Schema.Literals(["small", "medium", "large"]);
 export type TranscriptTextSize = typeof TranscriptTextSize.Type;
-export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
+export const TranscriptWidth = Schema.Literals(["narrow", "medium", "wide"]);
 export type TranscriptWidth = typeof TranscriptWidth.Type;
 /** Retired: how the plan-usage meters drew their bar; stays so old rows decode. */
-export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
+export const UsageBarStyle = Schema.Literals(["smooth", "pixelated"]);
 export type UsageBarStyle = typeof UsageBarStyle.Type;
 /**
  * How much of an agent's work a transcript shows open. Presentation only: it
@@ -542,15 +537,15 @@ export type UsageBarStyle = typeof UsageBarStyle.Type;
  * only and Failures only sit below Low and hide steps rather than fold them.
  */
 export const REPLY_DETAIL_LEVEL_VALUES = ["answers", "failures", "low", "medium", "high"] as const;
-export const ReplyDetailLevel = Schema.Literal(...REPLY_DETAIL_LEVEL_VALUES);
+export const ReplyDetailLevel = Schema.Literals(REPLY_DETAIL_LEVEL_VALUES);
 export type ReplyDetailLevel = typeof ReplyDetailLevel.Type;
 
 /** One thread's own Reply detail level, which wins over the default. */
 export const ThreadReplyDetail = Schema.Struct({
   mode: OctantMode,
-  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  threadId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   level: ReplyDetailLevel,
-}).annotations(strict);
+});
 export type ThreadReplyDetail = typeof ThreadReplyDetail.Type;
 
 /**
@@ -559,12 +554,12 @@ export type ThreadReplyDetail = typeof ThreadReplyDetail.Type;
  * bounded however many threads a host has had.
  */
 export const MAX_THREAD_REPLY_DETAILS = 500;
-export const ThreadReplyDetails = Schema.Array(ThreadReplyDetail).pipe(
-  Schema.maxItems(MAX_THREAD_REPLY_DETAILS),
-  Schema.filter(
+export const ThreadReplyDetails = Schema.Array(ThreadReplyDetail).check(
+  Schema.isMaxLength(MAX_THREAD_REPLY_DETAILS),
+  Schema.makeFilter(
     (entries) =>
       new Set(entries.map((entry) => `${entry.mode}:${entry.threadId}`)).size === entries.length,
-    { message: () => "A thread carries at most one Reply detail level." },
+    { message: "A thread carries at most one Reply detail level." },
   ),
 );
 export type ThreadReplyDetails = typeof ThreadReplyDetails.Type;
@@ -582,25 +577,35 @@ export const REPLY_DETAIL_PATH = "/api/reply-detail";
  * reader draws, instead of failing the whole answer and every thread's level
  * with it. The host's own settings stay strict.
  */
-const ReadReplyDetailLevel = Schema.transform(Schema.String, ReplyDetailLevel, {
-  strict: true,
-  decode: (value) => (Schema.is(ReplyDetailLevel)(value) ? value : "low"),
-  encode: (level) => level,
-});
+const ReadReplyDetailLevel = Schema.String.pipe(
+  Schema.decodeTo(
+    ReplyDetailLevel,
+    SchemaTransformation.transform({
+      decode: (value) => (Schema.is(ReplyDetailLevel)(value) ? value : "low"),
+      encode: (level) => level,
+    }),
+  ),
+);
 
 export const ReplyDetailReading = Schema.Struct({
   defaultLevel: ReadReplyDetailLevel,
   threads: Schema.Array(
-    Schema.Struct({ ...ThreadReplyDetail.fields, level: ReadReplyDetailLevel }).annotations(strict),
-  ).pipe(Schema.maxItems(MAX_THREAD_REPLY_DETAILS)),
-}).annotations(strict);
+    Schema.Struct({ ...ThreadReplyDetail.fields, level: ReadReplyDetailLevel }),
+  ).check(Schema.isMaxLength(MAX_THREAD_REPLY_DETAILS)),
+});
 export type ReplyDetailReading = typeof ReplyDetailReading.Type;
-export const decodeReplyDetailReading = Schema.decodeUnknownSync(ReplyDetailReading);
+export const decodeReplyDetailReading = Schema.decodeUnknownSync(
+  ReplyDetailReading,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const MIN_COMPLETED_THREAD_ARCHIVE_DAYS = 1;
 export const MAX_COMPLETED_THREAD_ARCHIVE_DAYS = 365;
-export const CompletedThreadArchiveAfterDays = Schema.Int.pipe(
-  Schema.between(MIN_COMPLETED_THREAD_ARCHIVE_DAYS, MAX_COMPLETED_THREAD_ARCHIVE_DAYS),
+export const CompletedThreadArchiveAfterDays = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_COMPLETED_THREAD_ARCHIVE_DAYS,
+    maximum: MAX_COMPLETED_THREAD_ARCHIVE_DAYS,
+  }),
 );
 export type CompletedThreadArchiveAfterDays = typeof CompletedThreadArchiveAfterDays.Type;
 export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchiveAfterDays = 7;
@@ -612,8 +617,11 @@ export const DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS: CompletedThreadArchive
  */
 export const MIN_STALLED_TURN_LIMIT_MINUTES = 5;
 export const MAX_STALLED_TURN_LIMIT_MINUTES = 480;
-export const StalledTurnLimitMinutes = Schema.Int.pipe(
-  Schema.between(MIN_STALLED_TURN_LIMIT_MINUTES, MAX_STALLED_TURN_LIMIT_MINUTES),
+export const StalledTurnLimitMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_STALLED_TURN_LIMIT_MINUTES,
+    maximum: MAX_STALLED_TURN_LIMIT_MINUTES,
+  }),
 );
 export type StalledTurnLimitMinutes = typeof StalledTurnLimitMinutes.Type;
 export const DEFAULT_STALLED_TURN_LIMIT_MINUTES: StalledTurnLimitMinutes = 30;
@@ -626,11 +634,11 @@ export const DEFAULT_STALLED_TURN_LIMIT_MINUTES: StalledTurnLimitMinutes = 30;
  */
 export const MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 5;
 export const MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES = 1440;
-export const ProviderToolCallPauseLimitMinutes = Schema.Int.pipe(
-  Schema.between(
-    MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
-    MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
-  ),
+export const ProviderToolCallPauseLimitMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+    maximum: MAX_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+  }),
 );
 export type ProviderToolCallPauseLimitMinutes = typeof ProviderToolCallPauseLimitMinutes.Type;
 export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES: ProviderToolCallPauseLimitMinutes = 120;
@@ -643,11 +651,11 @@ export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES: ProviderToolCallPau
  */
 export const MIN_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES = 5;
 export const MAX_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES = 1440;
-export const BackgroundSessionIdleLimitMinutes = Schema.Int.pipe(
-  Schema.between(
-    MIN_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
-    MAX_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
-  ),
+export const BackgroundSessionIdleLimitMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
+    maximum: MAX_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
+  }),
 );
 export type BackgroundSessionIdleLimitMinutes = typeof BackgroundSessionIdleLimitMinutes.Type;
 export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdleLimitMinutes = 120;
@@ -675,10 +683,13 @@ export {
  * An absolute folder path as the host canonicalized it. Same shape the
  * artifact mirror accepts for a folder the person names.
  */
-export const DefaultFolder = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter(
-    (value) => !value.includes("\0") && (value.startsWith("/") || /^[A-Za-z]:\\/.test(value)),
+export const DefaultFolder = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(4_096),
+    Schema.makeFilter(
+      (value) => !value.includes("\0") && (value.startsWith("/") || /^[A-Za-z]:\\/.test(value)),
+    ),
   ),
   Schema.brand("DefaultFolder"),
 );
@@ -699,36 +710,39 @@ export const StandaloneSkillActivationState = Schema.Struct({
    * The Project's same-named skill the host turned this one off for. Kept
    * until a person next switches either, so the notice survives a restart.
    */
-  gaveWayTo: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-}).annotations(strict);
+  gaveWayTo: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
+});
 export type StandaloneSkillActivationState = typeof StandaloneSkillActivationState.Type;
 
-export const StandaloneSkillActivationMap = Schema.Record({
-  key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-  value: StandaloneSkillActivationState,
-}).annotations(strict);
+export const StandaloneSkillActivationMap = Schema.Record(
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  StandaloneSkillActivationState,
+);
 export type StandaloneSkillActivationMap = typeof StandaloneSkillActivationMap.Type;
 
 /** The key providers whose own skill folder a person can turn on. */
 export const SKILL_FOLDER_PROVIDERS = ["claude", "codex"] as const;
-export const SkillFolderProvider = Schema.Literal(...SKILL_FOLDER_PROVIDERS);
+export const SkillFolderProvider = Schema.Literals(SKILL_FOLDER_PROVIDERS);
 export type SkillFolderProvider = typeof SkillFolderProvider.Type;
 
 /** An absolute folder path with no relative segment, as a person typed or picked it. */
-export const SkillFolderPath = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(1024),
-  Schema.filter(
+export const SkillFolderPath = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(1024),
+  Schema.makeFilter(
     (path) =>
       (path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path)) &&
       !path.split(/[\\/]/).includes("..") &&
       !path.includes("\0"),
-    { message: () => "A skill folder is an absolute path with no .. segment." },
+    { message: "A skill folder is an absolute path with no .. segment." },
   ),
 );
 export const MAX_ADDED_SKILL_FOLDERS = 32;
 export const SkillFolderSettings = Schema.Struct({
-  providers: Schema.Array(SkillFolderProvider).pipe(Schema.maxItems(SKILL_FOLDER_PROVIDERS.length)),
-  folders: Schema.Array(SkillFolderPath).pipe(Schema.maxItems(MAX_ADDED_SKILL_FOLDERS)),
+  providers: Schema.Array(SkillFolderProvider).check(
+    Schema.isMaxLength(SKILL_FOLDER_PROVIDERS.length),
+  ),
+  folders: Schema.Array(SkillFolderPath).check(Schema.isMaxLength(MAX_ADDED_SKILL_FOLDERS)),
 });
 export type SkillFolderSettings = typeof SkillFolderSettings.Type;
 
@@ -741,10 +755,10 @@ export type SkillFolderSettings = typeof SkillFolderSettings.Type;
  */
 export const RememberedComputerUseApp = Schema.Struct({
   projectId: ProjectId,
-  appId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  appId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   grantedBy: EventActor,
   grantedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RememberedComputerUseApp = typeof RememberedComputerUseApp.Type;
 
 /**
@@ -758,14 +772,14 @@ export const RememberedDesktopFileTransfer = Schema.Struct({
   projectId: ProjectId,
   grantedBy: EventActor,
   grantedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RememberedDesktopFileTransfer = typeof RememberedDesktopFileTransfer.Type;
 
 /** One site remembered for one stored Browser profile; see `rememberedBrowserProfileSites`. */
 export const RememberedBrowserProfileSite = Schema.Struct({
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
   profile: StoredBrowserProfile,
-}).annotations(strict);
+});
 export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.Type;
 
 /**
@@ -776,10 +790,10 @@ export type RememberedBrowserProfileSite = typeof RememberedBrowserProfileSite.T
  * profile, and it lifts no path, size or type check.
  */
 export const RememberedBrowserTransfer = Schema.Struct({
-  direction: Schema.Literal("upload", "download"),
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  direction: Schema.Literals(["upload", "download"]),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
   /** The thread workspace on this host: a Work Project folder or a Code checkout. */
-  workspaceRoot: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+  workspaceRoot: Schema.NonEmptyString.check(Schema.isMaxLength(4096)),
   /** The stored profile the page was in. Absent for a Private page. */
   profile: Schema.optional(StoredBrowserProfile),
   /**
@@ -792,34 +806,32 @@ export const RememberedBrowserTransfer = Schema.Struct({
    * mistaken for one.
    */
   privatePage: Schema.optional(Schema.Literal(true)),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((entry) => entry.profile === undefined || entry.privatePage !== true));
+}).check(Schema.makeFilter((entry) => entry.profile === undefined || entry.privatePage !== true));
 export type RememberedBrowserTransfer = typeof RememberedBrowserTransfer.Type;
 
 /** The next-message suggestion switch and the modes it covers. */
 export const NextMessageSuggestionsSetting = Schema.Struct({
   enabled: Schema.Boolean,
-  modes: Schema.Array(OctantMode).pipe(
-    Schema.maxItems(3),
-    Schema.filter((modes) => new Set(modes).size === modes.length),
+  modes: Schema.Array(OctantMode).check(
+    Schema.isMaxLength(3),
+    Schema.makeFilter((modes) => new Set(modes).size === modes.length),
   ),
-}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+});
 export type NextMessageSuggestionsSetting = typeof NextMessageSuggestionsSetting.Type;
 
-export const ThreadTitleSource = Schema.Literal("first-message", "api", "subscription");
+export const ThreadTitleSource = Schema.Literals(["first-message", "api", "subscription"]);
 export type ThreadTitleSource = typeof ThreadTitleSource.Type;
 
 const ThreadTitleModel = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 
 export const ThreadTitleSettings = Schema.Struct({
   source: ThreadTitleSource,
   apiModel: Schema.optional(ThreadTitleModel),
   subscriptionModel: Schema.optional(ThreadTitleModel),
-}).annotations(strict);
+});
 export type ThreadTitleSettings = typeof ThreadTitleSettings.Type;
 
 /** How many host credentials one provider's pass-through list may name. */
@@ -829,9 +841,9 @@ export const MAX_PROVIDER_PASS_THROUGH = 64;
  * The name of a host environment variable a person lets through to a provider.
  * Octant's own (`OCTANT_*`) never reach a provider, so the list cannot name one.
  */
-export const HostCredentialName = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/),
-  Schema.filter((name) => !name.toUpperCase().startsWith("OCTANT_")),
+export const HostCredentialName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/),
+  Schema.makeFilter((name) => !name.toUpperCase().startsWith("OCTANT_")),
 );
 
 export const ShellSettings = Schema.Struct({
@@ -860,43 +872,43 @@ export const ShellSettings = Schema.Struct({
   sidebarWidth: SidebarWidth,
   contextSidebarWidth: ContextSidebarWidth,
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
-  sidebarMaterial: Schema.Literal("system", "opaque"),
+  sidebarMaterial: Schema.Literals(["system", "opaque"]),
   /**
    * Extends translucency from the sidebar to the workspace background.
    * Only takes effect when the sidebar itself
    * resolves translucent; a store persisted before this setting shipped
    * decodes to opaque, matching the workspace's prior always-solid look.
    */
-  workspaceMaterial: Schema.optionalWith(Schema.Literal("system", "opaque"), {
-    default: () => "opaque" as const,
-  }),
+  workspaceMaterial: Schema.Literals(["system", "opaque"]).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("opaque" as const)),
+  ),
   modeSwitcherPresentation: ModeSwitcherPresentation,
-  projectViewSwitcherPresentation: Schema.optionalWith(ProjectViewSwitcherPresentation, {
-    default: () => "dropdown" as const,
-  }),
-  sidebarBackground: Schema.optionalWith(SidebarBackground, {
-    default: () => DEFAULT_SIDEBAR_BACKGROUND,
-  }),
+  projectViewSwitcherPresentation: ProjectViewSwitcherPresentation.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("dropdown" as const)),
+  ),
+  sidebarBackground: SidebarBackground.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_SIDEBAR_BACKGROUND)),
+  ),
   /**
    * Which sidebar destinations are visible and in what order. A store
    * persisted before customization shipped decodes to the untouched shell:
    * default rows, workspace destinations in the account menu.
    */
-  sidebarDestinations: Schema.optionalWith(SidebarDestinationCustomization, {
-    default: () => ({ order: [], visibility: [] }),
-  }),
+  sidebarDestinations: SidebarDestinationCustomization.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({ order: [], visibility: [] }))),
+  ),
   /**
    * Projects the person pinned to the icon rail, in the order they pinned
    * them. A pin names a Project by id; one for a Project that no longer exists
    * is ignored when the rail draws and dropped the next time pins are saved. A
    * store persisted before pins shipped decodes to none.
    */
-  sidebarPinnedProjects: Schema.optionalWith(
-    Schema.Array(ProjectId).pipe(
-      Schema.filter((ids) => new Set(ids).size === ids.length),
-      Schema.maxItems(64),
+  sidebarPinnedProjects: Schema.Array(ProjectId).pipe(
+    Schema.check(
+      Schema.makeFilter((ids) => new Set(ids).size === ids.length),
+      Schema.isMaxLength(64),
     ),
-    { default: () => [] },
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   /**
    * Whether the sidebar ends in a More row that reveals the destinations set
@@ -904,40 +916,40 @@ export const ShellSettings = Schema.Struct({
    * the account menu, the home they kept before the More row shipped. A store
    * persisted before this setting shipped decodes to on.
    */
-  sidebarMoreEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  sidebarMoreEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /**
    * Whether Inbox, Running, To review, and Done today sit in the sidebar as
    * count tiles. Off keeps the plain Inbox and Board rows. A store persisted
    * before the tiles shipped decodes to on.
    */
-  sidebarCountTiles: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  sidebarCountTiles: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /**
    * Whether the spend ceiling row shows on threads and Projects. A ceiling that
    * is set always shows, so this only hides the way to set the first one. A
    * store persisted before the setting shipped decodes to off.
    */
-  spendCeilingShown: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  spendCeilingShown: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * The sidebar's thread filter: an icon that opens a field, or a field that
    * is always there. A store persisted before the choice decodes to the icon.
    */
-  sidebarSearchPresentation: Schema.optionalWith(SidebarSearchPresentation, {
-    default: () => "icon" as const,
-  }),
+  sidebarSearchPresentation: SidebarSearchPresentation.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("icon" as const)),
+  ),
   /**
    * What Hide sidebar leaves behind: a narrow rail of icons, or nothing (the
    * window chrome then offers Show sidebar). A store persisted before the
    * rail shipped decodes to the rail.
    */
-  sidebarCollapsedPresentation: Schema.optionalWith(SidebarCollapsedPresentation, {
-    default: () => "always" as const,
-  }),
-  environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
-    default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
-  }),
-  firstRunOnboarding: Schema.optionalWith(FirstRunOnboardingStatus, {
-    default: () => "pending" as const,
-  }),
+  sidebarCollapsedPresentation: SidebarCollapsedPresentation.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("always" as const)),
+  ),
+  environmentPresentationByMode: EnvironmentPresentationByMode.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE)),
+  ),
+  firstRunOnboarding: FirstRunOnboardingStatus.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("pending" as const)),
+  ),
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
@@ -946,16 +958,18 @@ export const ShellSettings = Schema.Struct({
    * into network traffic the person never asked for (data protection by
    * default). Turning the switch on records the choice explicitly.
    */
-  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  automaticUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * Whether the desktop app's quit keyboard shortcut needs a second press
    * before it quits. On by default, including for a store from before the
    * choice existed: the guard was always on then.
    */
-  quitShortcutNeedsSecondPress: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  computerUse: Schema.optionalWith(ComputerUseSettings, {
-    default: () => ({ enabled: true, automaticUpdates: true }),
-  }),
+  quitShortcutNeedsSecondPress: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(true)),
+  ),
+  computerUse: ComputerUseSettings.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({ enabled: true, automaticUpdates: true }))),
+  ),
   /**
    * Whether Skills & Extensions marketplace search, inspect, and install may
    * contact skills.sh, the npm registry, or GitHub for catalog packages. Off
@@ -964,7 +978,9 @@ export const ShellSettings = Schema.Struct({
    * store persisted before this preference shipped decodes to on, matching the
    * prior always-on fetch posture when the person searched or inspected.
    */
-  marketplaceFetchesEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  marketplaceFetchesEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(true)),
+  ),
   /**
    * How long a put-away thread rests in the Put away shelf before the host
    * archives it. `null` means never. Archiving keeps everything and is the
@@ -972,9 +988,8 @@ export const ShellSettings = Schema.Struct({
    * A store persisted before completion shipped
    * decodes to the week the feature was introduced with.
    */
-  completedThreadArchiveAfterDays: Schema.optionalWith(
-    Schema.NullOr(CompletedThreadArchiveAfterDays),
-    { default: () => DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS },
+  completedThreadArchiveAfterDays: Schema.NullOr(CompletedThreadArchiveAfterDays).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS)),
   ),
   /**
    * Whether a thread is put away once it is done: a Work or Code thread when
@@ -983,50 +998,50 @@ export const ShellSettings = Schema.Struct({
    * message brings it back. On by default, including for a store persisted
    * before the choice existed.
    */
-  putAwayThreadsWhenDone: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  putAwayThreadsWhenDone: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /**
    * Compact a thread once its window is this full, for threads Octant keeps
    * the conversation of: Octant Harness, and Chat and Work on a direct
    * endpoint. Near a full window these otherwise only drop older exchanges
    * from what they send. `null` means never.
    */
-  autoCompactOctantWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
-    default: () => DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
-  }),
+  autoCompactOctantWindowPercent: Schema.NullOr(AutoCompactWindowPercent).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT)),
+  ),
   /**
    * The same rule for threads a runtime keeps (Claude Code, Codex, and the
    * others), which compact by themselves at their own point. `null` leaves
    * that to the runtime.
    */
-  autoCompactRuntimeWindowPercent: Schema.optionalWith(Schema.NullOr(AutoCompactWindowPercent), {
-    default: () => null,
-  }),
+  autoCompactRuntimeWindowPercent: Schema.NullOr(AutoCompactWindowPercent).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(null)),
+  ),
   /**
    * Compact a thread once no turn has run on it for this many minutes, so the
    * next turn starts from a summary rather than re-reading a window whose
    * provider cache has long expired. `null`, the default, means never: a
    * compaction of a thread nobody returns to is pure cost.
    */
-  autoCompactIdleMinutes: Schema.optionalWith(Schema.NullOr(AutoCompactIdleMinutes), {
-    default: () => null,
-  }),
+  autoCompactIdleMinutes: Schema.NullOr(AutoCompactIdleMinutes).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(null)),
+  ),
   /**
    * Compact a thread, and write a summary another provider can carry, once a
    * turn leaves its provider's account window (a 5-hour or weekly limit) at
    * least this used. `null`, the default, means never: the summary spends a
    * little of the limit that is running out.
    */
-  autoCompactLimitPercent: Schema.optionalWith(Schema.NullOr(AutoCompactLimitPercent), {
-    default: () => null,
-  }),
+  autoCompactLimitPercent: Schema.NullOr(AutoCompactLimitPercent).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(null)),
+  ),
   /**
    * Cut a Chat, Work or Code turn off once its provider has sent no event for
    * this many minutes. `null` means never: only the person stops such a turn.
    * A store persisted before the setting existed decodes to the default.
    */
-  stalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
-    default: () => DEFAULT_STALLED_TURN_LIMIT_MINUTES,
-  }),
+  stalledTurnLimitMinutes: Schema.NullOr(StalledTurnLimitMinutes).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_STALLED_TURN_LIMIT_MINUTES)),
+  ),
   /**
    * The stalled-turn limit for a Work or Code turn at Full access outside
    * Strict. `null`, the default, means never, since at Full access Octant
@@ -1034,18 +1049,17 @@ export const ShellSettings = Schema.Struct({
    * {@link stalledTurnLimitMinutes} at every level. A store persisted before
    * the setting existed decodes to Off.
    */
-  fullAccessStalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
-    default: () => null,
-  }),
+  fullAccessStalledTurnLimitMinutes: Schema.NullOr(StalledTurnLimitMinutes).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(null)),
+  ),
   /**
    * The longest a provider tool call that has reported a start and no finish
    * pauses the stalled-turn clock, in minutes. `null` means no bound: such a
    * call pauses the clock until it finishes or the person stops the turn. A
    * store persisted before the setting existed decodes to the default.
    */
-  providerToolCallPauseLimitMinutes: Schema.optionalWith(
-    Schema.NullOr(ProviderToolCallPauseLimitMinutes),
-    { default: () => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES },
+  providerToolCallPauseLimitMinutes: Schema.NullOr(ProviderToolCallPauseLimitMinutes).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES)),
   ),
   /**
    * How long a session left running only background work after its turn is
@@ -1054,9 +1068,8 @@ export const ShellSettings = Schema.Struct({
    * stops the thread, or the host quits. A store persisted before the
    * setting existed decodes to the default.
    */
-  backgroundSessionIdleLimitMinutes: Schema.optionalWith(
-    Schema.NullOr(BackgroundSessionIdleLimitMinutes),
-    { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
+  backgroundSessionIdleLimitMinutes: Schema.NullOr(BackgroundSessionIdleLimitMinutes).pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES)),
   ),
   /**
    * Whether a provider launch outside Strict leaves the provider's own
@@ -1067,14 +1080,14 @@ export const ShellSettings = Schema.Struct({
    * before it, every launch set the telemetry guards, and Octant sends
    * nothing to a vendor the person did not turn on.
    */
-  providerTelemetry: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  providerTelemetry: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * Whether a provider launch outside Strict lets the provider check for and
    * install a newer version of itself. Off, the default, keeps every
    * self-update guard set, since Octant installs and updates provider CLIs
    * itself; Strict keeps them set whatever this says.
    */
-  providerSelfUpdate: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  providerSelfUpdate: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * Host credentials the person lets through to one provider launched outside
    * Strict, keyed by the provider's driver kind (`claude`, `codex`, an ACP
@@ -1084,20 +1097,17 @@ export const ShellSettings = Schema.Struct({
    * names them. Strict ignores this. Names only, never values. Empty by
    * default, including for a store persisted before the setting existed.
    */
-  providerCredentialPassThrough: Schema.optionalWith(
-    Schema.Record({
-      key: Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/)),
-      value: Schema.Array(HostCredentialName).pipe(Schema.maxItems(MAX_PROVIDER_PASS_THROUGH)),
-    }),
-    { default: () => ({}) },
-  ),
+  providerCredentialPassThrough: Schema.Record(
+    Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,63}$/)),
+    Schema.Array(HostCredentialName).check(Schema.isMaxLength(MAX_PROVIDER_PASS_THROUGH)),
+  ).pipe(Schema.withDecodingDefaultType(Effect.sync(() => ({})))),
   /**
    * How many wake-ups one thread may have waiting, missed ones included. A
    * store persisted before the setting existed decodes to the former fixed 8.
    */
-  threadWakeupsWaitingLimit: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_THREAD_WAKEUPS_WAITING_SETTING)),
-    { default: () => DEFAULT_THREAD_WAKEUPS_WAITING },
+  threadWakeupsWaitingLimit: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_THREAD_WAKEUPS_WAITING_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_THREAD_WAKEUPS_WAITING)),
   ),
   /**
    * Whether a wake-up that came due while the host was down or asleep runs
@@ -1105,7 +1115,9 @@ export const ShellSettings = Schema.Struct({
    * through otherwise never ran. Off journals it as missed and waits for the
    * person's Run now.
    */
-  threadWakeupsRunMissedOnReturn: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  threadWakeupsRunMissedOnReturn: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(true)),
+  ),
   /**
    * Whether the host arms a resume at the reset by itself when a provider's
    * usage limit stops a turn a person sent from this computer or a device
@@ -1124,78 +1136,97 @@ export const ShellSettings = Schema.Struct({
    * thread whose coordinator set no bounds of its own. Default to the former
    * fixed values.
    */
-  messageWakesPerHour: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_WAKES_PER_HOUR)),
-    { default: () => DEFAULT_COORDINATOR_WAKES_PER_HOUR },
+  messageWakesPerHour: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_COORDINATOR_WAKES_PER_HOUR })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_COORDINATOR_WAKES_PER_HOUR)),
   ),
-  messageWakeRounds: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_COORDINATOR_ROUNDS)),
-    { default: () => DEFAULT_COORDINATOR_ROUNDS },
+  messageWakeRounds: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_COORDINATOR_ROUNDS })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_COORDINATOR_ROUNDS)),
   ),
   /** How many coordinators one Code Project may hold, the planner included. */
-  coordinatorsPerProject: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_COORDINATORS_PER_PROJECT_SETTING)),
-    { default: () => MAX_COORDINATORS_PER_PROJECT },
+  coordinatorsPerProject: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_COORDINATORS_PER_PROJECT_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(MAX_COORDINATORS_PER_PROJECT)),
   ),
   /** Started wakes after which a pull-request watch ends. */
-  pullRequestWatchWakeLimit: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING)),
-    { default: () => CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES },
+  pullRequestWatchWakeLimit: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CODE_PROJECT_PULL_REQUEST_WATCH_WAKES_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES)),
   ),
   /** Days after which a pull-request watch ends, counted from when it began. */
-  pullRequestWatchDays: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING)),
-    { default: () => CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS },
+  pullRequestWatchDays: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CODE_PROJECT_PULL_REQUEST_WATCH_DAYS_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS)),
   ),
   /** Auto-fix's automatic attempts on one failure before it hands back. */
-  autoFixAttemptsPerFailure: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING)),
-    { default: () => CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS },
+  autoFixAttemptsPerFailure: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({
+        minimum: 1,
+        maximum: MAX_CODE_PROJECT_PULL_REQUEST_AUTO_FIX_ATTEMPTS_SETTING,
+      }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS)),
   ),
   /** Thread messages one turn may send to other threads under Strict. */
-  threadMessagesPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_THREAD_MESSAGES_PER_TURN_SETTING)),
-    { default: () => DEFAULT_THREAD_MESSAGES_PER_TURN },
+  threadMessagesPerTurn: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_THREAD_MESSAGES_PER_TURN_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_THREAD_MESSAGES_PER_TURN)),
   ),
   /** Sibling-thread `read` calls one turn may make under Strict. */
-  siblingThreadReadsPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_READS_PER_TURN_SETTING)),
-    { default: () => DEFAULT_SIBLING_THREAD_READS_PER_TURN },
+  siblingThreadReadsPerTurn: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SIBLING_THREAD_READS_PER_TURN_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_SIBLING_THREAD_READS_PER_TURN)),
   ),
   /** Sibling-thread `wait` calls one turn may make under Strict. */
-  siblingThreadWaitsPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING)),
-    { default: () => DEFAULT_SIBLING_THREAD_WAITS_PER_TURN },
+  siblingThreadWaitsPerTurn: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_SIBLING_THREAD_WAITS_PER_TURN_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_SIBLING_THREAD_WAITS_PER_TURN)),
   ),
   /** The longest one Browser wait may last under Strict, in minutes. */
-  browserWaitLimitMinutes: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING)),
-    { default: () => DEFAULT_BROWSER_WAIT_LIMIT_MINUTES },
+  browserWaitLimitMinutes: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_BROWSER_WAIT_LIMIT_MINUTES)),
   ),
   /** The longest one `wait` on a child run may block, in seconds. */
-  childRunWaitLimitSeconds: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING)),
-    { default: () => DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS },
+  childRunWaitLimitSeconds: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS)),
   ),
   /** Shield denials in a row after which the next call goes to the person. */
-  shieldDenialsInARow: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_IN_A_ROW_SETTING)),
-    { default: () => DEFAULT_SHIELD_DENIALS_IN_A_ROW },
+  shieldDenialsInARow: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_SHIELD_DENIALS_IN_A_ROW_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_SHIELD_DENIALS_IN_A_ROW)),
   ),
   /** Shield denials in one thread after which every call goes to the person. */
-  shieldDenialsPerThread: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_SHIELD_DENIALS_PER_THREAD_SETTING)),
-    { default: () => DEFAULT_SHIELD_DENIALS_PER_THREAD },
+  shieldDenialsPerThread: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_SHIELD_DENIALS_PER_THREAD_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_SHIELD_DENIALS_PER_THREAD)),
   ),
   /** How many hours late a follow-up may still run before it is recorded missed. */
-  followUpLatenessLimitHours: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING)),
-    { default: () => DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS },
+  followUpLatenessLimitHours: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_FOLLOW_UP_LATENESS_LIMIT_HOURS_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_FOLLOW_UP_LATENESS_LIMIT_HOURS)),
   ),
   /** Minutes a shown provider command may still be run with "Run this command once". */
-  toolingCommandConfirmMinutes: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING)),
-    { default: () => DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES },
+  toolingCommandConfirmMinutes: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_TOOLING_COMMAND_CONFIRM_MINUTES_SETTING }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_TOOLING_COMMAND_CONFIRM_MINUTES)),
   ),
   /**
    * "Start agent-created routines active at Full access": a routine an agent
@@ -1204,9 +1235,9 @@ export const ShellSettings = Schema.Struct({
    * without asking; off keeps such a routine paused until the person enables
    * it.
    */
-  agentRoutinesStartActiveAtFullAccess: Schema.optionalWith(Schema.Boolean, {
-    default: () => true,
-  }),
+  agentRoutinesStartActiveAtFullAccess: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(true)),
+  ),
   /**
    * The release ring to follow, once someone has chosen one.
    *
@@ -1225,83 +1256,91 @@ export const ShellSettings = Schema.Struct({
    */
   updateChannel: Schema.optional(AppUpdateChannel),
   /** Enabled Open in applications, in the order shown by the native shell. */
-  openInApplications: Schema.optionalWith(OpenInApplicationOrder, {
-    default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],
-  }),
-  transcriptTextSize: Schema.optionalWith(TranscriptTextSize, {
-    default: () => "small" as const,
-  }),
-  transcriptWidth: Schema.optionalWith(TranscriptWidth, {
-    default: () => "medium" as const,
-  }),
+  openInApplications: OpenInApplicationOrder.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [...DEFAULT_OPEN_IN_APPLICATIONS])),
+  ),
+  transcriptTextSize: TranscriptTextSize.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("small" as const)),
+  ),
+  transcriptWidth: TranscriptWidth.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("medium" as const)),
+  ),
   /** Retired: the plan-usage bar style, with the Inbox card (2026-11-18); stays optional so old rows decode. */
-  usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
+  usageBars: UsageBarStyle.pipe(Schema.withDecodingDefaultType(Effect.succeed("smooth" as const))),
   /**
    * How much of a turn's thinking and tool calls the transcript shows open.
    * A store persisted before the setting shipped decodes to low, the quiet
    * folding every transcript had before.
    */
-  replyDetail: Schema.optionalWith(ReplyDetailLevel, { default: () => "low" as const }),
+  replyDetail: ReplyDetailLevel.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("low" as const)),
+  ),
   /**
    * Threads that chose their own Reply detail level. A thread not listed
    * follows `replyDetail`, so changing the default never moves a thread that
    * chose. A store persisted before per-thread levels shipped decodes to none.
    */
-  threadReplyDetail: Schema.optionalWith(ThreadReplyDetails, { default: () => [] }),
-  showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  threadReplyDetail: ThreadReplyDetails.pipe(Schema.withDecodingDefaultType(Effect.sync(() => []))),
+  showThreadProviderIcons: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(true)),
+  ),
   /**
    * Whether the quiet stats line (tokens, cache hit, speed, first-token time,
    * cost) sits under the composer of every thread. Off hides only the line:
    * the per-turn detail stays reachable from the context meter. A store
    * persisted before the line shipped decodes to on.
    */
-  showThreadStats: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  showThreadStats: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /**
    * Which start-screen cards show and in what order, per device. A store
    * persisted before the cards shipped decodes to the registry's own defaults.
    */
-  homeCards: Schema.optionalWith(HomeCardCustomization, {
-    default: () => ({ order: [], visibility: [] }),
-  }),
+  homeCards: HomeCardCustomization.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({ order: [], visibility: [] }))),
+  ),
   /**
    * Which facts each sidebar view's thread rows show. A store persisted before
    * this shipped decodes to each view's own defaults — exactly what those rows
    * carried already — so nothing disappears or appears for an existing
    * install.
    */
-  sidebarRowProperties: Schema.optionalWith(SidebarRowProperties, {
-    default: () => ({
-      projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects },
-      activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },
-    }),
-  }),
+  sidebarRowProperties: SidebarRowProperties.pipe(
+    Schema.withDecodingDefaultType(
+      Effect.sync(() => ({
+        projects: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.projects },
+        activity: { ...DEFAULT_SIDEBAR_ROW_PROPERTIES.activity },
+      })),
+    ),
+  ),
   // Navigator settings section. A store persisted before Navigator shipped
   // decodes to the empty section — both roles absent — which the snapshot
   // reports as `unconfigured` rather than inventing a default model.
-  navigatorAssistant: Schema.optionalWith(NavigatorAssistantSettings, {
-    default: () => ({}),
-  }),
+  navigatorAssistant: NavigatorAssistantSettings.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
+  ),
   // Voice settings section. A store persisted before voice shipped decodes to
   // the empty section — no transcription or synthesis endpoint — which the
   // speech status reports as `unconfigured` rather than guessing an endpoint.
-  voice: Schema.optionalWith(VoiceSettings, {
-    default: () => ({}),
-  }),
+  voice: VoiceSettings.pipe(Schema.withDecodingDefaultType(Effect.sync(() => ({})))),
   // Custom image-generation settings section. A store persisted before this
   // shipped decodes to no custom sources — the same OpenAI-compatible-only
   // reuse Voice already uses, so nothing here can point at an arbitrary URL.
-  imageGeneration: Schema.optionalWith(ImageGenerationSettings, {
-    default: () => ({ customSources: [] }),
-  }),
+  imageGeneration: ImageGenerationSettings.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({ customSources: [] }))),
+  ),
   // A store persisted before video shipped decodes to no named profile, so
   // Full access uses the first ready video profile.
-  videoGeneration: Schema.optionalWith(VideoGenerationSettings, { default: () => ({}) }),
+  videoGeneration: VideoGenerationSettings.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
+  ),
   // Who is using this host. A store persisted before profiles shipped decodes
   // to the empty profile rather than a name guessed from the OS account: the
   // host was never asked, and saying so is the honest reading.
-  userProfile: Schema.optionalWith(UserProfile, {
-    default: () => ({ accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR }),
-  }),
+  userProfile: UserProfile.pipe(
+    Schema.withDecodingDefaultType(
+      Effect.sync(() => ({ accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR })),
+    ),
+  ),
   /**
    * Skill folders beyond the Project and user-global roots: a key provider's
    * own folder the person turned on, and folders they added by path. Each is
@@ -1309,27 +1348,26 @@ export const ShellSettings = Schema.Struct({
    * trusted or active because the folder is listed. Octant never adds one on
    * its own, and a store persisted before this shipped decodes to none.
    */
-  skillFolders: Schema.optionalWith(SkillFolderSettings, {
-    default: () => ({ providers: [], folders: [] }),
-  }),
+  skillFolders: SkillFolderSettings.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({ providers: [], folders: [] }))),
+  ),
   // Review, trust, and enablement state for discovered/bundled skills.
   // Persisted before this shipped decodes to empty, so skills remain unavailable
   // until explicitly reviewed. The key is the source-qualified skill identity,
   // which embeds its content digest; any content change produces a new key and
   // the prior activation is automatically revoked.
-  standaloneSkillActivations: Schema.optionalWith(StandaloneSkillActivationMap, {
-    default: () => ({}),
-  }),
+  standaloneSkillActivations: StandaloneSkillActivationMap.pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => ({}))),
+  ),
   /**
    * Origins the person approved with "always allow" for the bundled Browser
    * tool. A remembered origin opens without asking again — the browsing
    * context is still confined to it — until the person forgets it in
    * Settings. A store persisted before this shipped decodes to none.
    */
-  rememberedBrowserOrigins: Schema.optionalWith(
-    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
-    { default: () => [] },
-  ),
+  rememberedBrowserOrigins: Schema.Array(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  ).pipe(Schema.withDecodingDefaultType(Effect.sync(() => []))),
   /**
    * Sites the person approved with "always allow" on a page in a Project or
    * Personal Browser profile. A pair, never an origin alone: a remembered
@@ -1338,9 +1376,9 @@ export const ShellSettings = Schema.Struct({
    * `rememberedBrowserOrigins`. A pair whose origin is `ANY_BROWSER_ORIGIN` is
    * the answer "Allow all sites in this profile".
    */
-  rememberedBrowserProfileSites: Schema.optionalWith(
-    Schema.Array(RememberedBrowserProfileSite).pipe(Schema.maxItems(1_024)),
-    { default: () => [] },
+  rememberedBrowserProfileSites: Schema.Array(RememberedBrowserProfileSite).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   /**
    * "Let agents download files": whether a page the agent drives in its
@@ -1351,15 +1389,15 @@ export const ShellSettings = Schema.Struct({
    * and a terminal CLI cannot reach. A store persisted before this shipped
    * decodes to off.
    */
-  agentBrowserDownloads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  agentBrowserDownloads: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * How many Browser captures each thread keeps, newest first. A host
    * setting like the switch above. A store persisted before this shipped
    * decodes to the default.
    */
-  browserCapturesPerThread: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_CAPTURES_PER_THREAD)),
-    { default: () => DEFAULT_BROWSER_CAPTURES_PER_THREAD },
+  browserCapturesPerThread: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_BROWSER_CAPTURES_PER_THREAD })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_BROWSER_CAPTURES_PER_THREAD)),
   ),
   /**
    * Whether Chat and Work keep a bounded copy of each tool call's input and
@@ -1367,25 +1405,25 @@ export const ShellSettings = Schema.Struct({
    * records and leaves the ones already kept, which go with their threads. A
    * store persisted before this shipped decodes to on.
    */
-  keepToolCallRecords: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  keepToolCallRecords: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /**
    * How many tool calls one Chat or Work turn keeps as steps, and so keeps
    * records for, while it runs below Full access. A host setting. A turn
    * that calls more still runs; its later calls have no row. A store
    * persisted before this shipped decodes to the default.
    */
-  toolStepsPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_THREAD_TOOL_STEPS_SETTING)),
-    { default: () => DEFAULT_THREAD_TOOL_STEPS_PER_TURN },
+  toolStepsPerTurn: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_THREAD_TOOL_STEPS_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_THREAD_TOOL_STEPS_PER_TURN)),
   ),
   /**
    * The same limit for a Work turn that runs at Full access. `0`, the
    * default, is off: every call is kept, and the spend ceiling is what
    * bounds the turn. A person may set a number here too.
    */
-  fullAccessToolStepsPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(0, MAX_THREAD_TOOL_STEPS_SETTING)),
-    { default: () => 0 },
+  fullAccessToolStepsPerTurn: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 0, maximum: MAX_THREAD_TOOL_STEPS_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(0)),
   ),
   /**
    * How many turns a runtime may start by itself inside one person's turn
@@ -1394,52 +1432,54 @@ export const ShellSettings = Schema.Struct({
    * there is no such count. A store persisted before this shipped decodes to
    * the default.
    */
-  runtimeTurnsPerTurn: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_RUNTIME_TURNS_PER_TURN_SETTING)),
-    { default: () => DEFAULT_RUNTIME_TURNS_PER_TURN },
+  runtimeTurnsPerTurn: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_RUNTIME_TURNS_PER_TURN_SETTING })),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_RUNTIME_TURNS_PER_TURN)),
   ),
   /**
    * The largest file, in megabytes, an agent may upload through a page or have
    * held and saved from one. A store persisted before this shipped decodes to
    * the former fixed limit.
    */
-  browserTransferFileLimitMegabytes: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES)),
-    { default: () => DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES },
+  browserTransferFileLimitMegabytes: Schema.Int.pipe(
+    Schema.check(
+      Schema.isBetween({ minimum: 1, maximum: MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES }),
+    ),
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES)),
   ),
   /**
    * How many downloads one browsing context holds for the agent at once; the
    * oldest is discarded first. Decodes to the former fixed limit when absent.
    */
-  browserHeldDownloadLimit: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_HELD_DOWNLOAD_LIMIT)),
-    { default: () => MAX_BROWSER_HELD_DOWNLOADS },
+  browserHeldDownloadLimit: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_BROWSER_HELD_DOWNLOAD_LIMIT })),
+    Schema.withDecodingDefaultType(Effect.succeed(MAX_BROWSER_HELD_DOWNLOADS)),
   ),
   /**
    * How many files an agent may send in one upload. Decodes to the former
    * fixed count when absent.
    */
-  browserUploadFileCountLimit: Schema.optionalWith(
-    Schema.Int.pipe(Schema.between(1, MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT)),
-    { default: () => MAX_BROWSER_UPLOAD_FILES },
+  browserUploadFileCountLimit: Schema.Int.pipe(
+    Schema.check(Schema.isBetween({ minimum: 1, maximum: MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT })),
+    Schema.withDecodingDefaultType(Effect.succeed(MAX_BROWSER_UPLOAD_FILES)),
   ),
   /**
    * Uploads and download saves the person answered "Always allow". Grows only
    * through that approval answer, like `rememberedBrowserOrigins`; a settings
    * replacement may only forget entries.
    */
-  rememberedBrowserTransfers: Schema.optionalWith(
-    Schema.Array(RememberedBrowserTransfer).pipe(Schema.maxItems(1_024)),
-    { default: () => [] },
+  rememberedBrowserTransfers: Schema.Array(RememberedBrowserTransfer).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   /**
    * Applications the person approved with "Remember for this Project" for the
    * bundled Computer use tool below Full access. Grows only through the
    * approval decision path; a settings replacement may only forget entries.
    */
-  rememberedComputerUseApps: Schema.optionalWith(
-    Schema.Array(RememberedComputerUseApp).pipe(Schema.maxItems(1_024)),
-    { default: () => [] },
+  rememberedComputerUseApps: Schema.Array(RememberedComputerUseApp).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   /**
    * Projects whose agents' files into a disposable desktop on this machine
@@ -1447,91 +1487,93 @@ export const ShellSettings = Schema.Struct({
    * Grows only through the approval decision path; a settings replacement
    * may only forget entries.
    */
-  rememberedDesktopFileTransfers: Schema.optionalWith(
-    Schema.Array(RememberedDesktopFileTransfer).pipe(Schema.maxItems(1_024)),
-    { default: () => [] },
+  rememberedDesktopFileTransfers: Schema.Array(RememberedDesktopFileTransfer).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   /** Local opt-in; old grants never inherit a newly enabled native owner. */
-  persistentBrowserOwner: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  persistentBrowserOwner: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(false)),
+  ),
   /**
    * How long a paired device stays paired, counted from its pairing. A host
    * setting; changing it moves every still-current registration's deadline
    * to its pairing time plus the new length. A store persisted before this
    * shipped decodes to the 30 days every registration was given.
    */
-  pairedDeviceLifetime: Schema.optionalWith(PairedDeviceLifetime, {
-    default: () => DEFAULT_PAIRED_DEVICE_LIFETIME,
-  }),
-}).annotations(strict);
+  pairedDeviceLifetime: PairedDeviceLifetime.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_PAIRED_DEVICE_LIFETIME)),
+  ),
+});
 export type ShellSettings = typeof ShellSettings.Type;
 
 const WelcomeWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("welcome"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 const DraftThreadWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("draft-thread"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   projectId: Schema.optional(ProjectId),
-}).annotations(strict);
+});
 
 const SettingsWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("settings"),
   id: WorkspaceTabId,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 const ProjectWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("project"),
   id: WorkspaceTabId,
   projectId: ProjectId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 const ChatThreadWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("chat-thread"),
   id: WorkspaceTabId,
   threadId: ChatThreadId,
   mode: Schema.Literal("chat"),
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 const WorkThreadWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("work-thread"),
   id: WorkspaceTabId,
   threadId: WorkThreadId,
   mode: Schema.Literal("work"),
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   hostId: Schema.optional(HostId),
-}).annotations(strict);
+});
 
 const CodeWorkspaceTabFields = {
   id: WorkspaceTabId,
   threadId: CodeThreadId,
   mode: Schema.Literal("code"),
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   hostId: Schema.optional(HostId),
 } as const;
 
 const CodeOverviewWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-overview"),
   ...CodeWorkspaceTabFields,
-}).annotations(strict);
+});
 
 const CodeFileWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-file"),
   ...CodeWorkspaceTabFields,
   relativePath: CodeProjectFilePath,
-}).annotations(strict);
+});
 
 const codeThreadSurface = <K extends string>(kind: K) =>
-  Schema.Struct({ kind: Schema.Literal(kind), ...CodeWorkspaceTabFields }).annotations(strict);
+  Schema.Struct({ kind: Schema.Literal(kind), ...CodeWorkspaceTabFields });
 
 const CodeTerminalWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-terminal"),
@@ -1545,12 +1587,12 @@ const CodeTerminalWorkspaceTab = Schema.Struct({
   terminalId: Schema.optional(CodeTerminalId),
   /** The tab runs the thread's provider's own command-line program rather than a shell. */
   program: Schema.optional(Schema.Literal("provider")),
-}).annotations(strict);
+});
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),
   ...CodeWorkspaceTabFields,
   testRunId: Schema.optional(CodeTestRunId),
-}).annotations(strict);
+});
 const CodeGitWorkspaceTab = codeThreadSurface("code-git");
 /**
  * A Code thread's pull request tab. Without `pullRequest` it is the thread's
@@ -1563,7 +1605,7 @@ const CodePrWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-pr"),
   ...CodeWorkspaceTabFields,
   pullRequest: Schema.optional(ThreadBoardPullRequestIdentity),
-}).annotations(strict);
+});
 const CodeLocalReviewWorkspaceTab = codeThreadSurface("code-local-review");
 const AppleWorkbenchWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("apple-workbench"),
@@ -1574,15 +1616,15 @@ const AppleWorkbenchWorkspaceTab = Schema.Struct({
    * Absent on the Apple workbench command, which stays the evidence surface.
    */
   pane: Schema.optional(Schema.Literal("device")),
-}).annotations(strict);
+});
 
-const BoundMode = Schema.Literal("work", "code");
+const BoundMode = Schema.Literals(["work", "code"]);
 
 const BrowserWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("browser"),
   id: WorkspaceTabId,
   mode: BoundMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   threadId: Schema.optional(BrowserThreadId),
   /**
    * The one host-owned context this tab shows, when it was opened for a
@@ -1592,14 +1634,14 @@ const BrowserWorkspaceTab = Schema.Struct({
    * Browser surface, which stays one shared tab per thread.
    */
   contextId: Schema.optional(BrowserContextId),
-}).annotations(strict);
+});
 
 const FilesWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("files"),
   id: WorkspaceTabId,
   mode: BoundMode,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 /**
  * The Side Chat tab: the ask-about lane for exactly one source thread.
@@ -1619,10 +1661,10 @@ const SideChatWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("side-chat"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   sourceThreadId: MentionableThreadId,
   sidecarThreadId: Schema.optional(ChatThreadId),
-}).annotations(strict);
+});
 
 /**
  * A persistent preview tab. Carries only the opaque target identity the
@@ -1641,7 +1683,7 @@ const PreviewWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("preview"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   targetId: PreviewTargetId,
   projectId: ProjectId,
   hostId: PreviewHostId,
@@ -1650,7 +1692,7 @@ const PreviewWorkspaceTab = Schema.Struct({
   displayName: PreviewDisplayName,
   viewerState: Schema.optional(PreviewViewerState),
   boundCodeThreadId: Schema.optional(CodeThreadId),
-}).annotations(strict);
+});
 
 // A Canvas tab names the Project the Canvas belongs to, or `null` for a Chat
 // Canvas that belongs to its thread alone; the host restores the latter
@@ -1659,10 +1701,10 @@ const CanvasWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("canvas"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   canvasId: CanvasId,
   projectId: Schema.NullOr(ProjectId),
-}).annotations(strict);
+});
 
 /**
  * A subagent opened as a thread of its own: its conversation, headed by the
@@ -1675,10 +1717,10 @@ const AgentRunWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("agent-run"),
   id: WorkspaceTabId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   parentThreadId: AgentRunParentThreadId,
   runId: AgentRunId,
-}).annotations(strict);
+});
 
 /**
  * The authoritative surface a pane shows. Still named `WorkspaceTab` because
@@ -1689,7 +1731,7 @@ const AgentRunWorkspaceTab = Schema.Struct({
  * renderer may layer window-local thread navigation above the pane tree, but
  * those entries are not hidden WorkspaceTabs and carry no authority.
  */
-export const WorkspaceTab = Schema.Union(
+export const WorkspaceTab = Schema.Union([
   WelcomeWorkspaceTab,
   DraftThreadWorkspaceTab,
   SettingsWorkspaceTab,
@@ -1710,7 +1752,7 @@ export const WorkspaceTab = Schema.Union(
   PreviewWorkspaceTab,
   CanvasWorkspaceTab,
   AgentRunWorkspaceTab,
-);
+]);
 export type WorkspaceTab = typeof WorkspaceTab.Type;
 
 /**
@@ -1763,32 +1805,32 @@ interface EncodedWorkspaceSplit {
 
 type EncodedWorkspaceLayoutNode = EncodedWorkspacePane | EncodedWorkspaceSplit;
 
-export const WorkspaceLayoutNode: Schema.Schema<WorkspaceLayoutNode, EncodedWorkspaceLayoutNode> =
+export const WorkspaceLayoutNode: Schema.Codec<WorkspaceLayoutNode, EncodedWorkspaceLayoutNode> =
   Schema.suspend(() =>
-    Schema.Union(
+    Schema.Union([
       Schema.Struct({
         kind: Schema.Literal("pane"),
         nodeId: LayoutNodeId,
         paneId: PaneId,
         surface: WorkspaceTab,
-        context: Schema.optionalWith(WorkspaceContextKey, { exact: true }),
-      }).annotations(strict),
+        context: Schema.optionalKey(WorkspaceContextKey),
+      }),
       Schema.Struct({
         kind: Schema.Literal("split"),
         nodeId: LayoutNodeId,
-        orientation: Schema.Literal("horizontal", "vertical"),
+        orientation: Schema.Literals(["horizontal", "vertical"]),
         ratio: SplitRatio,
         first: WorkspaceLayoutNode,
         second: WorkspaceLayoutNode,
-      }).annotations(strict),
-    ),
+      }),
+    ]),
   );
 
 export const StowedWorkspaceLayout = Schema.Struct({
   context: WorkspaceContextKey,
   layout: WorkspaceLayoutNode,
   activePaneId: PaneId,
-}).annotations(strict);
+});
 export type StowedWorkspaceLayout = typeof StowedWorkspaceLayout.Type;
 
 export const WindowWorkspace = Schema.Struct({
@@ -1798,24 +1840,24 @@ export const WindowWorkspace = Schema.Struct({
     chat: WorkspaceLayoutNode,
     work: WorkspaceLayoutNode,
     code: WorkspaceLayoutNode,
-  }).annotations(strict),
+  }),
   activePaneIds: Schema.Struct({
     chat: PaneId,
     work: PaneId,
     code: PaneId,
-  }).annotations(strict),
+  }),
   contextByMode: Schema.Struct({
     chat: WorkspaceContextKey,
     work: WorkspaceContextKey,
     code: WorkspaceContextKey,
-  }).annotations(strict),
-  stowedLayouts: Schema.optionalWith(
-    Schema.Array(StowedWorkspaceLayout).pipe(Schema.maxItems(MAX_STOWED_WORKSPACE_LAYOUTS)),
-    { default: () => [] },
+  }),
+  stowedLayouts: Schema.Array(StowedWorkspaceLayout).pipe(
+    Schema.check(Schema.isMaxLength(MAX_STOWED_WORKSPACE_LAYOUTS)),
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
   ),
   focusedPaneId: Schema.optional(PaneId),
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type WindowWorkspace = typeof WindowWorkspace.Type;
 
 export const ShellBootstrap = Schema.Struct({
@@ -1827,7 +1869,7 @@ export const ShellBootstrap = Schema.Struct({
   settingsVersion: AggregateVersion,
   workspaceVersion: AggregateVersion,
   presentationVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type ShellBootstrap = typeof ShellBootstrap.Type;
 
 const ModeOperationFields = { mode: OctantMode } as const;
@@ -1840,43 +1882,26 @@ const ModeOperationFields = { mode: OctantMode } as const;
  */
 const OpensAlone = Schema.optional(Schema.Literal(true));
 
-export const WorkspaceOperation = Schema.Union(
-  /**
-   * Open a surface: if the same surface is already visible in some pane, that
-   * pane becomes active; otherwise the surface replaces the named pane's
-   * content. Opening never mints a duplicate view of a surface the workspace
-   * already shows.
-   */
+export const WorkspaceOperation = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("open-surface"),
     ...ModeOperationFields,
     paneId: PaneId,
     surface: WorkspaceTab,
     alone: OpensAlone,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("switch-project-surface"),
     ...ModeOperationFields,
     surface: WorkspaceTab,
     alone: OpensAlone,
-  }).annotations(strict),
-  /**
-   * A center drop: the named pane's surface is replaced outright. When the
-   * dropped surface is already visible in another pane, that pane collapses
-   * and its surface moves here, so the workspace never shows the same surface
-   * twice.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("replace-pane-surface"),
     ...ModeOperationFields,
     paneId: PaneId,
     surface: WorkspaceTab,
-  }).annotations(strict),
-  /**
-   * An edge drop: split the target pane and place the surface in the new pane.
-   * When the surface is already visible in another pane, that pane collapses
-   * and its surface moves into the split rather than duplicating.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("split-pane"),
     ...ModeOperationFields,
@@ -1885,135 +1910,130 @@ export const WorkspaceOperation = Schema.Union(
     splitNodeId: LayoutNodeId,
     newPaneNodeId: LayoutNodeId,
     newPaneId: PaneId,
-    orientation: Schema.Literal("horizontal", "vertical"),
-    placement: Schema.Literal("before", "after"),
+    orientation: Schema.Literals(["horizontal", "vertical"]),
+    placement: Schema.Literals(["before", "after"]),
     ratio: SplitRatio,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("close-pane"),
     ...ModeOperationFields,
     paneId: PaneId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resize-split"),
     ...ModeOperationFields,
     splitNodeId: LayoutNodeId,
     ratio: SplitRatio,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("focus-pane"),
     ...ModeOperationFields,
     paneId: PaneId,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unfocus-pane"), ...ModeOperationFields }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("reset-mode"), ...ModeOperationFields }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("set-active-mode"), ...ModeOperationFields }).annotations(
-    strict,
-  ),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unfocus-pane"), ...ModeOperationFields }),
+  Schema.Struct({ kind: Schema.Literal("reset-mode"), ...ModeOperationFields }),
+  Schema.Struct({ kind: Schema.Literal("set-active-mode"), ...ModeOperationFields }),
   Schema.Struct({
     kind: Schema.Literal("set-side-chat-sidecar"),
     ...ModeOperationFields,
     paneId: PaneId,
     sidecarThreadId: ChatThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type WorkspaceOperation = typeof WorkspaceOperation.Type;
 
-export const ShellCommand = Schema.Union(
+export const ShellCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("replace-settings"),
     windowId: WindowId,
     expectedVersion: AggregateVersion,
     settings: ShellSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("apply-workspace-operation"),
     windowId: WindowId,
     expectedVersion: AggregateVersion,
     operation: WorkspaceOperation,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-environment-presentation"),
     windowId: WindowId,
     expectedVersion: AggregateVersion,
     presentation: EnvironmentPresentationState,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ShellCommand = typeof ShellCommand.Type;
 
-export const ShellCommandResult = Schema.Union(
+export const ShellCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("settings-replaced"),
     settings: ShellSettings,
     version: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("workspace-replaced"),
     workspace: WindowWorkspace,
     version: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("environment-presentation-replaced"),
     presentation: EnvironmentPresentationState,
     version: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ShellCommandResult = typeof ShellCommandResult.Type;
 
-const FailureMessage = Schema.NonEmptyTrimmedString;
-export const ShellFailure = Schema.Union(
-  Schema.Struct({ category: Schema.Literal("invalid"), message: FailureMessage }).annotations(
-    strict,
-  ),
-  Schema.Struct({ category: Schema.Literal("unsupported"), message: FailureMessage }).annotations(
-    strict,
-  ),
+const FailureMessage = NonEmptyTrimmedString;
+export const ShellFailure = Schema.Union([
+  Schema.Struct({ category: Schema.Literal("invalid"), message: FailureMessage }),
+  Schema.Struct({ category: Schema.Literal("unsupported"), message: FailureMessage }),
   Schema.Struct({
     category: Schema.Literal("conflict"),
     message: FailureMessage,
     expectedVersion: AggregateVersion,
     actualVersion: AggregateVersion,
-  }).annotations(strict),
-  Schema.Struct({ category: Schema.Literal("unavailable"), message: FailureMessage }).annotations(
-    strict,
-  ),
+  }),
+  Schema.Struct({ category: Schema.Literal("unavailable"), message: FailureMessage }),
   Schema.Struct({
     category: Schema.Literal("cross-context"),
     message: FailureMessage,
     offerNewWindow: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     category: Schema.Literal("recovery-required"),
     message: FailureMessage,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ShellFailure = typeof ShellFailure.Type;
 
-export const ShellSettingsReplaced = Schema.Struct({ settings: ShellSettings }).annotations(strict);
+export const ShellSettingsReplaced = Schema.Struct({ settings: ShellSettings });
 export type ShellSettingsReplaced = typeof ShellSettingsReplaced.Type;
 
-export const WorkspaceLayoutReplaced = Schema.Struct({ workspace: WindowWorkspace }).annotations(
-  strict,
-);
+export const WorkspaceLayoutReplaced = Schema.Struct({ workspace: WindowWorkspace });
 export type WorkspaceLayoutReplaced = typeof WorkspaceLayoutReplaced.Type;
 
 export const EnvironmentPresentationReplaced = Schema.Struct({
   presentation: EnvironmentPresentationState,
-}).annotations(strict);
+});
 export type EnvironmentPresentationReplaced = typeof EnvironmentPresentationReplaced.Type;
 
-export const decodeWindowId = Schema.decodeUnknownSync(WindowId);
-export const decodeLayoutNodeId = Schema.decodeUnknownSync(LayoutNodeId);
-export const decodePaneId = Schema.decodeUnknownSync(PaneId);
-export const decodeWorkspaceTabId = Schema.decodeUnknownSync(WorkspaceTabId);
-export const decodeWorkspaceContextKey = Schema.decodeUnknownSync(WorkspaceContextKey);
+export const decodeWindowId = Schema.decodeUnknownSync(WindowId, STRICT_DECODE_OPTIONS);
+export const decodeLayoutNodeId = Schema.decodeUnknownSync(LayoutNodeId, STRICT_DECODE_OPTIONS);
+export const decodePaneId = Schema.decodeUnknownSync(PaneId, STRICT_DECODE_OPTIONS);
+export const decodeWorkspaceTabId = Schema.decodeUnknownSync(WorkspaceTabId, STRICT_DECODE_OPTIONS);
+export const decodeWorkspaceContextKey = Schema.decodeUnknownSync(
+  WorkspaceContextKey,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkspaceSurfaceDescriptor = Schema.decodeUnknownSync(
   WorkspaceSurfaceDescriptor,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkspaceSurfaceCatalog = Schema.decodeUnknownSync(WorkspaceSurfaceCatalog);
-export const decodeShellSettings = Schema.decodeUnknownSync(ShellSettings);
+export const decodeWorkspaceSurfaceCatalog = Schema.decodeUnknownSync(
+  WorkspaceSurfaceCatalog,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShellSettings = Schema.decodeUnknownSync(ShellSettings, STRICT_DECODE_OPTIONS);
 
 /**
  * The host's shell settings for a device the host's own person paired, which
@@ -2024,41 +2044,74 @@ export const SHELL_SETTINGS_PATH = "/api/shell/settings";
 export const ShellSettingsReading = Schema.Struct({
   settings: ShellSettings,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type ShellSettingsReading = typeof ShellSettingsReading.Type;
-export const decodeShellSettingsReading = Schema.decodeUnknownSync(ShellSettingsReading);
+export const decodeShellSettingsReading = Schema.decodeUnknownSync(
+  ShellSettingsReading,
+  STRICT_DECODE_OPTIONS,
+);
 export const ShellSettingsReplacement = Schema.Struct({
   expectedVersion: AggregateVersion,
   settings: ShellSettings,
-}).annotations(strict);
+});
 export type ShellSettingsReplacement = typeof ShellSettingsReplacement.Type;
-export const decodeShellSettingsReplacement = Schema.decodeUnknownSync(ShellSettingsReplacement);
-export const decodeWorkspaceTab = Schema.decodeUnknownSync(WorkspaceTab);
-export const decodeWorkspaceLayoutNode = Schema.decodeUnknownSync(WorkspaceLayoutNode);
-export const decodeWindowWorkspace = Schema.decodeUnknownSync(WindowWorkspace);
-export const decodeShellBootstrap = Schema.decodeUnknownSync(ShellBootstrap);
-export const decodeWorkspaceOperation = Schema.decodeUnknownSync(WorkspaceOperation);
-export const decodeShellCommand = Schema.decodeUnknownSync(ShellCommand);
-export const decodeShellCommandResult = Schema.decodeUnknownSync(ShellCommandResult);
-export const decodeShellFailure = Schema.decodeUnknownSync(ShellFailure);
-export const decodeShellSettingsReplaced = Schema.decodeUnknownSync(ShellSettingsReplaced);
-export const decodeWorkspaceLayoutReplaced = Schema.decodeUnknownSync(WorkspaceLayoutReplaced);
-export const decodeEnvironmentPresentation = Schema.decodeUnknownSync(EnvironmentPresentation);
+export const decodeShellSettingsReplacement = Schema.decodeUnknownSync(
+  ShellSettingsReplacement,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkspaceTab = Schema.decodeUnknownSync(WorkspaceTab, STRICT_DECODE_OPTIONS);
+export const decodeWorkspaceLayoutNode = Schema.decodeUnknownSync(
+  WorkspaceLayoutNode,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWindowWorkspace = Schema.decodeUnknownSync(
+  WindowWorkspace,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShellBootstrap = Schema.decodeUnknownSync(ShellBootstrap, STRICT_DECODE_OPTIONS);
+export const decodeWorkspaceOperation = Schema.decodeUnknownSync(
+  WorkspaceOperation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShellCommand = Schema.decodeUnknownSync(ShellCommand, STRICT_DECODE_OPTIONS);
+export const decodeShellCommandResult = Schema.decodeUnknownSync(
+  ShellCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShellFailure = Schema.decodeUnknownSync(ShellFailure, STRICT_DECODE_OPTIONS);
+export const decodeShellSettingsReplaced = Schema.decodeUnknownSync(
+  ShellSettingsReplaced,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkspaceLayoutReplaced = Schema.decodeUnknownSync(
+  WorkspaceLayoutReplaced,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeEnvironmentPresentation = Schema.decodeUnknownSync(
+  EnvironmentPresentation,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeEnvironmentTabPresentation = Schema.decodeUnknownSync(
   EnvironmentTabPresentation,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeEnvironmentPresentationByMode = Schema.decodeUnknownSync(
   EnvironmentPresentationByMode,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeEnvironmentPresentationState = Schema.decodeUnknownSync(
   EnvironmentPresentationState,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeEnvironmentCompactIdentity = Schema.decodeUnknownSync(
   EnvironmentCompactIdentity,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeEnvironmentSectionDescriptor = Schema.decodeUnknownSync(
   EnvironmentSectionDescriptor,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeEnvironmentPresentationReplaced = Schema.decodeUnknownSync(
   EnvironmentPresentationReplaced,
+  STRICT_DECODE_OPTIONS,
 );

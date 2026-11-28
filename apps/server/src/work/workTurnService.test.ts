@@ -2796,7 +2796,7 @@ describe("WorkTurnService", () => {
     it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
       let release: (() => void) | undefined;
       const adopt = vi.fn(() =>
-        Effect.async<typeof cursor>((resume) => {
+        Effect.callback<typeof cursor>((resume) => {
           release = () => resume(Effect.succeed(cursor));
         }),
       );
@@ -2856,7 +2856,7 @@ describe("WorkTurnService", () => {
     it("refuses an adoption whose Project was relinked while it ran, and gives the claim back", async () => {
       let finish: (() => void) | undefined;
       const adopt = vi.fn((_input: { readonly sessionId: unknown }) =>
-        Effect.async<typeof cursor>((resume) => {
+        Effect.callback<typeof cursor>((resume) => {
           finish = () => resume(Effect.succeed(cursor));
         }),
       );

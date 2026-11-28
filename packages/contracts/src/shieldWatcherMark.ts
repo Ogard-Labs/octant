@@ -1,7 +1,5 @@
 import { Schema } from "effect";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * What Octant Shield's Watcher found in outside content as it entered a
  * thread. Each label is a kind, never the text that earned it, so the Judge
@@ -16,7 +14,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * - `secret-env-print`: a shell call printed an environment variable whose
  *   name says it holds a secret.
  */
-export const ShieldWatcherLabel = Schema.Literal(
+export const ShieldWatcherLabel = Schema.Literals([
   "agent-instructions",
   "hidden-text",
   "encoded-text",
@@ -24,7 +22,7 @@ export const ShieldWatcherLabel = Schema.Literal(
   "fake-authority",
   "secret-path-read",
   "secret-env-print",
-);
+]);
 export type ShieldWatcherLabel = typeof ShieldWatcherLabel.Type;
 
 export const SHIELD_WATCHER_LABELS: ReadonlyArray<ShieldWatcherLabel> = ShieldWatcherLabel.literals;
@@ -35,7 +33,7 @@ export const SHIELD_WATCHER_LABELS: ReadonlyArray<ShieldWatcherLabel> = ShieldWa
  * set at Full access, where the mark is a quiet tag and never asks or blocks.
  */
 export const ToolOutsideContentMark = Schema.Struct({
-  labels: Schema.Array(ShieldWatcherLabel).pipe(Schema.maxItems(SHIELD_WATCHER_LABELS.length)),
+  labels: Schema.Array(ShieldWatcherLabel).check(Schema.isMaxLength(SHIELD_WATCHER_LABELS.length)),
   recordedOnly: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type ToolOutsideContentMark = typeof ToolOutsideContentMark.Type;

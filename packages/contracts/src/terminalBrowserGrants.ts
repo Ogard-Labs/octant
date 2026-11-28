@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeTerminalId, CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { WindowId } from "./shell";
@@ -6,8 +7,6 @@ export {
   TERMINAL_BROWSER_ENDPOINT_ENVIRONMENT,
   TERMINAL_BROWSER_TOKEN_ENVIRONMENT,
 } from "./terminalBrowserEnvironment";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The two variables a Code thread terminal is started with when its Browser
@@ -20,7 +19,10 @@ export const TERMINAL_BROWSER_GRANT_EVENT_NAMES = {
   revoked: "code.terminal-browser-grant-revoked@1",
 } as const;
 
-export const TerminalBrowserGrantId = Schema.UUID.pipe(Schema.brand("TerminalBrowserGrantId"));
+export const TerminalBrowserGrantId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("TerminalBrowserGrantId"),
+);
 export type TerminalBrowserGrantId = typeof TerminalBrowserGrantId.Type;
 
 /**
@@ -35,7 +37,7 @@ export type TerminalBrowserGrantId = typeof TerminalBrowserGrantId.Type;
  * nothing to switch off, and `grant-unavailable` is a host that could not start
  * the endpoint or record the grant.
  */
-export const TerminalBrowserGrantRefusalReason = Schema.Literal(
+export const TerminalBrowserGrantRefusalReason = Schema.Literals([
   "not-local-window",
   "not-a-code-thread",
   "thread-not-active",
@@ -44,7 +46,7 @@ export const TerminalBrowserGrantRefusalReason = Schema.Literal(
   "terminal-already-granted",
   "no-live-grant",
   "grant-unavailable",
-);
+]);
 export type TerminalBrowserGrantRefusalReason = typeof TerminalBrowserGrantRefusalReason.Type;
 
 /**
@@ -52,7 +54,7 @@ export type TerminalBrowserGrantRefusalReason = typeof TerminalBrowserGrantRefus
  * cleanly; one that crashed leaves the record open, and a restarted host mints
  * nothing by itself, so an open record never means a live grant.
  */
-export const TerminalBrowserGrantRevokeReason = Schema.Literal(
+export const TerminalBrowserGrantRevokeReason = Schema.Literals([
   "switched-off",
   "terminal-closed",
   "terminal-not-started",
@@ -61,7 +63,7 @@ export const TerminalBrowserGrantRevokeReason = Schema.Literal(
   "thread-deleted",
   "window-revoked",
   "host-stopped",
-);
+]);
 export type TerminalBrowserGrantRevokeReason = typeof TerminalBrowserGrantRevokeReason.Type;
 
 const GrantTarget = {
@@ -75,23 +77,23 @@ const GrantTarget = {
  * the endpoint address never appear here: they exist only in the environment
  * of the terminal the grant was minted for.
  */
-export const TerminalBrowserGrantOutcome = Schema.Union(
+export const TerminalBrowserGrantOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("granted"),
     ...GrantTarget,
     issuedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: TerminalBrowserGrantRefusalReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("revoked"),
     ...GrantTarget,
     reason: TerminalBrowserGrantRevokeReason,
     revokedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type TerminalBrowserGrantOutcome = typeof TerminalBrowserGrantOutcome.Type;
 
 /**
@@ -103,7 +105,7 @@ export const TerminalBrowserGrantIssued = Schema.Struct({
   ...GrantTarget,
   windowId: WindowId,
   issuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type TerminalBrowserGrantIssued = typeof TerminalBrowserGrantIssued.Type;
 
 export const TerminalBrowserGrantRevoked = Schema.Struct({
@@ -111,16 +113,22 @@ export const TerminalBrowserGrantRevoked = Schema.Struct({
   ...GrantTarget,
   reason: TerminalBrowserGrantRevokeReason,
   revokedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type TerminalBrowserGrantRevoked = typeof TerminalBrowserGrantRevoked.Type;
 
-export const decodeTerminalBrowserGrantId = Schema.decodeUnknownSync(TerminalBrowserGrantId);
+export const decodeTerminalBrowserGrantId = Schema.decodeUnknownSync(
+  TerminalBrowserGrantId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeTerminalBrowserGrantOutcome = Schema.decodeUnknownSync(
   TerminalBrowserGrantOutcome,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTerminalBrowserGrantIssued = Schema.decodeUnknownSync(
   TerminalBrowserGrantIssued,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTerminalBrowserGrantRevoked = Schema.decodeUnknownSync(
   TerminalBrowserGrantRevoked,
+  STRICT_DECODE_OPTIONS,
 );

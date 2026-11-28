@@ -52,7 +52,7 @@ async function collect(driver: ProviderDriver): Promise<ReadonlyArray<ProviderRu
     Effect.scoped(driver.acquire({ instanceId, projectRoot: "/tmp/octant-test" })),
   );
   return Array.from(
-    await Effect.runPromise(Stream.runCollect(Stream.unwrapScoped(connection.subscribe))),
+    await Effect.runPromise(Stream.runCollect(Stream.unwrap(connection.subscribe))),
   );
 }
 

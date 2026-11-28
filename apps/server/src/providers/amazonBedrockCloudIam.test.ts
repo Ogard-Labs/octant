@@ -16,7 +16,7 @@ import {
   type CredentialStore,
 } from "@octant/host-runtime";
 import { readCloudIamCredential } from "@octant/provider-sdk/cloud-iam";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
@@ -257,7 +257,7 @@ async function runTurn(
           modelId: BEDROCK_MODEL,
           executionPolicy: "approval-gated",
         });
-        const collector = yield* Effect.fork(
+        const collector = yield* Effect.forkChild(
           (yield* connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === session),
             Stream.takeUntil(
@@ -275,7 +275,7 @@ async function runTurn(
           attachments: [],
           tools: [],
         });
-        yield* collector.await;
+        yield* Fiber.await(collector);
       }),
     ),
   );

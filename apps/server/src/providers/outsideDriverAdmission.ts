@@ -182,8 +182,8 @@ interface RunningDriver {
   ended: boolean;
 }
 
-const decodeListing = Schema.decodeUnknownEither(OutsideProviderDriverListing);
-const decodeReference = Schema.decodeUnknownEither(OutsideProviderDriverReference);
+const decodeListing = Schema.decodeUnknownResult(OutsideProviderDriverListing);
+const decodeReference = Schema.decodeUnknownResult(OutsideProviderDriverReference);
 
 export class OutsideDriverAdmission {
   readonly #platform: string;
@@ -289,7 +289,7 @@ export class OutsideDriverAdmission {
     });
     if (target === undefined) return undefined;
     const decoded = decodeReference(target);
-    return decoded._tag === "Right" ? decoded.right : undefined;
+    return decoded._tag === "Success" ? decoded.success : undefined;
   }
 
   /**
@@ -354,7 +354,7 @@ export class OutsideDriverAdmission {
                 },
               }),
         });
-        return listing._tag === "Right" ? [listing.right] : [];
+        return listing._tag === "Success" ? [listing.success] : [];
       }),
     );
   }

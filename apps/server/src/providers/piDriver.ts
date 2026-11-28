@@ -106,7 +106,7 @@ interface PendingApproval {
 }
 
 interface PiRuntime {
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly client: PiClientPort;
   readonly managedTools: PiManagedToolsBridge | undefined;
   readonly version: string;
@@ -126,7 +126,7 @@ interface SessionState {
   readonly sessionId: ProviderSessionId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly modelId: string;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly client: PiClientPort;
   readonly removeEvent: () => void;
   readonly runtime: PiRuntime;
@@ -1257,7 +1257,7 @@ function makeConnection(
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingTools.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
-      subscribe: Stream.fromPubSub(queue, { scoped: true }),
+      subscribe: Effect.map(PubSub.subscribe(queue), Stream.fromSubscription),
       start: (input) =>
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map(() => ({
@@ -1397,7 +1397,7 @@ function makeConnection(
               // Pi answers a steer it will not take (an extension command, a
               // run that just ended) with a failed response, which leaves the
               // turn as it was.
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 error instanceof PiRpcFailure && error.kind === "remote"
                   ? Effect.succeed("unsupported" as const)
                   : Effect.fail(providerFailure(error)),
@@ -1437,7 +1437,7 @@ function makeConnection(
           // Pi writes the compaction entry only once the summary exists, but
           // a failed response does not say how far it got, so the session is
           // reported as possibly changed.
-          Effect.catchAll((error) =>
+          Effect.catch((error) =>
             error instanceof PiRpcFailure && error.kind === "remote"
               ? Effect.succeed({
                   kind: "failed" as const,
@@ -1530,7 +1530,7 @@ function makeConnection(
               return request(() =>
                 state.client.respondToUi(pending.uiId, { confirmed: false }),
               ).pipe(
-                Effect.zipRight(
+                Effect.andThen(
                   Effect.fail(failure("unauthorized", "This mode cannot approve Pi actions.")),
                 ),
               );

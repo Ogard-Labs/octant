@@ -252,9 +252,9 @@ export async function runWindowsForeground(
         }),
       ).pipe(Effect.provide(makePersistenceLive({ windowsProfile: { paths, files } })));
       const exit = await Effect.runPromiseExit(program, { signal });
-      if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
+      if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
         const failure =
-          Option.getOrUndefined(Cause.failureOption(exit.cause)) ?? Cause.squash(exit.cause);
+          Option.getOrUndefined(Cause.findErrorOption(exit.cause)) ?? Cause.squash(exit.cause);
         console.error(fatalStartupOutput(new WindowsForegroundStartupFailed(phase, failure)));
         process.exitCode = 1;
       }

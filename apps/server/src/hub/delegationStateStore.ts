@@ -24,7 +24,6 @@ import { Schema } from "effect";
 
 const SUBDIR = "hub";
 const FILE = "delegations.json";
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 /** The newest settled entries a host keeps of each kind; a person's own devices delegate rarely. */
 export const MAX_REMEMBERED_SETTLED = 1_024;
 /**
@@ -40,12 +39,12 @@ export const ReceivedDelegation = Schema.Struct({
   senderMemberId: HubMemberId,
   projectId: ProjectId,
   delegatedFrom: DelegatingThreadReference,
-  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  threadId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64))),
   /** The turn that carries the task; a follow-up a person runs on the thread is a different turn. */
-  turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  turnId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64))),
   authority: DelegatedAuthority,
   receivedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ReceivedDelegation = typeof ReceivedDelegation.Type;
 
 /**
@@ -53,10 +52,10 @@ export type ReceivedDelegation = typeof ReceivedDelegation.Type;
  * `awaiting-acceptance` while the target's answer to the request is lost. In
  * that case the target may already run the child, so the request stays on file.
  */
-export const SentDelegationState = Schema.Union(
+export const SentDelegationState = Schema.Union([
   DelegationChildState,
   Schema.Literal("awaiting-acceptance"),
-);
+]);
 export type SentDelegationState = typeof SentDelegationState.Type;
 
 /** A delegation this spoke sent for one of its own threads. */
@@ -66,8 +65,8 @@ export const SentDelegation = Schema.Struct({
   projectId: ProjectId,
   parent: Schema.Struct({
     mode: PeerDelegationMode,
-    threadId: Schema.UUID,
-  }).annotations(strict),
+    threadId: Schema.String.check(Schema.isGUID()),
+  }),
   authority: DelegatedAuthority,
   /** The child's state as the target last reported it. */
   state: SentDelegationState,
@@ -76,7 +75,9 @@ export const SentDelegation = Schema.Struct({
    * retried start can resend it under the same id. It is this host's own
    * content, erased with the parent thread, and dropped once the target answers.
    */
-  task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32_768))),
+  task: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(32_768))),
+  ),
   /** Set once the result was recorded on the parent thread; a result is recorded once. */
   resultRecorded: Schema.optional(Schema.Literal(true)),
   /**
@@ -91,7 +92,7 @@ export const SentDelegation = Schema.Struct({
    */
   result: Schema.optional(DelegationResult),
   sentAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SentDelegation = typeof SentDelegation.Type;
 
 /**
@@ -106,7 +107,7 @@ export const OwedCancel = Schema.Struct({
   /** When the request was sent, to tell a target that never got it from one still starting it. */
   sentAt: UtcTimestamp,
   owedSince: UtcTimestamp,
-}).annotations(strict);
+});
 export type OwedCancel = typeof OwedCancel.Type;
 
 export const DelegationState = Schema.Struct({
@@ -118,12 +119,12 @@ export const DelegationState = Schema.Struct({
    * reads as accepting, which every member did before the switch existed.
    */
   accepting: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type DelegationState = typeof DelegationState.Type;
 
 export const EMPTY_DELEGATION_STATE: DelegationState = { received: [], sent: [] };
 
-const decodeState = Schema.decodeUnknownSync(DelegationState);
+const decodeState = Schema.decodeUnknownSync(DelegationState, { onExcessProperty: "error" });
 
 /** A sent delegation nothing more will happen to: its result is recorded, or it ended. */
 export function isSettledSent(entry: SentDelegation): boolean {

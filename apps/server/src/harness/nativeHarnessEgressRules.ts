@@ -99,7 +99,7 @@ const decodeRuleHostOption = Schema.decodeUnknownOption(ToolEgressRuleHost);
 const decodeProposalHostOption = Schema.decodeUnknownOption(ToolEgressProposalHost);
 const decodeTimestampOption = Schema.decodeUnknownOption(UtcTimestamp);
 
-const PAYLOADS: Readonly<Record<string, Schema.Schema.AnyNoContext>> = {
+const PAYLOADS: Readonly<Record<string, Schema.Codec<unknown, unknown>>> = {
   [TOOL_EGRESS_EVENT_NAMES.threadRuleGranted]: ThreadEgressRuleGrantedPayload,
   [TOOL_EGRESS_EVENT_NAMES.threadRuleRevoked]: ThreadEgressRuleRevokedPayload,
   [TOOL_EGRESS_EVENT_NAMES.projectRuleGranted]: ProjectEgressRuleGrantedPayload,

@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CorrelationId, UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Structured agent-to-agent messages.
@@ -14,7 +13,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * a byte length only, the same discipline as ingested external content.
  */
 
-export const AgentMessageId = Schema.UUID.pipe(Schema.brand("AgentMessageId"));
+export const AgentMessageId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("AgentMessageId"),
+);
 export type AgentMessageId = typeof AgentMessageId.Type;
 
 /**
@@ -23,10 +25,13 @@ export type AgentMessageId = typeof AgentMessageId.Type;
  * separators and URL schemes, so a server bug cannot turn an endpoint into a
  * host path or an authority URL.
  */
-export const AgentMessageEndpointId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter(
-    (value) => !value.includes("\0") && !/[\\/]/.test(value) && !/^(file|https?):/i.test(value),
+export const AgentMessageEndpointId = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(128),
+    Schema.makeFilter(
+      (value) => !value.includes("\0") && !/[\\/]/.test(value) && !/^(file|https?):/i.test(value),
+    ),
   ),
   Schema.brand("AgentMessageEndpointId"),
 );
@@ -37,23 +42,26 @@ export const MAX_AGENT_MESSAGE_BODY_BYTES = 65_536;
 
 export const AgentMessageBodyReference = Schema.Struct({
   /** Opaque host-side reference to the stored body. Never the body itself. */
-  contentReference: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(512),
-    Schema.filter(
+  contentReference: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(512),
+    Schema.makeFilter(
       (value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"),
     ),
   ),
-  byteLength: Schema.Int.pipe(Schema.between(1, MAX_AGENT_MESSAGE_BODY_BYTES)),
-}).annotations(strict);
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_MESSAGE_BODY_BYTES }),
+  ),
+});
 export type AgentMessageBodyReference = typeof AgentMessageBodyReference.Type;
 
-export const AgentMessageRefuseReason = Schema.Literal(
+export const AgentMessageRefuseReason = Schema.Literals([
   "unauthorized",
   "depth-exceeded",
   "recipient-terminal",
   "oversize",
   "policy",
-);
+]);
 export type AgentMessageRefuseReason = typeof AgentMessageRefuseReason.Type;
 
 export const AGENT_MESSAGE_AGGREGATE = "agent-message";
@@ -83,7 +91,7 @@ export const AgentMessageSent = Schema.Struct({
   recipientRunId: Schema.optional(AgentMessageEndpointId),
   bodyReference: AgentMessageBodyReference,
   occurredAt: Schema.String,
-}).annotations(strict);
+});
 export type AgentMessageSent = typeof AgentMessageSent.Type;
 
 export const AgentMessageDelivered = Schema.Struct({
@@ -94,7 +102,7 @@ export const AgentMessageDelivered = Schema.Struct({
   recipientRunId: Schema.optional(AgentMessageEndpointId),
   bodyReference: AgentMessageBodyReference,
   occurredAt: Schema.String,
-}).annotations(strict);
+});
 export type AgentMessageDelivered = typeof AgentMessageDelivered.Type;
 
 export const AgentMessageRefused = Schema.Struct({
@@ -111,7 +119,7 @@ export const AgentMessageRefused = Schema.Struct({
   senderThreadId: Schema.optional(AgentMessageEndpointId),
   recipientThreadId: Schema.optional(AgentMessageEndpointId),
   occurredAt: Schema.String,
-}).annotations(strict);
+});
 export type AgentMessageRefused = typeof AgentMessageRefused.Type;
 
 export const AgentMessageExpired = Schema.Struct({
@@ -119,51 +127,73 @@ export const AgentMessageExpired = Schema.Struct({
   messageId: AgentMessageId,
   correlationId: CorrelationId,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentMessageExpired = typeof AgentMessageExpired.Type;
-export const decodeAgentMessageExpired = Schema.decodeUnknownSync(AgentMessageExpired);
+export const decodeAgentMessageExpired = Schema.decodeUnknownSync(
+  AgentMessageExpired,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const AgentMessageAcknowledged = Schema.Struct({
   kind: Schema.Literal("message-acknowledged"),
   messageId: AgentMessageId,
   correlationId: CorrelationId,
   occurredAt: Schema.String,
-}).annotations(strict);
+});
 export type AgentMessageAcknowledged = typeof AgentMessageAcknowledged.Type;
 
-export const decodeAgentMessageSent = Schema.decodeUnknownSync(AgentMessageSent);
-export const decodeAgentMessageDelivered = Schema.decodeUnknownSync(AgentMessageDelivered);
-export const decodeAgentMessageRefused = Schema.decodeUnknownSync(AgentMessageRefused);
-export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(AgentMessageAcknowledged);
-export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(AgentMessageEndpointId);
+export const decodeAgentMessageSent = Schema.decodeUnknownSync(
+  AgentMessageSent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentMessageDelivered = Schema.decodeUnknownSync(
+  AgentMessageDelivered,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentMessageRefused = Schema.decodeUnknownSync(
+  AgentMessageRefused,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentMessageAcknowledged = Schema.decodeUnknownSync(
+  AgentMessageAcknowledged,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentMessageEndpointId = Schema.decodeUnknownSync(
+  AgentMessageEndpointId,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** One bounded receipt petition; caller identity is supplied only by the host. */
 export const MAX_AGENT_MESSAGE_RECEIPT_IDS = 20;
 export const AgentMessageReceiptRequest = Schema.Struct({
-  action: Schema.Literal("acknowledge", "status"),
-  messageIds: Schema.Array(AgentMessageId).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_AGENT_MESSAGE_RECEIPT_IDS),
+  action: Schema.Literals(["acknowledge", "status"]),
+  messageIds: Schema.Array(AgentMessageId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_AGENT_MESSAGE_RECEIPT_IDS),
   ),
-}).annotations(strict);
+});
 export type AgentMessageReceiptRequest = typeof AgentMessageReceiptRequest.Type;
 export const decodeAgentMessageReceiptRequest = Schema.decodeUnknownSync(
   AgentMessageReceiptRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 /** One message in the messaging bounds view: a status, never a body. */
 export const AgentMessageStatusSummary = Schema.Struct({
   messageId: AgentMessageId,
   senderThreadId: AgentMessageEndpointId,
   recipientThreadId: AgentMessageEndpointId,
-  state: Schema.Literal("in-flight", "delivered", "refused", "acknowledged", "expired"),
+  state: Schema.Literals(["in-flight", "delivered", "refused", "acknowledged", "expired"]),
   refuseReason: Schema.optional(AgentMessageRefuseReason),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentMessageStatusSummary = typeof AgentMessageStatusSummary.Type;
-export const decodeAgentMessageStatusSummary = Schema.decodeUnknownSync(AgentMessageStatusSummary);
+export const decodeAgentMessageStatusSummary = Schema.decodeUnknownSync(
+  AgentMessageStatusSummary,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const MAX_AGENT_MESSAGE_STATUS_SUMMARIES = 20;
 
@@ -178,12 +208,13 @@ export const AgentMessageMessagingFacts = Schema.Struct({
   maxOpenInFlightPerSender: NonNegativeInt,
   delivered: NonNegativeInt,
   refused: NonNegativeInt,
-  recent: Schema.Array(AgentMessageStatusSummary).pipe(
-    Schema.maxItems(MAX_AGENT_MESSAGE_STATUS_SUMMARIES),
+  recent: Schema.Array(AgentMessageStatusSummary).check(
+    Schema.isMaxLength(MAX_AGENT_MESSAGE_STATUS_SUMMARIES),
   ),
-}).annotations(strict);
+});
 export type AgentMessageMessagingFacts = typeof AgentMessageMessagingFacts.Type;
 
 export const decodeAgentMessageMessagingFacts = Schema.decodeUnknownSync(
   AgentMessageMessagingFacts,
+  STRICT_DECODE_OPTIONS,
 );

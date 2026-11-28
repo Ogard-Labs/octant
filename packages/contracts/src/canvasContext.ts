@@ -1,14 +1,16 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 const CanvasId = brandedUuid("CanvasId");
 const CanvasVersionId = brandedUuid("CanvasVersionId");
-const CanvasDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.filter((value) => !/[\\/]/.test(value), {
-    message: () => "Canvas display names must not contain path separators.",
+const CanvasDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.makeFilter((value) => !/[\\/]/.test(value), {
+    message: "Canvas display names must not contain path separators.",
   }),
 );
 
@@ -27,11 +29,17 @@ export const CanvasContextSelection = Schema.Struct({
   id: CanvasContextSelectionId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   displayName: CanvasDisplayName,
   scope: Schema.Literal("whole-canvas"),
-}).annotations(strict);
+});
 export type CanvasContextSelection = typeof CanvasContextSelection.Type;
 
-export const decodeCanvasContextSelectionId = Schema.decodeUnknownSync(CanvasContextSelectionId);
-export const decodeCanvasContextSelection = Schema.decodeUnknownSync(CanvasContextSelection);
+export const decodeCanvasContextSelectionId = Schema.decodeUnknownSync(
+  CanvasContextSelectionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasContextSelection = Schema.decodeUnknownSync(
+  CanvasContextSelection,
+  STRICT_DECODE_OPTIONS,
+);

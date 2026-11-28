@@ -4,7 +4,7 @@ import {
   type ThreadMoveThreadStatus,
 } from "@octant/contracts";
 import { memberThreadPage } from "@octant/domain";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 import { validateExternalBrowserUrl } from "./externalBrowserUrl";
 import {
   sendHubAdministrationOperation,
@@ -15,7 +15,7 @@ export type MovedThreadOpenThereOutcome =
   | { readonly status: "opened" }
   | { readonly status: "refused" };
 
-const decodeThread = Schema.decodeUnknownEither(MovedThreadReference);
+const decodeThread = Schema.decodeUnknownResult(MovedThreadReference);
 
 /**
  * Open there on a moved thread's tombstone: the person's default browser opens
@@ -34,9 +34,9 @@ export async function openMovedThreadThere(input: {
 }): Promise<MovedThreadOpenThereOutcome> {
   const refused = { status: "refused" } as const;
   const thread = decodeThread(input.thread);
-  if (Either.isLeft(thread)) return refused;
+  if (Result.isFailure(thread)) return refused;
   const answer = await sendHubAdministrationOperation(input.runtime, "thread-move-status", {
-    thread: thread.right,
+    thread: thread.success,
   });
   if (answer.status !== 200) return refused;
   const departed = departedOf(answer.body);

@@ -6,18 +6,17 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** The command-line tools whose sessions the host can read. */
-export const TerminalSessionProvider = Schema.Literal("claude", "codex");
+export const TerminalSessionProvider = Schema.Literals(["claude", "codex"]);
 export type TerminalSessionProvider = typeof TerminalSessionProvider.Type;
 
 /** The tool's own session id: a file name, so it never carries a path. */
 export const TerminalSessionId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9-]{7,127}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9-]{7,127}$/)),
   Schema.brand("TerminalSessionId"),
 );
 export type TerminalSessionId = typeof TerminalSessionId.Type;
@@ -33,17 +32,21 @@ export const MAX_IMPORTED_TERMINAL_ENTRY_LENGTH = 8_000;
  */
 export const MAX_IMPORTED_TERMINAL_TEXT_LENGTH = 60_000;
 
-const TerminalSessionTitle = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TERMINAL_SESSION_TITLE_LENGTH),
+const TerminalSessionTitle = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TERMINAL_SESSION_TITLE_LENGTH),
 );
 
 export const TerminalSessionContinuity = Schema.Struct({
   kind: Schema.Literal("text-handoff"),
   native: Schema.Literal("unavailable"),
   reason: Schema.Literal("account-binding-unavailable"),
-}).annotations(strict);
+});
 export type TerminalSessionContinuity = typeof TerminalSessionContinuity.Type;
-const TerminalSessionWorkingDirectory = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096));
+const TerminalSessionWorkingDirectory = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4096),
+);
 
 /** One session in a Project's folder, as the picker lists it. */
 export const TerminalSessionSummary = Schema.Struct({
@@ -53,33 +56,33 @@ export const TerminalSessionSummary = Schema.Struct({
   workingDirectory: Schema.optional(TerminalSessionWorkingDirectory),
   continuity: Schema.optional(TerminalSessionContinuity),
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type TerminalSessionSummary = typeof TerminalSessionSummary.Type;
 
 export const TerminalSessionListRequest = Schema.Struct({
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type TerminalSessionListRequest = typeof TerminalSessionListRequest.Type;
 
 export const TerminalSessionListResponse = Schema.Struct({
-  sessions: Schema.Array(TerminalSessionSummary).pipe(
-    Schema.maxItems(MAX_TERMINAL_SESSIONS_LISTED),
+  sessions: Schema.Array(TerminalSessionSummary).check(
+    Schema.isMaxLength(MAX_TERMINAL_SESSIONS_LISTED),
   ),
-}).annotations(strict);
+});
 export type TerminalSessionListResponse = typeof TerminalSessionListResponse.Type;
 
 /** What a create command names to start the new thread from a session. */
 export const TerminalSessionImportRequest = Schema.Struct({
   provider: TerminalSessionProvider,
   sessionId: TerminalSessionId,
-  continuation: Schema.optional(Schema.Literal("native", "text-handoff")),
-}).annotations(strict);
+  continuation: Schema.optional(Schema.Literals(["native", "text-handoff"])),
+});
 export type TerminalSessionImportRequest = typeof TerminalSessionImportRequest.Type;
 
 export const ImportedTerminalEntry = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
-  text: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_IMPORTED_TERMINAL_ENTRY_LENGTH)),
-}).annotations(strict);
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.NonEmptyString.check(Schema.isMaxLength(MAX_IMPORTED_TERMINAL_ENTRY_LENGTH)),
+});
 export type ImportedTerminalEntry = typeof ImportedTerminalEntry.Type;
 
 /**
@@ -94,22 +97,22 @@ export const ImportedTerminalSession = Schema.Struct({
   continuity: Schema.optional(TerminalSessionContinuity),
   updatedAt: UtcTimestamp,
   importedAt: UtcTimestamp,
-  entries: Schema.Array(ImportedTerminalEntry).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_IMPORTED_TERMINAL_ENTRIES),
+  entries: Schema.Array(ImportedTerminalEntry).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_IMPORTED_TERMINAL_ENTRIES),
   ),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type ImportedTerminalSession = typeof ImportedTerminalSession.Type;
 
 export const TerminalSessionHistoryRequest = Schema.Struct({
-  threadId: Schema.UUID,
-}).annotations(strict);
+  threadId: GuidString,
+});
 export type TerminalSessionHistoryRequest = typeof TerminalSessionHistoryRequest.Type;
 
 export const TerminalSessionHistoryResponse = Schema.Struct({
   imported: Schema.optional(ImportedTerminalSession),
-}).annotations(strict);
+});
 export type TerminalSessionHistoryResponse = typeof TerminalSessionHistoryResponse.Type;
 
 /** Journaled on the thread's own import aggregate (aggregate id = thread id). */
@@ -120,31 +123,42 @@ export const THREAD_TERMINAL_SESSION_EVENT_NAMES = {
 } as const;
 
 export const TerminalSessionImportedPayload = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   imported: ImportedTerminalSession,
-}).annotations(strict);
+});
 export type TerminalSessionImportedPayload = typeof TerminalSessionImportedPayload.Type;
 
 /** The first turn that carried the history to the model was admitted. */
 export const TerminalSessionDeliveredPayload = Schema.Struct({
-  threadId: Schema.UUID,
-}).annotations(strict);
+  threadId: GuidString,
+});
 export type TerminalSessionDeliveredPayload = typeof TerminalSessionDeliveredPayload.Type;
 
 export const decodeTerminalSessionListRequest = Schema.decodeUnknownSync(
   TerminalSessionListRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTerminalSessionListResponse = Schema.decodeUnknownSync(
   TerminalSessionListResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTerminalSessionHistoryRequest = Schema.decodeUnknownSync(
   TerminalSessionHistoryRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeTerminalSessionHistoryResponse = Schema.decodeUnknownSync(
   TerminalSessionHistoryResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeImportedTerminalSession = Schema.decodeUnknownSync(ImportedTerminalSession);
+export const decodeImportedTerminalSession = Schema.decodeUnknownSync(
+  ImportedTerminalSession,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeTerminalSessionImportedPayload = Schema.decodeUnknownSync(
   TerminalSessionImportedPayload,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeTerminalSessionId = Schema.decodeUnknownSync(TerminalSessionId);
+export const decodeTerminalSessionId = Schema.decodeUnknownSync(
+  TerminalSessionId,
+  STRICT_DECODE_OPTIONS,
+);

@@ -29,7 +29,7 @@ const input = {
 } as const;
 
 describe("what an agent may ask for", () => {
-  const decode = Schema.decodeUnknownSync(ThreadSecretRequestInput);
+  const decode = Schema.decodeUnknownSync(ThreadSecretRequestInput, { onExcessProperty: "error" });
 
   it("accepts a request that names only what it needs", () => {
     expect(decode(input)).toEqual(input);
@@ -125,7 +125,7 @@ describe("what an agent may ask for", () => {
 });
 
 describe("a command run with a secret", () => {
-  const decode = Schema.decodeUnknownSync(ThreadSecretRunInput);
+  const decode = Schema.decodeUnknownSync(ThreadSecretRunInput, { onExcessProperty: "error" });
   const run = { operation: "run-with-secret", command: "deploy", secrets: ["DEPLOY_TOKEN"] };
 
   it("names the secrets it is given and never carries one", () => {
@@ -152,7 +152,7 @@ describe("a command run with a secret", () => {
 });
 
 describe("what the agent gets back", () => {
-  const decode = Schema.decodeUnknownSync(ThreadSecretRequestResult);
+  const decode = Schema.decodeUnknownSync(ThreadSecretRequestResult, { onExcessProperty: "error" });
 
   it.each([
     { status: "saved", delivery: "handle", name: "DEPLOY_TOKEN", handle: ID },
@@ -234,8 +234,10 @@ describe("the card and its private answer", () => {
     remembered: [],
     state: "pending",
   };
-  const decodeCard = Schema.decodeUnknownSync(ThreadSecretRequestCard);
-  const decodeAnswer = Schema.decodeUnknownSync(ThreadSecretAnswer);
+  const decodeCard = Schema.decodeUnknownSync(ThreadSecretRequestCard, {
+    onExcessProperty: "error",
+  });
+  const decodeAnswer = Schema.decodeUnknownSync(ThreadSecretAnswer, { onExcessProperty: "error" });
 
   it("refuses a value on the card", () => {
     expect(decodeCard(card)).toEqual(card);
@@ -303,14 +305,14 @@ describe("the card and its private answer", () => {
       delivery: "environment",
       remainingMs: 60_000,
     };
-    const decode = Schema.decodeUnknownSync(ActiveThreadSecret);
+    const decode = Schema.decodeUnknownSync(ActiveThreadSecret, { onExcessProperty: "error" });
     expect(decode(active)).toEqual(active);
     expect(() => decode({ ...active, value: "private" })).toThrow();
   });
 });
 
 describe("what the journal keeps", () => {
-  const decode = Schema.decodeUnknownSync(ThreadSecretJournalRecord);
+  const decode = Schema.decodeUnknownSync(ThreadSecretJournalRecord, { onExcessProperty: "error" });
   const common = {
     secretId: ID,
     threadId: "thread",
@@ -348,7 +350,7 @@ describe("what the journal keeps", () => {
 });
 
 describe("what the host remembers", () => {
-  const decode = Schema.decodeUnknownSync(ThreadSecretMemoryRecord);
+  const decode = Schema.decodeUnknownSync(ThreadSecretMemoryRecord, { onExcessProperty: "error" });
 
   it("is a name and where its value is, never a value or a thread", () => {
     const records = [

@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ParseResult } from "effect";
+import { Schema } from "effect";
 import {
   decodeSimulatorDeviceInput,
   decodeSimulatorDeviceWatch,
@@ -225,7 +225,7 @@ export function simulatorDeviceBrokerHandler(
       if (typeof body !== "object" || body === null || !("input" in body)) return failure(400);
       return Response.json(await deliver(decodeSimulatorDeviceInput(body.input), request.signal));
     } catch (error) {
-      return failure(ParseResult.isParseError(error) || error instanceof SyntaxError ? 400 : 503);
+      return failure(Schema.isSchemaError(error) || error instanceof SyntaxError ? 400 : 503);
     }
   };
 }

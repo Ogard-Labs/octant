@@ -71,7 +71,7 @@ describe("ContextHarnessService integration", () => {
           acquire: () => Effect.die("Unused"),
           contextFacts: {
             observeModelLimits: () =>
-              Effect.sync(() => release?.()).pipe(Effect.zipRight(Effect.never)),
+              Effect.sync(() => release?.()).pipe(Effect.andThen(Effect.never)),
             observeServiceLimits: () => Effect.succeed(serviceLimits()),
           },
         },

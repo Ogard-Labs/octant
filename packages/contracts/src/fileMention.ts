@@ -1,10 +1,11 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeThreadId } from "./code";
 import { ProjectId } from "./projects";
 import { WorkThreadId } from "./workThreads";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const textEncoder = new TextEncoder();
 
 /**
@@ -28,24 +29,26 @@ export const MAX_FILE_MENTION_RELATIVE_PATH_BYTES = 4_096;
  * before any read, so a renderer that bypasses the typeahead is still refused.
  */
 export const FileMentionPath = Schema.String.pipe(
-  Schema.filter((value) => {
-    if (
-      value.length === 0 ||
-      value.includes("\0") ||
-      value.includes("\\") ||
-      value === "/" ||
-      value.startsWith("//") ||
-      value.endsWith("/") ||
-      value.normalize("NFC") !== value ||
-      textEncoder.encode(value).byteLength > MAX_FILE_MENTION_RELATIVE_PATH_BYTES
-    ) {
-      return false;
-    }
-    const components = (value.startsWith("/") ? value.slice(1) : value).split("/");
-    return components.every(
-      (component) => component !== "" && component !== "." && component !== "..",
-    );
-  }),
+  Schema.check(
+    Schema.makeFilter((value) => {
+      if (
+        value.length === 0 ||
+        value.includes("\0") ||
+        value.includes("\\") ||
+        value === "/" ||
+        value.startsWith("//") ||
+        value.endsWith("/") ||
+        value.normalize("NFC") !== value ||
+        textEncoder.encode(value).byteLength > MAX_FILE_MENTION_RELATIVE_PATH_BYTES
+      ) {
+        return false;
+      }
+      const components = (value.startsWith("/") ? value.slice(1) : value).split("/");
+      return components.every(
+        (component) => component !== "" && component !== "." && component !== "..",
+      );
+    }),
+  ),
   Schema.brand("FileMentionPath"),
 );
 export type FileMentionPath = typeof FileMentionPath.Type;
@@ -64,30 +67,30 @@ export const MAX_FILE_MENTION_CHARACTERS = 8_000;
  * variant: Chat Projects have no filesystem authority, so this surface cannot
  * even be expressed there.
  */
-export const FileMentionScope = Schema.Union(
+export const FileMentionScope = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("work"),
     threadId: WorkThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type FileMentionScope = typeof FileMentionScope.Type;
 
 export const FileMentionCandidate = Schema.Struct({
   path: FileMentionPath,
-  kind: Schema.Literal("file", "directory"),
-}).annotations(strict);
+  kind: Schema.Literals(["file", "directory"]),
+});
 export type FileMentionCandidate = typeof FileMentionCandidate.Type;
 
 export const ResolvedFileMention = Schema.Struct({
   path: FileMentionPath,
-  text: Schema.String.pipe(Schema.maxLength(MAX_FILE_MENTION_CHARACTERS)),
+  text: Schema.String.check(Schema.isMaxLength(MAX_FILE_MENTION_CHARACTERS)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type ResolvedFileMention = typeof ResolvedFileMention.Type;
 
 /**
@@ -96,8 +99,8 @@ export type ResolvedFileMention = typeof ResolvedFileMention.Type;
  * still accepted here so policy can refuse it as `out-of-root` rather than
  * failing the command as invalid.
  */
-export const FileMentionPathInput = Schema.String.pipe(
-  Schema.filter(
+export const FileMentionPathInput = Schema.String.check(
+  Schema.makeFilter(
     (value) =>
       value.length > 0 &&
       textEncoder.encode(value).byteLength <= MAX_FILE_MENTION_RELATIVE_PATH_BYTES,
@@ -111,8 +114,8 @@ export type FileMentionPathInput = typeof FileMentionPathInput.Type;
  */
 export const UnavailableFileMention = Schema.Struct({
   path: FileMentionPathInput,
-  reason: Schema.Literal("out-of-root", "not-found", "unauthorized", "unsupported-mode"),
-}).annotations(strict);
+  reason: Schema.Literals(["out-of-root", "not-found", "unauthorized", "unsupported-mode"]),
+});
 export type UnavailableFileMention = typeof UnavailableFileMention.Type;
 
 /**
@@ -121,88 +124,106 @@ export type UnavailableFileMention = typeof UnavailableFileMention.Type;
  * paths into bounded read-only contents at send time. Both refuse a path
  * outside the root before any file bytes are read.
  */
-export const FolderMentionScope = Schema.Union(
+export const FolderMentionScope = Schema.Union([
   FileMentionScope,
   Schema.Struct({
-    mode: Schema.Literal("code-draft", "work-draft"),
+    mode: Schema.Literals(["code-draft", "work-draft"]),
     projectId: ProjectId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type FolderMentionScope = typeof FolderMentionScope.Type;
 
-export const FileMentionCommand = Schema.Union(
+export const FileMentionCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("inspect-folder-mentions"),
     requestId: FileMentionRequestId,
     scope: FolderMentionScope,
-    paths: Schema.Array(FileMentionPathInput).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    paths: Schema.Array(FileMentionPathInput).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("complete-file-mentions"),
     requestId: FileMentionRequestId,
     scope: FileMentionScope,
-    query: Schema.String.pipe(Schema.maxLength(200)),
-  }).annotations(strict),
+    query: Schema.String.check(Schema.isMaxLength(200)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resolve-file-mentions"),
     requestId: FileMentionRequestId,
     scope: FileMentionScope,
-    paths: Schema.Array(FileMentionPathInput).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    paths: Schema.Array(FileMentionPathInput).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type FileMentionCommand = typeof FileMentionCommand.Type;
 
-export const FileMentionCommandResult = Schema.Union(
+export const FileMentionCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("folder-mentions-inspected"),
     requestId: FileMentionRequestId,
     folders: Schema.Array(
-      Schema.Struct({ path: FileMentionPathInput, hostId: Schema.Literal("local") }).annotations(
-        strict,
-      ),
-    ).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
-    unavailable: Schema.Array(UnavailableFileMention).pipe(
-      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+      Schema.Struct({ path: FileMentionPathInput, hostId: Schema.Literal("local") }),
+    ).check(Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN)),
+    unavailable: Schema.Array(UnavailableFileMention).check(
+      Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("file-mentions-completed"),
     requestId: FileMentionRequestId,
-    candidates: Schema.Array(FileMentionCandidate).pipe(
-      Schema.maxItems(MAX_FILE_MENTION_CANDIDATES),
+    candidates: Schema.Array(FileMentionCandidate).check(
+      Schema.isMaxLength(MAX_FILE_MENTION_CANDIDATES),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("file-mentions-resolved"),
     requestId: FileMentionRequestId,
-    mentions: Schema.Array(ResolvedFileMention).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
-    unavailable: Schema.Array(UnavailableFileMention).pipe(
-      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    mentions: Schema.Array(ResolvedFileMention).check(
+      Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN),
     ),
-  }).annotations(strict),
+    unavailable: Schema.Array(UnavailableFileMention).check(
+      Schema.isMaxLength(MAX_FILE_MENTIONS_PER_TURN),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     requestId: FileMentionRequestId,
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "unauthorized",
       "not-found",
       "unsupported-mode",
       "unavailable",
       "invalid",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type FileMentionCommandResult = typeof FileMentionCommandResult.Type;
 
-export const decodeFileMentionRequestId = Schema.decodeUnknownSync(FileMentionRequestId);
-export const decodeFileMentionPath = Schema.decodeUnknownSync(FileMentionPath);
-export const decodeFileMentionCommand = Schema.decodeUnknownSync(FileMentionCommand);
-export const decodeFileMentionCommandResult = Schema.decodeUnknownSync(FileMentionCommandResult);
-export const decodeFileMentionCandidate = Schema.decodeUnknownSync(FileMentionCandidate);
-export const decodeResolvedFileMention = Schema.decodeUnknownSync(ResolvedFileMention);
+export const decodeFileMentionRequestId = Schema.decodeUnknownSync(
+  FileMentionRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFileMentionPath = Schema.decodeUnknownSync(
+  FileMentionPath,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFileMentionCommand = Schema.decodeUnknownSync(
+  FileMentionCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFileMentionCommandResult = Schema.decodeUnknownSync(
+  FileMentionCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFileMentionCandidate = Schema.decodeUnknownSync(
+  FileMentionCandidate,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeResolvedFileMention = Schema.decodeUnknownSync(
+  ResolvedFileMention,
+  STRICT_DECODE_OPTIONS,
+);

@@ -127,9 +127,9 @@ export function createPendingRequestRouteHandler(dependencies: PendingRequestRou
         if (size > 1024) return reply(413);
         chunks.push(part.value);
       }
-      const change = Schema.decodeUnknownSync(PendingQuestionDeferral)(
-        JSON.parse(Buffer.concat(chunks).toString("utf8")),
-      );
+      const change = Schema.decodeUnknownSync(PendingQuestionDeferral, {
+        onExcessProperty: "error",
+      })(JSON.parse(Buffer.concat(chunks).toString("utf8")));
       const current = () => {
         try {
           const context = authenticate();

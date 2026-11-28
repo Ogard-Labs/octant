@@ -4,9 +4,9 @@ import {
   type ProviderFolderScanStopReason,
   type ProviderInstance,
 } from "@octant/contracts";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 
-const decodeDiscoveredFolderProvider = Schema.decodeUnknownEither(DiscoveredFolderProviderSchema);
+const decodeDiscoveredFolderProvider = Schema.decodeUnknownResult(DiscoveredFolderProviderSchema);
 
 /**
  * One normalized folder observation contributed by a provider adapter.
@@ -95,8 +95,8 @@ export function collectProviderProjectFolderDiscoveryPorts(
   const collected: ProviderProjectFolderDiscoveryPort[] = [];
   for (const port of ports) {
     const decoded = decodeDiscoveredFolderProvider(port.providerId);
-    if (Either.isLeft(decoded)) continue;
-    const key = decoded.right;
+    if (Result.isFailure(decoded)) continue;
+    const key = decoded.success;
     if (seen.has(key)) continue;
     seen.add(key);
     collected.push(port);

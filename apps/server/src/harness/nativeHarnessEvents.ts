@@ -47,36 +47,38 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 export const NativeHarnessProjectRoutingOverrideCleared = Schema.Struct({
   projectId: ProjectId,
   version: AggregateVersion,
-}).annotations(strict);
+});
 
 export const NativeHarnessRouteDecided = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   decision: NativeHarnessRouteDecision,
-}).annotations(strict);
+});
 
 export const NativeHarnessFollowUpActivated = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   suggestionId: NativeHarnessFollowUpId,
   created: NativeHarnessFollowUpCreation,
-}).annotations(strict);
+});
 
 export const NativeHarnessTasksReplaced = Schema.Struct({
   sessionId: NativeHarnessSessionId,
-  items: Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
-}).annotations(strict);
+  items: Schema.Array(NativeHarnessTodoItem).pipe(
+    Schema.check(Schema.isMaxLength(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+  ),
+});
 
 export const NativeHarnessQuestionSettled = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   questionId: NativeHarnessQuestionId,
   status: NativeHarnessQuestionStatus,
-  answer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4_096))),
+  answer: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(4_096))),
+  ),
   settledAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 export const NativeHarnessApprovalSettled = Schema.Struct({
   sessionId: NativeHarnessSessionId,
@@ -84,17 +86,17 @@ export const NativeHarnessApprovalSettled = Schema.Struct({
   status: NativeHarnessApprovalStatus,
   remembered: Schema.optional(Schema.Boolean),
   settledAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 export const NativeHarnessSessionPaused = Schema.Struct({
   sessionId: NativeHarnessSessionId,
-  status: Schema.Literal("paused-by-advisor", "paused-by-user", "budget-limited", "failed"),
-  detail: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  status: Schema.Literals(["paused-by-advisor", "paused-by-user", "budget-limited", "failed"]),
+  detail: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(512))),
+});
 
 export const NativeHarnessSessionResumed = Schema.Struct({
   sessionId: NativeHarnessSessionId,
-}).annotations(strict);
+});
 
 /**
  * A turn began. Journaled so a restart can tell a turn it cut off from one
@@ -103,7 +105,7 @@ export const NativeHarnessSessionResumed = Schema.Struct({
 export const NativeHarnessTurnStarted = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 /**
  * A turn closed without a completed record: it `ended` (failed or was
@@ -112,9 +114,9 @@ export const NativeHarnessTurnStarted = Schema.Struct({
  */
 export const NativeHarnessTurnSettled = Schema.Struct({
   sessionId: NativeHarnessSessionId,
-  outcome: Schema.Literal("ended", "lost-in-restart"),
+  outcome: Schema.Literals(["ended", "lost-in-restart"]),
   settledAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 /**
  * The journal frames the harness writes. Routing configuration and every

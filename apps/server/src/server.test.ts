@@ -338,7 +338,7 @@ describe("startOctantServer", () => {
       ).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
     );
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") expect(Cause.isInterruptedOnly(exit.cause)).toBe(true);
+    if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     expect(stop).toHaveBeenCalledOnce();
   });
 
@@ -358,10 +358,10 @@ describe("startOctantServer", () => {
     );
     expect(exit._tag).toBe("Failure");
     if (exit._tag === "Failure") {
-      expect(Array.from(Cause.defects(exit.cause))).toEqual([]);
-      expect(Array.from(Cause.failures(exit.cause))).toMatchObject([
-        { category: "server-unavailable" },
-      ]);
+      expect(exit.cause.reasons.filter(Cause.isDieReason)).toEqual([]);
+      expect(
+        exit.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error),
+      ).toMatchObject([{ category: "server-unavailable" }]);
     }
   });
 

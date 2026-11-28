@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeRepositoryId } from "./code";
 import { BindingRevisionId, ProjectId } from "./projects";
 import {
@@ -9,9 +10,9 @@ import {
 } from "./providers";
 import { HostId } from "./shell";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const MAX_NEW_THREAD_DRAFT_INTENT_BYTES = 32 * 1024;
 
@@ -20,9 +21,9 @@ export type NewThreadDraftId = typeof NewThreadDraftId.Type;
 export const ThreadCreationRootId = brandedUuid("ThreadCreationRootId");
 export type ThreadCreationRootId = typeof ThreadCreationRootId.Type;
 
-export const ThreadCreationAuthority = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("chat") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("work"), rootId: ThreadCreationRootId }).annotations(strict),
+export const ThreadCreationAuthority = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("chat") }),
+  Schema.Struct({ kind: Schema.Literal("work"), rootId: ThreadCreationRootId }),
   Schema.Struct({
     kind: Schema.Literal("code"),
     bindingRevisionId: BindingRevisionId,
@@ -30,8 +31,8 @@ export const ThreadCreationAuthority = Schema.Union(
     checkoutId: CodeCheckoutId,
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadCreationAuthority = typeof ThreadCreationAuthority.Type;
 
 const ThreadCreationContextFields = {
@@ -40,13 +41,13 @@ const ThreadCreationContextFields = {
   modelId: ProviderModelId,
 } as const;
 
-export const ValidatedThreadCreationContext = Schema.Union(
+export const ValidatedThreadCreationContext = Schema.Union([
   Schema.Struct({
     ...ThreadCreationContextFields,
     mode: Schema.Literal("chat"),
     projectId: Schema.NullOr(ProjectId),
-    authority: Schema.Struct({ kind: Schema.Literal("chat") }).annotations(strict),
-  }).annotations(strict),
+    authority: Schema.Struct({ kind: Schema.Literal("chat") }),
+  }),
   Schema.Struct({
     ...ThreadCreationContextFields,
     mode: Schema.Literal("work"),
@@ -54,8 +55,8 @@ export const ValidatedThreadCreationContext = Schema.Union(
     authority: Schema.Struct({
       kind: Schema.Literal("work"),
       rootId: ThreadCreationRootId,
-    }).annotations(strict),
-  }).annotations(strict),
+    }),
+  }),
   Schema.Struct({
     ...ThreadCreationContextFields,
     mode: Schema.Literal("code"),
@@ -67,48 +68,56 @@ export const ValidatedThreadCreationContext = Schema.Union(
       checkoutId: CodeCheckoutId,
       executionPolicy: ProviderExecutionPolicy,
       permissionPersistence: PermissionPersistence,
-    }).annotations(strict),
-  }).annotations(strict),
-);
+    }),
+  }),
+]);
 export type ValidatedThreadCreationContext = typeof ValidatedThreadCreationContext.Type;
 
 export const ValidatedThreadDraft = Schema.Struct({
   draftId: NewThreadDraftId,
-  intent: Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= MAX_NEW_THREAD_DRAFT_INTENT_BYTES),
+  intent: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter(
+      (value) => encoder.encode(value).byteLength <= MAX_NEW_THREAD_DRAFT_INTENT_BYTES,
+    ),
   ),
   context: ValidatedThreadCreationContext,
-}).annotations(strict);
+});
 export type ValidatedThreadDraft = typeof ValidatedThreadDraft.Type;
 
-export const ThreadCreationContextField = Schema.Literal(
+export const ThreadCreationContextField = Schema.Literals([
   "host",
   "mode",
   "project",
   "provider",
   "model",
   "authority",
-);
+]);
 export type ThreadCreationContextField = typeof ThreadCreationContextField.Type;
 
-export const ValidatedThreadCreationResult = Schema.Union(
+export const ValidatedThreadCreationResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     draft: ValidatedThreadDraft,
     context: ValidatedThreadCreationContext,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("missing-context", "invalid-context"),
+    kind: Schema.Literals(["missing-context", "invalid-context"]),
     field: ThreadCreationContextField,
     draft: ValidatedThreadDraft,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ValidatedThreadCreationResult = typeof ValidatedThreadCreationResult.Type;
 
-export const decodeValidatedThreadDraft = Schema.decodeUnknownSync(ValidatedThreadDraft);
+export const decodeValidatedThreadDraft = Schema.decodeUnknownSync(
+  ValidatedThreadDraft,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeValidatedThreadCreationContext = Schema.decodeUnknownSync(
   ValidatedThreadCreationContext,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeValidatedThreadCreationResult = Schema.decodeUnknownSync(
   ValidatedThreadCreationResult,
+  STRICT_DECODE_OPTIONS,
 );

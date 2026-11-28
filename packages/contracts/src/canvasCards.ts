@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AgentRunAuthority } from "./agentRun";
 import { CanvasId, CanvasPresentation, CanvasSourceManifest, CanvasVersionId } from "./canvas";
 import { ChatThreadId } from "./chat";
@@ -11,16 +12,19 @@ import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ThreadCreationRootId } from "./threadCreation";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
-const boundedText = (maxLength: number) => Schema.String.pipe(Schema.maxLength(maxLength));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
+const boundedText = (maxLength: number) => Schema.String.check(Schema.isMaxLength(maxLength));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 
 // Canvas cards are the durable bridge between a creation event and the
@@ -44,10 +48,10 @@ export type CanvasCardId = typeof CanvasCardId.Type;
 
 // A Canvas originates in exactly one mode/thread/Project, so the origin
 // thread identity is a union of the mode-specific thread IDs.
-export const CanvasOriginThreadId = Schema.Union(ChatThreadId, WorkThreadId, CodeThreadId);
+export const CanvasOriginThreadId = Schema.Union([ChatThreadId, WorkThreadId, CodeThreadId]);
 export type CanvasOriginThreadId = typeof CanvasOriginThreadId.Type;
 
-export const CanvasIntentKind = Schema.Literal("blank", "template", "prompt");
+export const CanvasIntentKind = Schema.Literals(["blank", "template", "prompt"]);
 export type CanvasIntentKind = typeof CanvasIntentKind.Type;
 
 function modeMatchesWorkspace(
@@ -63,16 +67,16 @@ function modeMatchesWorkspace(
 // may never leave implicitly. Chat canvases stay in virtual memory; Work
 // canvases stay inside the confined root; Code canvases stay in the chosen
 // worktree.
-export const CanvasWorkspaceScope = Schema.Union(
+export const CanvasWorkspaceScope = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat-virtual"),
     projectId: Schema.NullOr(ProjectId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("work-root"),
     projectId: ProjectId,
     rootId: ThreadCreationRootId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
     projectId: ProjectId,
@@ -80,26 +84,24 @@ export const CanvasWorkspaceScope = Schema.Union(
     bindingRevisionId: BindingRevisionId,
     checkoutId: CodeCheckoutId,
     verified: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasWorkspaceScope = typeof CanvasWorkspaceScope.Type;
 
 export const CanvasScope = Schema.Struct({
   hostId: HostId,
   mode: OctantMode,
   workspace: CanvasWorkspaceScope,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((scope) => {
-      if (scope.mode === "chat") return scope.workspace.kind === "chat-virtual";
-      if (scope.mode === "work") return scope.workspace.kind === "work-root";
-      return scope.workspace.kind === "code-worktree";
-    }),
-  );
+}).check(
+  Schema.makeFilter((scope) => {
+    if (scope.mode === "chat") return scope.workspace.kind === "chat-virtual";
+    if (scope.mode === "work") return scope.workspace.kind === "work-root";
+    return scope.workspace.kind === "code-worktree";
+  }),
+);
 export type CanvasScope = typeof CanvasScope.Type;
 
-export const CanvasCreateDenialCode = Schema.Literal(
+export const CanvasCreateDenialCode = Schema.Literals([
   "mode-mismatch",
   "origin-thread-mismatch",
   "scope-mismatch",
@@ -114,10 +116,10 @@ export const CanvasCreateDenialCode = Schema.Literal(
   "card-not-ready",
   "unauthorized",
   "unavailable",
-);
+]);
 export type CanvasCreateDenialCode = typeof CanvasCreateDenialCode.Type;
 
-export const CanvasCardStatus = Schema.Literal(
+export const CanvasCardStatus = Schema.Literals([
   "creating",
   "ready",
   "limited",
@@ -129,7 +131,7 @@ export const CanvasCardStatus = Schema.Literal(
   "oversized",
   "incompatible",
   "failed",
-);
+]);
 export type CanvasCardStatus = typeof CanvasCardStatus.Type;
 
 export const CanvasCreateRequest = Schema.Struct({
@@ -146,17 +148,15 @@ export const CanvasCreateRequest = Schema.Struct({
   templateId: Schema.optional(boundedToken("CanvasTemplateId")),
   sourceManifest: CanvasSourceManifest,
   requestedAuthority: AgentRunAuthority,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)),
-    Schema.filter((request) => {
-      if (request.intent === "prompt" && request.prompt === undefined) return false;
-      if (request.intent !== "prompt" && request.prompt !== undefined) return false;
-      if (request.intent === "template" && request.templateId === undefined) return false;
-      return true;
-    }),
-  );
+}).check(
+  Schema.makeFilter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)),
+  Schema.makeFilter((request) => {
+    if (request.intent === "prompt" && request.prompt === undefined) return false;
+    if (request.intent !== "prompt" && request.prompt !== undefined) return false;
+    if (request.intent === "template" && request.templateId === undefined) return false;
+    return true;
+  }),
+);
 export type CanvasCreateRequest = typeof CanvasCreateRequest.Type;
 
 export const CanvasCreateReceipt = Schema.Struct({
@@ -174,7 +174,7 @@ export const CanvasCreateReceipt = Schema.Struct({
   outcome: CanvasCardStatus,
   createdAt: UtcTimestamp,
   recoveryReason: Schema.optional(boundedText(1_024)),
-}).annotations(strict);
+});
 export type CanvasCreateReceipt = typeof CanvasCreateReceipt.Type;
 
 export const CanvasThreadReferenceCard = Schema.Struct({
@@ -190,12 +190,12 @@ export const CanvasThreadReferenceCard = Schema.Struct({
   authority: AgentRunAuthority,
   actorId: ActorId,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
   createdAt: UtcTimestamp,
   summary: Schema.optional(boundedText(CANVAS_CARD_SUMMARY_MAX_CHARS)),
-  actionCount: Schema.Int.pipe(
-    Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_CARD_MAX_ACTIONS),
+  actionCount: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(CANVAS_CARD_MAX_ACTIONS),
   ),
   /**
    * Where the thread shows this Canvas now, after the host's inline bound. A
@@ -204,21 +204,21 @@ export const CanvasThreadReferenceCard = Schema.Struct({
   presentation: Schema.optional(CanvasPresentation),
   /** When the Canvas's first version was written, so a thread can place it in the turn that made it. */
   canvasCreatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CanvasThreadReferenceCard = typeof CanvasThreadReferenceCard.Type;
 
-export const CanvasCreateResult = Schema.Union(
+export const CanvasCreateResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("accepted"),
     receipt: CanvasCreateReceipt,
     card: CanvasThreadReferenceCard,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasCreateDenialCode,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasCreateResult = typeof CanvasCreateResult.Type;
 
 /**
@@ -244,14 +244,14 @@ export const CanvasHtmlImportRequest = Schema.Struct({
   workspace: CanvasWorkspaceScope,
   originThreadId: CanvasOriginThreadId,
   requestedAuthority: AgentRunAuthority,
-  source: Schema.Literal("file", "paste"),
+  source: Schema.Literals(["file", "paste"]),
   title: Schema.optional(boundedNonEmptyText(CANVAS_CARD_TITLE_MAX_CHARS)),
   fileName: Schema.optional(boundedNonEmptyText(CANVAS_CARD_TITLE_MAX_CHARS)),
   /** Bounded by the host in bytes, so an oversized page is refused as too large, not malformed. */
   html: Schema.String,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)));
+}).check(
+  Schema.makeFilter((request) => modeMatchesWorkspace(request.mode, request.workspace.kind)),
+);
 export type CanvasHtmlImportRequest = typeof CanvasHtmlImportRequest.Type;
 
 /**
@@ -261,13 +261,13 @@ export type CanvasHtmlImportRequest = typeof CanvasHtmlImportRequest.Type;
  * `empty`: nothing left to draw. `unsupported`: markup the design policy still
  * refuses after the import took out what it loads.
  */
-export const CanvasHtmlImportRefusalReason = Schema.Literal(
+export const CanvasHtmlImportRefusalReason = Schema.Literals([
   "too-large",
   "not-html",
   "unparseable",
   "empty",
   "unsupported",
-);
+]);
 export type CanvasHtmlImportRefusalReason = typeof CanvasHtmlImportRefusalReason.Type;
 
 /**
@@ -275,7 +275,7 @@ export type CanvasHtmlImportRefusalReason = typeof CanvasHtmlImportRefusalReason
  * and leaves nothing: files from the network, links out of the page, embedded
  * pages, form destinations, page settings, and SVG animation.
  */
-export const CanvasHtmlImportDropKind = Schema.Literal(
+export const CanvasHtmlImportDropKind = Schema.Literals([
   "script-file",
   "stylesheet",
   "file",
@@ -284,7 +284,7 @@ export const CanvasHtmlImportDropKind = Schema.Literal(
   "form-target",
   "page-setting",
   "svg-animation",
-);
+]);
 export type CanvasHtmlImportDropKind = typeof CanvasHtmlImportDropKind.Type;
 
 export const CANVAS_HTML_IMPORT_DROP_EXAMPLES = 3;
@@ -292,12 +292,12 @@ export const CANVAS_HTML_IMPORT_DROP_EXAMPLE_MAX_CHARS = 120;
 
 export const CanvasHtmlImportDrop = Schema.Struct({
   kind: CanvasHtmlImportDropKind,
-  count: Schema.Int.pipe(Schema.positive()),
+  count: PositiveInt,
   /** A few of the addresses or names taken out, cut short; shown as text, never as markup. */
-  examples: Schema.Array(boundedNonEmptyText(CANVAS_HTML_IMPORT_DROP_EXAMPLE_MAX_CHARS)).pipe(
-    Schema.maxItems(CANVAS_HTML_IMPORT_DROP_EXAMPLES),
+  examples: Schema.Array(boundedNonEmptyText(CANVAS_HTML_IMPORT_DROP_EXAMPLE_MAX_CHARS)).check(
+    Schema.isMaxLength(CANVAS_HTML_IMPORT_DROP_EXAMPLES),
   ),
-}).annotations(strict);
+});
 export type CanvasHtmlImportDrop = typeof CanvasHtmlImportDrop.Type;
 
 /**
@@ -306,28 +306,28 @@ export type CanvasHtmlImportDrop = typeof CanvasHtmlImportDrop.Type;
  * design that runs script, under the same page, sandbox, and bridge as any
  * running design.
  */
-export const CanvasHtmlImportFrame = Schema.Literal("static", "running");
+export const CanvasHtmlImportFrame = Schema.Literals(["static", "running"]);
 export type CanvasHtmlImportFrame = typeof CanvasHtmlImportFrame.Type;
 
-export const CanvasHtmlImportResult = Schema.Union(
+export const CanvasHtmlImportResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("imported"),
     receipt: CanvasCreateReceipt,
     card: CanvasThreadReferenceCard,
     frame: CanvasHtmlImportFrame,
     dropped: Schema.Array(CanvasHtmlImportDrop),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     reason: CanvasHtmlImportRefusalReason,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasCreateDenialCode,
     message: boundedNonEmptyText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasHtmlImportResult = typeof CanvasHtmlImportResult.Type;
 
 export const CanvasThreadReferenceCardsOutcome = Schema.Struct({
@@ -335,27 +335,70 @@ export const CanvasThreadReferenceCardsOutcome = Schema.Struct({
   threadId: CanvasOriginThreadId,
   projectId: Schema.NullOr(ProjectId),
   cards: Schema.Array(CanvasThreadReferenceCard),
-}).annotations(strict);
+});
 export type CanvasThreadReferenceCardsOutcome = typeof CanvasThreadReferenceCardsOutcome.Type;
 
 // ── Decoders ────────────────────────────────────────────────────────────────
 
-export const decodeCanvasCardSchemaVersion = Schema.decodeUnknownSync(CanvasCardSchemaVersion);
-export const decodeCanvasCreateRequestId = Schema.decodeUnknownSync(CanvasCreateRequestId);
-export const decodeCanvasCreateReceiptId = Schema.decodeUnknownSync(CanvasCreateReceiptId);
-export const decodeCanvasCardId = Schema.decodeUnknownSync(CanvasCardId);
-export const decodeCanvasOriginThreadId = Schema.decodeUnknownSync(CanvasOriginThreadId);
-export const decodeCanvasIntentKind = Schema.decodeUnknownSync(CanvasIntentKind);
-export const decodeCanvasWorkspaceScope = Schema.decodeUnknownSync(CanvasWorkspaceScope);
-export const decodeCanvasScope = Schema.decodeUnknownSync(CanvasScope);
-export const decodeCanvasCreateDenialCode = Schema.decodeUnknownSync(CanvasCreateDenialCode);
-export const decodeCanvasCardStatus = Schema.decodeUnknownSync(CanvasCardStatus);
-export const decodeCanvasCreateRequest = Schema.decodeUnknownSync(CanvasCreateRequest);
-export const decodeCanvasCreateReceipt = Schema.decodeUnknownSync(CanvasCreateReceipt);
-export const decodeCanvasCreateResult = Schema.decodeUnknownSync(CanvasCreateResult);
-export const decodeCanvasThreadReferenceCard = Schema.decodeUnknownSync(CanvasThreadReferenceCard);
-export const decodeCanvasHtmlImportRequest = Schema.decodeUnknownSync(CanvasHtmlImportRequest);
-export const decodeCanvasHtmlImportResult = Schema.decodeUnknownSync(CanvasHtmlImportResult);
+export const decodeCanvasCardSchemaVersion = Schema.decodeUnknownSync(
+  CanvasCardSchemaVersion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCreateRequestId = Schema.decodeUnknownSync(
+  CanvasCreateRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCreateReceiptId = Schema.decodeUnknownSync(
+  CanvasCreateReceiptId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCardId = Schema.decodeUnknownSync(CanvasCardId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasOriginThreadId = Schema.decodeUnknownSync(
+  CanvasOriginThreadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasIntentKind = Schema.decodeUnknownSync(
+  CanvasIntentKind,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasWorkspaceScope = Schema.decodeUnknownSync(
+  CanvasWorkspaceScope,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasScope = Schema.decodeUnknownSync(CanvasScope, STRICT_DECODE_OPTIONS);
+export const decodeCanvasCreateDenialCode = Schema.decodeUnknownSync(
+  CanvasCreateDenialCode,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCardStatus = Schema.decodeUnknownSync(
+  CanvasCardStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCreateRequest = Schema.decodeUnknownSync(
+  CanvasCreateRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCreateReceipt = Schema.decodeUnknownSync(
+  CanvasCreateReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasCreateResult = Schema.decodeUnknownSync(
+  CanvasCreateResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasThreadReferenceCard = Schema.decodeUnknownSync(
+  CanvasThreadReferenceCard,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasHtmlImportRequest = Schema.decodeUnknownSync(
+  CanvasHtmlImportRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasHtmlImportResult = Schema.decodeUnknownSync(
+  CanvasHtmlImportResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasThreadReferenceCardsOutcome = Schema.decodeUnknownSync(
   CanvasThreadReferenceCardsOutcome,
+  STRICT_DECODE_OPTIONS,
 );

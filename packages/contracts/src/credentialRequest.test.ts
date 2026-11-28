@@ -5,7 +5,7 @@ import { CredentialRequestAnswer, CredentialRequestView } from "./credentialRequ
 describe("private credential wire boundaries", () => {
   it("refuses a secret value smuggled into a public card", () => {
     expect(() =>
-      Schema.decodeUnknownSync(CredentialRequestView)({
+      Schema.decodeUnknownSync(CredentialRequestView, { onExcessProperty: "error" })({
         requests: [
           {
             id: "00000000-0000-4000-8000-000000000001",
@@ -23,7 +23,7 @@ describe("private credential wire boundaries", () => {
     ).toThrow();
   });
   it("refuses an endpoint or a value on a decline", () => {
-    const decode = Schema.decodeUnknownSync(CredentialRequestAnswer);
+    const decode = Schema.decodeUnknownSync(CredentialRequestAnswer, { onExcessProperty: "error" });
     const id = "00000000-0000-4000-8000-000000000001";
     expect(() => decode({ id, action: "decline", secret: "private-token" })).toThrow();
     expect(() =>
@@ -33,7 +33,7 @@ describe("private credential wire boundaries", () => {
 });
 
 it("accepts a reference-only consent and refuses mixed material or extra destinations", () => {
-  const decode = Schema.decodeUnknownSync(CredentialRequestAnswer);
+  const decode = Schema.decodeUnknownSync(CredentialRequestAnswer, { onExcessProperty: "error" });
   const input = {
     id: "00000000-0000-4000-8000-000000000001",
     action: "allow-linked",

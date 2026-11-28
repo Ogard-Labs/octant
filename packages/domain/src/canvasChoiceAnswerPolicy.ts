@@ -110,7 +110,9 @@ export function admitCanvasChoiceAnswersRevision(
 ): CanvasChoiceAnswerAdmission {
   let command: CanvasChoiceAnswersReviseCommand;
   try {
-    command = Schema.decodeUnknownSync(CanvasChoiceAnswersReviseCommand)(input);
+    command = Schema.decodeUnknownSync(CanvasChoiceAnswersReviseCommand, {
+      onExcessProperty: "error",
+    })(input);
   } catch {
     return reject("malformed-request", "Canvas answers change is malformed.");
   }

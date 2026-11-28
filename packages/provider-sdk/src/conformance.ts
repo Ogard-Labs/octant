@@ -130,7 +130,7 @@ function failureFromExit<A>(
   operation: string,
 ): ProviderFailure {
   assertConformance(Exit.isFailure(exit), `${operation} unexpectedly succeeded`);
-  const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+  const failure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
   assertConformance(failure !== undefined, `${operation} did not return a typed provider failure`);
   assertConformance(
     failureCategories.has(failure.category),
@@ -304,8 +304,8 @@ export async function runProviderConformance(
               // The host hands a placement out only with Strict off, since
               // Octant's sandbox cannot run on a server; a runtime may refuse
               // a Strict start there before it starts anything.
-              yield* onServer.start({ ...fixture.sessionStart, strict: false }).pipe(Effect.either);
-              yield* onServer.stop(fixture.sessionStart.sessionId).pipe(Effect.either);
+              yield* onServer.start({ ...fixture.sessionStart, strict: false }).pipe(Effect.result);
+              yield* onServer.stop(fixture.sessionStart.sessionId).pipe(Effect.result);
             }),
           );
           assertConformance(
@@ -322,7 +322,7 @@ export async function runProviderConformance(
             "successful start returned a different session",
           );
           const successfulTurnEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             collectSessionThroughTerminal(successfulTurnEvents, successful.sessionStart.sessionId),
           );
           yield* connection.send(successful.turn);
@@ -349,7 +349,7 @@ export async function runProviderConformance(
           "start returned a different session",
         );
         const turnEvents = yield* connection.subscribe;
-        const collected = yield* Effect.fork(
+        const collected = yield* Effect.forkChild(
           collectSessionThroughTerminal(turnEvents, fixture.sessionStart.sessionId),
         );
         yield* connection.send(fixture.turn);
@@ -628,7 +628,9 @@ export async function runSessionCompactionConformance(
         // Each turn is followed by a stop and a resume, as the host runs them.
         for (const input of fixture.turns) {
           const turnEvents = yield* connection.subscribe;
-          const turn = yield* Effect.fork(collectSessionThroughTerminal(turnEvents, sessionId));
+          const turn = yield* Effect.forkChild(
+            collectSessionThroughTerminal(turnEvents, sessionId),
+          );
           yield* connection.send(input);
           const turnEnded = Array.from(yield* Fiber.join(turn)).at(-1);
           assertConformance(
@@ -643,7 +645,7 @@ export async function runSessionCompactionConformance(
           return { claim, compacted: false, turnRefusedWhileCompacting: false };
         }
         const compactionEvents = yield* connection.subscribe;
-        const requested = yield* Effect.fork(
+        const requested = yield* Effect.forkChild(
           Stream.runCollect(
             compactionEvents.pipe(
               Stream.filter((event) => event.sessionId === sessionId),
@@ -653,20 +655,15 @@ export async function runSessionCompactionConformance(
             ),
           ),
         );
-        const compacting = yield* Effect.fork(
+        const compacting = yield* Effect.forkChild(
           compact({ sessionId, compactionId: fixture.compactionId }),
+          { startImmediately: true },
         );
         // A turn sent while the compaction is pending would be planned over
         // it, or would take the compaction's report as its own reply.
         let turnRefusedWhileCompacting = false;
         if (claim === "supported" && fixture.releaseCompaction !== undefined) {
-          for (
-            let spins = 0;
-            spins < 1_000 && (yield* Fiber.status(compacting))._tag === "Running";
-            spins += 1
-          ) {
-            yield* Effect.yieldNow();
-          }
+          yield* Effect.yieldNow;
           const sent = yield* Effect.exit(connection.send(fixture.turns[0]));
           assertConformance(
             Exit.isFailure(sent),
@@ -689,11 +686,13 @@ export async function runSessionCompactionConformance(
           `session compaction is claimed as supported but compact answered ${result.kind}`,
         );
         const seen = yield* Fiber.join(requested).pipe(
-          Effect.timeoutFail({
+          Effect.timeoutOrElse({
             duration: COMPACTION_EVENT_GRACE,
-            onTimeout: () =>
-              new Error(
-                "Provider conformance failed: compact resolved without a requested context-compacted event",
+            orElse: () =>
+              Effect.fail(
+                new Error(
+                  "Provider conformance failed: compact resolved without a requested context-compacted event",
+                ),
               ),
           }),
           Effect.orDie,

@@ -20,9 +20,12 @@ import { Schema } from "effect";
  * path separators and URL schemes so a server bug cannot deliver a host path
  * or authority URL through a mention.
  */
-export const MentionableThreadId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+export const MentionableThreadId = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(128),
+    Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+  ),
   Schema.brand("MentionableThreadId"),
 );
 export type MentionableThreadId = typeof MentionableThreadId.Type;
@@ -37,6 +40,6 @@ export const MAX_THREAD_MENTIONS_PER_TURN = 4;
  * Ids only: the turn records no title, transcript or authority of theirs, and
  * a reader that cannot list a thread learns nothing of it from its id.
  */
-export const ThreadMentionIds = Schema.Array(MentionableThreadId).pipe(
-  Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
+export const ThreadMentionIds = Schema.Array(MentionableThreadId).check(
+  Schema.isMaxLength(MAX_THREAD_MENTIONS_PER_TURN),
 );

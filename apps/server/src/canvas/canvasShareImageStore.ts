@@ -9,7 +9,9 @@ import type { CanvasShareResolvedImages } from "@octant/domain";
 import { ManagedAttachmentStore } from "../attachments/managedAttachmentStore";
 
 const decodeSnapshotId = Schema.decodeUnknownSync(CanvasShareSnapshotId);
-const decodeDigest = Schema.decodeUnknownSync(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)));
+const decodeDigest = Schema.decodeUnknownSync(
+  Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
+);
 
 /**
  * The image bytes a shared snapshot shows, kept apart from the journal: one

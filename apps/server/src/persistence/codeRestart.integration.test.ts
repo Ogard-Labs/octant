@@ -7,7 +7,7 @@ import {
   decodeCodeRuntimeWorkId,
   type CodeRuntimeRemoteStep,
 } from "@octant/contracts";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { readCodeCheckout, readCodeFileReference, readCodeRuntimeWork } from "./codeProjection";
 import { Journal } from "./journal";
@@ -273,7 +273,7 @@ describe("Code persistence restart", () => {
     seeded.close();
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -282,7 +282,7 @@ describe("Code persistence restart", () => {
         ),
       ),
     );
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
 
     const inspected = openSqlite(path);
     expect(

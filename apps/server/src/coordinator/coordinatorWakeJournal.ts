@@ -23,14 +23,16 @@ export const COORDINATOR_WAKE_EVENT_NAMES = {
   doneWhenReset: "coordinator.done-when-reset@1",
 } as const;
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const Id = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128));
+const Id = Schema.String.pipe(
+  Schema.check(Schema.isMinLength(1)),
+  Schema.check(Schema.isMaxLength(128)),
+);
 
 export const CoordinatorWakeDecided = Schema.Struct({
-  wakeId: Schema.UUID,
-  cause: Schema.Literal("message", "notice", "done-when"),
+  wakeId: Schema.String.check(Schema.isGUID()),
+  cause: Schema.Literals(["message", "notice", "done-when"]),
   senderThreadId: Id,
-  hop: Schema.Int.pipe(Schema.nonNegative()),
+  hop: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * The worker change a notice wake is for. The rest of a coordinator's
    * pending notices stay in memory: the turn reads every worker's state again
@@ -40,34 +42,42 @@ export const CoordinatorWakeDecided = Schema.Struct({
     Schema.Struct({
       workerThreadId: Id,
       state: CoordinatorWorkerNotice,
-      at: Schema.String.pipe(Schema.maxLength(64)),
-    }).annotations(strict),
+      at: Schema.String.pipe(Schema.check(Schema.isMaxLength(64))),
+    }),
   ),
   /** Unmet host-checked done-when items a done-when wake is reporting. */
   unmet: Schema.optional(
-    Schema.Array(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(240))).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_COORDINATOR_DONE_WHEN_ITEMS),
+    Schema.Array(
+      Schema.String.pipe(
+        Schema.check(Schema.isMinLength(1)),
+        Schema.check(Schema.isMaxLength(240)),
+      ),
+    ).pipe(
+      Schema.check(Schema.isMinLength(1)),
+      Schema.check(Schema.isMaxLength(MAX_COORDINATOR_DONE_WHEN_ITEMS)),
     ),
   ),
-}).annotations(strict);
+});
 export type CoordinatorWakeDecided = typeof CoordinatorWakeDecided.Type;
 
 export const CoordinatorWakeSettled = Schema.Struct({
-  wakeId: Schema.UUID,
+  wakeId: Schema.String.check(Schema.isGUID()),
   /** `held`: restart continuation left it for a person; it never starts by itself. */
-  outcome: Schema.Literal("started", "dropped", "held"),
-}).annotations(strict);
+  outcome: Schema.Literals(["started", "dropped", "held"]),
+});
 export type CoordinatorWakeSettled = typeof CoordinatorWakeSettled.Type;
 
 /** Persisted marker that a coordinator's exact done-when condition held, so a restart does not re-arm it. */
 export const CoordinatorDoneWhenSatisfied = Schema.Struct({
-  conditionKey: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
-}).annotations(strict);
+  conditionKey: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(4_096)),
+  ),
+});
 export type CoordinatorDoneWhenSatisfied = typeof CoordinatorDoneWhenSatisfied.Type;
 
 /** Clears any prior done-when satisfied marker after the condition was edited, cleared, or stopped. */
-export const CoordinatorDoneWhenReset = Schema.Struct({}).annotations(strict);
+export const CoordinatorDoneWhenReset = Schema.Struct({});
 export type CoordinatorDoneWhenReset = typeof CoordinatorDoneWhenReset.Type;
 
 export function registerCoordinatorWakeEvents(registry: EventRegistry): EventRegistry {
@@ -96,9 +106,15 @@ export interface CoordinatorWakes {
 }
 
 const REPLAY_BATCH_SIZE = 1_000;
-const decodeDecided = Schema.decodeUnknownSync(CoordinatorWakeDecided);
-const decodeSettled = Schema.decodeUnknownSync(CoordinatorWakeSettled);
-const decodeDoneWhenSatisfied = Schema.decodeUnknownSync(CoordinatorDoneWhenSatisfied);
+const decodeDecided = Schema.decodeUnknownSync(CoordinatorWakeDecided, {
+  onExcessProperty: "error",
+});
+const decodeSettled = Schema.decodeUnknownSync(CoordinatorWakeSettled, {
+  onExcessProperty: "error",
+});
+const decodeDoneWhenSatisfied = Schema.decodeUnknownSync(CoordinatorDoneWhenSatisfied, {
+  onExcessProperty: "error",
+});
 
 export function createCoordinatorWakeJournal(options: {
   readonly journal: Pick<Journal, "append" | "replayAggregateType">;

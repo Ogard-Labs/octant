@@ -29,4 +29,4 @@ export const ZEN_BUILTIN_BACKGROUND_IDS = [
 
 export type ZenBuiltinBackgroundId = (typeof ZEN_BUILTIN_BACKGROUND_IDS)[number];
 
-export const ZenBuiltinBackgroundId = Schema.Literal(...ZEN_BUILTIN_BACKGROUND_IDS);
+export const ZenBuiltinBackgroundId = Schema.Literals(ZEN_BUILTIN_BACKGROUND_IDS);

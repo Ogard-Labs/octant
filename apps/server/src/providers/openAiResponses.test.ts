@@ -1,5 +1,5 @@
 import type { OpenAiCompatibleProviderConfiguration, ProviderFailure } from "@octant/contracts";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { type CompatibleFetch, makeOpenAiCompatibleEndpoint } from "./openAiCompatibleEndpoint";
 import { type ResponsesTurnInput, sendResponsesTurn } from "./openAiResponses";
@@ -71,10 +71,10 @@ function input(
 }
 
 async function failureOf(effect: Effect.Effect<unknown, ProviderFailure>) {
-  const either = await Effect.runPromise(Effect.either(effect));
-  expect(Either.isLeft(either)).toBe(true);
-  if (Either.isRight(either)) throw new Error("Expected a typed provider failure.");
-  return either.left;
+  const either = await Effect.runPromise(Effect.result(effect));
+  expect(Result.isFailure(either)).toBe(true);
+  if (Result.isSuccess(either)) throw new Error("Expected a typed provider failure.");
+  return either.failure;
 }
 
 describe("sendResponsesTurn", () => {

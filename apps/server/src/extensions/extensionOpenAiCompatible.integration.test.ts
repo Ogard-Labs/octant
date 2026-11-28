@@ -204,7 +204,7 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
             modelId,
             executionPolicy: "approval-gated",
           });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === providerSessionId),

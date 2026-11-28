@@ -12,7 +12,7 @@ const flow = (overrides: object) =>
   ({ name: "Check", steps: [step], savedAt: "2026-11-01T09:00:00.000Z", ...overrides }) as unknown;
 
 describe("a saved Browser flow", () => {
-  const decode = Schema.decodeUnknownSync(BrowserFlow);
+  const decode = Schema.decodeUnknownSync(BrowserFlow, { onExcessProperty: "error" });
 
   it("holds 1 to 50 steps and a name of 1 to 80 characters", () => {
     expect(decode(flow({}))).toMatchObject({ name: "Check" });
@@ -34,7 +34,10 @@ describe("a saved Browser flow", () => {
   it("requires a host-issued review identity before a person can start a fixed run", () => {
     expect(decodeBrowserFlowsCommand({ kind: "list" })).toEqual({ kind: "list" });
     expect(() =>
-      Schema.decodeUnknownSync(BrowserFlowsCommand)({ kind: "run", name: "x" }),
+      Schema.decodeUnknownSync(BrowserFlowsCommand, { onExcessProperty: "error" })({
+        kind: "run",
+        name: "x",
+      }),
     ).toThrow();
     expect(() =>
       decodeBrowserFlowsCommand({ kind: "start-run", runId: "not-a-review", values: [] }),

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderExecutionPolicy } from "./providers";
 import { WindowId } from "./shell";
@@ -6,23 +7,25 @@ import { DESKTOP_LEASE_MAXIMUM_MINUTES, DesktopLeaseId } from "./desktopLease";
 import { UtcTimestamp } from "./events";
 export { ComputerUseSettings, decodeComputerUseSettings } from "./computerUseSettings";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const text = (max: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(max));
-const appId = text(256).pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9.-]*$/));
-export const ComputerObservationId = Schema.UUID.pipe(Schema.brand("ComputerObservationId"));
+const text = (max: number) => Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(max));
+const appId = text(256).check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9.-]*$/));
+export const ComputerObservationId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ComputerObservationId"),
+);
 export type ComputerObservationId = typeof ComputerObservationId.Type;
 export const ComputerWindowId = Schema.Int.pipe(
-  Schema.positive(),
+  Schema.check(Schema.isGreaterThan(0)),
   Schema.brand("ComputerWindowId"),
 );
 export type ComputerWindowId = typeof ComputerWindowId.Type;
 
 const observedElement = {
   observationId: ComputerObservationId,
-  elementIndex: Schema.Int.pipe(Schema.nonNegative()),
+  elementIndex: NonNegativeInt,
 };
-const typedText = Schema.String.pipe(Schema.maxLength(16_384));
-const pressKey = Schema.Literal(
+const typedText = Schema.String.check(Schema.isMaxLength(16_384));
+const pressKey = Schema.Literals([
   "Enter",
   "Return",
   "Tab",
@@ -37,66 +40,63 @@ const pressKey = Schema.Literal(
   "End",
   "PageUp",
   "PageDown",
-);
-export const ComputerControlCommand = Schema.Union(
-  Schema.Struct({ operation: Schema.Literal("apps") }).annotations(strict),
-  Schema.Struct({ operation: Schema.Literal("launch", "windows"), appId }).annotations(strict),
+]);
+export const ComputerControlCommand = Schema.Union([
+  Schema.Struct({ operation: Schema.Literal("apps") }),
+  Schema.Struct({ operation: Schema.Literals(["launch", "windows"]), appId }),
   Schema.Struct({
     operation: Schema.Literal("observe"),
     appId,
     windowId: ComputerWindowId,
-  }).annotations(strict),
-  Schema.Struct({ operation: Schema.Literal("click"), ...observedElement }).annotations(strict),
+  }),
+  Schema.Struct({ operation: Schema.Literal("click"), ...observedElement }),
   Schema.Struct({
     operation: Schema.Literal("click"),
     observationId: ComputerObservationId,
-    x: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-    y: Schema.Number.pipe(Schema.finite(), Schema.nonNegative()),
-  }).annotations(strict),
+    x: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
+    y: Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
+  }),
   Schema.Struct({
     operation: Schema.Literal("type"),
     ...observedElement,
     text: typedText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("press"),
     ...observedElement,
     key: pressKey,
-  }).annotations(strict),
-  // A screen without an accessibility tree has no element to address, so text
-  // and keys go to its keyboard focus, which a click on the screenshot sets.
-  // Only a disposable desktop takes these; this Mac refuses them.
+  }),
   Schema.Struct({
     operation: Schema.Literal("type"),
     observationId: ComputerObservationId,
     text: typedText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("press"),
     observationId: ComputerObservationId,
     key: pressKey,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("scroll"),
     observationId: ComputerObservationId,
-    direction: Schema.Literal("up", "down", "left", "right"),
-    amount: Schema.Int.pipe(Schema.between(1, 10)),
-  }).annotations(strict),
-  Schema.Struct({ operation: Schema.Literal("stop") }).annotations(strict),
-);
+    direction: Schema.Literals(["up", "down", "left", "right"]),
+    amount: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 10 })),
+  }),
+  Schema.Struct({ operation: Schema.Literal("stop") }),
+]);
 export type ComputerControlCommand = typeof ComputerControlCommand.Type;
 
 /** Bound by the host at turn admission, never supplied as tool arguments. */
 export const ComputerUseOwner = Schema.Struct({
   windowId: WindowId,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   executionPolicy: ProviderExecutionPolicy,
   /** The thread's disposable desktop the send bound; absent, the destination is this Mac. */
   leaseId: Schema.optional(DesktopLeaseId),
-}).annotations(strict);
+});
 export type ComputerUseOwner = typeof ComputerUseOwner.Type;
 
 /**
@@ -106,8 +106,8 @@ export type ComputerUseOwner = typeof ComputerUseOwner.Type;
  */
 export const ComputerSendFileCommand = Schema.Struct({
   operation: Schema.Literal("send-file"),
-  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
-}).annotations(strict);
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
+});
 export type ComputerSendFileCommand = typeof ComputerSendFileCommand.Type;
 
 /**
@@ -117,8 +117,10 @@ export type ComputerSendFileCommand = typeof ComputerSendFileCommand.Type;
  */
 export const ComputerExtendDesktopCommand = Schema.Struct({
   operation: Schema.Literal("extend"),
-  minutes: Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_MAXIMUM_MINUTES)),
-}).annotations(strict);
+  minutes: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: DESKTOP_LEASE_MAXIMUM_MINUTES }),
+  ),
+});
 export type ComputerExtendDesktopCommand = typeof ComputerExtendDesktopCommand.Type;
 
 /**
@@ -129,106 +131,105 @@ export type ComputerExtendDesktopCommand = typeof ComputerExtendDesktopCommand.T
  */
 export const ComputerTypeSecretCommand = Schema.Struct({
   operation: Schema.Literal("type-secret"),
-  handle: Schema.UUID,
+  handle: GuidString,
   ...observedElement,
-}).annotations(strict);
+});
 export type ComputerTypeSecretCommand = typeof ComputerTypeSecretCommand.Type;
 
 /** Private host-to-desktop check for whether an observed element is a verified password field. */
 export const ComputerSecretTargetRequest = Schema.Struct({
   ...observedElement,
-}).annotations(strict);
+});
 export type ComputerSecretTargetRequest = typeof ComputerSecretTargetRequest.Type;
 
 /** Private host-to-desktop delivery of a redeemed secret value into a verified password field. */
 export const ComputerHostTypeSecretRequest = Schema.Struct({
   ...observedElement,
   text: typedText,
-}).annotations(strict);
+});
 export type ComputerHostTypeSecretRequest = typeof ComputerHostTypeSecretRequest.Type;
 
-export const ComputerSecretTargetInspection = Schema.Union(
+export const ComputerSecretTargetInspection = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("secure-target"),
     appId,
     windowId: ComputerWindowId,
-    windowTitle: Schema.String.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
+    windowTitle: Schema.String.check(Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("refused", "failed"),
+    kind: Schema.Literals(["refused", "failed"]),
     reason: text(128),
     message: text(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ComputerSecretTargetInspection = typeof ComputerSecretTargetInspection.Type;
 
 export const ComputerUseImage = Schema.Struct({
-  mimeType: Schema.Literal("image/png", "image/jpeg"),
-  data: text(2_097_152).pipe(Schema.pattern(/^[A-Za-z0-9+/]+={0,2}$/)),
-}).annotations(strict);
+  mimeType: Schema.Literals(["image/png", "image/jpeg"]),
+  data: text(2_097_152).check(Schema.isPattern(/^[A-Za-z0-9+/]+={0,2}$/)),
+});
 export type ComputerUseImage = typeof ComputerUseImage.Type;
 
-export const ComputerUseApp = Schema.Struct({ appId, name: text(256) }).annotations(strict);
+export const ComputerUseApp = Schema.Struct({ appId, name: text(256) });
 export const ComputerUseWindow = Schema.Struct({
   windowId: ComputerWindowId,
-  title: Schema.String.pipe(Schema.maxLength(1_024)),
-}).annotations(strict);
+  title: Schema.String.check(Schema.isMaxLength(1_024)),
+});
 export const ComputerUseElement = Schema.Struct({
-  index: Schema.Int.pipe(Schema.nonNegative()),
+  index: NonNegativeInt,
   role: text(128),
-  label: Schema.String.pipe(Schema.maxLength(2_048)),
-  value: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+  label: Schema.String.check(Schema.isMaxLength(2_048)),
+  value: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
   protected: Schema.Boolean,
-}).annotations(strict);
-export const ComputerControlResult = Schema.Union(
+});
+export const ComputerControlResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("apps"),
-    apps: Schema.Array(ComputerUseApp).pipe(Schema.maxItems(256)),
-  }).annotations(strict),
+    apps: Schema.Array(ComputerUseApp).check(Schema.isMaxLength(256)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("windows"),
     appId,
-    windows: Schema.Array(ComputerUseWindow).pipe(Schema.maxItems(128)),
-  }).annotations(strict),
+    windows: Schema.Array(ComputerUseWindow).check(Schema.isMaxLength(128)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("observation"),
     observationId: ComputerObservationId,
     appId,
     windowId: ComputerWindowId,
-    windowTitle: Schema.optional(Schema.String.pipe(Schema.maxLength(1_024))),
-    elements: Schema.Array(ComputerUseElement).pipe(Schema.maxItems(512)),
+    windowTitle: Schema.optional(Schema.String.check(Schema.isMaxLength(1_024))),
+    elements: Schema.Array(ComputerUseElement).check(Schema.isMaxLength(512)),
     truncated: Schema.Boolean,
     image: Schema.optional(ComputerUseImage),
-    imageWidth: Schema.optional(Schema.Int.pipe(Schema.positive())),
-    imageHeight: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("stopped") }).annotations(strict),
+    imageWidth: Schema.optional(PositiveInt),
+    imageHeight: Schema.optional(PositiveInt),
+  }),
+  Schema.Struct({ kind: Schema.Literal("stopped") }),
   /** A thread secret was typed into a verified password field; no value or screenshot returns. */
-  Schema.Struct({ kind: Schema.Literal("typed") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("typed") }),
   /** The action was cancelled before completion. */
-  Schema.Struct({ kind: Schema.Literal("cancelled") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("cancelled") }),
   /** A file sent into the bound desktop's inbox, as the host journaled it. */
   Schema.Struct({
     kind: Schema.Literal("sent"),
     name: text(255),
-    size: Schema.Int.pipe(Schema.nonNegative()),
-    sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-  }).annotations(strict),
-  /** The bound desktop's lease now ends at this time, as the provider confirmed. */
+    size: NonNegativeInt,
+    sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("extended"),
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    kind: Schema.Literal("refused", "failed"),
+    kind: Schema.Literals(["refused", "failed"]),
     reason: text(128),
     message: text(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ComputerControlResult = typeof ComputerControlResult.Type;
 
 export const ComputerUseStatus = Schema.Struct({
-  verification: Schema.optional(Schema.Literal("not-tested", "running", "passed", "failed")),
+  verification: Schema.optional(Schema.Literals(["not-tested", "running", "passed", "failed"])),
   verificationMessage: Schema.optional(text(1_024)),
   setupPending: Schema.optional(Schema.Boolean),
   supported: Schema.Boolean,
@@ -238,31 +239,53 @@ export const ComputerUseStatus = Schema.Struct({
   permissions: Schema.Struct({
     accessibility: Schema.Boolean,
     screenRecording: Schema.Boolean,
-  }).annotations(strict),
-  driver: Schema.Literal("unavailable", "stopped", "starting", "ready", "failed"),
+  }),
+  driver: Schema.Literals(["unavailable", "stopped", "starting", "ready", "failed"]),
   version: Schema.optional(text(64)),
-  activeSessions: Schema.Int.pipe(Schema.nonNegative()),
-  update: Schema.Literal("idle", "checking", "downloading", "staged", "current", "failed"),
+  activeSessions: NonNegativeInt,
+  update: Schema.Literals(["idle", "checking", "downloading", "staged", "current", "failed"]),
   availableVersion: Schema.optional(text(64)),
   message: Schema.optional(text(1_024)),
-}).annotations(strict);
+});
 export type ComputerUseStatus = typeof ComputerUseStatus.Type;
 
-export const decodeComputerControlCommand = Schema.decodeUnknownSync(ComputerControlCommand);
-export const decodeComputerControlResult = Schema.decodeUnknownSync(ComputerControlResult);
-export const decodeComputerUseOwner = Schema.decodeUnknownSync(ComputerUseOwner);
-export const decodeComputerSendFileCommand = Schema.decodeUnknownSync(ComputerSendFileCommand);
+export const decodeComputerControlCommand = Schema.decodeUnknownSync(
+  ComputerControlCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerControlResult = Schema.decodeUnknownSync(
+  ComputerControlResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerUseOwner = Schema.decodeUnknownSync(
+  ComputerUseOwner,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerSendFileCommand = Schema.decodeUnknownSync(
+  ComputerSendFileCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeComputerExtendDesktopCommand = Schema.decodeUnknownSync(
   ComputerExtendDesktopCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeComputerTypeSecretCommand = Schema.decodeUnknownSync(ComputerTypeSecretCommand);
+export const decodeComputerUseStatus = Schema.decodeUnknownSync(
+  ComputerUseStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerTypeSecretCommand = Schema.decodeUnknownSync(
+  ComputerTypeSecretCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeComputerSecretTargetRequest = Schema.decodeUnknownSync(
   ComputerSecretTargetRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeComputerHostTypeSecretRequest = Schema.decodeUnknownSync(
   ComputerHostTypeSecretRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeComputerSecretTargetInspection = Schema.decodeUnknownSync(
   ComputerSecretTargetInspection,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeComputerUseStatus = Schema.decodeUnknownSync(ComputerUseStatus);

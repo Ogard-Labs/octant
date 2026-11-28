@@ -8,9 +8,9 @@ import {
   type SafeDiscoveredFolderName,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { Either, Schema } from "effect";
+import { Result, Schema } from "effect";
 
-const decodeSafeDiscoveredFolderName = Schema.decodeUnknownEither(SafeDiscoveredFolderNameSchema);
+const decodeSafeDiscoveredFolderName = Schema.decodeUnknownResult(SafeDiscoveredFolderNameSchema);
 const MAX_FOLDER_NAME_CODE_UNITS = 128;
 
 export interface ParsedRemoteOwnerName {
@@ -140,7 +140,7 @@ export function safeDiscoveredFolderName(folderPath: string): SafeDiscoveredFold
   }
   const candidate = truncated.trim();
   const decoded = decodeSafeDiscoveredFolderName(candidate);
-  return Either.isRight(decoded) ? decoded.right : undefined;
+  return Result.isSuccess(decoded) ? decoded.success : undefined;
 }
 
 /**

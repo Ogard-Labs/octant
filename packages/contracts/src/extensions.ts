@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasExportContribution } from "./canvasExportContribution";
 import { CodeToolContribution } from "./codeToolContribution";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -32,21 +33,23 @@ export {
   ExtensionPublisherKeyFingerprint,
 } from "./extensionIdentity";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedToken = (maximumLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maximumLength),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maximumLength),
+    Schema.isPattern(/^[a-z][a-z0-9-]*$/),
   );
 const boundedText = (maximumLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximumLength));
-const opaqueReference = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximumLength));
+const opaqueReference = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
 );
-const entryPointReference = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/),
+const entryPointReference = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/),
 );
 
 export const ExtensionSlug = boundedToken(64).pipe(Schema.brand("ExtensionSlug"));
@@ -62,40 +65,45 @@ export const ExtensionSourceReference = opaqueReference.pipe(
 );
 export type ExtensionSourceReference = typeof ExtensionSourceReference.Type;
 export const ExtensionCatalogEpoch = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
   Schema.brand("ExtensionCatalogEpoch"),
 );
 export type ExtensionCatalogEpoch = typeof ExtensionCatalogEpoch.Type;
 export const ExtensionManifestVersion = Schema.Int.pipe(
-  Schema.positive(),
-  Schema.lessThanOrEqualTo(1),
+  Schema.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1)),
   Schema.brand("ExtensionManifestVersion"),
 );
 export type ExtensionManifestVersion = typeof ExtensionManifestVersion.Type;
 const isToolExtensionId = Schema.is(ToolExtensionId);
 const isExtensionComponentId = Schema.is(ExtensionComponentId);
-export const ExtensionComponentQualifiedId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter((value) => {
-    const separator = value.indexOf("/");
-    return (
-      separator > 0 &&
-      value.indexOf("/", separator + 1) === -1 &&
-      isToolExtensionId(value.slice(0, separator)) &&
-      isExtensionComponentId(value.slice(separator + 1))
-    );
-  }),
+export const ExtensionComponentQualifiedId = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(128),
+    Schema.makeFilter((value) => {
+      const separator = value.indexOf("/");
+      return (
+        separator > 0 &&
+        value.indexOf("/", separator + 1) === -1 &&
+        isToolExtensionId(value.slice(0, separator)) &&
+        isExtensionComponentId(value.slice(separator + 1))
+      );
+    }),
+  ),
   Schema.brand("ExtensionComponentQualifiedId"),
 );
 export type ExtensionComponentQualifiedId = typeof ExtensionComponentQualifiedId.Type;
-export const SourceQualifiedSkillId = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.pattern(/^[a-z][a-z0-9-]*:[A-Za-z0-9._~:-]+:[a-z][a-z0-9-]*:sha256:[a-f0-9]{64}$/),
+export const SourceQualifiedSkillId = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(512),
+    Schema.isPattern(/^[a-z][a-z0-9-]*:[A-Za-z0-9._~:-]+:[a-z][a-z0-9-]*:sha256:[a-f0-9]{64}$/),
+  ),
   Schema.brand("SourceQualifiedSkillId"),
 );
 export type SourceQualifiedSkillId = typeof SourceQualifiedSkillId.Type;
 
-export const ExtensionSourceKind = Schema.Literal(
+export const ExtensionSourceKind = Schema.Literals([
   "bundled",
   "catalog",
   "local-folder",
@@ -103,50 +111,46 @@ export const ExtensionSourceKind = Schema.Literal(
   "plugin-package",
   "provider-native",
   "user-added",
-);
+]);
 export type ExtensionSourceKind = typeof ExtensionSourceKind.Type;
 
-export const ExtensionSource = Schema.Union(
+export const ExtensionSource = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("bundled"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("catalog"),
     catalogId: ExtensionCatalogId,
     entryId: ExtensionCatalogEntryId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("local-folder"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("agents-skills-directory"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("plugin-package"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("provider-native"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
-  /**
-   * A package the host wrote for an MCP server the person added by hand in
-   * Settings. The reference names the host's own folder for it; uninstalling
-   * removes that folder and the secrets the server was given.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("user-added"),
     sourceRef: ExtensionSourceReference,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionSource = typeof ExtensionSource.Type;
 
-const canonicalHttpUrl = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(2048),
-  Schema.filter((value) => {
+const canonicalHttpUrl = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2048),
+  Schema.makeFilter((value) => {
     try {
       const parsed = new URL(value);
       return (
@@ -175,27 +179,28 @@ export const ExtensionProvenance = Schema.Struct({
   /** The key whose signature the host verified, set by the host only. */
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
   sourceCommit: Schema.optional(
-    Schema.String.pipe(Schema.pattern(/^[a-f0-9]{7,64}$/), Schema.maxLength(64)),
+    Schema.String.check(Schema.isPattern(/^[a-f0-9]{7,64}$/), Schema.isMaxLength(64)),
   ),
   reviewed: Schema.Boolean,
   reviewedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type ExtensionProvenance = typeof ExtensionProvenance.Type;
 
-export const ExtensionLicense = Schema.Union(
+export const ExtensionLicense = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("spdx"),
-    identifier: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(128),
-      Schema.pattern(/^[A-Za-z0-9-.+]+$/),
+    identifier: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9-.+]+$/),
     ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("custom"), label: boundedText(256) }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unreported") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("custom"), label: boundedText(256) }),
+  Schema.Struct({ kind: Schema.Literal("unreported") }),
+]);
 export type ExtensionLicense = typeof ExtensionLicense.Type;
 
-export const ExtensionPlatform = Schema.Literal("macos", "linux", "windows");
+export const ExtensionPlatform = Schema.Literals(["macos", "linux", "windows"]);
 export type ExtensionPlatform = typeof ExtensionPlatform.Type;
 export const ExtensionProviderFamily = boundedToken(96).pipe(
   Schema.brand("ExtensionProviderFamily"),
@@ -248,25 +253,23 @@ function comparePackageVersions(left: string, right: string): number {
 const ExtensionAppCompatibility = Schema.Struct({
   minimum: ExtensionPackageVersion,
   maximumExclusive: Schema.optional(ExtensionPackageVersion),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (range) =>
-        range.maximumExclusive === undefined ||
-        comparePackageVersions(range.minimum, range.maximumExclusive) < 0,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (range) =>
+      range.maximumExclusive === undefined ||
+      comparePackageVersions(range.minimum, range.maximumExclusive) < 0,
+  ),
+);
 
 export const ExtensionCompatibility = Schema.Struct({
   app: Schema.optional(ExtensionAppCompatibility),
-  platforms: Schema.Array(ExtensionPlatform).pipe(Schema.minItems(1), Schema.maxItems(3)),
-  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
-  providerFamilies: Schema.Array(ExtensionProviderFamily).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  platforms: Schema.Array(ExtensionPlatform).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
+  modes: Schema.Array(OctantMode).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
+  providerFamilies: Schema.Array(ExtensionProviderFamily).check(Schema.isMaxLength(64)),
+});
 export type ExtensionCompatibility = typeof ExtensionCompatibility.Type;
 
-export const ExtensionCapability = Schema.Literal(
+export const ExtensionCapability = Schema.Literals([
   "instructions",
   "mcp",
   "filesystem",
@@ -280,10 +283,10 @@ export const ExtensionCapability = Schema.Literal(
   "apps",
   "agents",
   "apple-development",
-);
+]);
 export type ExtensionCapability = typeof ExtensionCapability.Type;
 
-export const ExtensionComponentKind = Schema.Literal(
+export const ExtensionComponentKind = Schema.Literals([
   "code-tool",
   "skill-instructions",
   "mcp-server",
@@ -310,11 +313,12 @@ export const ExtensionComponentKind = Schema.Literal(
   "pull-request-guide-writer",
   "theme",
   "ground",
-);
+]);
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
-export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
+export const ExtensionSkillName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
 );
 export type ExtensionSkillName = typeof ExtensionSkillName.Type;
 
@@ -326,20 +330,20 @@ export type ExtensionSkillName = typeof ExtensionSkillName.Type;
  * grant: a server that declares `static` and needs more fails rather than
  * getting more. Canonical: docs/design/language-services.md § Launch classes.
  */
-export const ExtensionLanguageServerClass = Schema.Literal("static", "repo-tooling");
+export const ExtensionLanguageServerClass = Schema.Literals(["static", "repo-tooling"]);
 export type ExtensionLanguageServerClass = typeof ExtensionLanguageServerClass.Type;
 
 /** A Language Server Protocol language identifier, such as `typescript`. */
 export const ExtensionLanguageId = Schema.String.pipe(
-  Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,63}$/)),
   Schema.brand("ExtensionLanguageId"),
 );
 export type ExtensionLanguageId = typeof ExtensionLanguageId.Type;
 
 export const ExtensionLanguageServerDeclaration = Schema.Struct({
-  languages: Schema.Array(ExtensionLanguageId).pipe(Schema.minItems(1), Schema.maxItems(32)),
+  languages: Schema.Array(ExtensionLanguageId).check(Schema.isMinLength(1), Schema.isMaxLength(32)),
   launchClass: ExtensionLanguageServerClass,
-}).annotations(strict);
+});
 export type ExtensionLanguageServerDeclaration = typeof ExtensionLanguageServerDeclaration.Type;
 
 /**
@@ -348,7 +352,7 @@ export type ExtensionLanguageServerDeclaration = typeof ExtensionLanguageServerD
  * nothing. Canonical: docs/design/language-services.md § Component and package.
  */
 export const ExtensionDebugRuntimeId = Schema.String.pipe(
-  Schema.pattern(/^[a-z][a-z0-9-]{0,31}$/),
+  Schema.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,31}$/)),
   Schema.brand("ExtensionDebugRuntimeId"),
 );
 export type ExtensionDebugRuntimeId = typeof ExtensionDebugRuntimeId.Type;
@@ -358,7 +362,7 @@ export type ExtensionDebugRuntimeId = typeof ExtensionDebugRuntimeId.Type;
  * adapter may be proposed for. A matching label only: it starts nothing.
  */
 export const ExtensionDebugImportType = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)),
   Schema.brand("ExtensionDebugImportType"),
 );
 export type ExtensionDebugImportType = typeof ExtensionDebugImportType.Type;
@@ -463,13 +467,13 @@ export type ExtensionDebugLaunchArguments = typeof ExtensionDebugLaunchArguments
  * event of the adapter's own (debugpy's `debugpyAttach`). Canonical:
  * docs/design/language-services.md § Child processes.
  */
-export const ExtensionDebugChildAnnouncement = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("start-debugging") }).annotations(strict),
+export const ExtensionDebugChildAnnouncement = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("start-debugging") }),
   Schema.Struct({
     kind: Schema.Literal("event"),
-    event: Schema.String.pipe(Schema.pattern(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)),
-  }).annotations(strict),
-);
+    event: Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)),
+  }),
+]);
 export type ExtensionDebugChildAnnouncement = typeof ExtensionDebugChildAnnouncement.Type;
 
 /**
@@ -481,40 +485,41 @@ export type ExtensionDebugChildAnnouncement = typeof ExtensionDebugChildAnnounce
  * § Component and package and § Child processes.
  */
 export const ExtensionDebugAdapterDeclaration = Schema.Struct({
-  runtimes: Schema.Array(ExtensionDebugRuntimeId).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  runtimes: Schema.Array(ExtensionDebugRuntimeId).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(8),
+  ),
   launchArguments: ExtensionDebugLaunchArguments,
-  importTypes: Schema.Array(ExtensionDebugImportType).pipe(Schema.maxItems(8)),
-  debugPorts: Schema.Literal(0, 1),
+  importTypes: Schema.Array(ExtensionDebugImportType).check(Schema.isMaxLength(8)),
+  debugPorts: Schema.Literals([0, 1]),
   /** `1` when the adapter also debugs the child processes of the program it starts. */
-  childSessions: Schema.optional(Schema.Literal(0, 1)),
+  childSessions: Schema.optional(Schema.Literals([0, 1])),
   /** Present exactly when `childSessions` is `1`. */
   childAnnouncement: Schema.optional(ExtensionDebugChildAnnouncement),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((declaration) => {
-      const placeholders = placeholdersIn(declaration.launchArguments, new Set());
-      // The body must run the program the person confirmed, and a port is
-      // declared exactly when the body hands it to the adapter: an unfilled
-      // port is a grant nothing uses, and an undeclared one is never chosen.
-      // A child announcement is named exactly when children are declared, so
-      // the review card never shows one without the other.
-      return (
-        placeholders.has("{{program}}") &&
-        placeholders.has("{{debugPort}}") === (declaration.debugPorts === 1) &&
-        (declaration.childAnnouncement !== undefined) === (declaration.childSessions === 1)
-      );
-    }),
-  );
+}).check(
+  Schema.makeFilter((declaration) => {
+    const placeholders = placeholdersIn(declaration.launchArguments, new Set());
+    // The body must run the program the person confirmed, and a port is
+    // declared exactly when the body hands it to the adapter: an unfilled
+    // port is a grant nothing uses, and an undeclared one is never chosen.
+    // A child announcement is named exactly when children are declared, so
+    // the review card never shows one without the other.
+    return (
+      placeholders.has("{{program}}") &&
+      placeholders.has("{{debugPort}}") === (declaration.debugPorts === 1) &&
+      (declaration.childAnnouncement !== undefined) === (declaration.childSessions === 1)
+    );
+  }),
+);
 export type ExtensionDebugAdapterDeclaration = typeof ExtensionDebugAdapterDeclaration.Type;
 
 /** Explicit egress scope shown with an export approval; no ambient network is granted. */
 export const ExtensionCanvasExportDeclaration = Schema.Struct({
   contribution: CanvasExportContribution,
   allowedOrigins: Schema.Array(
-    Schema.String.pipe(
-      Schema.maxLength(256),
-      Schema.filter((value) => {
+    Schema.String.check(
+      Schema.isMaxLength(256),
+      Schema.makeFilter((value) => {
         try {
           const url = new URL(value);
           return (
@@ -525,14 +530,14 @@ export const ExtensionCanvasExportDeclaration = Schema.Struct({
         }
       }),
     ),
-  ).pipe(
-    Schema.maxItems(8),
-    Schema.filter((values) => new Set(values).size === values.length),
+  ).check(
+    Schema.isMaxLength(8),
+    Schema.makeFilter((values) => new Set(values).size === values.length),
   ),
-}).annotations(strict);
+});
 export type ExtensionCanvasExportDeclaration = typeof ExtensionCanvasExportDeclaration.Type;
 
-const ExtensionThemeColor = Schema.String.pipe(Schema.pattern(/^#[0-9a-fA-F]{6}$/));
+const ExtensionThemeColor = Schema.String.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/));
 const ExtensionThemeRole = /^[a-z][a-z0-9-]{0,63}$/;
 /**
  * One mode's colours: semantic role names to six-digit hex colours and
@@ -540,13 +545,13 @@ const ExtensionThemeRole = /^[a-z][a-z0-9-]{0,63}$/;
  * roles must be present, and whether text meets contrast, is decided by
  * `@octant/theme` before the theme is listed.
  */
-const ExtensionThemeTokens = Schema.Record({ key: Schema.String, value: ExtensionThemeColor }).pipe(
-  Schema.filter((tokens) => {
+const ExtensionThemeTokens = Schema.Record(Schema.String, ExtensionThemeColor).check(
+  Schema.makeFilter((tokens) => {
     const roles = Object.keys(tokens);
     return roles.length <= 128 && roles.every((role) => ExtensionThemeRole.test(role));
   }),
 );
-export const ExtensionThemeMode = Schema.Literal("light", "dark");
+export const ExtensionThemeMode = Schema.Literals(["light", "dark"]);
 export type ExtensionThemeMode = typeof ExtensionThemeMode.Type;
 
 /**
@@ -555,29 +560,29 @@ export type ExtensionThemeMode = typeof ExtensionThemeMode.Type;
  * address, and a field it does not name is refused rather than ignored.
  */
 export const ExtensionThemeDeclaration = Schema.Struct({
-  supportedModes: Schema.Array(ExtensionThemeMode).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(2),
-    Schema.filter((modes) => new Set(modes).size === modes.length),
+  supportedModes: Schema.Array(ExtensionThemeMode).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
+    Schema.makeFilter((modes) => new Set(modes).size === modes.length),
   ),
   tokens: Schema.Struct({
     light: Schema.optional(ExtensionThemeTokens),
     dark: Schema.optional(ExtensionThemeTokens),
-  }).annotations(strict),
+  }),
   /** Inks for the application-ground dither, as the built-in presets carry. */
   patternPalette: Schema.optional(
-    Schema.Array(ExtensionThemeColor).pipe(Schema.minItems(1), Schema.maxItems(6)),
+    Schema.Array(ExtensionThemeColor).check(Schema.isMinLength(1), Schema.isMaxLength(6)),
   ),
-})
-  .annotations(strict)
-  .pipe(
-    // Colours are given for exactly the modes the theme says it supports.
-    Schema.filter((theme) =>
+}).pipe(
+  // Colours are given for exactly the modes the theme says it supports.
+  Schema.check(
+    Schema.makeFilter((theme) =>
       ExtensionThemeMode.literals.every(
         (mode) => theme.supportedModes.includes(mode) === (theme.tokens[mode] !== undefined),
       ),
     ),
-  );
+  ),
+);
 export type ExtensionThemeDeclaration = typeof ExtensionThemeDeclaration.Type;
 
 /**
@@ -591,7 +596,7 @@ export const ExtensionGroundDeclaration = Schema.Struct({
   characterDensity: Schema.optional(AppBackgroundPercent),
   characterSpeed: Schema.optional(AppBackgroundPercent),
   characterPattern: Schema.optional(AppBackgroundCharacterPattern),
-}).annotations(strict);
+});
 export type ExtensionGroundDeclaration = typeof ExtensionGroundDeclaration.Type;
 
 /**
@@ -603,16 +608,19 @@ export const MAX_DECLARED_USD_MICROS_PER_IMAGE = 100_000_000;
 
 /** One image model an outside media driver offers, with its published price. */
 export const ExtensionImageGenerationModel = Schema.Struct({
-  modelId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  modelId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   /**
    * The provider's published price for one image, in integer micro-dollars.
    * Absent when the provider publishes none: the host then treats the model
    * as unpriced, and an active spend limit refuses it.
    */
   usdMicrosPerImage: Schema.optional(
-    Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_DECLARED_USD_MICROS_PER_IMAGE)),
+    Schema.Int.check(
+      Schema.isGreaterThan(0),
+      Schema.isLessThanOrEqualTo(MAX_DECLARED_USD_MICROS_PER_IMAGE),
+    ),
   ),
-}).annotations(strict);
+});
 export type ExtensionImageGenerationModel = typeof ExtensionImageGenerationModel.Type;
 
 /** The longest clip a video model may declare, so a declared range stays a short list. */
@@ -687,8 +695,8 @@ function declaresBoundedClips(model: VideoModelCapabilities): boolean {
  * One video model an outside media driver offers: exactly what the video
  * seam's own models declare, within bounds the host can reserve and show.
  */
-export const ExtensionVideoGenerationModel = VideoModelCapabilities.pipe(
-  Schema.filter((model) => declaresReservablePrice(model.price) && declaresBoundedClips(model)),
+export const ExtensionVideoGenerationModel = VideoModelCapabilities.check(
+  Schema.makeFilter((model) => declaresReservablePrice(model.price) && declaresBoundedClips(model)),
 );
 export type ExtensionVideoGenerationModel = typeof ExtensionVideoGenerationModel.Type;
 
@@ -701,24 +709,24 @@ const distinctModels = (models: ReadonlyArray<{ readonly modelId: string }>): bo
  * reads prices only from here, so a running driver can never name its own
  * price, and the digest the person trusted covers them.
  */
-export const ExtensionMediaGenerationDeclaration = Schema.Union(
+export const ExtensionMediaGenerationDeclaration = Schema.Union([
   Schema.Struct({
     media: Schema.Literal("image"),
-    models: Schema.Array(ExtensionImageGenerationModel).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(64),
-      Schema.filter(distinctModels),
+    models: Schema.Array(ExtensionImageGenerationModel).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(64),
+      Schema.makeFilter(distinctModels),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     media: Schema.Literal("video"),
-    models: Schema.Array(ExtensionVideoGenerationModel).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(64),
-      Schema.filter(distinctModels),
+    models: Schema.Array(ExtensionVideoGenerationModel).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(64),
+      Schema.makeFilter(distinctModels),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionMediaGenerationDeclaration = typeof ExtensionMediaGenerationDeclaration.Type;
 
 export const ExtensionComponent = Schema.Struct({
@@ -726,7 +734,7 @@ export const ExtensionComponent = Schema.Struct({
   kind: ExtensionComponentKind,
   displayName: boundedText(128),
   description: Schema.optional(boundedText(2048)),
-  declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
+  declaredCapabilities: Schema.Array(ExtensionCapability).check(Schema.isMaxLength(32)),
   entryPoint: Schema.optional(entryPointReference),
   configurationReference: Schema.optional(opaqueReference),
   contentReference: Schema.optional(opaqueReference),
@@ -746,7 +754,7 @@ export const ExtensionComponent = Schema.Struct({
   ground: Schema.optional(ExtensionGroundDeclaration),
   /** Present only on a `provider-driver` that generates media: its models and prices, as data. */
   mediaGeneration: Schema.optional(ExtensionMediaGenerationDeclaration),
-}).annotations(strict);
+});
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
 const executableKinds = new Set<ExtensionComponentKind>([
@@ -765,7 +773,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
-export const ExtensionContributionPoint = Schema.Literal(
+export const ExtensionContributionPoint = Schema.Literals([
   "sidebar.destination",
   "settings.section",
   "workspace.tab",
@@ -773,10 +781,10 @@ export const ExtensionContributionPoint = Schema.Literal(
   "preview.viewer",
   "appearance.preset",
   "board.view",
-);
+]);
 export type ExtensionContributionPoint = typeof ExtensionContributionPoint.Type;
 
-export const ExtensionPreviewViewerKind = Schema.Literal(
+export const ExtensionPreviewViewerKind = Schema.Literals([
   "text",
   "markdown",
   "image",
@@ -785,10 +793,10 @@ export const ExtensionPreviewViewerKind = Schema.Literal(
   "workbook",
   "document",
   "slides",
-);
+]);
 export type ExtensionPreviewViewerKind = typeof ExtensionPreviewViewerKind.Type;
 
-export const ExtensionBoardMode = Schema.Literal("work", "code");
+export const ExtensionBoardMode = Schema.Literals(["work", "code"]);
 export type ExtensionBoardMode = typeof ExtensionBoardMode.Type;
 
 export const ExtensionSidebarDestinationContribution = Schema.Struct({
@@ -796,10 +804,10 @@ export const ExtensionSidebarDestinationContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   destinationId: boundedToken(64),
   label: boundedText(64),
-  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
+  modes: Schema.Array(OctantMode).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
   /** Optional module entry point the renderer loads to render or handle the destination. */
   entryPoint: Schema.optional(entryPointReference),
-}).annotations(strict);
+});
 export type ExtensionSidebarDestinationContribution =
   typeof ExtensionSidebarDestinationContribution.Type;
 
@@ -808,12 +816,12 @@ export const ExtensionSettingsSectionContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   sectionId: boundedToken(64),
   label: boundedText(64),
-  scope: Schema.Literal("app", "host", "mode", "project", "thread"),
+  scope: Schema.Literals(["app", "host", "mode", "project", "thread"]),
   keywords: boundedText(512),
   /** Optional module entry point the renderer loads for the section's panel. */
   entryPoint: Schema.optional(entryPointReference),
   description: Schema.optional(boundedText(2048)),
-}).annotations(strict);
+});
 export type ExtensionSettingsSectionContribution = typeof ExtensionSettingsSectionContribution.Type;
 
 export const ExtensionWorkspaceTabContribution = Schema.Struct({
@@ -821,8 +829,8 @@ export const ExtensionWorkspaceTabContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   tabId: boundedToken(64),
   label: boundedText(64),
-  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
-}).annotations(strict);
+  modes: Schema.Array(OctantMode).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
+});
 export type ExtensionWorkspaceTabContribution = typeof ExtensionWorkspaceTabContribution.Type;
 
 export const ExtensionThreadPaneContribution = Schema.Struct({
@@ -830,8 +838,8 @@ export const ExtensionThreadPaneContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   paneId: boundedToken(64),
   label: boundedText(64),
-  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
-}).annotations(strict);
+  modes: Schema.Array(OctantMode).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
+});
 export type ExtensionThreadPaneContribution = typeof ExtensionThreadPaneContribution.Type;
 
 export const ExtensionPreviewViewerContribution = Schema.Struct({
@@ -839,8 +847,11 @@ export const ExtensionPreviewViewerContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   viewerId: boundedToken(64),
   label: boundedText(64),
-  kinds: Schema.Array(ExtensionPreviewViewerKind).pipe(Schema.minItems(1), Schema.maxItems(16)),
-}).annotations(strict);
+  kinds: Schema.Array(ExtensionPreviewViewerKind).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(16),
+  ),
+});
 export type ExtensionPreviewViewerContribution = typeof ExtensionPreviewViewerContribution.Type;
 
 export const ExtensionAppearancePresetContribution = Schema.Struct({
@@ -848,7 +859,7 @@ export const ExtensionAppearancePresetContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   presetId: boundedToken(64),
   label: boundedText(64),
-}).annotations(strict);
+});
 export type ExtensionAppearancePresetContribution =
   typeof ExtensionAppearancePresetContribution.Type;
 
@@ -857,11 +868,11 @@ export const ExtensionBoardViewContribution = Schema.Struct({
   componentId: ExtensionComponentId,
   viewId: boundedToken(64),
   label: boundedText(64),
-  modes: Schema.Array(ExtensionBoardMode).pipe(Schema.minItems(1), Schema.maxItems(2)),
-}).annotations(strict);
+  modes: Schema.Array(ExtensionBoardMode).check(Schema.isMinLength(1), Schema.isMaxLength(2)),
+});
 export type ExtensionBoardViewContribution = typeof ExtensionBoardViewContribution.Type;
 
-export const ExtensionContribution = Schema.Union(
+export const ExtensionContribution = Schema.Union([
   ExtensionSidebarDestinationContribution,
   ExtensionSettingsSectionContribution,
   ExtensionWorkspaceTabContribution,
@@ -869,7 +880,7 @@ export const ExtensionContribution = Schema.Union(
   ExtensionPreviewViewerContribution,
   ExtensionAppearancePresetContribution,
   ExtensionBoardViewContribution,
-);
+]);
 export type ExtensionContribution = typeof ExtensionContribution.Type;
 
 export const ExtensionPackageManifest = Schema.Struct({
@@ -885,88 +896,83 @@ export const ExtensionPackageManifest = Schema.Struct({
   provenance: ExtensionProvenance,
   license: ExtensionLicense,
   compatibility: ExtensionCompatibility,
-  declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
+  declaredCapabilities: Schema.Array(ExtensionCapability).check(Schema.isMaxLength(32)),
   primaryComponentId: Schema.optional(ExtensionComponentId),
-  components: Schema.Array(ExtensionComponent).pipe(Schema.minItems(1), Schema.maxItems(256)),
-  contributions: Schema.optional(Schema.Array(ExtensionContribution).pipe(Schema.maxItems(32))),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((manifest) => {
-      const components = new Map(manifest.components.map((component) => [component.id, component]));
-      if (components.size !== manifest.components.length) return false;
+  components: Schema.Array(ExtensionComponent).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
+  ),
+  contributions: Schema.optional(Schema.Array(ExtensionContribution).check(Schema.isMaxLength(32))),
+}).check(
+  Schema.makeFilter((manifest) => {
+    const components = new Map(manifest.components.map((component) => [component.id, component]));
+    if (components.size !== manifest.components.length) return false;
+    if (manifest.primaryComponentId !== undefined && !components.has(manifest.primaryComponentId)) {
+      return false;
+    }
+    if (
+      manifest.contributions !== undefined &&
+      !manifest.contributions.every((contribution) => components.has(contribution.componentId))
+    ) {
+      return false;
+    }
+    const packageCapabilities = new Set(manifest.declaredCapabilities);
+    return manifest.components.every((component) => {
       if (
-        manifest.primaryComponentId !== undefined &&
-        !components.has(manifest.primaryComponentId)
+        component.declaredCapabilities.some((capability) => !packageCapabilities.has(capability))
       ) {
         return false;
       }
+      const executable = executableKinds.has(component.kind);
+      const mcpChild = mcpChildKinds.has(component.kind);
+      if (component.kind === "mcp-server") {
+        if (component.entryPoint === undefined && component.configurationReference === undefined) {
+          return false;
+        }
+      } else if (executable !== (component.entryPoint !== undefined)) {
+        return false;
+      }
       if (
-        manifest.contributions !== undefined &&
-        !manifest.contributions.every((contribution) => components.has(contribution.componentId))
+        component.kind !== "skill-instructions" &&
+        component.kind !== "mcp-server" &&
+        component.configurationReference !== undefined
       ) {
         return false;
       }
-      const packageCapabilities = new Set(manifest.declaredCapabilities);
-      return manifest.components.every((component) => {
-        if (
-          component.declaredCapabilities.some((capability) => !packageCapabilities.has(capability))
-        ) {
-          return false;
-        }
-        const executable = executableKinds.has(component.kind);
-        const mcpChild = mcpChildKinds.has(component.kind);
-        if (component.kind === "mcp-server") {
-          if (
-            component.entryPoint === undefined &&
-            component.configurationReference === undefined
-          ) {
-            return false;
-          }
-        } else if (executable !== (component.entryPoint !== undefined)) {
-          return false;
-        }
-        if (
-          component.kind !== "skill-instructions" &&
-          component.kind !== "mcp-server" &&
-          component.configurationReference !== undefined
-        ) {
-          return false;
-        }
-        if (component.kind !== "skill-instructions" && component.contentReference !== undefined) {
-          return false;
-        }
-        if (component.kind !== "skill-instructions" && component.skillName !== undefined) {
-          return false;
-        }
-        if ((component.kind === "language-server") !== (component.languageServer !== undefined)) {
-          return false;
-        }
-        if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
-          return false;
-        }
-        if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
-          return false;
-        if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
-        if ((component.kind === "theme") !== (component.theme !== undefined)) return false;
-        if (component.kind === "theme" && component.declaredCapabilities.length > 0) return false;
-        if ((component.kind === "ground") !== (component.ground !== undefined)) return false;
-        if (component.kind !== "provider-driver" && component.mediaGeneration !== undefined) {
-          return false;
-        }
-        if (component.kind === "ground" && component.declaredCapabilities.length > 0) return false;
-        if (
-          component.kind === "code-tool" &&
-          (component.declaredCapabilities.length !== 1 ||
-            component.declaredCapabilities[0] !== "credentials")
-        )
-          return false;
-        if (mcpChild !== (component.parentComponentId !== undefined)) return false;
-        if (!mcpChild) return true;
-        return components.get(component.parentComponentId!)?.kind === "mcp-server";
-      });
-    }),
-  );
+      if (component.kind !== "skill-instructions" && component.contentReference !== undefined) {
+        return false;
+      }
+      if (component.kind !== "skill-instructions" && component.skillName !== undefined) {
+        return false;
+      }
+      if ((component.kind === "language-server") !== (component.languageServer !== undefined)) {
+        return false;
+      }
+      if ((component.kind === "debug-adapter") !== (component.debugAdapter !== undefined)) {
+        return false;
+      }
+      if ((component.kind === "canvas-export-target") !== (component.canvasExport !== undefined))
+        return false;
+      if ((component.kind === "code-tool") !== (component.codeTool !== undefined)) return false;
+      if ((component.kind === "theme") !== (component.theme !== undefined)) return false;
+      if (component.kind === "theme" && component.declaredCapabilities.length > 0) return false;
+      if ((component.kind === "ground") !== (component.ground !== undefined)) return false;
+      if (component.kind !== "provider-driver" && component.mediaGeneration !== undefined) {
+        return false;
+      }
+      if (component.kind === "ground" && component.declaredCapabilities.length > 0) return false;
+      if (
+        component.kind === "code-tool" &&
+        (component.declaredCapabilities.length !== 1 ||
+          component.declaredCapabilities[0] !== "credentials")
+      )
+        return false;
+      if (mcpChild !== (component.parentComponentId !== undefined)) return false;
+      if (!mcpChild) return true;
+      return components.get(component.parentComponentId!)?.kind === "mcp-server";
+    });
+  }),
+);
 export type ExtensionPackageManifest = typeof ExtensionPackageManifest.Type;
 
 export const ExtensionActivationState = Schema.Struct({
@@ -982,10 +988,10 @@ export const ExtensionActivationState = Schema.Struct({
   unavailable: Schema.Boolean,
   interrupted: Schema.Boolean,
   waiting: Schema.Boolean,
-}).annotations(strict);
+});
 export type ExtensionActivationState = typeof ExtensionActivationState.Type;
 
-export const ExtensionBlockReason = Schema.Literal(
+export const ExtensionBlockReason = Schema.Literals([
   "host-prohibited",
   "mode-prohibited",
   "project-prohibited",
@@ -1004,54 +1010,52 @@ export const ExtensionBlockReason = Schema.Literal(
   "unavailable",
   "interrupted",
   "waiting",
-);
+]);
 export type ExtensionBlockReason = typeof ExtensionBlockReason.Type;
 
-export const ExtensionEffectiveState = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("effective") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("blocked"), reason: ExtensionBlockReason }).annotations(
-    strict,
-  ),
-);
+export const ExtensionEffectiveState = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("effective") }),
+  Schema.Struct({ kind: Schema.Literal("blocked"), reason: ExtensionBlockReason }),
+]);
 export type ExtensionEffectiveState = typeof ExtensionEffectiveState.Type;
 
 export const ExtensionActivationScope = Schema.Struct({
   hostId: HostId,
   mode: OctantMode,
   projectId: Schema.NullOr(ProjectId),
-  threadId: Schema.NullOr(Schema.UUID),
+  threadId: Schema.NullOr(GuidString),
   providerFamily: ExtensionProviderFamily,
-}).annotations(strict);
+});
 export type ExtensionActivationScope = typeof ExtensionActivationScope.Type;
 
 export const ExtensionActivationPolicyFacts = Schema.Struct({
-  revision: Schema.Int.pipe(Schema.nonNegative()),
+  revision: NonNegativeInt,
   // Informational: the catalog epoch hashes what the policy allows,
   // not how many times the Project or thread changed.
-  projectRevision: Schema.Int.pipe(Schema.nonNegative()),
-  threadRevision: Schema.Int.pipe(Schema.nonNegative()),
+  projectRevision: NonNegativeInt,
+  threadRevision: NonNegativeInt,
   hostAllowed: Schema.Boolean,
   modeAllowed: Schema.Boolean,
   projectAllowed: Schema.Boolean,
   threadAllowed: Schema.Boolean,
   policyAllowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type ExtensionActivationPolicyFacts = typeof ExtensionActivationPolicyFacts.Type;
 
 export const ExtensionContextContribution = Schema.Struct({
   kind: Schema.Literal("zero"),
-  reason: Schema.Union(ExtensionBlockReason, Schema.Literal("not-selected")),
-}).annotations(strict);
+  reason: Schema.Union([ExtensionBlockReason, Schema.Literal("not-selected")]),
+});
 export type ExtensionContextContribution = typeof ExtensionContextContribution.Type;
 
 export const ExtensionDiagnostic = Schema.Struct({
   code: boundedToken(128),
-  message: boundedText(1024).pipe(
-    Schema.filter(
+  message: boundedText(1024).check(
+    Schema.makeFilter(
       (message) => !message.includes("/") && !message.includes("\\") && !message.includes("\0"),
     ),
   ),
-}).annotations(strict);
+});
 export type ExtensionDiagnostic = typeof ExtensionDiagnostic.Type;
 
 export const SourceQualifiedSkill = Schema.Struct({
@@ -1061,20 +1065,23 @@ export const SourceQualifiedSkill = Schema.Struct({
   digest: ExtensionContentDigest,
   available: Schema.Boolean,
   diagnostic: Schema.optional(ExtensionDiagnostic),
-}).annotations(strict);
+});
 export type SourceQualifiedSkill = typeof SourceQualifiedSkill.Type;
 
 export const ExtensionSkillCollision = Schema.Struct({
   name: boundedToken(64),
-  candidates: Schema.Array(SourceQualifiedSkillId).pipe(Schema.minItems(2), Schema.maxItems(64)),
-}).annotations(strict);
+  candidates: Schema.Array(SourceQualifiedSkillId).check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(64),
+  ),
+});
 export type ExtensionSkillCollision = typeof ExtensionSkillCollision.Type;
 
 export const StandaloneSkillScope = Schema.Struct({
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   projectId: ProjectId,
   threadRef: opaqueReference,
-}).annotations(strict);
+});
 export type StandaloneSkillScope = typeof StandaloneSkillScope.Type;
 
 /**
@@ -1085,9 +1092,9 @@ export type StandaloneSkillScope = typeof StandaloneSkillScope.Type;
  * snapshot, while it drops an unknown field.
  */
 export const StandaloneSkillProjectScope = Schema.Struct({
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type StandaloneSkillProjectScope = typeof StandaloneSkillProjectScope.Type;
 
 export const StandaloneSkillRecord = Schema.Struct({
@@ -1097,7 +1104,7 @@ export const StandaloneSkillRecord = Schema.Struct({
   displayName: boundedText(128),
   description: Schema.optional(boundedText(2048)),
   provenance: ExtensionProvenance,
-  contentBytes: Schema.Int.pipe(Schema.nonNegative()),
+  contentBytes: NonNegativeInt,
   reviewed: Schema.Boolean,
   desiredEnabled: Schema.Boolean,
   effectiveState: ExtensionEffectiveState,
@@ -1110,7 +1117,7 @@ export const StandaloneSkillRecord = Schema.Struct({
    * that the host has already read from disk. Trust is still enforced by the
    * activation ladder before this text reaches any provider context.
    */
-  instructions: Schema.optional(Schema.String.pipe(Schema.maxLength(256 * 1024))),
+  instructions: Schema.optional(Schema.String.check(Schema.isMaxLength(256 * 1024))),
   /**
    * Raw, provider-published Canvas skill contribution document, when the skill
    * ships parsed Canvas presentation metadata. Carried as an opaque value and
@@ -1119,16 +1126,16 @@ export const StandaloneSkillRecord = Schema.Struct({
    * contracts package avoids a dependency cycle on the Canvas skill schema.
    */
   canvasContribution: Schema.optional(Schema.Unknown),
-}).annotations(strict);
+});
 export type StandaloneSkillRecord = typeof StandaloneSkillRecord.Type;
 
 export const ExtensionSelectionOrigin = Schema.Struct({
-  kind: Schema.Literal("draft", "turn"),
+  kind: Schema.Literals(["draft", "turn"]),
   reference: opaqueReference,
-}).annotations(strict);
+});
 export type ExtensionSelectionOrigin = typeof ExtensionSelectionOrigin.Type;
 
-export const ExtensionSelection = Schema.Union(
+export const ExtensionSelection = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("plugin"),
     extensionId: ToolExtensionId,
@@ -1138,7 +1145,7 @@ export const ExtensionSelection = Schema.Union(
     packageDigest: ExtensionContentDigest,
     catalogEpoch: ExtensionCatalogEpoch,
     origin: ExtensionSelectionOrigin,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("skill"),
     skillId: SourceQualifiedSkillId,
@@ -1146,8 +1153,8 @@ export const ExtensionSelection = Schema.Union(
     packageDigest: ExtensionContentDigest,
     catalogEpoch: ExtensionCatalogEpoch,
     origin: ExtensionSelectionOrigin,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionSelection = typeof ExtensionSelection.Type;
 
 export const ExtensionPackageState = Schema.Struct({
@@ -1189,7 +1196,7 @@ export const ExtensionPackageState = Schema.Struct({
       pinned: Schema.optional(ExtensionPublisherKeyFingerprint),
       selected: Schema.optional(ExtensionPublisherKeyFingerprint),
       held: Schema.optional(ExtensionPublisherHoldReason),
-    }).annotations(strict),
+    }),
   ),
   /**
    * Present while the selected version is an unsigned update the host took
@@ -1203,17 +1210,17 @@ export const ExtensionPackageState = Schema.Struct({
       previousDigest: ExtensionContentDigest,
       at: UtcTimestamp,
       rollbackAvailable: Schema.Boolean,
-    }).annotations(strict),
+    }),
   ),
   components: Schema.Array(
     Schema.Struct({
       component: ExtensionComponent,
       activation: ExtensionActivationState,
       effectiveState: ExtensionEffectiveState,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(256)),
-  diagnostics: Schema.Array(ExtensionDiagnostic).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(256)),
+  diagnostics: Schema.Array(ExtensionDiagnostic).check(Schema.isMaxLength(128)),
+});
 export type ExtensionPackageState = typeof ExtensionPackageState.Type;
 
 export const ExtensionEffectivePackageState = Schema.Struct({
@@ -1236,24 +1243,53 @@ export const ExtensionEffectivePackageState = Schema.Struct({
       policy: ExtensionActivationPolicyFacts,
       effectiveState: ExtensionEffectiveState,
       contextContribution: ExtensionContextContribution,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(256)),
-  diagnostics: Schema.Array(ExtensionDiagnostic).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(256)),
+  diagnostics: Schema.Array(ExtensionDiagnostic).check(Schema.isMaxLength(128)),
+});
 export type ExtensionEffectivePackageState = typeof ExtensionEffectivePackageState.Type;
 
-export const decodeExtensionPackageId = Schema.decodeUnknownSync(ExtensionPackageId);
-export const decodeExtensionComponentId = Schema.decodeUnknownSync(ExtensionComponentId);
-export const decodeExtensionContentDigest = Schema.decodeUnknownSync(ExtensionContentDigest);
+export const decodeExtensionPackageId = Schema.decodeUnknownSync(
+  ExtensionPackageId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionComponentId = Schema.decodeUnknownSync(
+  ExtensionComponentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionContentDigest = Schema.decodeUnknownSync(
+  ExtensionContentDigest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeExtensionPublisherKeyFingerprint = Schema.decodeUnknownSync(
   ExtensionPublisherKeyFingerprint,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeExtensionPackageManifest = Schema.decodeUnknownSync(ExtensionPackageManifest);
-export const decodeExtensionActivationState = Schema.decodeUnknownSync(ExtensionActivationState);
-export const decodeExtensionSelection = Schema.decodeUnknownSync(ExtensionSelection);
-export const decodeSourceQualifiedSkill = Schema.decodeUnknownSync(SourceQualifiedSkill);
-export const decodeSourceQualifiedSkillId = Schema.decodeUnknownSync(SourceQualifiedSkillId);
-export const decodeStandaloneSkillRecord = Schema.decodeUnknownSync(StandaloneSkillRecord);
+export const decodeExtensionPackageManifest = Schema.decodeUnknownSync(
+  ExtensionPackageManifest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionActivationState = Schema.decodeUnknownSync(
+  ExtensionActivationState,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionSelection = Schema.decodeUnknownSync(
+  ExtensionSelection,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSourceQualifiedSkill = Schema.decodeUnknownSync(
+  SourceQualifiedSkill,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSourceQualifiedSkillId = Schema.decodeUnknownSync(
+  SourceQualifiedSkillId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeStandaloneSkillRecord = Schema.decodeUnknownSync(
+  StandaloneSkillRecord,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeExtensionComponentQualifiedId = Schema.decodeUnknownSync(
   ExtensionComponentQualifiedId,
+  STRICT_DECODE_OPTIONS,
 );

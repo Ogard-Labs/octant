@@ -1,4 +1,5 @@
 import { personDecides } from "./hostAnswer";
+import { GuidString, NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { AgentRunId, AgentRunParentThreadId, AgentRunRole } from "./agentRun";
 import { AnswerChatTurnQuestionCommand, ChatAttemptQuestion, ChatThreadId } from "./chat";
@@ -18,8 +19,6 @@ import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } fro
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * The fenced block a Work or Code reply closes with when it hands the person a
  * decision. The host reads it from the normalized reply text alone, so every
@@ -37,17 +36,21 @@ export const MAX_TURN_DECISION_WHY_LENGTH = 240;
 /** The consequence or tradeoff of one option, one line under its button. */
 export const MAX_TURN_DECISION_OPTION_DETAIL_LENGTH = 80;
 
-export const TurnDecisionAskText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_DECISION_ASK_LENGTH),
+export const TurnDecisionAskText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_DECISION_ASK_LENGTH),
 );
-export const TurnDecisionOptionText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_DECISION_OPTION_LENGTH),
+export const TurnDecisionOptionText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_DECISION_OPTION_LENGTH),
 );
-export const TurnDecisionWhyText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_DECISION_WHY_LENGTH),
+export const TurnDecisionWhyText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_DECISION_WHY_LENGTH),
 );
-export const TurnDecisionOptionDetailText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_DECISION_OPTION_DETAIL_LENGTH),
+export const TurnDecisionOptionDetailText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_DECISION_OPTION_DETAIL_LENGTH),
 );
 
 /**
@@ -60,31 +63,32 @@ export const TurnDecisionOptions = Schema.Array(
     label: TurnDecisionOptionText,
     recommended: Schema.Boolean,
     detail: Schema.optional(TurnDecisionOptionDetailText),
-  }).annotations(strict),
-).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_TURN_DECISION_OPTIONS),
-  Schema.filter(
+  }),
+).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_TURN_DECISION_OPTIONS),
+  Schema.makeFilter(
     (options) =>
       options.filter((option) => option.recommended).length === 1 &&
       new Set(options.map((option) => option.label)).size === options.length,
-    { message: () => "A decision recommends exactly one of its distinct options." },
+    { message: "A decision recommends exactly one of its distinct options." },
   ),
 );
 export type TurnDecisionOptions = typeof TurnDecisionOptions.Type;
 
 /** A reviewer's reason is one short sentence beside the option it backs. */
 export const MAX_TURN_DECISION_REVIEW_REASON_LENGTH = 100;
-export const TurnDecisionReviewReasonText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_TURN_DECISION_REVIEW_REASON_LENGTH),
-  Schema.pattern(/^[^\r\n]+$/),
+export const TurnDecisionReviewReasonText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_TURN_DECISION_REVIEW_REASON_LENGTH),
+  Schema.isPattern(/^[^\r\n]+$/),
 );
 
 /** The model that asked: the asking turn's provider account and model. */
 export const TurnDecisionAskedBy = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type TurnDecisionAskedBy = typeof TurnDecisionAskedBy.Type;
 
 /**
@@ -94,23 +98,25 @@ export type TurnDecisionAskedBy = typeof TurnDecisionAskedBy.Type;
  * come, so a card can stop waiting. Absent when no second opinion is chosen or
  * the chosen account cannot be asked right now.
  */
-export const TurnDecisionReview = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("pending") }).annotations(strict),
+export const TurnDecisionReview = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("pending") }),
   Schema.Struct({
     status: Schema.Literal("reviewed"),
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-    providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    providerName: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+    ),
     /** The reviewer account's driver, so a card can draw its provider mark. */
-    driverKind: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+    driverKind: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64))),
     backs: TurnDecisionOptionText,
     reason: TurnDecisionReviewReasonText,
     reviewedAt: UtcTimestamp,
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("withheld") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("failed") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("not-allowed") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("withheld") }),
+  Schema.Struct({ status: Schema.Literal("failed") }),
+  Schema.Struct({ status: Schema.Literal("not-allowed") }),
+]);
 export type TurnDecisionReview = typeof TurnDecisionReview.Type;
 
 /**
@@ -124,9 +130,9 @@ export type TurnDecisionReview = typeof TurnDecisionReview.Type;
  * next turn, sent through the mode's own send command.
  */
 const PendingRequestFields = {
-  deferralKey: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/))),
+  deferralKey: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   deferredUntil: Schema.optional(UtcTimestamp),
-  threadTitle: Schema.NonEmptyTrimmedString,
+  threadTitle: NonEmptyTrimmedString,
   requestedAt: UtcTimestamp,
 } as const;
 
@@ -134,7 +140,7 @@ const PendingRequestFields = {
 export const WorkPendingRequestAnswer = Schema.Struct({
   requestId: WorkRequestId,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type WorkPendingRequestAnswer = typeof WorkPendingRequestAnswer.Type;
 
 const WorkPendingRequestFields = {
@@ -151,7 +157,7 @@ export const CodePendingApprovalAnswer = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   approvalId: CodeApprovalId,
-}).annotations(strict);
+});
 export type CodePendingApprovalAnswer = typeof CodePendingApprovalAnswer.Type;
 
 /** `answer-provider-input` takes these beside its fresh operation id and response evidence. */
@@ -159,7 +165,7 @@ export const CodePendingQuestionAnswer = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   requestId: CodeProviderRequestId,
-}).annotations(strict);
+});
 export type CodePendingQuestionAnswer = typeof CodePendingQuestionAnswer.Type;
 
 const CodePendingRequestFields = {
@@ -178,7 +184,7 @@ export const CodePendingDecisionAnswer = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   operationId: CodeOperationId,
-}).annotations(strict);
+});
 export type CodePendingDecisionAnswer = typeof CodePendingDecisionAnswer.Type;
 
 /**
@@ -191,7 +197,7 @@ export const WorkPendingDecisionAnswer = Schema.Struct({
   threadId: WorkThreadId,
   turnId: WorkTurnId,
   authority: WorkTurnAuthority,
-}).annotations(strict);
+});
 export type WorkPendingDecisionAnswer = typeof WorkPendingDecisionAnswer.Type;
 
 /** `answer-chat-turn-question` takes these beside the answer text. */
@@ -201,7 +207,7 @@ export const ChatPendingQuestionAnswer = Schema.Struct({
   turnId: AnswerChatTurnQuestionCommand.fields.turnId,
   attemptId: AnswerChatTurnQuestionCommand.fields.attemptId,
   requestId: AnswerChatTurnQuestionCommand.fields.requestId,
-}).annotations(strict);
+});
 export type ChatPendingQuestionAnswer = typeof ChatPendingQuestionAnswer.Type;
 
 const sameThread = (request: {
@@ -226,20 +232,23 @@ const ChildPendingRequestFields = {
    * answer in. A Chat thread has no dock, so a row for its subagent would send
    * the person to a place with nothing to answer.
    */
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   projectId: Schema.optional(ProjectId),
   /** The parent thread the subagent works under. */
   threadId: AgentRunParentThreadId,
   child: Schema.Struct({
     runId: AgentRunId,
     role: AgentRunRole,
-    task: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(MAX_CHILD_PENDING_REQUEST_TASK_LENGTH),
+    task: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(MAX_CHILD_PENDING_REQUEST_TASK_LENGTH),
     ),
-    providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    providerName: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+    ),
     modelId: Schema.optional(ProviderModelId),
-  }).annotations(strict),
-  text: Schema.NonEmptyTrimmedString,
+  }),
+  text: NonEmptyTrimmedString,
 } as const;
 
 const isWorkRequestText = Schema.is(WorkRequestSanitizedText);
@@ -279,12 +288,12 @@ const childTextKeepsModeBounds = (request: {
  */
 const LeadApprovalFields = {
   ...PendingRequestFields,
-  mode: Schema.Literal("chat", "work", "code"),
+  mode: Schema.Literals(["chat", "work", "code"]),
   kind: Schema.Literal("lead-approval"),
   /** Absent for a Chat thread filed under no Project. */
   projectId: Schema.optional(ProjectId),
   threadId: AgentRunParentThreadId,
-  text: Schema.NonEmptyTrimmedString,
+  text: NonEmptyTrimmedString,
   lostInRestart: Schema.optional(Schema.Literal(true)),
 } as const;
 
@@ -327,19 +336,17 @@ const LeadQuestionFields = {
   text: WorkRequestSanitizedText,
 } as const;
 
-export const PendingRequest = Schema.Union(
-  Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
-    strict,
-  ),
+export const PendingRequest = Schema.Union([
+  Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }),
   Schema.Struct({
     ...WorkPendingRequestFields,
     kind: Schema.Literal("question"),
-    options: Schema.Array(
-      Schema.Struct({ label: WorkRequestSanitizedText }).annotations(strict),
-    ).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    options: Schema.Array(Schema.Struct({ label: WorkRequestSanitizedText })).check(
+      Schema.isMaxLength(MAX_WORK_REQUEST_OPTIONS),
+    ),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...CodePendingRequestFields,
     kind: Schema.Literal("approval"),
@@ -349,27 +356,25 @@ export const PendingRequest = Schema.Union(
      * site ask, so a client can tell it from a provider's own tool approval
      * and never offer a site answer for a more powerful action.
      */
-    browserOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+    browserOrigin: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+    ),
     answer: CodePendingApprovalAnswer,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
+  }).check(Schema.makeFilter(sameThread, { jsonSchema: {} })),
   Schema.Struct({
     ...CodePendingRequestFields,
     kind: Schema.Literal("question"),
     text: CodeQuestionPromptText,
-    options: Schema.Array(
-      Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
-    ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    options: Schema.Array(Schema.Struct({ label: CodeQuestionOptionText })).check(
+      Schema.isMaxLength(MAX_CODE_QUESTION_OPTIONS),
+    ),
     /**
      * The question asks for a secret. The row finds it and leaves the answer
      * to the thread's masked field, so no list answers it as evidence.
      */
     secret: Schema.optional(Schema.Literal(true)),
     answer: CodePendingQuestionAnswer,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
+  }).check(Schema.makeFilter(sameThread, { jsonSchema: {} })),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("work"),
@@ -383,9 +388,7 @@ export const PendingRequest = Schema.Union(
     askedBy: Schema.optional(TurnDecisionAskedBy),
     review: Schema.optional(TurnDecisionReview),
     answer: WorkPendingDecisionAnswer,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
+  }).check(Schema.makeFilter(sameThread, { jsonSchema: {} })),
   Schema.Struct({
     ...CodePendingRequestFields,
     kind: Schema.Literal("decision"),
@@ -396,25 +399,19 @@ export const PendingRequest = Schema.Union(
     askedBy: Schema.optional(TurnDecisionAskedBy),
     review: Schema.optional(TurnDecisionReview),
     answer: CodePendingDecisionAnswer,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
+  }).check(Schema.makeFilter(sameThread, { jsonSchema: {} })),
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-approval"),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
+  }).check(Schema.makeFilter(childTextKeepsModeBounds, { jsonSchema: {} })),
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-question"),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
-  Schema.Struct(LeadApprovalFields)
-    .annotations(strict)
-    .pipe(Schema.filter(leadTextKeepsModeBounds, { jsonSchema: {} })),
-  Schema.Struct(LeadQuestionFields).annotations(strict),
+  }).check(Schema.makeFilter(childTextKeepsModeBounds, { jsonSchema: {} })),
+  Schema.Struct(LeadApprovalFields).check(
+    Schema.makeFilter(leadTextKeepsModeBounds, { jsonSchema: {} }),
+  ),
+  Schema.Struct(LeadQuestionFields),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("chat"),
@@ -422,15 +419,13 @@ export const PendingRequest = Schema.Union(
     /** Absent for a Chat thread filed under no Project. */
     projectId: Schema.optional(ProjectId),
     threadId: ChatThreadId,
-    text: ChatAttemptQuestion.from.fields.prompt,
-    options: ChatAttemptQuestion.from.fields.options,
+    text: ChatAttemptQuestion.fields.prompt,
+    options: ChatAttemptQuestion.fields.options,
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
     answer: ChatPendingQuestionAnswer,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
-).annotations(personDecides);
+  }).check(Schema.makeFilter(sameThread, { jsonSchema: {} })),
+]).annotate(personDecides);
 export type PendingRequest = typeof PendingRequest.Type;
 
 export const MAX_PENDING_REQUESTS = 128;
@@ -446,7 +441,7 @@ export const MAX_WAITING_ASK_DETAIL_LENGTH = 4_000;
  * proposal or change request, a service offer, a Browser
  * site, upload, download or script approval, or the Browser sign-in card.
  */
-export const WaitingAskKind = Schema.Literal(
+export const WaitingAskKind = Schema.Literals([
   "tool-approval",
   "memory-proposal",
   "routine-proposal",
@@ -454,7 +449,7 @@ export const WaitingAskKind = Schema.Literal(
   "service-offer",
   "browser-approval",
   "browser-sign-in",
-);
+]);
 export type WaitingAskKind = typeof WaitingAskKind.Type;
 
 /** Opt in to shared offer rows without breaking older clients' closed ask-kind list. */
@@ -476,21 +471,19 @@ export const PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE =
  */
 export const WaitingAsk = Schema.Struct({
   kind: WaitingAskKind,
-  askId: Schema.UUID,
-  mode: Schema.Literal("chat", "work", "code"),
+  askId: GuidString,
+  mode: Schema.Literals(["chat", "work", "code"]),
   /** Absent for a Chat thread filed under no Project. */
   projectId: Schema.optional(ProjectId),
-  threadId: Schema.UUID,
-  threadTitle: Schema.NonEmptyTrimmedString,
+  threadId: GuidString,
+  threadTitle: NonEmptyTrimmedString,
   requestedAt: UtcTimestamp,
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_WAITING_ASK_TEXT_LENGTH)),
+  text: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_WAITING_ASK_TEXT_LENGTH)),
   detail: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_WAITING_ASK_DETAIL_LENGTH)),
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_WAITING_ASK_DETAIL_LENGTH)),
   ),
   inPlace: Schema.optional(Schema.Literal(true)),
-})
-  .annotations(strict)
-  .annotations(personDecides);
+}).annotate(personDecides);
 export type WaitingAsk = typeof WaitingAsk.Type;
 
 /**
@@ -505,29 +498,35 @@ export type WaitingAsk = typeof WaitingAsk.Type;
  * services that hold asks cap them at 32 each, well inside the bound.
  */
 export const PendingRequestList = Schema.Struct({
-  requests: Schema.Array(PendingRequest).pipe(Schema.maxItems(MAX_PENDING_REQUESTS)),
+  requests: Schema.Array(PendingRequest).check(Schema.isMaxLength(MAX_PENDING_REQUESTS)),
   truncated: Schema.Boolean,
-  asks: Schema.optional(Schema.Array(WaitingAsk).pipe(Schema.maxItems(MAX_PENDING_REQUESTS))),
-  offerHostRun: Schema.optional(Schema.UUID),
-}).annotations(strict);
+  asks: Schema.optional(Schema.Array(WaitingAsk).check(Schema.isMaxLength(MAX_PENDING_REQUESTS))),
+  offerHostRun: Schema.optional(GuidString),
+});
 export type PendingRequestList = typeof PendingRequestList.Type;
 
 export const PendingRequestFailure = Schema.Struct({
-  code: Schema.Literal("invalid", "unauthorized", "unavailable"),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  code: Schema.Literals(["invalid", "unauthorized", "unavailable"]),
+  message: NonEmptyTrimmedString,
+});
 export type PendingRequestFailure = typeof PendingRequestFailure.Type;
 
-export const decodePendingRequest = Schema.decodeUnknownSync(PendingRequest);
-export const decodePendingRequestList = Schema.decodeUnknownSync(PendingRequestList);
-export const decodeWaitingAsk = Schema.decodeUnknownSync(WaitingAsk);
-export const decodePendingRequestFailure = Schema.decodeUnknownSync(PendingRequestFailure);
+export const decodePendingRequest = Schema.decodeUnknownSync(PendingRequest, STRICT_DECODE_OPTIONS);
+export const decodePendingRequestList = Schema.decodeUnknownSync(
+  PendingRequestList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWaitingAsk = Schema.decodeUnknownSync(WaitingAsk, STRICT_DECODE_OPTIONS);
+export const decodePendingRequestFailure = Schema.decodeUnknownSync(
+  PendingRequestFailure,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Attention only. No answer, authority or question text is journaled here. */
 export const PendingQuestionDeferral = Schema.Struct({
-  key: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  key: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   until: Schema.NullOr(UtcTimestamp),
-}).annotations(strict);
+});
 export type PendingQuestionDeferral = typeof PendingQuestionDeferral.Type;
 
 /**
@@ -535,24 +534,24 @@ export type PendingQuestionDeferral = typeof PendingQuestionDeferral.Type;
  * could not be asked (off, at its limit, removed) or a call that timed out is
  * never journaled: nothing was learned, so a later read asks again.
  */
-export const DecisionReviewOutcome = Schema.Union(
+export const DecisionReviewOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("reviewed"),
     backs: TurnDecisionOptionText,
     reason: TurnDecisionReviewReasonText,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("withheld") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("failed") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("not-allowed") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("withheld") }),
+  Schema.Struct({ kind: Schema.Literal("failed") }),
+  Schema.Struct({ kind: Schema.Literal("not-allowed") }),
+]);
 export type DecisionReviewOutcome = typeof DecisionReviewOutcome.Type;
 
 /** `decision-review.recorded@1`: keyed like a decision's deferral, so it names the turn that asked. */
 export const DecisionReviewRecorded = Schema.Struct({
-  key: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  key: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   reviewedAt: UtcTimestamp,
   outcome: DecisionReviewOutcome,
-}).annotations(strict);
+});
 export type DecisionReviewRecorded = typeof DecisionReviewRecorded.Type;

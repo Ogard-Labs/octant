@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import {
   MAX_THREAD_GOAL_CHECK_LENGTH,
@@ -7,9 +8,9 @@ import {
 } from "./goal";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 export const REPORT_FINISHED_TOOL_NAME = "octant_report_finished";
 export const THREAD_FINISHED_RECEIPT_AGGREGATE_TYPE = "thread-finished-receipt";
@@ -32,8 +33,9 @@ export const MAX_FINISHED_RECEIPTS_PER_THREAD = 64;
 export const FinishedReceiptId = brandedUuid("FinishedReceiptId");
 export type FinishedReceiptId = typeof FinishedReceiptId.Type;
 
-export const FinishedReceiptCheckCommand = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_FINISHED_CHECK_COMMAND_LENGTH),
+export const FinishedReceiptCheckCommand = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_FINISHED_CHECK_COMMAND_LENGTH),
 );
 export type FinishedReceiptCheckCommand = typeof FinishedReceiptCheckCommand.Type;
 
@@ -43,11 +45,14 @@ export type FinishedReceiptCheckCommand = typeof FinishedReceiptCheckCommand.Typ
  * runs itself for proof. The agent's own words are never proof.
  */
 export const ReportFinishedInput = Schema.Struct({
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FINISHED_SUMMARY_LENGTH)),
-  checks: Schema.optional(
-    Schema.Array(FinishedReceiptCheckCommand).pipe(Schema.maxItems(MAX_FINISHED_CHECKS)),
+  summary: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_FINISHED_SUMMARY_LENGTH),
   ),
-}).annotations(strict);
+  checks: Schema.optional(
+    Schema.Array(FinishedReceiptCheckCommand).check(Schema.isMaxLength(MAX_FINISHED_CHECKS)),
+  ),
+});
 export type ReportFinishedInput = typeof ReportFinishedInput.Type;
 
 /**
@@ -57,51 +62,51 @@ export type ReportFinishedInput = typeof ReportFinishedInput.Type;
  * - `claimed`: a goal criterion with no check command; only a person can confirm it.
  * - `unavailable`: the host could not run the check (for example, a thread with no folder).
  */
-export const FinishedReceiptCheckStatus = Schema.Literal(
+export const FinishedReceiptCheckStatus = Schema.Literals([
   "proven",
   "failed",
   "claimed",
   "unavailable",
-);
+]);
 export type FinishedReceiptCheckStatus = typeof FinishedReceiptCheckStatus.Type;
 
 /** Overall status of a finished receipt, including staleness from later journaled file changes. */
-export const FinishedReceiptStatus = Schema.Literal(
+export const FinishedReceiptStatus = Schema.Literals([
   "proven",
   "failed",
   "claimed",
   "unavailable",
   "stale",
-);
+]);
 export type FinishedReceiptStatus = typeof FinishedReceiptStatus.Type;
 
 export const FinishedReceiptItem = Schema.Struct({
-  kind: Schema.Literal("check", "goal-criterion"),
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  kind: Schema.Literals(["check", "goal-criterion"]),
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
   command: Schema.optional(FinishedReceiptCheckCommand),
   criterionId: Schema.optional(ThreadGoalCriterionId),
   status: FinishedReceiptCheckStatus,
   exitCode: Schema.optional(Schema.Int),
   outputTail: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_FINISHED_CHECK_OUTPUT_TAIL_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_FINISHED_CHECK_OUTPUT_TAIL_LENGTH)),
   ),
-  reason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  reason: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+});
 export type FinishedReceiptItem = typeof FinishedReceiptItem.Type;
 
 /** Diff file and line counts observed by the host, or why they were unavailable. */
-export const FinishedReceiptDiff = Schema.Union(
+export const FinishedReceiptDiff = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("observed"),
     changedFiles: NonNegativeInt,
     insertions: NonNegativeInt,
     deletions: NonNegativeInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  }).annotations(strict),
-);
+    reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  }),
+]);
 export type FinishedReceiptDiff = typeof FinishedReceiptDiff.Type;
 
 /**
@@ -111,16 +116,19 @@ export type FinishedReceiptDiff = typeof FinishedReceiptDiff.Type;
  */
 export const FinishedReceiptRecorded = Schema.Struct({
   receiptId: FinishedReceiptId,
-  threadId: Schema.UUID,
-  mode: Schema.Literal("work", "code"),
+  threadId: GuidString,
+  mode: Schema.Literals(["work", "code"]),
   projectId: ProjectId,
   /** The turn or Code operation during which the lead reported finished. */
-  turnId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FINISHED_SUMMARY_LENGTH)),
-  items: Schema.Array(FinishedReceiptItem).pipe(Schema.maxItems(MAX_FINISHED_CHECKS * 2)),
+  turnId: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+  summary: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_FINISHED_SUMMARY_LENGTH),
+  ),
+  items: Schema.Array(FinishedReceiptItem).check(Schema.isMaxLength(MAX_FINISHED_CHECKS * 2)),
   diff: FinishedReceiptDiff,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type FinishedReceiptRecorded = typeof FinishedReceiptRecorded.Type;
 
 /**
@@ -135,14 +143,14 @@ export const ThreadFinishedReceipt = Schema.Struct({
   claimedCount: NonNegativeInt,
   failedCount: NonNegativeInt,
   unavailableCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type ThreadFinishedReceipt = typeof ThreadFinishedReceipt.Type;
 
 export const ThreadFinishedReceiptsResponse = Schema.Struct({
-  receipts: Schema.Array(ThreadFinishedReceipt).pipe(
-    Schema.maxItems(MAX_FINISHED_RECEIPTS_PER_THREAD),
+  receipts: Schema.Array(ThreadFinishedReceipt).check(
+    Schema.isMaxLength(MAX_FINISHED_RECEIPTS_PER_THREAD),
   ),
-}).annotations(strict);
+});
 export type ThreadFinishedReceiptsResponse = typeof ThreadFinishedReceiptsResponse.Type;
 
 /**
@@ -155,16 +163,38 @@ export const ThreadBoardFinishedMark = Schema.Struct({
   provenCount: NonNegativeInt,
   claimedCount: NonNegativeInt,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadBoardFinishedMark = typeof ThreadBoardFinishedMark.Type;
 
-export const decodeFinishedReceiptId = Schema.decodeUnknownSync(FinishedReceiptId);
-export const decodeReportFinishedInput = Schema.decodeUnknownSync(ReportFinishedInput);
-export const decodeFinishedReceiptItem = Schema.decodeUnknownSync(FinishedReceiptItem);
-export const decodeFinishedReceiptDiff = Schema.decodeUnknownSync(FinishedReceiptDiff);
-export const decodeFinishedReceiptRecorded = Schema.decodeUnknownSync(FinishedReceiptRecorded);
-export const decodeThreadFinishedReceipt = Schema.decodeUnknownSync(ThreadFinishedReceipt);
+export const decodeFinishedReceiptId = Schema.decodeUnknownSync(
+  FinishedReceiptId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReportFinishedInput = Schema.decodeUnknownSync(
+  ReportFinishedInput,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFinishedReceiptItem = Schema.decodeUnknownSync(
+  FinishedReceiptItem,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFinishedReceiptDiff = Schema.decodeUnknownSync(
+  FinishedReceiptDiff,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeFinishedReceiptRecorded = Schema.decodeUnknownSync(
+  FinishedReceiptRecorded,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadFinishedReceipt = Schema.decodeUnknownSync(
+  ThreadFinishedReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadFinishedReceiptsResponse = Schema.decodeUnknownSync(
   ThreadFinishedReceiptsResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadBoardFinishedMark = Schema.decodeUnknownSync(ThreadBoardFinishedMark);
+export const decodeThreadBoardFinishedMark = Schema.decodeUnknownSync(
+  ThreadBoardFinishedMark,
+  STRICT_DECODE_OPTIONS,
+);

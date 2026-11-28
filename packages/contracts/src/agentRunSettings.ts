@@ -1,9 +1,8 @@
 import { HostResourcePolicy, KeepAwakePolicy } from "./hostResourcePolicy";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { AgentRunCreationPosture } from "./agentRun";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Server-authoritative Agents settings: whether the thread's agent may start
@@ -18,13 +17,15 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * parallelism but never remove the bound.
  */
 export const MAX_AGENT_RUN_CONCURRENCY = 16;
-const AgentRunConcurrencyLimit = Schema.Int.pipe(Schema.between(1, MAX_AGENT_RUN_CONCURRENCY));
+const AgentRunConcurrencyLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_RUN_CONCURRENCY }),
+);
 export const AgentRunConcurrency = Schema.Struct({
   /** Helpers of one thread running at once. */
   perThread: AgentRunConcurrencyLimit,
   /** Helpers running at once across the app. */
   onHost: AgentRunConcurrencyLimit,
-}).annotations(strict);
+});
 export type AgentRunConcurrency = typeof AgentRunConcurrency.Type;
 
 export const DEFAULT_AGENT_RUN_CONCURRENCY: AgentRunConcurrency = { perThread: 4, onHost: 8 };
@@ -37,8 +38,8 @@ export const DEFAULT_AGENT_RUN_CONCURRENCY: AgentRunConcurrency = { perThread: 4
  */
 export const DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES = 120;
 export const MAX_AGENT_RUN_WORKING_TIME_MINUTES = 240;
-const AgentRunWorkingTimeLimit = Schema.Int.pipe(
-  Schema.between(1, MAX_AGENT_RUN_WORKING_TIME_MINUTES),
+const AgentRunWorkingTimeLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_RUN_WORKING_TIME_MINUTES }),
 );
 
 /**
@@ -49,8 +50,8 @@ const AgentRunWorkingTimeLimit = Schema.Int.pipe(
  */
 export const DEFAULT_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 30;
 export const MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES = 240;
-const AgentRunProviderSlotWaitLimit = Schema.Int.pipe(
-  Schema.between(1, MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES),
+const AgentRunProviderSlotWaitLimit = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES }),
 );
 
 export const AgentRunPolicySettings = Schema.Struct({
@@ -76,14 +77,14 @@ export const AgentRunPolicySettings = Schema.Struct({
   previousKeepAwake: Schema.optional(KeepAwakePolicy),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunPolicySettings = typeof AgentRunPolicySettings.Type;
 
 /**
  * The two postures a person can choose. Subagents are started only by the
  * thread's agent, so there is no "only when I start them" middle ground.
  */
-export const AgentRunSelectableCreationPosture = Schema.Literal("off", "automatic");
+export const AgentRunSelectableCreationPosture = Schema.Literals(["off", "automatic"]);
 export type AgentRunSelectableCreationPosture = typeof AgentRunSelectableCreationPosture.Type;
 
 export const DEFAULT_AGENT_RUN_CREATION_POSTURE: AgentRunSelectableCreationPosture = "automatic";
@@ -99,7 +100,7 @@ export const UpdateAgentRunPolicySettings = Schema.Struct({
   concurrency: Schema.optional(AgentRunConcurrency),
   resourcePolicy: Schema.optional(HostResourcePolicy),
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type UpdateAgentRunPolicySettings = typeof UpdateAgentRunPolicySettings.Type;
 
 /** The limits in force: the stored ones, or the defaults for settings that predate them. */
@@ -135,7 +136,11 @@ export function agentRunWorkingTimeLimitMinutes(
   return settings.workingTimeLimitMinutes ?? DEFAULT_AGENT_RUN_WORKING_TIME_MINUTES;
 }
 
-export const decodeAgentRunPolicySettings = Schema.decodeUnknownSync(AgentRunPolicySettings);
+export const decodeAgentRunPolicySettings = Schema.decodeUnknownSync(
+  AgentRunPolicySettings,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeUpdateAgentRunPolicySettings = Schema.decodeUnknownSync(
   UpdateAgentRunPolicySettings,
+  STRICT_DECODE_OPTIONS,
 );

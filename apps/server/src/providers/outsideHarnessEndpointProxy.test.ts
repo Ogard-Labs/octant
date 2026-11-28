@@ -14,7 +14,7 @@ import {
 import { modelCanTakeDelegatedWork } from "@octant/domain";
 import type { HarnessEndpointRequest } from "@octant/provider-sdk/harness-endpoint";
 import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
-import { Effect } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
@@ -136,9 +136,9 @@ function harness(
   const probeFailure = async (): Promise<ProviderFailure> => {
     const exit = await Effect.runPromiseExit(Effect.scoped(proxy.probe({ instanceId: id })));
     if (exit._tag === "Success") throw new Error("The probe was expected to fail.");
-    const cause = exit.cause;
-    if (cause._tag !== "Fail") throw new Error("The probe died instead of failing.");
-    return cause.error;
+    const failure = Cause.findErrorOption(exit.cause);
+    if (Option.isNone(failure)) throw new Error("The probe died instead of failing.");
+    return failure.value;
   };
   return { channel, driver, registry, proxy, probe, probeFailure, instanceId: id };
 }

@@ -21,8 +21,8 @@ export type BrowserHeldSelect =
     } & Omit<SelectPopup, "kind" | "id">)
   | { readonly status: "too-many"; readonly token: string };
 
-const Token = Schema.UUID;
-const decodePopup = Schema.decodeUnknownSync(HumanBrowserPagePopup);
+const Token = Schema.String.check(Schema.isGUID());
+const decodePopup = Schema.decodeUnknownSync(HumanBrowserPagePopup, { onExcessProperty: "error" });
 const decodeTooMany = Schema.decodeUnknownSync(
   Schema.Struct({ token: Token, tooMany: Schema.Literal(true) }),
   { onExcessProperty: "error" },
@@ -72,7 +72,10 @@ export async function readBrowserHeldSelect(
       browserSelectMenuEntries(options as ReadonlyArray<{ readonly group?: string }>) >
         MAX_BROWSER_SELECT_MENU_ENTRIES
     )
-      return { status: "too-many", token: Schema.decodeUnknownSync(Token)(token) };
+      return {
+        status: "too-many",
+        token: Schema.decodeUnknownSync(Token, { onExcessProperty: "error" })(token),
+      };
     const popup = decodePopup({
       kind: "select",
       id: typeof token === "string" ? token : "",

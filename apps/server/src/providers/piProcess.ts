@@ -1427,10 +1427,10 @@ export function makePiProcessLive(options: PiProcessOptions = {}): PiProcessPort
                 }),
               catch: () => failure("provider-failed", "Pi process receipt is unavailable."),
             }).pipe(
-              Effect.catchAll((error) =>
+              Effect.catch((error) =>
                 Effect.promise(() =>
                   terminate(child, shutdownTimeoutMs).catch(() => undefined),
-                ).pipe(Effect.zipRight(Effect.fail(error))),
+                ).pipe(Effect.andThen(Effect.fail(error))),
               ),
             );
           }

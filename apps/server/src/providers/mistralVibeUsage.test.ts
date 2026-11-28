@@ -31,7 +31,7 @@ function recordingFetch(response: (url: string) => Response) {
 
 function observe(facts: ReturnType<typeof makeMistralVibeUsageFacts>, onDemand = true) {
   return Effect.runPromise(
-    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand }))),
+    Effect.scoped(Effect.result(facts.observeServiceLimits({ instanceId, onDemand }))),
   );
 }
 
@@ -60,10 +60,10 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("available");
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("available");
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "monthly",
         status: "allowed",
@@ -94,10 +94,10 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("available");
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("available");
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "monthly",
         status: "exhausted",
@@ -123,10 +123,10 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("exhausted");
-    expect(outcome.right.rateLimitWindows?.[0]).toMatchObject({
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("exhausted");
+    expect(outcome.success.rateLimitWindows?.[0]).toMatchObject({
       status: "exhausted",
       utilization: 1,
       overage: { status: "allowed", disabledReason: "Pay as you go off" },
@@ -148,9 +148,9 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "monthly",
         status: "allowed",
@@ -177,9 +177,9 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "monthly",
         status: "allowed",
@@ -194,7 +194,7 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(JSON.stringify(outcome)).not.toContain(key);
   });
 
@@ -205,7 +205,7 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
   });
 
   it("refuses a saved sign-in Mistral rejects, without the key", async () => {
@@ -213,7 +213,7 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unauthenticated" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unauthenticated" } });
     expect(JSON.stringify(outcome)).not.toContain(key);
   });
 
@@ -223,8 +223,8 @@ describe("Mistral Vibe plan usage", () => {
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
     expect(outcome).toMatchObject({
-      _tag: "Left",
-      left: { category: "unsupported", message: "This account cannot view Vibe billing usage." },
+      _tag: "Failure",
+      failure: { category: "unsupported", message: "This account cannot view Vibe billing usage." },
     });
     expect(JSON.stringify(outcome)).not.toContain(key);
   });
@@ -234,7 +234,7 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "subscription", fetch: http.fetch }));
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unavailable" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unavailable" } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -245,7 +245,7 @@ describe("Mistral Vibe plan usage", () => {
       facts({ authentication: "api-key", hasKey: false, fetch: http.fetch }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unavailable" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unavailable" } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -256,7 +256,7 @@ describe("Mistral Vibe plan usage", () => {
 
     const outcome = await observe(facts({ authentication: "api-key", fetch: http.fetch }));
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "protocol" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "protocol" } });
     expect(JSON.stringify(outcome)).not.toContain(key);
   });
 
@@ -276,18 +276,18 @@ describe("Mistral Vibe plan usage", () => {
     });
 
     expect(await observe(usage, false)).toMatchObject({
-      _tag: "Left",
-      left: { category: "unavailable" },
+      _tag: "Failure",
+      failure: { category: "unavailable" },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(http.requests).toHaveLength(1);
 
-    expect((await observe(usage, false))._tag).toBe("Right");
-    expect((await observe(usage, false))._tag).toBe("Right");
+    expect((await observe(usage, false))._tag).toBe("Success");
+    expect((await observe(usage, false))._tag).toBe("Success");
     expect(http.requests).toHaveLength(1);
 
     now += 5 * 60_000;
-    expect((await observe(usage, false))._tag).toBe("Right");
+    expect((await observe(usage, false))._tag).toBe("Success");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(http.requests).toHaveLength(2);
   });

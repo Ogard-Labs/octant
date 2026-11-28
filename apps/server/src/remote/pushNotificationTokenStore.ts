@@ -151,19 +151,22 @@ export function pushDestinationStands(
 }
 
 const StoredRegistration = Schema.Struct({
-  hostId: Schema.NonEmptyTrimmedString,
-  deviceId: Schema.NonEmptyTrimmedString,
+  hostId: Schema.Trimmed.check(Schema.isNonEmpty()),
+  deviceId: Schema.Trimmed.check(Schema.isNonEmpty()),
   platform: RemotePushPlatform,
   token: Schema.NonEmptyString,
   notificationPublicKey: RemotePushNotificationPublicKey,
   preferences: RemotePushPreferencesV1,
-  collapseKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
-  updatedAt: Schema.NonEmptyTrimmedString,
-}).annotations({ parseOptions: { onExcessProperty: "error" } });
+  collapseKey: Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/))),
+  updatedAt: Schema.Trimmed.check(Schema.isNonEmpty()),
+});
 const StoredRegistrations = Schema.Struct({
   registrations: Schema.Array(StoredRegistration),
-}).annotations({ parseOptions: { onExcessProperty: "error" } });
-const decodeStoredRegistrations = Schema.decodeUnknownSync(Schema.parseJson(StoredRegistrations));
+});
+const decodeStoredRegistrations = Schema.decodeUnknownSync(
+  Schema.fromJsonString(StoredRegistrations),
+  { onExcessProperty: "error" },
+);
 
 function keyOf(hostId: string, deviceId: string): string {
   return `${hostId}\0${deviceId}`;

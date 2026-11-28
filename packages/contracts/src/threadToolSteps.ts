@@ -2,11 +2,11 @@ import { Schema } from "effect";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { LinearIssueIdentifier, LinearIssueUrl } from "./linearIssues";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
@@ -50,14 +50,14 @@ export const MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES = 262_144;
  * never reach it, and nothing here is fetched from the service.
  */
 export const ThreadPublishedSnapshot = Schema.Struct({
-  format: Schema.Literal("html", "markdown"),
-  content: Schema.String.pipe(
-    Schema.filter(
+  format: Schema.Literals(["html", "markdown"]),
+  content: Schema.String.check(
+    Schema.makeFilter(
       (value) =>
         value.length > 0 && encoder.encode(value).byteLength <= MAX_THREAD_PUBLISHED_SNAPSHOT_BYTES,
     ),
   ),
-}).annotations(strict);
+});
 export type ThreadPublishedSnapshot = typeof ThreadPublishedSnapshot.Type;
 
 /**
@@ -68,8 +68,8 @@ export type ThreadPublishedSnapshot = typeof ThreadPublishedSnapshot.Type;
  * browser, and draws the snapshot.
  */
 export const ThreadPublishedPage = Schema.Struct({
-  url: boundedNonEmptyText(2_048).pipe(
-    Schema.filter((value) => {
+  url: boundedNonEmptyText(2_048).check(
+    Schema.makeFilter((value) => {
       try {
         const url = new URL(value);
         return url.protocol === "https:" && url.username === "" && url.password === "";
@@ -90,7 +90,7 @@ export const ThreadPublishedPage = Schema.Struct({
    * others an account offers), read from the call; absent for a plain page.
    */
   artifactType: Schema.optional(boundedNonEmptyText(64)),
-}).annotations(strict);
+});
 export type ThreadPublishedPage = typeof ThreadPublishedPage.Type;
 
 /**
@@ -102,7 +102,7 @@ export type ThreadPublishedPage = typeof ThreadPublishedPage.Type;
 export const ThreadCanvasPreviewReceipt = Schema.Struct({
   canvasId: boundedNonEmptyText(255),
   versionId: boundedNonEmptyText(255),
-}).annotations(strict);
+});
 export type ThreadCanvasPreviewReceipt = typeof ThreadCanvasPreviewReceipt.Type;
 
 /**
@@ -111,7 +111,7 @@ export type ThreadCanvasPreviewReceipt = typeof ThreadCanvasPreviewReceipt.Type;
  * nothing, and recording reads would link a thread to every pull request its
  * agent glanced at.
  */
-export const ThreadForgeAction = Schema.Literal(
+export const ThreadForgeAction = Schema.Literals([
   "created",
   "merged",
   "reviewed",
@@ -119,7 +119,7 @@ export const ThreadForgeAction = Schema.Literal(
   "edited",
   "closed",
   "reopened",
-);
+]);
 export type ThreadForgeAction = typeof ThreadForgeAction.Type;
 
 /** At most this many references cross on one finished tool call. */
@@ -133,14 +133,14 @@ export const MAX_THREAD_FORGE_REFERENCES_PER_CALL = 10;
  */
 export const ThreadGithubForgeReference = Schema.Struct({
   forge: Schema.Literal("github"),
-  kind: Schema.Literal("pull-request", "issue"),
+  kind: Schema.Literals(["pull-request", "issue"]),
   action: ThreadForgeAction,
   owner: GithubRepositoryOwner,
   repository: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.between(1, 999_999_999)),
+  number: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 999_999_999 })),
   title: Schema.optional(boundedNonEmptyText(256)),
   state: Schema.optional(boundedNonEmptyText(64)),
-}).annotations(strict);
+});
 export type ThreadGithubForgeReference = typeof ThreadGithubForgeReference.Type;
 
 /** A Linear issue a finished tool call wrote to, by its issue key. */
@@ -153,18 +153,18 @@ export const ThreadLinearForgeReference = Schema.Struct({
   url: Schema.optional(LinearIssueUrl),
   title: Schema.optional(boundedNonEmptyText(256)),
   state: Schema.optional(boundedNonEmptyText(64)),
-}).annotations(strict);
+});
 export type ThreadLinearForgeReference = typeof ThreadLinearForgeReference.Type;
 
-export const ThreadForgeReference = Schema.Union(
+export const ThreadForgeReference = Schema.Union([
   ThreadGithubForgeReference,
   ThreadLinearForgeReference,
-);
+]);
 export type ThreadForgeReference = typeof ThreadForgeReference.Type;
 
-export const ThreadForgeReferences = Schema.Array(ThreadForgeReference).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_THREAD_FORGE_REFERENCES_PER_CALL),
+export const ThreadForgeReferences = Schema.Array(ThreadForgeReference).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_THREAD_FORGE_REFERENCES_PER_CALL),
 );
 
 /**
@@ -175,5 +175,5 @@ export const ThreadForgeReferences = Schema.Array(ThreadForgeReference).pipe(
  * the choice once. Only a thread whose provider account enabled the tool can
  * use `native-artifacts`; anywhere else it delivers Canvases too.
  */
-export const ThreadDocumentDelivery = Schema.Literal("canvas", "native-artifacts");
+export const ThreadDocumentDelivery = Schema.Literals(["canvas", "native-artifacts"]);
 export type ThreadDocumentDelivery = typeof ThreadDocumentDelivery.Type;
