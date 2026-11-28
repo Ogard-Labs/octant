@@ -1425,28 +1425,32 @@ describe("Pi provider driver", () => {
     );
     await expect(
       Effect.runPromise(
-        connection.resume({
-          sessionId,
-          resumeCursor: { driverKind: "pi", value: "unknown" },
-          executionPolicy: "approval-gated",
-        }),
+        Effect.flip(
+          connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "pi", value: "unknown" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
       ),
-    ).rejects.toThrow(/stale-resume/);
+    ).resolves.toMatchObject({ category: "stale-resume" });
     // A Pi session keeps the model it was opened with.
     await expect(
       Effect.runPromise(
-        connection.resume({
-          sessionId,
-          modelId: "openai/gpt-5" as ProviderModelId,
-          resumeCursor: {
-            driverKind: "pi",
-            value: sessionId,
-            binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
-          },
-          executionPolicy: "approval-gated",
-        }),
+        Effect.flip(
+          connection.resume({
+            sessionId,
+            modelId: "openai/gpt-5" as ProviderModelId,
+            resumeCursor: {
+              driverKind: "pi",
+              value: sessionId,
+              binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+            },
+            executionPolicy: "approval-gated",
+          }),
+        ),
       ),
-    ).rejects.toThrow(/stale-resume/);
+    ).resolves.toMatchObject({ category: "stale-resume" });
     await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy: "plan" }));
     client.emit({
       type: "extension_ui_request",
@@ -1458,14 +1462,14 @@ describe("Pi provider driver", () => {
     expect(client.responses).toEqual([{ id: "unexpected", response: { confirmed: false } }]);
     await expect(
       Effect.runPromise(
-        connection.answerApproval({ sessionId, requestId: "unknown", approved: true }),
+        Effect.flip(connection.answerApproval({ sessionId, requestId: "unknown", approved: true })),
       ),
-    ).rejects.toThrow(/protocol/);
+    ).resolves.toMatchObject({ category: "protocol" });
     await expect(
       Effect.runPromise(
-        connection.answerUserInput({ sessionId, requestId: "unknown", answer: "x" }),
+        Effect.flip(connection.answerUserInput({ sessionId, requestId: "unknown", answer: "x" })),
       ),
-    ).rejects.toThrow(/unsupported/);
+    ).resolves.toMatchObject({ category: "unsupported" });
     await Effect.runPromise(connection.stop(sessionId));
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
