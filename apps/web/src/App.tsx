@@ -9494,6 +9494,7 @@ function LaunchedShell(
           githubClient={githubClient}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+          {...(hostFederationTransports === undefined ? {} : { hostFederationTransports })}
           hostReservesTitlebarInset={
             (presentation === "page" || isNarrow) && hostReservesTitlebarInset
           }

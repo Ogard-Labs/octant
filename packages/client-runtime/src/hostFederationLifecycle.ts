@@ -67,6 +67,8 @@ export interface FederatedHostLifecycleSnapshot {
   readonly displayName: string;
   /** Remote origin the person paired; absent for the local host. */
   readonly origin?: string;
+  /** The host's `serverBuildVersion` from its verified signed hello, when read. */
+  readonly serverBuildVersion?: string;
   /** `hub` for a member the hub introduced this device to, which holds it to its Act item. */
   readonly through?: "hub";
   /** `hub` for the hub itself among the computers the hub introduced this device to. */
@@ -278,6 +280,7 @@ function expiryFor(input: {
 function snapshotFrom(input: {
   readonly registration: ClientHostRegistration;
   readonly transportState: FederatedTransportState | undefined;
+  readonly serverBuildVersion?: string | undefined;
 }): FederatedHostLifecycleSnapshot {
   const state =
     input.transportState !== undefined
@@ -305,6 +308,9 @@ function snapshotFrom(input: {
     kind: input.registration.kind,
     displayName: input.registration.displayName,
     ...(input.registration.origin !== undefined ? { origin: input.registration.origin } : {}),
+    ...(input.serverBuildVersion !== undefined
+      ? { serverBuildVersion: input.serverBuildVersion }
+      : {}),
     ...(input.registration.through === undefined ? {} : { through: input.registration.through }),
     ...(input.registration.role === undefined ? {} : { role: input.registration.role }),
     state,
@@ -378,6 +384,9 @@ export function createHostFederationLifecycle(
       const snapshot = snapshotFrom({
         registration,
         transportState: slot?.state,
+        ...(slot?.serverBuildVersion === undefined
+          ? {}
+          : { serverBuildVersion: slot.serverBuildVersion }),
       });
       next.push(snapshot);
       markCacheForState({

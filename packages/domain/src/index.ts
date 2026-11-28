@@ -239,6 +239,7 @@ export * from "./canvasChoiceAnswerPolicy";
 export * from "./canvasTagsPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";
+export * from "./fleetUpdatePolicy";
 export * from "./modelRoleSuggestionPolicy";
 export * from "./nativeHarnessRoutingPolicy";
 export * from "./imageDescriptionPolicy";

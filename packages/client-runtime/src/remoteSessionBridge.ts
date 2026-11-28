@@ -109,6 +109,8 @@ export interface RemoteSessionBridge {
   readonly reconnect: () => void;
   readonly disconnect: () => void;
   readonly connection: () => RemoteConnection | undefined;
+  /** The `serverBuildVersion` from this session's verified signed host hello, once read. */
+  readonly serverBuildVersion?: () => string | undefined;
 }
 
 const KEY_ALGORITHM: EcKeyGenParams = { name: "ECDSA", namedCurve: "P-256" };
@@ -138,7 +140,12 @@ export function createRemoteSessionBridge(
       }
     | undefined;
   let hostFacts:
-    | { readonly hostId: string; readonly displayName: string; readonly hostKeyFingerprint: string }
+    | {
+        readonly hostId: string;
+        readonly displayName: string;
+        readonly hostKeyFingerprint: string;
+        readonly serverBuildVersion: string;
+      }
     | undefined;
   const listeners = new Set<(state: RemoteSessionBridgeState) => void>();
 
@@ -153,10 +160,12 @@ export function createRemoteSessionBridge(
     hostId: string;
     displayName: string;
     hostKeyFingerprint: string;
+    serverBuildVersion: string;
   }) => ({
     hostId: hello.hostId,
     displayName: hello.displayName,
     hostKeyFingerprint: hello.hostKeyFingerprint,
+    serverBuildVersion: hello.serverBuildVersion,
   });
 
   const mapConnectionState = (
@@ -459,5 +468,6 @@ export function createRemoteSessionBridge(
       emit({ kind: "idle" });
     },
     connection: () => activeConnection,
+    serverBuildVersion: () => hostFacts?.serverBuildVersion,
   };
 }

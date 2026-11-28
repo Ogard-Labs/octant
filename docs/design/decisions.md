@@ -57,7 +57,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 10        | 7       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 14        | 8       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 8         | 4       | 4            | 0                   |
-| [Updates and development](#updates-and-development)                                   | 5         | 5       | 0            | 0                   |
+| [Updates and development](#updates-and-development)                                   | 6         | 5       | 1            | 0                   |
 | [Design system](#design-system)                                                       | 12        | 11      | 1            | 0                   |
 | [Workspace](#workspace)                                                               | 21        | 17      | 4            | 0                   |
 | [Start screen](#start-screen)                                                         | 5         | 5       | 0            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **323**   | **216** | **103**      | **4**               |
+| **All areas**                                                                         | **324**   | **216** | **104**      | **4**               |
 
 ## Principles and hard lines
 
@@ -2744,6 +2744,22 @@ The desktop updater verifies a feed's Ed25519 signature against the compiled-in 
 - The first release run that publishes a headless build listing is still owed.
 
 Status: Built. Detail: [Architecture: Security and authority, Update feed signing keys are per ring](../architecture.md#security-and-authority).
+
+### Fleet updates across connected computers
+
+From one confirmation in Settings › Updates, the person can update outdated provider CLIs and Octant across connected computers — desktop apps and headless servers alike — with this local app restarting last (maintainer decision, 2026-11-28).
+
+- Only a device the host's own person paired at Full (or the hub that installed a server over SSH) can start updates; lower access levels, hub-introduced devices, agent grants, routines, peers and hubs acting on unowned hosts are refused.
+- A connected headless server is never skipped merely because it has no desktop app. Valid skip reasons are concrete connectivity, permission, ring (a ring that publishes no headless build), remote-desktop-not-yet-built, or manual-update-required facts.
+- Order is strictly: outdated provider CLIs first via existing `update-provider-cli` (no second updater; the desktop paired-computer channel allows `POST /api/providers/commands` with a 150-second timeout, and a channel timeout re-reads the observed version rather than posting again), then remote Octant servers with one shared drain choice (**Wait up to N minutes for running work** or **Stop now**), then this local app last (**Later** defers only this local app). One host's failure never stops another.
+- Servers installed over SSH reuse the existing hub upkeep path (`/api/shield/servers/member-install`) without new authority.
+
+Not built yet:
+
+- Remote updates for standalone headless hosts through `/api/host-control/update` (offline store restore in the CLI, detached upgrade runner outside the service, result file, `host-update.requested@1` and `host-update.step@1` events, and `hostDataMap` disclosure): follows in the next delivery part.
+- Remote desktop app updates (listed as "Update on that machine." until built): follows in a later slice.
+
+Status: Partly built. Since: 2026-11-28. Detail: [Architecture: Security and authority, Fleet updates across connected computers](../architecture.md#security-and-authority).
 
 ### A guided tour on the first start
 

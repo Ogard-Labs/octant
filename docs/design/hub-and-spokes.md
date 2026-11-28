@@ -995,7 +995,9 @@ and no credential is copied to the server.
 **Update.** A server this computer made an Octant computer (the journal holds
 an install whose join succeeded, and no removal since) offers **Update** and
 **Remove Octant** in place of Make this an Octant computer, for the same
-principals on the same route, decided before anything is read. Preparing
+principals on the same route, decided before anything is read. The unified
+fleet update confirmation in Settings › Updates also includes these servers
+through this same route and drain choice, with no new authority. Preparing
 reads the install over SSH (the version its `current` link names, that
 version's manifest, and the login's state and data folders) and this
 computer's build, and changes nothing on the server. When no build newer

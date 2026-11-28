@@ -28,6 +28,9 @@ import { openUsageSubject as openUsageSubjectThread } from "./usageSubjectOpener
 type HostFederationLifecycle = NonNullable<
   ReturnType<typeof useHostFederationLifecycle>
 >["lifecycle"];
+type HostFederationTransports = NonNullable<
+  ReturnType<typeof useHostFederationLifecycle>
+>["transports"];
 
 export interface SettingsContainerProps {
   /** Change feed revisions for Settings › Remote access's access activity and change notices. */
@@ -65,6 +68,7 @@ export interface SettingsContainerProps {
   readonly githubClient: NonNullable<Parameters<typeof ShellSettingsSurface>[0]["githubClient"]>;
   readonly hostBridge?: OctantHostBridge;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  readonly hostFederationTransports?: HostFederationTransports;
   readonly hostReservesTitlebarInset: boolean;
   readonly isNarrow: boolean;
   readonly linearClient: NonNullable<
@@ -106,6 +110,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     discoveryController,
     githubClient,
     hostFederationLifecycle,
+    hostFederationTransports,
     hostReservesTitlebarInset,
     isNarrow,
     linearClient,
@@ -372,6 +377,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       }))}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+      {...(hostFederationTransports === undefined ? {} : { hostFederationTransports })}
       githubClient={githubClient}
       integrationClient={linearClient}
       linearProjects={allProjects}
