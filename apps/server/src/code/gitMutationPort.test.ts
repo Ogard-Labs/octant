@@ -699,6 +699,23 @@ describe("GitMutationPort", () => {
     });
   });
 
+  it("skips an ignored folder whose name contains glob characters inside an untracked folder", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, ".gitignore"), "x\\*/\n");
+    git(repository, "add", ".gitignore");
+    git(repository, "commit", "-m", "ignore literal x* dir");
+    const ignoredRepository = join(repository, "vendor", "x*", "cache");
+    mkdirSync(ignoredRepository, { recursive: true });
+    git(ignoredRepository, "init", "--initial-branch=main");
+    writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: [],
+    });
+  });
+
   it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
     const repository = createRepository(temporaryDirectory());
     writeFileSync(join(repository, ".gitignore"), "build/\n");
@@ -828,6 +845,109 @@ describe("GitMutationPort", () => {
     // The undo point a restore hands back is built with `git add -A`, which
     // skips ignored files, so overwriting this would have been irreversible.
     expect(readFileSync(join(repository, "secrets.env"), "utf8")).toBe("the only copy\n");
+  });
+
+  it("refuses a restore over an ignored file whose name contains glob characters even when a tracked file matches the glob", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    writeFileSync(join(repository, "xa.log"), "tracked\n");
+    writeFileSync(join(repository, "x*.log"), "checkpointed\n");
+    git(repository, "add", "--", "xa.log", "x*.log");
+    git(repository, "commit", "-m", "add logs");
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    // Keep `xa.log` tracked while taking only the literal `x*.log` out of the
+    // index; without `--literal-pathspecs`, `git rm` itself expands `x*.log`.
+    git(repository, "--literal-pathspecs", "rm", "--cached", "--", "x*.log");
+    writeFileSync(join(repository, ".gitignore"), "*.log\n");
+    git(repository, "add", "--", ".gitignore");
+    git(repository, "commit", "-m", "ignore logs while keeping xa.log tracked");
+    expect(gitOutput(repository, "ls-files", "--", "xa.log").trim()).toBe("xa.log");
+    writeFileSync(join(repository, "x*.log"), "local ignored copy\n");
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "rejected", reason: "ignored-path-collision" });
+    expect(readFileSync(join(repository, "x*.log"), "utf8")).toBe("local ignored copy\n");
+  });
+
+  it("refuses a restore onto a file now inside a submodule so local submodule edits stay intact", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const library = createRepository(temporaryDirectory());
+    writeFileSync(join(library, "config.toml"), "upstream = true\n");
+    git(library, "add", "--", "config.toml");
+    git(library, "commit", "-m", "add library config");
+
+    mkdirSync(join(repository, "vendor", "lib"), { recursive: true });
+    writeFileSync(join(repository, "vendor", "lib", "config.toml"), "old = true\n");
+    git(repository, "add", "--", "vendor/lib/config.toml");
+    git(repository, "commit", "-m", "regular directory");
+    const port = new GitMutationPort(undefined, confinedOptions());
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    git(repository, "rm", "-rf", "--", "vendor/lib");
+    git(repository, "commit", "-m", "remove regular directory");
+    execFileSync(
+      "git",
+      [
+        "-C",
+        repository,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        library,
+        "vendor/lib",
+      ],
+      { stdio: "ignore" },
+    );
+    git(repository, "commit", "-m", "replace with submodule");
+    writeFileSync(join(repository, "vendor", "lib", "config.toml"), "local submodule edit\n");
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "failed" });
+    expect(readFileSync(join(repository, "vendor", "lib", "config.toml"), "utf8")).toBe(
+      "local submodule edit\n",
+    );
+  });
+
+  it("restores a file over an ignored directory that holds only tracked files, and refuses once an ignored file sits inside it", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    writeFileSync(join(repository, "config"), "old file\n");
+    git(repository, "add", "--", "config");
+    git(repository, "commit", "-m", "config as file");
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    git(repository, "rm", "--", "config");
+    mkdirSync(join(repository, "config"));
+    writeFileSync(join(repository, "config", "default.toml"), "tracked = true\n");
+    writeFileSync(join(repository, ".gitignore"), "config/\n");
+    git(repository, "add", "-f", "--", ".gitignore", "config/default.toml");
+    git(repository, "commit", "-m", "config as ignored dir with tracked file");
+
+    // With an ignored local override present, restore must refuse.
+    writeFileSync(join(repository, "config", "local.toml"), "secret override\n");
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "rejected", reason: "ignored-path-collision" });
+    expect(readFileSync(join(repository, "config", "local.toml"), "utf8")).toBe(
+      "secret override\n",
+    );
+
+    // Once only tracked files remain inside `config/`, restore succeeds.
+    rmSync(join(repository, "config", "local.toml"));
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(readFileSync(join(repository, "config"), "utf8")).toBe("old file\n");
   });
 
   it("restores over an ignored path the snapshot carries when nothing is there to lose", async () => {

@@ -6,7 +6,7 @@ import {
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access, lstat, opendir } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { MAX_CODE_GIT_HUNK_PATCH_BYTES, type ProviderExecutionPolicy } from "@octant/contracts";
 
@@ -213,20 +213,36 @@ async function nestedRepositoriesBelow(
   while (level.length > 0) {
     const next: string[] = [];
     for (const relative of level) {
-      let entries;
+      const fullPath = join(checkoutRoot, relative);
       try {
-        entries = await readdir(join(checkoutRoot, relative), { withFileTypes: true });
+        await lstat(join(fullPath, ".git"));
+        found.push(relative);
+        continue;
+      } catch {
+        // Not a repository root of its own; stream its entries below.
+      }
+      let dir;
+      try {
+        dir = await opendir(fullPath);
       } catch {
         continue;
       }
-      if (entries.some((entry) => entry.name === ".git")) {
-        found.push(relative);
+      try {
+        // Stream one entry at a time so one huge directory stops at the budget
+        // instead of reading its entire listing into memory first.
+        let entry = await dir.read();
+        while (entry !== null) {
+          budget.walked += 1;
+          if (budget.walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
+          if (entry.isDirectory() && !entry.isSymbolicLink()) {
+            next.push(`${relative}/${entry.name}`);
+          }
+          entry = await dir.read();
+        }
+      } catch {
         continue;
-      }
-      for (const entry of entries) {
-        budget.walked += 1;
-        if (budget.walked > MAX_UNTRACKED_ENTRIES_WALKED) return undefined;
-        if (entry.isDirectory() && !entry.isSymbolicLink()) next.push(`${relative}/${entry.name}`);
+      } finally {
+        await dir.close().catch(() => undefined);
       }
     }
     if (next.length === 0) break;
@@ -1146,14 +1162,18 @@ export class GitMutationPort {
     };
   }
 
-  /** Which of these checkout-relative paths Git ignores; undefined when Git could not say. */
+  /** Which of these untracked checkout-relative paths Git ignores; undefined when Git could not say. */
   async #ignoredPaths(
     checkoutRoot: string,
     paths: ReadonlyArray<string>,
     signal?: AbortSignal,
   ): Promise<ReadonlySet<string> | undefined> {
+    // `--no-index` skips index pathspec globbing, so a folder whose name
+    // contains `*`, `?`, or `[` cannot match a tracked sibling and falsely
+    // read as not ignored. Every path passed here comes from inside an
+    // untracked directory, so none is tracked.
     const result = await this.#run(
-      ["-C", checkoutRoot, "check-ignore", "--stdin", "-z"],
+      ["-C", checkoutRoot, "check-ignore", "--no-index", "--stdin", "-z"],
       signal,
       undefined,
       "approval-gated",
@@ -1295,6 +1315,7 @@ export class GitMutationPort {
     );
     if (tracked.exitCode !== 0) return undefined;
     const indexed = new Set(splitNulPaths(tracked.stdout));
+    const verifiedNonGitlinkAncestors = new Set<string>();
     // A path the checkout still tracks cannot be the case at issue: Git does not
     // ignore tracked paths, and a restore writing over one is exactly what the
     // undo point covers. Only a path that has left the index can be ignored now,
@@ -1302,12 +1323,77 @@ export class GitMutationPort {
     for (const path of splitNulPaths(listed.stdout)) {
       if (indexed.has(path)) continue;
       if (!(await this.#dependencies.pathExists(join(checkoutRoot, path)))) continue;
-      // `-q` answers through the exit code alone, so no path has to survive a
-      // round trip through a text format that quotes unusual names. It takes one
-      // pathname at a time, which is affordable here: the candidates are only
-      // the snapshot's untracked files, not the whole tree.
+      // A path strictly below a submodule gitlink (mode 160000) is not
+      // captured by the superproject's `git add -A` undo point; refuse
+      // fail-closed so local edits inside the submodule are never overwritten.
+      // Check modes only once per ancestor that already appears as an index
+      // entry so `ls-files -z` stays path-only and bounded on large checkouts.
+      const uncheckedAncestors = indexedAncestors(path, indexed).filter(
+        (ancestor) => !verifiedNonGitlinkAncestors.has(ancestor),
+      );
+      if (uncheckedAncestors.length > 0) {
+        const ancestorModes = await this.#run(
+          [
+            "-C",
+            checkoutRoot,
+            "--literal-pathspecs",
+            "ls-files",
+            "-s",
+            "-z",
+            "--",
+            ...uncheckedAncestors,
+          ],
+          signal,
+          undefined,
+          executionPolicy,
+        );
+        if (ancestorModes.exitCode !== 0) return undefined;
+        for (const record of splitNulPaths(ancestorModes.stdout)) {
+          const space = record.indexOf(" ");
+          if (space === -1) return undefined;
+          if (record.slice(0, space) === "160000") return undefined;
+        }
+        for (const ancestor of uncheckedAncestors) verifiedNonGitlinkAncestors.add(ancestor);
+      }
+      let isDirectory = false;
+      try {
+        isDirectory = (await lstat(join(checkoutRoot, path))).isDirectory();
+      } catch {
+        // Mocked `pathExists` or concurrent removal: fall through to file check.
+      }
+      if (isDirectory) {
+        // A regular file in the snapshot replacing a directory on disk loses
+        // unrecoverable data only if ignored files sit inside that directory.
+        // Directories holding only tracked or unignored files are covered by
+        // the undo point and restore cleanly.
+        const ignoredInside = await this.#run(
+          [
+            "-C",
+            checkoutRoot,
+            "--literal-pathspecs",
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "-z",
+            "--",
+            path,
+          ],
+          signal,
+          undefined,
+          executionPolicy,
+        );
+        if (ignoredInside.exitCode !== 0) return undefined;
+        if (ignoredInside.stdout.length > 0) return true;
+        continue;
+      }
+      // `--no-index` prevents Git from expanding `*`, `?`, or `[` in the
+      // pathname against tracked entries in the index (every tracked path was
+      // already skipped above via `indexed.has(path)`). `-q` answers through
+      // the exit code alone, so no path has to survive a round trip through a
+      // text format that quotes unusual names.
       const checked = await this.#run(
-        ["-C", checkoutRoot, "check-ignore", "-q", "--", asPlainPath(path)],
+        ["-C", checkoutRoot, "check-ignore", "--no-index", "-q", "--", asPlainPath(path)],
         signal,
         undefined,
         executionPolicy,
@@ -1859,4 +1945,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function asPlainPath(path: string): string {
   return path.startsWith(":") ? `./${path}` : path;
+}
+
+function indexedAncestors(path: string, indexed: ReadonlySet<string>): ReadonlyArray<string> {
+  const matched: string[] = [];
+  let slash = path.indexOf("/");
+  while (slash !== -1) {
+    const prefix = path.slice(0, slash);
+    if (indexed.has(prefix)) matched.push(prefix);
+    slash = path.indexOf("/", slash + 1);
+  }
+  return matched;
 }
