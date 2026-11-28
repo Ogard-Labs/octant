@@ -23060,8 +23060,31 @@ restart asks again. At Auto, Shield's rules decide first, as above.
 **Provider runtimes' own commands.** A runtime's shell commands that reach a
 server are recorded as `shield-remote-commands.ran@1` when the runtime names
 the command: Codex names every command and reports its exit status, and
-Claude Code names a command only when it is a plain `ssh`, `scp`, or `rsync`
-call, without an exit status. A Codex command's output from a server passes
+Claude Code names every command, without an exit status.
+
+What a runtime names for a call is one line: a shell command's first line,
+or the checkout-relative path a file tool writes, never file contents. The
+adapter reduces it with `summarizeStepArgument` (absolute paths cut to their
+last segment, at most 160 characters, and redacted: secret-named assignments
+such as `API_TOKEN=` or `DB_PASS=`, password and token flag values, a
+password glued to a MySQL client's `-p`, `sshpass -p`, a registry login's
+`-p`, openssl's `-k` and `pass:`, the password of a `-u user:password` pair,
+`_authToken` settings, `aws configure set` secrets, a password echoed into
+`sudo -S`, credentials in a URL, and known key formats), the shared driver
+boundary redacts every broker-issued secret from it, and the host reduces it
+again before it is journaled on the call's `tool-activity` row, which the
+approval card's well reads. A path
+outside the checkout names nothing. Claude Code streams a call's start before
+its input, so its adapter names the call on the one `tool-progress` after
+the start once the whole input arrives; the remote-command record and the
+forge record below read it there as they read a start. Since Claude Code
+names its local commands too, its pushes and pull-request changes are
+journaled `seen-after-start` as Codex's are (maintainer decision,
+2026-11-28). _Rationale:_ the person consents to the call the well shows,
+and a well read from the call's own report needs no read of its own; the
+line journaled is reduced as Codex's commands already were. A password the
+model types in a shape the reduction does not know (a bare positional word)
+is journaled as typed; a broker-issued secret never is. A Codex command's output from a server passes
 the Watcher as `remote-command` outside content. A runtime that names no
 command (OpenCode, ACP agents, Pi) keeps Shield's journaled decision as its
 record. A failure with no exit status is recorded as `unavailable`, since it

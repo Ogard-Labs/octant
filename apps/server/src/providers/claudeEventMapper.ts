@@ -16,7 +16,6 @@ import {
 } from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
-import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -143,6 +142,8 @@ export interface ClaudeToolState {
   forgeInput?: { readonly [key: string]: ClaudeJsonValue };
   /** The start's journaled notice, once one went out. */
   noticed?: true;
+  /** What the call was asked to do went out, on its start or on the progress after it. */
+  argumentNamed?: true;
   /**
    * Octant answered this call itself in place of the runtime (a wake-up
    * call): the runtime reports the answer as a refused call, which is not a
@@ -613,6 +614,41 @@ function toolStartNotice(
   }
 }
 
+/** The input field naming the file each of Claude's file-writing tools writes. */
+const CLAUDE_FILE_TOOL_PATH_KEYS: ReadonlyMap<string, string> = new Map([
+  ["Edit", "file_path"],
+  ["Write", "file_path"],
+  ["NotebookEdit", "notebook_path"],
+]);
+
+/**
+ * What a call was asked to do, as its start names it, the same as Codex names
+ * its calls: a shell command's first line or the checkout-relative path a file
+ * tool writes, reduced to one redacted, bounded line. The approval card shows
+ * it, and Octant Shield's remote-command and forge records read the command.
+ * Never file contents, and nothing for a path outside the checkout, which the
+ * gate names in its own ask (maintainer decision, 2026-11-28).
+ */
+function toolCallArgument(
+  context: ClaudeEventContext,
+  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
+  fileChange: ClaudeFileChange | undefined,
+): string | undefined {
+  if (content.disabled === true) return undefined;
+  if (CLAUDE_COMMAND_TOOLS.has(content.toolName)) {
+    const command = jsonString(content.input, "command");
+    return command === undefined ? undefined : summarizeStepArgument(command);
+  }
+  // The file change already asked the Project whether its path is confined.
+  if (fileChange !== undefined) {
+    return fileChange.kind === "checkout" ? summarizeStepArgument(fileChange.path) : undefined;
+  }
+  const pathKey = CLAUDE_FILE_TOOL_PATH_KEYS.get(content.toolName);
+  const pathValue = pathKey === undefined ? undefined : jsonString(content.input, pathKey);
+  const path = pathValue === undefined ? undefined : confinedRelativePath(context, pathValue);
+  return path === undefined ? undefined : summarizeStepArgument(path);
+}
+
 function contentShape(value: string): string {
   const lines = value.split("\n").length;
   const characters = Array.from(value).length;
@@ -779,37 +815,39 @@ function mapToolUse(
   };
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
   if (!resolved.created) {
-    // A streamed start carried no input, so a notice that depends on it (a
-    // command leaving the sandbox) is journaled when the whole input comes,
-    // under the start that already went out.
+    // A streamed start carried no input, so what depends on it (a command
+    // leaving the sandbox, the command or path an approval shows) is
+    // journaled when the whole input comes, under the start that already
+    // went out, on one progress line.
     const late =
       authoritativeInput && resolved.state.noticed !== true ? toolStartNotice(content) : undefined;
-    if (late === undefined) return withoutIgnored(inputContent());
-    resolved.state.noticed = true;
+    const lateArgument =
+      authoritativeInput && resolved.state.argumentNamed !== true
+        ? toolCallArgument(context, content, resolved.state.fileChange)
+        : undefined;
+    if (late === undefined && lateArgument === undefined) return withoutIgnored(inputContent());
+    if (late !== undefined) resolved.state.noticed = true;
+    if (lateArgument !== undefined) resolved.state.argumentNamed = true;
     return [
       ...inputContent(),
       event(context, {
         kind: "tool-progress",
         toolCallId: resolved.state.toolCallId,
-        message: late,
+        message: late ?? "Tool is ready to run.",
+        ...(lateArgument === undefined ? {} : { argument: lateArgument }),
       }),
     ];
   }
-  // A shell command rides on the tool's start only when it reaches a server,
-  // so the command can be journaled with its host as Octant Shield's record
-  // of it; the start of any other command names the tool and nothing more.
-  const shellCommand = CLAUDE_COMMAND_TOOLS.has(content.toolName)
-    ? jsonString(content.input, "command")
+  // A streamed start's input is not yet whole; its call is named once it is.
+  const argument = authoritativeInput
+    ? toolCallArgument(context, content, resolved.state.fileChange)
     : undefined;
-  const remoteArgument =
-    shellCommand !== undefined && remoteHostsNamedBy(shellCommand).length > 0
-      ? summarizeStepArgument(shellCommand)
-      : undefined;
+  if (argument !== undefined) resolved.state.argumentNamed = true;
   const start = event(context, {
     kind: "tool-start",
     toolCallId: resolved.state.toolCallId,
     toolName: resolved.state.toolName,
-    ...(remoteArgument === undefined ? {} : { argument: remoteArgument }),
+    ...(argument === undefined ? {} : { argument }),
   });
   if (content.toolName === CLAUDE_SUBAGENT_TOOL) {
     // The runtime's own subagent: shown as a child run of this thread from

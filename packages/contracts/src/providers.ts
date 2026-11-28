@@ -3024,6 +3024,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-progress"),
     toolCallId: Schema.NonEmptyTrimmedString,
     message: Schema.NonEmptyTrimmedString,
+    /**
+     * What the call was asked to do, the same reduced line as on
+     * `tool-start`, when the start went out before the runtime had the
+     * call's input: a streamed start opens the row as the model begins the
+     * call, and its input arrives whole only later. Sent at most once per
+     * call, and only for a call whose start named none.
+     */
+    argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

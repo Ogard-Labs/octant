@@ -1988,8 +1988,10 @@ const ToolEvent = Schema.Struct({
    * What the call was asked to do, as the runtime's start named it: one
    * redacted, bounded line (a command, a checkout-relative path). It is kept
    * apart from `summary`, which is progress or result text ("Tool is
-   * running."), so an approval can show the call it gates. Only on the start;
-   * absent when the runtime named none and in journals written before it.
+   * running."), so an approval can show the call it gates. On the start, or
+   * on the progress that named a streamed start's call once its input
+   * arrived; absent when the runtime named none and in journals written
+   * before it.
    */
   argument: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */

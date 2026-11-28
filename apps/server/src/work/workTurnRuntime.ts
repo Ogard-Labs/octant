@@ -823,7 +823,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
                   });
                 }
-                if (event.kind === "tool-start" && event.argument !== undefined) {
+                if (
+                  (event.kind === "tool-start" || event.kind === "tool-progress") &&
+                  event.argument !== undefined
+                ) {
                   input.forgeChanges?.observe({
                     threadId: String(input.command.threadId),
                     command: event.argument,

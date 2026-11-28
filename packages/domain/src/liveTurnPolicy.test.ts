@@ -53,6 +53,16 @@ describe("a running turn's live step", () => {
     expect(liveTurnStep(state)).toMatchObject({ kind: "tool", tool: "Command" });
   });
 
+  it("keeps waiting for approval when a streamed call is named after the ask", () => {
+    let state = observeLiveTurn(startLiveTurn("t"), toolStart("Bash"));
+    state = observeLiveTurn(state, approval());
+    state = observeLiveTurn(
+      state,
+      event("tool-progress", { toolCallId: "x", message: "Tool is ready to run.", argument: "ls" }),
+    );
+    expect(liveTurnStep(state)).toEqual({ kind: "waiting", reason: "approval" });
+  });
+
   it("says the turn is waiting for an answer when the agent asks a question", () => {
     const state = observeLiveTurn(
       startLiveTurn("t"),
@@ -122,6 +132,34 @@ describe("a step argument that leaves the host", () => {
       expect(cleaned).not.toContain(secret);
     }
     expect(cleaned).toContain("--env prod");
+  });
+
+  it("replaces passwords a command carries in short flags, user:password pairs and named settings", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["mysql -uroot -pHunter2Secret db", "mysql -uroot -p[redacted] db"],
+      ["docker login -u me -p s3cr3t ghcr.io", "docker login -u me -p [redacted] ghcr.io"],
+      ["sshpass -p hunter2 ssh web1", "sshpass -p [redacted] ssh web1"],
+      ["curl -u admin:hunter2 https://x.example", "curl -u admin:[redacted] https://x.example"],
+      ["curl --user 'admin:hunter2' x", "curl --user 'admin:[redacted]' x"],
+      ["DB_PASS=hunter2 node app.js", "DB_PASS=[redacted] node app.js"],
+      ["MY_PW=hunter2 node app.js", "MY_PW=[redacted] node app.js"],
+      [
+        "npm config set //registry.example/:_authToken npm_abcdef123456",
+        "npm config set …/:_authToken [redacted]",
+      ],
+      [
+        "aws configure set aws_secret_access_key wJalrXUtnFEMI",
+        "aws configure set aws_secret_access_key [redacted]",
+      ],
+      ["echo 'hunter2' | sudo -S apt update", "echo [redacted] | sudo -S apt update"],
+      ["openssl enc -k hunter2 -in a", "openssl enc -k [redacted] -in a"],
+      ["openssl enc -pass pass:hunter2 -in a", "openssl enc -pass pass:[redacted] -in a"],
+    ];
+    for (const [command, shown] of cases) expect(summarizeStepArgument(command)).toBe(shown);
+    // A flag that takes no password keeps its value.
+    expect(summarizeStepArgument("mysql -u root -p db")).toBe("mysql -u root -p db");
+    expect(summarizeStepArgument("mkdir -p src/a/b")).toBe("mkdir -p src/a/b");
+    expect(summarizeStepArgument("ssh -p 2222 web1")).toBe("ssh -p 2222 web1");
   });
 
   it("shows the command a login-shell wrapper runs, not the wrapper", () => {

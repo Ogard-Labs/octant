@@ -43,4 +43,33 @@ describe("a provider runtime's remote commands", () => {
       [{ threadId: "t1", projectId: "p1", command: "scp web1:/a .", status: "unavailable" }],
     ]);
   });
+
+  it("journals a remote command a streamed start named on the progress after it", () => {
+    const record = vi.fn(() => "recorded" as const);
+    const commands = new RuntimeRemoteCommands(record);
+    commands.observe("t1", "p1", event({ kind: "tool-start", toolCallId: "a", toolName: "Bash" }));
+    commands.observe(
+      "t1",
+      "p1",
+      event({
+        kind: "tool-progress",
+        toolCallId: "a",
+        message: "Tool is ready to run.",
+        argument: "ssh web1 uptime",
+      }),
+    );
+    commands.observe(
+      "t1",
+      "p1",
+      event({ kind: "tool-progress", toolCallId: "a", message: "Tool is running." }),
+    );
+    commands.observe(
+      "t1",
+      "p1",
+      event({ kind: "tool-success", toolCallId: "a", summary: "Tool completed." }),
+    );
+    expect(record.mock.calls).toEqual([
+      [{ threadId: "t1", projectId: "p1", command: "ssh web1 uptime", status: "ran" }],
+    ]);
+  });
 });

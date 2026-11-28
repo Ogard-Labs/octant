@@ -162,6 +162,15 @@ describe("approvalCallPreview", () => {
     expect(approvalCallPreview(activity, "call-7")).toBe("bun test apps/web/src/composer");
   });
 
+  it("shows the command a streamed start named on the progress after it", () => {
+    // The Claude adapter opens the row before the call's input arrives, then
+    // names the command once it does.
+    const named = { ...running, summary: "Tool is ready to run.", argument: "bun test apps/web" };
+    expect(approvalCallPreview(fold(started(), named, running), "call-7")).toBe(
+      "bun test apps/web",
+    );
+  });
+
   it("names nothing when the call's row carries only progress text", () => {
     expect(approvalCallPreview(fold(started(), running), "call-7")).toBeUndefined();
   });

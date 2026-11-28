@@ -206,8 +206,9 @@ export interface CodeTurnEvent {
   readonly toolCallId?: string;
   readonly toolName?: string;
   /**
-   * What a started tool was asked to do, as the runtime's start named it;
-   * only on a `tool` start. `text` is the call's progress or result wording.
+   * What a started tool was asked to do, as the runtime named it: on a `tool`
+   * start, or on the progress that names a streamed start's call once its
+   * input arrived. `text` is the call's progress or result wording.
    */
   readonly argument?: string;
   /**
@@ -771,7 +772,10 @@ export class CodeTurnRunner {
                   }
                   return;
                 }
-                if (event.kind === "tool-start" && event.argument !== undefined) {
+                if (
+                  (event.kind === "tool-start" || event.kind === "tool-progress") &&
+                  event.argument !== undefined
+                ) {
                   input.forgeChanges?.observe({
                     threadId: String(input.thread.id),
                     command: event.argument,
@@ -1292,14 +1296,20 @@ function normalizeProviderEvent(
         ...(argument === undefined ? {} : { argument }),
       });
     }
-    case "tool-progress":
+    case "tool-progress": {
+      // A streamed start's call, named once its input arrived; redacted again
+      // as a start's argument is.
+      const argument =
+        event.argument === undefined ? undefined : summarizeStepArgument(event.argument);
       return Effect.succeed({
         ...base,
         category: "tool",
         toolCallId: text(event.toolCallId),
         text: text(event.message),
         status: "in-progress",
+        ...(argument === undefined ? {} : { argument }),
       });
+    }
     case "tool-success":
       return observation(event.summary).pipe(
         Effect.map((normalized) => ({

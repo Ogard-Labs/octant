@@ -217,10 +217,11 @@ an icon and explicit answer controls. A provider approval reads as a plain
 question: the agent's ask, one quiet line saying why the thread asks, taken
 from its mode ("This thread asks before it runs commands or changes files.",
 "This thread edits files on its own and asks before it runs commands."), the
-gated call in a well when the runtime's start of that call named what it runs
-(its command line or the file's checkout-relative path, redacted and bounded
-to one line by the host and journaled on the call's row apart from its
-progress text), and the
+gated call in a well when the runtime named what that call runs (its command
+line or the file's checkout-relative path, redacted and bounded to one line
+by the host and journaled on the call's row apart from its progress text:
+Codex and Claude Code name every command and file edit, Claude Code on the
+progress line after a streamed start), and the
 answers under them from the leading edge: Allow once, Remember for this
 Project and Deny, with their words unchanged. The well never shows the row's
 progress or result text (a Codex call's row reads "Tool is running." while it

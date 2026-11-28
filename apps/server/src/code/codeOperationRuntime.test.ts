@@ -6419,6 +6419,50 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("journals the command a streamed start named on its progress, redacted, apart from the start", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(23);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    // The Claude adapter's streamed start: the row opens before the input
+    // arrives, and the progress after it names the local command.
+    for (const runtimeEvent of [
+      providerEvent({ kind: "tool-start", toolCallId: "call-8", toolName: "Bash" }),
+      providerEvent({
+        kind: "tool-progress",
+        toolCallId: "call-8",
+        message: "Tool is ready to run.",
+        argument: "API_TOKEN=fixture-secret-must-not-cross bun test apps/web",
+      }),
+    ]) {
+      await Effect.runPromise(Queue.offer(queue, runtimeEvent));
+    }
+
+    await vi.waitFor(async () => {
+      const events = await operationEvents(fixture.runtime, startOperation);
+      const tool = events.filter((event) => event.kind === "tool-activity");
+      expect(tool).toEqual([
+        expect.objectContaining({ state: "started" }),
+        expect.objectContaining({
+          state: "running",
+          argument: expect.stringContaining("bun test apps/web"),
+        }),
+      ]);
+      expect(tool[0]).not.toHaveProperty("argument");
+      expect(JSON.stringify(events)).not.toContain("fixture-secret-must-not-cross");
+    });
+    fixture.close();
+  });
+
   it("times a tool call around the person's approval wait and journals the reasoning total", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

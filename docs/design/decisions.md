@@ -268,6 +268,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield sends no telemetry, counts against spend ceilings and journals every decision.
 - Automatic model calls are set from a local window or a device the host's own person paired (maintainer decision, 2026-11-12); selection is manual and never fails over.
 - A release with Shield requires measuring its false-allow rate on the fixture set.
+- Claude Code names every call's command or checkout-relative file path as Codex does, one redacted, bounded line journaled on the call's row: the approval well shows it, and Shield's remote-command and forge records read it (maintainer decision, 2026-11-28).
 
 Not built yet:
 
