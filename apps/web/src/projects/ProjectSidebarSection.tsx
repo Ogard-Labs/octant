@@ -1,6 +1,8 @@
 import { CoordinatorWorkerCounts } from "./ProjectThreadList";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { useWorkingRowLine } from "./useWorkingRowLine";
+import { SidebarRequestActions } from "./SidebarRequestActions";
+import { SidebarPendingRequestsContext } from "./useSidebarPendingRequests";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -1676,6 +1678,9 @@ function ActivityThreadList(props: {
                   key={thread.navigationId}
                   lineageThreads={props.lineageThreads}
                   onSelectThread={props.onSelectThread}
+                  {...(props.openThreadIds === undefined
+                    ? {}
+                    : { openThreadIds: props.openThreadIds })}
                   thread={thread}
                 />
               ))}
@@ -1729,6 +1734,19 @@ function ActivityThreadButton(props: {
       })
     : NO_THREAD_ROW_STATE;
   const workingLine = useWorkingRowLine(props.thread, rowState.state?.status === "working");
+  // A thread waiting on the person that the window does not show can be
+  // answered or opened from its row; the open one has its card in the thread.
+  const pendingRequests = useContext(SidebarPendingRequestsContext);
+  const answersHere =
+    rowState.state?.status === "attention" &&
+    !selected &&
+    props.openThreadIds?.some((candidate) => candidate === rowId) !== true;
+  const ask = answersHere ? pendingRequests?.forThread(props.thread.threadId) : undefined;
+  const lastLine = ask === undefined ? workingLine : { ...workingLine, activity: ask.text };
+  const openThread = () => {
+    tabs?.openAsPreview(props.thread.threadId);
+    props.onSelectThread(props.thread.navigationId);
+  };
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
 
@@ -1742,7 +1760,7 @@ function ActivityThreadButton(props: {
         ...(pullRequest === undefined ? {} : { pullRequest, morePullRequests }),
         ...rowCounts,
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
-        ...workingLine,
+        ...lastLine,
         ...(age === undefined ? {} : { age: age.label }),
       })}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
@@ -1802,7 +1820,7 @@ function ActivityThreadButton(props: {
         {...(pullRequest === undefined ? {} : { pullRequest, morePullRequests })}
         {...rowCounts}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
-        {...workingLine}
+        {...lastLine}
         threadId={props.thread.threadId}
         unread={rowState.unread}
         {...(shows.status && props.thread.hiddenWorkers !== undefined
@@ -1820,20 +1838,17 @@ function ActivityThreadButton(props: {
       />
     </OctantButton>
   );
-  if (hasMenu) {
-    return (
-      <ThreadRowContextMenu
-        actions={props.actions}
-        className="activity-nav__row"
-        inlineActions={inlineActions}
-        {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
-        projectName={props.thread.projectName}
-        row={row}
-        thread={props.thread}
-      />
-    );
-  }
-  return (
+  const listed = hasMenu ? (
+    <ThreadRowContextMenu
+      actions={props.actions}
+      className="activity-nav__row"
+      inlineActions={inlineActions}
+      {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
+      projectName={props.thread.projectName}
+      row={row}
+      thread={props.thread}
+    />
+  ) : (
     <div className="activity-nav__row">
       <ThreadRowInfoPopup
         {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
@@ -1843,6 +1858,13 @@ function ActivityThreadButton(props: {
       >
         {row}
       </ThreadRowInfoPopup>
+    </div>
+  );
+  if (!answersHere) return listed;
+  return (
+    <div className="activity-nav__asking">
+      {listed}
+      <SidebarRequestActions ask={ask} onOpen={openThread} title={props.thread.title} />
     </div>
   );
 }

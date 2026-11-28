@@ -411,9 +411,28 @@ hairline above it and no ground of its own: the list scrolls above it, never
 under it, because an opaque ground drew a slab on the translucent sidebar (the
 narrow drawer scrolls as one column, so there the foot sticks and paints the
 drawer's opaque ground). Both headings have one form: the label, a trailing
-chevron and the count at the right edge. A running thread is listed only there, with its live
-"Working 4m"; one waiting on an approval or an answer is not working and stays
-at the top under Needs you, with its state in words. A pinned thread and a
+chevron and the count at the right edge. A running thread is listed only there, with its spinner
+and live time; one waiting on an approval or an answer is not working and stays
+at the top under Needs you, with its pause mark and how long it has waited.
+
+**Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
+Needs-you row in Status or the Activity feed whose thread the window does not
+show (neither the focused thread nor one open in another pane) says on its
+third line what the thread asks, and carries its answers under it: **Allow
+once** and **Deny**, the approval card's own words, then **Open**, after the
+row's button in keyboard order. The answers appear only when the host lists
+exactly one request for that thread and it is a plain approval: not a question,
+a decision or a secret, not a subagent's or the agent's own approval (which the
+thread finds rather than answers elsewhere), and not a Browser site ask, whose
+site the row has no room to name. Otherwise, and in a window with no
+pending-request reader, the row offers Open alone. Allow once and Deny send the
+same answer command the thread's approval card and Home's Needs you card send,
+through the clients the thread view already holds; Allow once never remembers
+the answer for the Project, which stays on the card. The host re-checks the
+answer, and a refusal is one quiet line under the buttons until the host stops
+listing the request. The window reads pending requests for this only while
+such a row is listed, on the same signals the Needs you card reads, never on a
+timer. The open thread's row offers nothing: its card is in the thread. A pinned thread and a
 coordinator keep their place among the pins, and in the Activity feed a thread
 waiting on an approval or an answer sits under Priority whatever its read
 state. Settled rows are the compact

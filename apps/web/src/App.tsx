@@ -6602,6 +6602,32 @@ function LaunchedShell(
     }),
     [extensionClient, needsYouProjectClient],
   );
+  // The sidebar answers a waiting thread's approval through the same clients
+  // the thread view and the Needs you card answer through; it adds no route.
+  const sidebarPendingRequests = useMemo(
+    () =>
+      pendingRequestClient === undefined
+        ? undefined
+        : {
+            answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
+            feedRevision: pendingRequestFeedRevision,
+            now: snoozeClockNow.getTime(),
+            pendingRequestClient,
+            settings: controller.settings,
+            workspace: controller.workspace,
+          },
+    [
+      chatClient,
+      codeClient,
+      controller.settings,
+      controller.workspace,
+      pendingRequestClient,
+      pendingRequestFeedRevision,
+      snoozeClockNow,
+      workRequestClient,
+      workTurnClient,
+    ],
+  );
   const homeStartHub = hubAdministrationOf(props.hostBridge);
   const homeStart = useHomeStart({
     ...(homeStartHub === undefined || props.hostBridge === undefined
@@ -9676,6 +9702,9 @@ function LaunchedShell(
                 navigation={navigationModel}
                 navigatorAvailable={navigatorAssistant.state.kind === "ready"}
                 {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
+                {...(sidebarPendingRequests === undefined
+                  ? {}
+                  : { pendingRequests: sidebarPendingRequests })}
                 {...(projectController.errorMessage === undefined
                   ? {}
                   : { projectErrorMessage: projectController.errorMessage })}

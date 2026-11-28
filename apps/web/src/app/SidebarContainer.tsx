@@ -23,6 +23,11 @@ import { codeThreadCoordinatorActions } from "./codeThreadCoordinatorActions";
 import { threadRestRowActions } from "./threadRestRowActions";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
+import {
+  SidebarPendingRequestsContext,
+  useSidebarPendingRequests,
+  type SidebarPendingRequestSource,
+} from "../projects/useSidebarPendingRequests";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { ServerProjectsSidebarGroup } from "../projects/ServerProjectsSidebarGroup";
 import { PairedComputersSidebarGroup } from "../projects/PairedComputersSidebarGroup";
@@ -182,6 +187,8 @@ export interface SidebarContainerProps {
   readonly navigation: ShellNavigationModel;
   readonly navigatorAvailable: boolean;
   readonly openSidebarThreadIds?: ReadonlyArray<string>;
+  /** The window's pending-request reader and answer clients; a remote window has none. */
+  readonly pendingRequests?: SidebarPendingRequestSource;
   readonly projectErrorMessage?: string;
   readonly projectStatus: ProjectController["status"];
   readonly projects: ProjectController["projects"];
@@ -601,6 +608,30 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   );
   const workThreadRowActions = rowActions.work;
 
+  // The pending-request reader runs only while a Needs-you row of a thread the
+  // window does not show is listed, so a sidebar with nothing to answer reads
+  // nothing. The open thread answers on its own card.
+  const answeringThreads = activeMode === "code" ? codeSidebarThreads : workSideThreads;
+  const shownThreadIds = useMemo(
+    () =>
+      new Set(
+        [
+          ...(openSidebarThreadIds ?? []),
+          activeChatThreadId,
+          activeCodeThreadId,
+          activeWorkThreadId,
+        ].flatMap((id) => (id === undefined ? [] : [String(id)])),
+      ),
+    [activeChatThreadId, activeCodeThreadId, activeWorkThreadId, openSidebarThreadIds],
+  );
+  const answersInSidebar = answeringThreads.some(
+    (thread) =>
+      thread.activity === "attention" &&
+      !shownThreadIds.has(thread.threadId) &&
+      !shownThreadIds.has(thread.navigationId ?? thread.threadId),
+  );
+  const sidebarPendingRequests = useSidebarPendingRequests(props.pendingRequests, answersInSidebar);
+
   // Settings' key belongs to the Mac app's own menu; a browser has none, so it
   // is named only where it works.
   const settingsShortcut =
@@ -788,133 +819,118 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
               </OctantAlert>
             ) : (
               <>
-                <ProjectSidebarSection
-                  projectViewsEnabled
-                  projectViewsMode={activeMode === "code" ? "code" : "work"}
-                  projectViewSwitcherPresentation={settings.projectViewSwitcherPresentation}
-                  onProjectViewSwitcherPresentationChange={(presentation) =>
-                    void updateSettings({
-                      projectViewSwitcherPresentation: presentation,
-                    })
-                  }
-                  projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
-                  activityMode={activeMode === "code" ? "code" : "work"}
-                  {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
-                  {...(sidebarListRequest === undefined ? {} : { listRequest: sidebarListRequest })}
-                  railPins={{
-                    pinnedIds: new Set(railPinnedProjects.map((project) => String(project.id))),
-                    onChange: setRailPin,
-                  }}
-                  rowProperties={settings.sidebarRowProperties}
-                  onRowPropertiesChange={(sidebarRowProperties) => {
-                    void updateSettings({ sidebarRowProperties });
-                  }}
-                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                  {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
-                    ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
-                    : {})}
-                  {...(activeSidebarDestination === undefined &&
-                  ((activeMode === "chat" &&
-                    chatStatus === "ready" &&
-                    activeChatThreadId !== undefined) ||
-                    (activeMode === "code" &&
-                      codeStatus === "ready" &&
-                      activeCodeThreadId !== undefined) ||
-                    (activeMode === "work" &&
-                      workStatus === "ready" &&
-                      activeWorkThreadId !== undefined))
-                    ? {
-                        activeThreadId:
-                          activeMode === "code"
-                            ? String(activeCodeThreadId)
-                            : activeMode === "work"
-                              ? String(activeWorkThreadId)
-                              : String(activeChatThreadId),
-                      }
-                    : {})}
-                  {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
-                    ? {}
-                    : { openThreadIds: openSidebarThreadIds })}
-                  {...(activeMode === "code"
-                    ? { hiddenProjectWorkers: props.navigation.hiddenProjectWorkers }
-                    : {})}
-                  archivedProjects={workSide ? workSideArchivedProjects : archivedProjects}
-                  availabilityByProject={availabilityByProject}
-                  contextHealthByProject={contextHealthByProject}
-                  onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
-                  {...(activeMode === "chat" && chatStatus === "ready"
-                    ? {
-                        addProjectLabel: "chat-project" as const,
-                        onAddProject: () => openProjectCreate(),
-                        unfiledLabel: "No Project" as const,
-                      }
-                    : {
-                        onAddProject: () => openProjectCreate(),
-                        unfiledLabel: "No Project" as const,
-                      })}
-                  onArchive={(projectId) => void actions.setProjectArchived(projectId, true)}
-                  onColorChange={(projectId, color) => {
-                    void actions.setProjectColor(projectId, color);
-                  }}
-                  onMove={(projectId, pinned) => void actions.moveProject(projectId, pinned)}
-                  {...(activeMode === "chat"
-                    ? {
-                        newThreadVerb: "chat" as const,
-                        onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
-                      }
-                    : activeMode === "code"
+                <SidebarPendingRequestsContext.Provider value={sidebarPendingRequests}>
+                  <ProjectSidebarSection
+                    projectViewsEnabled
+                    projectViewsMode={activeMode === "code" ? "code" : "work"}
+                    projectViewSwitcherPresentation={settings.projectViewSwitcherPresentation}
+                    onProjectViewSwitcherPresentationChange={(presentation) =>
+                      void updateSettings({
+                        projectViewSwitcherPresentation: presentation,
+                      })
+                    }
+                    projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
+                    activityMode={activeMode === "code" ? "code" : "work"}
+                    {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
+                    {...(sidebarListRequest === undefined
+                      ? {}
+                      : { listRequest: sidebarListRequest })}
+                    railPins={{
+                      pinnedIds: new Set(railPinnedProjects.map((project) => String(project.id))),
+                      onChange: setRailPin,
+                    }}
+                    rowProperties={settings.sidebarRowProperties}
+                    onRowPropertiesChange={(sidebarRowProperties) => {
+                      void updateSettings({ sidebarRowProperties });
+                    }}
+                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                    {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
+                      ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
+                      : {})}
+                    {...(activeSidebarDestination === undefined &&
+                    ((activeMode === "chat" &&
+                      chatStatus === "ready" &&
+                      activeChatThreadId !== undefined) ||
+                      (activeMode === "code" &&
+                        codeStatus === "ready" &&
+                        activeCodeThreadId !== undefined) ||
+                      (activeMode === "work" &&
+                        workStatus === "ready" &&
+                        activeWorkThreadId !== undefined))
                       ? {
-                          newThreadVerb: "thread" as const,
-                          onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
-                          onNewCoordinatorInProject: (projectId) =>
-                            void actions.openCoordinatorDraftInProject(projectId),
+                          activeThreadId:
+                            activeMode === "code"
+                              ? String(activeCodeThreadId)
+                              : activeMode === "work"
+                                ? String(activeWorkThreadId)
+                                : String(activeChatThreadId),
                         }
-                      : activeMode === "work"
+                      : {})}
+                    {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
+                      ? {}
+                      : { openThreadIds: openSidebarThreadIds })}
+                    {...(activeMode === "code"
+                      ? { hiddenProjectWorkers: props.navigation.hiddenProjectWorkers }
+                      : {})}
+                    archivedProjects={workSide ? workSideArchivedProjects : archivedProjects}
+                    availabilityByProject={availabilityByProject}
+                    contextHealthByProject={contextHealthByProject}
+                    onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
+                    {...(activeMode === "chat" && chatStatus === "ready"
+                      ? {
+                          addProjectLabel: "chat-project" as const,
+                          onAddProject: () => openProjectCreate(),
+                          unfiledLabel: "No Project" as const,
+                        }
+                      : {
+                          onAddProject: () => openProjectCreate(),
+                          unfiledLabel: "No Project" as const,
+                        })}
+                    onArchive={(projectId) => void actions.setProjectArchived(projectId, true)}
+                    onColorChange={(projectId, color) => {
+                      void actions.setProjectColor(projectId, color);
+                    }}
+                    onMove={(projectId, pinned) => void actions.moveProject(projectId, pinned)}
+                    {...(activeMode === "chat"
+                      ? {
+                          newThreadVerb: "chat" as const,
+                          onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
+                        }
+                      : activeMode === "code"
                         ? {
                             newThreadVerb: "thread" as const,
                             onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
+                            onNewCoordinatorInProject: (projectId) =>
+                              void actions.openCoordinatorDraftInProject(projectId),
                           }
-                        : {})}
-                  onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
-                    void actions.moveProject(projectId, pinned, beforeProjectId, afterProjectId)
-                  }
-                  onRestore={(projectId) => void actions.setProjectArchived(projectId, false)}
-                  onProjectOpen={openSelectedProject}
-                  {...(workSide
-                    ? {
-                        onSelectThread: selectWorkSideThread,
-                        threadActions: workSideRowActions,
-                        threads: workSideThreads,
-                      }
-                    : activeMode === "code"
+                        : activeMode === "work"
+                          ? {
+                              newThreadVerb: "thread" as const,
+                              onNewThreadInProject: (projectId) =>
+                                void openDraftInProject(projectId),
+                            }
+                          : {})}
+                    onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
+                      void actions.moveProject(projectId, pinned, beforeProjectId, afterProjectId)
+                    }
+                    onRestore={(projectId) => void actions.setProjectArchived(projectId, false)}
+                    onProjectOpen={openSelectedProject}
+                    {...(workSide
                       ? {
-                          onSelectThread: selectCodeThread,
-                          threadActions: codeThreadRowActions,
-                          onRenameThread: renameCodeThread,
-                          ...(markedThreadGroups === undefined
-                            ? codeStatus === "ready"
-                              ? {
-                                  threads:
-                                    outsideServerProjects(codeSidebarThreads).map(withProviderMark),
-                                }
-                              : {}
-                            : {
-                                threadGroups: {
-                                  recents: outsideServerProjects(markedThreadGroups.recents),
-                                  all: outsideServerProjects(markedThreadGroups.all),
-                                  unfiled: outsideServerProjects(markedThreadGroups.unfiled),
-                                },
-                              }),
+                          onSelectThread: selectWorkSideThread,
+                          threadActions: workSideRowActions,
+                          threads: workSideThreads,
                         }
-                      : activeMode === "work"
+                      : activeMode === "code"
                         ? {
-                            onSelectThread: selectWorkThread,
-                            threadActions: workThreadRowActions,
+                            onSelectThread: selectCodeThread,
+                            threadActions: codeThreadRowActions,
+                            onRenameThread: renameCodeThread,
                             ...(markedThreadGroups === undefined
-                              ? workStatus === "ready"
+                              ? codeStatus === "ready"
                                 ? {
                                     threads:
-                                      outsideServerProjects(workProjectThreads).map(
+                                      outsideServerProjects(codeSidebarThreads).map(
                                         withProviderMark,
                                       ),
                                   }
@@ -927,31 +943,53 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                                   },
                                 }),
                           }
-                        : {})}
-                  {...(activeMode === "chat"
-                    ? {}
-                    : {
-                        threadStatus: threadStatus,
-                        ...(threadErrorMessage === undefined
-                          ? {}
-                          : { threadErrorMessage: threadErrorMessage }),
-                        onRetryThreads: retryActiveModeThreads,
-                      })}
-                  projects={workSide ? workSideProjects : projects}
-                  {...(workSide &&
-                  workSideProjects.length === 0 &&
-                  allProjects.some(
-                    (project) => project.type === "code" && project.lifecycle === "active",
-                  )
-                    ? {
-                        otherModeProjectsHint: {
-                          message: "Your Projects are in Code.",
-                          actionLabel: "Switch to Code",
-                          onSwitch: () => selectMode("code"),
-                        },
-                      }
-                    : {})}
-                />
+                        : activeMode === "work"
+                          ? {
+                              onSelectThread: selectWorkThread,
+                              threadActions: workThreadRowActions,
+                              ...(markedThreadGroups === undefined
+                                ? workStatus === "ready"
+                                  ? {
+                                      threads:
+                                        outsideServerProjects(workProjectThreads).map(
+                                          withProviderMark,
+                                        ),
+                                    }
+                                  : {}
+                                : {
+                                    threadGroups: {
+                                      recents: outsideServerProjects(markedThreadGroups.recents),
+                                      all: outsideServerProjects(markedThreadGroups.all),
+                                      unfiled: outsideServerProjects(markedThreadGroups.unfiled),
+                                    },
+                                  }),
+                            }
+                          : {})}
+                    {...(activeMode === "chat"
+                      ? {}
+                      : {
+                          threadStatus: threadStatus,
+                          ...(threadErrorMessage === undefined
+                            ? {}
+                            : { threadErrorMessage: threadErrorMessage }),
+                          onRetryThreads: retryActiveModeThreads,
+                        })}
+                    projects={workSide ? workSideProjects : projects}
+                    {...(workSide &&
+                    workSideProjects.length === 0 &&
+                    allProjects.some(
+                      (project) => project.type === "code" && project.lifecycle === "active",
+                    )
+                      ? {
+                          otherModeProjectsHint: {
+                            message: "Your Projects are in Code.",
+                            actionLabel: "Switch to Code",
+                            onSwitch: () => selectMode("code"),
+                          },
+                        }
+                      : {})}
+                  />
+                </SidebarPendingRequestsContext.Provider>
                 {activeMode === "code" && codeStatus === "ready" ? (
                   <ServerProjectsSidebarGroup
                     actions={codeThreadRowActions}
