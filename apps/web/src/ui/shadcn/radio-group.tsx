@@ -119,7 +119,7 @@ export function RadioGroupItem<Value extends string = string>({
         })
       : appearance === "segmented"
         ? "inline-flex h-[round(1.714rem,2px)] cursor-default items-center justify-center gap-1 rounded-sm border border-transparent px-2 text-sm font-medium whitespace-nowrap text-muted-foreground outline-none hover:text-foreground data-checked:bg-(--oct-fill-2) data-checked:text-foreground disabled:pointer-events-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)"
-        : "cursor-default outline-none disabled:cursor-default disabled:opacity-(--oct-disabled-opacity)";
+        : buttonVariants({ variant: "bare" });
   return (
     <RadioPrimitive.Root<Value>
       className={cn(buttonStyle, className)}
