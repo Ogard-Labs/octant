@@ -95,4 +95,44 @@ describe("createIntegrationClient", () => {
       }),
     ).toThrow(IntegrationClientFailure);
   });
+
+  it("reads connected accounts and forwards optional accountRef on operations and secret commands", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          accounts: [
+            {
+              accountRef: "acct-work",
+              state: "ready",
+              account: { login: "work", source: "oauth", scopes: ["read"] },
+              capabilities: [{ operationId: "list-issues", available: true }],
+            },
+          ],
+          oauthConfigured: true,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ kind: "ok", value: { rows: [], hasNextPage: false } }))
+      .mockResolvedValueOnce(jsonResponse({ kind: "stored" }));
+    const transport = client(fetch);
+    const snapshot = await transport.accountsSnapshot?.();
+    expect(snapshot?.accounts[0]?.accountRef).toBe("acct-work");
+    expect(String(fetch.mock.calls[0]?.[0])).toBe(
+      "http://127.0.0.1:4317/api/integrations/linear/accounts",
+    );
+
+    await transport.listIssues({ search: "bug" }, "acct-work");
+    expect(JSON.parse(fetch.mock.calls[1]?.[1].body)).toEqual({
+      kind: "operation",
+      operationId: "list-issues",
+      input: { search: "bug" },
+      accountRef: "acct-work",
+    });
+
+    await transport.adoptLegacyPersonalCredential?.();
+    expect(JSON.parse(fetch.mock.calls[2]?.[1].body)).toEqual({
+      kind: "adopt-legacy",
+      scope: "personal-api-key",
+    });
+  });
 });

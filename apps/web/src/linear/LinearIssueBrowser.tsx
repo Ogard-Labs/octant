@@ -1,5 +1,6 @@
 import "../styles/linear-issues.css";
 import type { ProjectLinearTarget } from "@octant/contracts";
+import type { IntegrationAccountEntry } from "@octant/contracts/integration";
 import type {
   LinearIssueDetail,
   LinearIssueFilterOption,
@@ -15,6 +16,7 @@ import { CircleDot, Search, X } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { failureMessage } from "../lib/failureMessage";
+import { linearAccountDisplayLabel, readyLinearAccounts } from "./linearIssuesReadAvailable";
 import { SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -30,9 +32,16 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 export interface LinearIssueBrowserProps {
-  readonly listIssues: (input?: LinearIssueListInput) => Promise<LinearIssueListPage>;
-  readonly getIssue: (input: LinearIssueGetInput) => Promise<LinearIssueDetail>;
-  readonly listIssueFilters: () => Promise<LinearIssueFilterOptions>;
+  readonly listIssues: (
+    input?: LinearIssueListInput,
+    accountRef?: string,
+  ) => Promise<LinearIssueListPage>;
+  readonly getIssue: (
+    input: LinearIssueGetInput,
+    accountRef?: string,
+  ) => Promise<LinearIssueDetail>;
+  readonly listIssueFilters: (accountRef?: string) => Promise<LinearIssueFilterOptions>;
+  readonly accounts?: ReadonlyArray<IntegrationAccountEntry>;
   readonly defaultLinearTarget?: ProjectLinearTarget;
   readonly onClose?: () => void;
   readonly isNarrow?: boolean;
@@ -53,6 +62,32 @@ type DetailState =
 const ALL = "all";
 
 export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
+  const readyAccounts = useMemo(
+    () => (props.accounts === undefined ? [] : readyLinearAccounts(props.accounts)),
+    [props.accounts],
+  );
+  const initialAccountRef = useMemo(() => {
+    if (props.defaultLinearTarget?.accountRef !== undefined) {
+      return props.defaultLinearTarget.accountRef;
+    }
+    if (readyAccounts.length === 0) return undefined;
+    if (props.defaultLinearTarget !== undefined) {
+      return (
+        readyAccounts.find((entry) => entry.isLegacy === true)?.accountRef ??
+        readyAccounts[0]?.accountRef
+      );
+    }
+    return readyAccounts[0]?.accountRef;
+  }, [props.defaultLinearTarget, readyAccounts]);
+  const [accountRef, setAccountRef] = useState<string | undefined>(initialAccountRef);
+  const soleReadyAccount = readyAccounts.length === 1 ? readyAccounts[0] : undefined;
+  const activeAccountRef =
+    readyAccounts.length > 1
+      ? (accountRef ?? readyAccounts[0]?.accountRef)
+      : (props.defaultLinearTarget?.accountRef ??
+        (soleReadyAccount !== undefined && soleReadyAccount.isLegacy !== true
+          ? soleReadyAccount.accountRef
+          : undefined));
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const [teamId, setTeamId] = useState(props.defaultLinearTarget?.teamId ?? ALL);
@@ -74,6 +109,15 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     listIssueFiltersRef.current = props.listIssueFilters;
   });
 
+  const callListIssues = (input?: LinearIssueListInput) =>
+    activeAccountRef === undefined
+      ? listIssuesRef.current(input)
+      : listIssuesRef.current(input, activeAccountRef);
+  const callGetIssue = (input: LinearIssueGetInput) =>
+    activeAccountRef === undefined
+      ? getIssueRef.current(input)
+      : getIssueRef.current(input, activeAccountRef);
+
   const query = useMemo(() => {
     try {
       const next = buildQuery(debouncedSearch, teamId, stateId, assigneeId, projectId);
@@ -86,7 +130,11 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
 
   useEffect(() => {
     let active = true;
-    void listIssueFiltersRef.current().then(
+    const loadFilters =
+      activeAccountRef === undefined
+        ? listIssueFiltersRef.current()
+        : listIssueFiltersRef.current(activeAccountRef);
+    void loadFilters.then(
       (options) => {
         if (active) setFilters(options);
       },
@@ -97,7 +145,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [activeAccountRef]);
 
   useEffect(() => {
     let active = true;
@@ -105,7 +153,11 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     detailGenerationRef.current += 1;
     setList({ status: "loading" });
     setDetail({ status: "idle" });
-    listIssuesRef.current(query).then(
+    const load =
+      activeAccountRef === undefined
+        ? listIssuesRef.current(query)
+        : listIssuesRef.current(query, activeAccountRef);
+    load.then(
       (page) => {
         if (!active || generation !== listGenerationRef.current) return;
         setList({ status: "ready", page });
@@ -121,7 +173,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     return () => {
       active = false;
     };
-  }, [query]);
+  }, [query, activeAccountRef]);
 
   async function loadMore(): Promise<void> {
     const page = list.status === "ready" || list.status === "loading-more" ? list.page : undefined;
@@ -129,7 +181,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     const generation = listGenerationRef.current;
     setList({ status: "loading-more", page });
     try {
-      const next = await listIssuesRef.current({ ...query, cursor: page.endCursor });
+      const next = await callListIssues({ ...query, cursor: page.endCursor });
       if (generation !== listGenerationRef.current) return;
       setList({
         status: "ready",
@@ -153,7 +205,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     const generation = ++detailGenerationRef.current;
     setDetail({ status: "loading", id: row.id });
     try {
-      const loaded = await getIssueRef.current({ id: row.id });
+      const loaded = await callGetIssue({ id: row.id });
       if (generation !== detailGenerationRef.current) return;
       setDetail({ status: "ready", detail: loaded });
     } catch (error: unknown) {
@@ -214,6 +266,24 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
           )}
         </label>
         <div className="linear-issues__filters">
+          {readyAccounts.length > 1 ? (
+            <OctantSelectField
+              aria-label="Workspace"
+              onValueChange={(nextRef) => {
+                setAccountRef(nextRef);
+                setTeamId(ALL);
+                setStateId(ALL);
+                setAssigneeId(ALL);
+                setProjectId(ALL);
+              }}
+              options={readyAccounts.map((entry) => ({
+                id: entry.accountRef,
+                label: linearAccountDisplayLabel(entry),
+              }))}
+              placeholder="Workspace"
+              value={activeAccountRef ?? ""}
+            />
+          ) : null}
           <FilterSelect
             ariaLabel="Team"
             onChange={setTeamId}
@@ -256,7 +326,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
             onClick: () => {
               const generation = listGenerationRef.current;
               setList({ status: "loading" });
-              void listIssuesRef.current(query).then(
+              void callListIssues(query).then(
                 (next) => {
                   if (generation !== listGenerationRef.current) return;
                   setList({ status: "ready", page: next });
