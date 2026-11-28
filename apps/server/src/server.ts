@@ -1763,6 +1763,13 @@ export function startOctantServer(
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
+      workRequestService,
+      codeTurnDecisions,
+      threadMessageQueue,
+      codeTurnAwaitsPerson: (threadId) =>
+        codeOperationRuntime?.turnAwaitsPerson?.(threadId) === true,
+      threadAwaitsHarnessApproval,
+      coordinatorService,
     });
     const benchmarkThreadPurge: BenchmarkThreadPurgeSlot = {};
     const { benchmarkRoutes, benchmarkRunner } = wireBenchmarks({

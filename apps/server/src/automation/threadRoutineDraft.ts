@@ -15,8 +15,13 @@ import {
   type AgentRunAuthority,
   type AutomationDefinitionDraft,
   type AutomationMode,
+  type AutomationMissedRunPolicy,
+  type AutomationScheduledTrigger,
+  type AutomationTargetPolicy,
+  type AutomationThreadFinishedTrigger,
+  type AutomationThreadId,
   type PermissionPersistence,
-  type RoutineProposal,
+  type ProjectId,
 } from "@octant/contracts";
 import type { AgentProfile } from "@octant/contracts/agent-profile";
 
@@ -56,9 +61,20 @@ export type ThreadRoutineDraftResult =
   | { readonly status: "ready"; readonly draft: AutomationDefinitionDraft }
   | { readonly status: "refused"; readonly message: string };
 
+export interface ThreadRoutineDraftInput {
+  readonly threadId: AutomationThreadId;
+  readonly mode: AutomationMode;
+  readonly projectId: ProjectId;
+  readonly displayName: string;
+  readonly taskPrompt: string;
+  readonly trigger: AutomationScheduledTrigger | AutomationThreadFinishedTrigger;
+  readonly missedRunPolicy: AutomationMissedRunPolicy;
+  readonly targetPolicy?: AutomationTargetPolicy | undefined;
+}
+
 export function buildThreadRoutineDraft(
   deps: ThreadRoutineDraftDependencies,
-  proposal: RoutineProposal,
+  proposal: ThreadRoutineDraftInput,
 ): ThreadRoutineDraftResult {
   const mode = proposal.mode;
   const followUp = proposal.targetPolicy === "same-thread";

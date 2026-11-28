@@ -1,5 +1,7 @@
 import {
+  AUTOMATION_THREAD_FINISHED_READS_FLAG,
   AutomationEventSourceChoices,
+  AutomationFinishWaitTargetsResponse,
   type AutomationEventSourceChoice,
   type AutomationCommand,
   AutomationCommandResult,
@@ -59,6 +61,13 @@ export interface AutomationClient {
   readonly eventSources?: (
     signal?: AbortSignal,
   ) => Promise<ReadonlyArray<AutomationEventSourceChoice>>;
+  /**
+   * Local threads this person can open and wait on when arming a
+   * thread-finished follow-up.
+   */
+  readonly listFinishWaitTargets?: (
+    signal?: AbortSignal,
+  ) => Promise<AutomationFinishWaitTargetsResponse>;
   list(input?: AutomationListInput, signal?: AbortSignal): Promise<AutomationListResponse>;
   get(
     automationId: AutomationId,
@@ -135,9 +144,20 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
         signal,
       );
     },
+    listFinishWaitTargets(signal) {
+      return request(
+        options.fetch,
+        new URL("/api/automations/finish-wait-targets", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(AutomationFinishWaitTargetsResponse),
+        maxAttempts,
+        signal,
+      );
+    },
     list(input = {}, signal) {
       const url = new URL("/api/automations/list", options.baseUrl);
       url.searchParams.set("mode", input.mode ?? "all");
+      url.searchParams.set("reads", AUTOMATION_THREAD_FINISHED_READS_FLAG);
       if (input.projectId !== undefined) url.searchParams.set("projectId", input.projectId);
       if (input.search !== undefined && input.search.trim().length > 0) {
         url.searchParams.set("search", input.search);
@@ -156,6 +176,7 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
     get(automationId, signal, context) {
       const url = new URL("/api/automations/get", options.baseUrl);
       url.searchParams.set("automationId", String(automationId));
+      url.searchParams.set("reads", AUTOMATION_THREAD_FINISHED_READS_FLAG);
       if (context?.fileSourceReview)
         return fileRoutineRequest(
           (boundedSignal) =>
@@ -270,9 +291,11 @@ export function createAutomationClient(options: AutomationClientOptions): Automa
       );
     },
     listProposals(signal) {
+      const url = new URL("/api/automations/proposals", options.baseUrl);
+      url.searchParams.set("reads", AUTOMATION_THREAD_FINISHED_READS_FLAG);
       return request(
         options.fetch,
-        new URL("/api/automations/proposals", options.baseUrl).toString(),
+        url.toString(),
         { method: "GET", headers },
         (value) =>
           decodeProposalAnswer(() => decodeHostAnswer(RoutineProposalList)(value).proposals),

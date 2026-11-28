@@ -3,6 +3,7 @@ import { automationPromptDigest } from "./automationAuthorityRevalidation";
 import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
+  automationThreadFinishedTurnPrompt,
   type AutomationRun,
   type WorkThreadId,
   type UtcTimestamp,
@@ -215,7 +216,15 @@ async function startOrRecover(
     requestId: decodeWorkTurnRequestId(String(input.firstTurnRequestId)),
     threadId: input.threadId,
     turnId,
-    prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+    prompt:
+      input.run.occurrence.kind === "thread-finished"
+        ? automationThreadFinishedTurnPrompt(
+            snapshot.taskPrompt,
+            String(input.run.occurrence.targetThreadId),
+          )
+        : followUp
+          ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+          : snapshot.taskPrompt,
     authority: {
       hostId: LOCAL_HOST_ID,
       projectId: snapshot.projectId,

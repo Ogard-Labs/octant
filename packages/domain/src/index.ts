@@ -45,6 +45,7 @@ export * from "./remoteServerProxyRelayPolicy";
 export * from "./remoteServerPagePolicy";
 export * from "./pushNotificationPolicy";
 export * from "./automationNotificationPolicy";
+export * from "./automationThreadFinishPolicy";
 export * from "./mobileHardeningPolicy";
 export * from "./codeWorktreeCleanupPolicy";
 export * from "./codeWorktreeNaming";

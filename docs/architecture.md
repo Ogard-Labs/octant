@@ -5759,6 +5759,51 @@ Chat still take no app-managed tools.
   thread.
   Either way it runs at most once and then ends itself as `exhausted`, the
   state every spent one-time routine reaches, with its run history kept.
+- **Follow-ups when another thread finishes.** A routine may carry a one-shot
+  `thread-finished` trigger (or a scheduled routine may carry one attached
+  finish wait) that starts a follow-up turn in the waiting thread
+  (`same-thread`), starts a new Work or Code thread in its Project
+  (`new-thread`), or runs an existing Work or Code routine once more when a
+  specific watched thread on the same host satisfies a closed finish condition
+  (maintainer decision, 2026-11-28). Two closed conditions are supported:
+  `turn-finished` (default: a turn that started or was running after arming
+  completed, and the thread is idle with no open approval or question, pending
+  decision, or queued message) and `done` (the thread is settled or completed
+  from unambiguous evidence or by a person). Failed, stopped, and interrupted
+  turns never satisfy either condition, and a thread that already met the
+  condition before arming does not fire retroactively. Only a person at a local
+  window or a device they paired at Full access on the follow-up's host may arm
+  a wait (`POST /api/automations/follow-ups` with `arm-thread-finish-follow-up`
+  or `arm-routine-finish-wait`, or `arm-finish-wait` on an existing routine);
+  hub-introduced devices, narrower paired devices, agent grants, and
+  automation-origin turns are refused. An agent may only propose a finish wait
+  via `octant_propose_routine` (`trigger: "thread-finished"`), which always
+  waits on the person's confirmation card at every access level (never auto-arms
+  at Full access). Self-waits and waits on a thread's own child runs or
+  coordinator workers are refused, and waits are bounded to 8 armed per thread
+  and 32 armed per host. Every wait runs at the routine ceiling (`ask-first`,
+  no `projectLevel` opt-in, no unattended Full access) and revalidates host,
+  Project, binding, profile, provider, model, thread, and arming-device
+  authority before dispatch; revoking or narrowing the arming paired device
+  blocks the run. A coordinator thread resumed via `same-thread` counts against
+  its hourly wake bound and starts no worker. The watcher observes committed
+  journal facts and reconciles on startup and timers, claiming each occurrence
+  under a deterministic occurrence key
+  (`thread-finished:<automationId>:<revision>:<targetThreadId>:<attestedTurnId>`)
+  and journaled `automation-finish-wait-changed@1` events so replay, duplicate
+  facts, restarts, and mid-claim crashes never start a second run. The started
+  turn opens with a host sentence naming the watched thread only by reference
+  (never copying the target thread's title or reply text). A finish wait
+  expires after 7 days by default (at most 30 days), transitions to `unavailable`
+  if the watched thread is deleted, archived, or moved out of scope, and holds
+  finishes noticed past the lateness limit (`followUpLatenessLimitHours`, 24
+  hours default) as `missed` for the person to choose **Run now**
+  (`run-missed-finish-wait`) or **Cancel** (`cancel-finish-wait`). Clients that
+  understand `thread-finished` pass `?reads=thread-finished` on automation list,
+  detail, and proposal reads so older clients never see unknown trigger or
+  proposal shapes, and the journal store version advances on migration so older
+  builds refuse downgrade. Cross-host waiting (watching a thread on another
+  connected host through the hub peer thread-state route) is not built yet.
 - **Asleep or offline.** The scheduler is an in-process timer in the running
   host over journaled definitions. Nothing wakes the computer or runs in a
   cloud today. A self-hosted wake service on a person's hub, which only wakes

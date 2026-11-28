@@ -3,6 +3,7 @@ import "../styles/automation.css";
 import type { AutomationClient } from "@octant/client-runtime";
 import type {
   AutomationCommandResult,
+  AutomationFollowUpRequest,
   AutomationSummary,
   AutomationThreadRoutineRequest,
 } from "@octant/contracts/automation";
@@ -20,6 +21,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentFinishWaitPicker } from "./EnvironmentFinishWaitPicker";
 import { FollowUpPicker, scheduledAtOf, type Editing } from "./EnvironmentFollowUpPicker";
 import { EnvironmentRoutineForm } from "./EnvironmentRoutineForm";
 
@@ -36,7 +38,10 @@ const MAX_ROUTINE_PAGES = 10;
 const COLLAPSED_ROUTINE_COUNT = 5;
 
 type Place = "follow-up-here" | "from-here" | "follow-up-elsewhere" | "project";
-type Opened = { readonly kind: "follow-up"; readonly editing: Editing } | { readonly kind: "new" };
+type Opened =
+  | { readonly kind: "follow-up"; readonly editing: Editing }
+  | { readonly kind: "finish-wait" }
+  | { readonly kind: "new" };
 
 /** Where a routine stands to this thread: its own follow-ups first, then what it created. */
 function placeOf(summary: AutomationSummary, threadId: string): Place {
@@ -70,8 +75,14 @@ export function arrangeThreadRoutines(
       (item) =>
         (item.lifecycle === "enabled" || item.lifecycle === "paused") &&
         // A follow-up whose one run has started is no longer still to come;
-        // the routine ends once that run settles.
-        !(item.targetPolicy === "same-thread" && item.latestRunLifecycle !== undefined),
+        // the routine ends once that run settles. Keep a missed/armed finish
+        // wait visible so the person can act on it.
+        !(
+          item.targetPolicy === "same-thread" &&
+          item.latestRunLifecycle !== undefined &&
+          item.finishWait?.state !== "armed" &&
+          item.finishWait?.state !== "missed"
+        ),
     )
     .map((item, index) => ({ item, index, place: PLACE_ORDER[placeOf(item, threadId)] }))
     .sort(
@@ -207,6 +218,29 @@ export function EnvironmentRoutines(props: {
     if (await act(() => client.createThreadRoutine(request))) setOpened(undefined);
   }
 
+  async function submitFinishWait(request: AutomationFollowUpRequest) {
+    if (await act(() => client.followUp(request))) setOpened(undefined);
+  }
+
+  async function runRoutineNow(routine: AutomationSummary) {
+    const requestId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `run-now-${Date.now()}`;
+    if (
+      await act(() =>
+        client.execute({
+          kind: "run-now-automation",
+          automationId: routine.id,
+          expectedVersion: routine.version,
+          runNowRequestId: requestId as never,
+        }),
+      )
+    ) {
+      setOpened(undefined);
+    }
+  }
+
   function start(next: Opened) {
     setOpen(true);
     setOpened(next);
@@ -225,6 +259,7 @@ export function EnvironmentRoutines(props: {
         <OctantMenu
           items={[
             { value: "follow-up", label: "Follow up later", disabled: busy },
+            { value: "finish-wait", label: "Follow up when a thread finishes", disabled: busy },
             ...(mode === "chat"
               ? []
               : [{ value: "routine", label: "New routine", disabled: busy }]),
@@ -235,7 +270,9 @@ export function EnvironmentRoutines(props: {
               ? props.onSetGoal?.()
               : value === "follow-up"
                 ? start({ kind: "follow-up", editing: { kind: "new" } })
-                : start({ kind: "new" })
+                : value === "finish-wait"
+                  ? start({ kind: "finish-wait" })
+                  : start({ kind: "new" })
           }
           selectionMode="action"
           trigger={<Plus aria-hidden="true" size={16} />}
@@ -264,6 +301,19 @@ export function EnvironmentRoutines(props: {
           }
         />
       ) : null}
+      {opened?.kind === "finish-wait" ? (
+        <EnvironmentFinishWaitPicker
+          busy={busy}
+          client={client}
+          existingRoutines={routines}
+          mode={mode}
+          onClose={() => setOpened(undefined)}
+          onRunRoutineNow={(routine) => void runRoutineNow(routine)}
+          onSubmit={(request) => void submitFinishWait(request)}
+          projectId={projectId}
+          threadId={threadId}
+        />
+      ) : null}
       {opened?.kind === "new" && mode !== "chat" ? (
         <EnvironmentRoutineForm
           busy={busy}
@@ -282,9 +332,27 @@ export function EnvironmentRoutines(props: {
             const label = PLACE_LABEL[place];
             const paused = summary.lifecycle === "paused";
             const followUpHere = place === "follow-up-here";
-            const schedule = followUpHere
-              ? followUpWhenLabel(scheduledAtOf(summary), nowIso)
-              : routineScheduleLine(summary.trigger, summary.nextDueAt, nowIso);
+            const isThreadFinished = summary.trigger.kind === "thread-finished";
+            const finishWait = summary.finishWait;
+            const finishWaitLabel =
+              finishWait === undefined
+                ? undefined
+                : finishWait.state === "missed"
+                  ? "Missed — needs your decision"
+                  : finishWait.state === "unavailable"
+                    ? "Target cannot be checked"
+                    : finishWait.state === "expired"
+                      ? "Expired"
+                      : finishWait.state === "armed"
+                        ? `Waiting on thread ${String(finishWait.targetThreadId).slice(0, 8)}`
+                        : undefined;
+            const schedule = isThreadFinished
+              ? (finishWaitLabel ?? routineScheduleLine(summary.trigger, summary.nextDueAt, nowIso))
+              : followUpHere
+                ? followUpWhenLabel(scheduledAtOf(summary), nowIso)
+                : finishWaitLabel !== undefined
+                  ? `${routineScheduleLine(summary.trigger, summary.nextDueAt, nowIso)} · ${finishWaitLabel}`
+                  : routineScheduleLine(summary.trigger, summary.nextDueAt, nowIso);
             return (
               <li
                 aria-label={summary.displayName}
@@ -326,23 +394,52 @@ export function EnvironmentRoutines(props: {
                     per routine were the loudest thing in the panel). */}
                 <OctantMenu
                   items={[
-                    ...(followUpHere
+                    ...(finishWait?.state === "missed"
                       ? [
-                          { value: "change-time", label: "Change time", disabled: busy },
+                          { value: "run-missed", label: "Run now", disabled: busy },
                           {
-                            value: "cancel",
-                            label: "Cancel follow-up",
+                            value: isThreadFinished ? "cancel" : "cancel-wait",
+                            label: "Cancel wait",
                             destructive: true,
                             disabled: busy,
                           },
                         ]
-                      : [
-                          {
-                            value: "pause-resume",
-                            label: paused ? "Resume" : "Pause",
-                            disabled: busy,
-                          },
-                        ]),
+                      : followUpHere && !isThreadFinished
+                        ? [
+                            { value: "change-time", label: "Change time", disabled: busy },
+                            {
+                              value: "cancel",
+                              label: "Cancel follow-up",
+                              destructive: true,
+                              disabled: busy,
+                            },
+                          ]
+                        : isThreadFinished
+                          ? [
+                              {
+                                value: "cancel",
+                                label: "Cancel follow-up",
+                                destructive: true,
+                                disabled: busy,
+                              },
+                            ]
+                          : [
+                              ...(finishWait?.state === "armed"
+                                ? [
+                                    {
+                                      value: "cancel-wait",
+                                      label: "Cancel thread wait",
+                                      destructive: true,
+                                      disabled: busy,
+                                    },
+                                  ]
+                                : []),
+                              {
+                                value: "pause-resume",
+                                label: paused ? "Resume" : "Pause",
+                                disabled: busy,
+                              },
+                            ]),
                     ...(props.onOpenRoutine === undefined
                       ? []
                       : [{ value: "open", label: "Open in Automations" }]),
@@ -350,6 +447,29 @@ export function EnvironmentRoutines(props: {
                   onValueChange={(value) => {
                     if (value === "change-time") {
                       start({ kind: "follow-up", editing: { kind: "move", summary } });
+                    } else if (value === "run-missed" && finishWait !== undefined) {
+                      const requestId =
+                        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                          ? crypto.randomUUID()
+                          : `run-missed-${Date.now()}`;
+                      void act(() =>
+                        client.execute({
+                          kind: "run-missed-finish-wait",
+                          automationId: summary.id,
+                          expectedVersion: summary.version,
+                          waitId: finishWait.waitId,
+                          runNowRequestId: requestId as never,
+                        }),
+                      );
+                    } else if (value === "cancel-wait" && finishWait !== undefined) {
+                      void act(() =>
+                        client.execute({
+                          kind: "cancel-finish-wait",
+                          automationId: summary.id,
+                          expectedVersion: summary.version,
+                          waitId: finishWait.waitId,
+                        }),
+                      );
                     } else if (value === "cancel") {
                       void act(() =>
                         client.execute({

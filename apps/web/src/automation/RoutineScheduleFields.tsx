@@ -139,6 +139,8 @@ export function initialRoutineScheduleState(
         localTime: initial.localTime,
         timeZone: initial.timeZone,
       };
+    case "thread-finished":
+      return base;
   }
 }
 

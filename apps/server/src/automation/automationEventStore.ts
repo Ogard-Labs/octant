@@ -7,8 +7,11 @@ import {
   AutomationCancellationTombstone as AutomationCancellationTombstoneSchema,
   AutomationFileSourceObserved,
   AutomationFileSourceWindowChanged,
+  AutomationFinishWaitChanged,
   type AutomationFileSourceCheckpoint,
   type AutomationFileSourceReview,
+  type AutomationFinishWaitRecord,
+  type AutomationFinishWaitState,
   AutomationDefinitionCreated,
   AutomationDefinitionExhausted,
   AutomationDefinitionLifecycleChanged,
@@ -61,6 +64,7 @@ export const AUTOMATION_RUN_AGGREGATE_TYPE = "automation-run";
 export const AUTOMATION_FILE_SOURCE_OBSERVED = "automation-file-source-observed@1";
 export const AUTOMATION_FILE_SOURCE_WINDOW_CHANGED = "automation-file-source-window-changed@1";
 export const AUTOMATION_EVENT_SOURCE_OBSERVED = "automation-event-source-observed@1";
+export const AUTOMATION_FINISH_WAIT_CHANGED = "automation-finish-wait-changed@1";
 export const AUTOMATION_DEFINITION_CREATED = "automation-definition-created@1";
 export const AUTOMATION_DEFINITION_UPDATED = "automation-definition-updated@1";
 export const AUTOMATION_DEFINITION_LIFECYCLE_CHANGED = "automation-definition-lifecycle-changed@1";
@@ -85,6 +89,7 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
 const decodeFileSourceWindowChanged = Schema.decodeUnknownSync(AutomationFileSourceWindowChanged);
+const decodeFinishWaitChanged = Schema.decodeUnknownSync(AutomationFinishWaitChanged);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -113,6 +118,7 @@ export function registerAutomationEvents(registry: EventRegistry): EventRegistry
     .register(AUTOMATION_EVENT_SOURCE_OBSERVED, 1, AutomationEventSourceObserved)
     .register(AUTOMATION_FILE_SOURCE_OBSERVED, 1, AutomationFileSourceObserved)
     .register(AUTOMATION_FILE_SOURCE_WINDOW_CHANGED, 1, AutomationFileSourceWindowChanged)
+    .register(AUTOMATION_FINISH_WAIT_CHANGED, 1, AutomationFinishWaitChanged)
     .register(AUTOMATION_DEFINITION_CREATED, 1, AutomationDefinitionCreated)
     .register(AUTOMATION_DEFINITION_UPDATED, 1, AutomationDefinitionUpdated)
     .register(AUTOMATION_DEFINITION_LIFECYCLE_CHANGED, 1, AutomationDefinitionLifecycleChanged)
@@ -159,6 +165,7 @@ export interface AppendAutomationDefinitionCreatedInput {
   readonly eventSource?: AutomationEventSourceCheckpoint;
   readonly automation: AutomationDefinition;
   readonly fileSource?: AutomationFileSourceCheckpoint;
+  readonly finishWait?: AutomationFinishWaitRecord;
 }
 
 export interface AppendAutomationDefinitionUpdatedInput {
@@ -296,6 +303,13 @@ export type AutomationOccurrenceLedgerEvent =
       readonly at: UtcTimestamp;
     }
   | {
+      readonly kind: "finish-wait-changed";
+      readonly definitionRevision: number;
+      readonly wait: AutomationFinishWaitRecord;
+      readonly previousState?: AutomationFinishWaitState;
+      readonly at: UtcTimestamp;
+    }
+  | {
       readonly kind: "exhausted";
       readonly definitionRevision: number;
       readonly consumedScheduledAt: UtcTimestamp;
@@ -330,6 +344,7 @@ const DEFINITION_EVENT_NAMES: ReadonlySet<string> = new Set([
   AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_WINDOW_CHANGED,
+  AUTOMATION_FINISH_WAIT_CHANGED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_UPDATED,
   AUTOMATION_DEFINITION_LIFECYCLE_CHANGED,
@@ -383,6 +398,7 @@ export class AutomationEventStore {
         ...(input.eventSource === undefined ? {} : { eventSource: input.eventSource }),
         automation: input.automation,
         ...(input.fileSource === undefined ? {} : { fileSource: input.fileSource }),
+        ...(input.finishWait === undefined ? {} : { finishWait: input.finishWait }),
       });
       if (payload.fileSource !== undefined) {
         validateAutomationFileCheckpoint(payload.fileSource);
@@ -629,6 +645,19 @@ export class AutomationEventStore {
                 ...(event.nextFutureOccurrence === undefined
                   ? {}
                   : { nextFutureOccurrence: event.nextFutureOccurrence }),
+                recordedAt: event.at,
+              }),
+            };
+          case "finish-wait-changed":
+            return {
+              eventName: AUTOMATION_FINISH_WAIT_CHANGED,
+              payload: decodeFinishWaitChanged({
+                automationId: input.automationId,
+                definitionRevision: event.definitionRevision,
+                wait: event.wait,
+                ...(event.previousState === undefined
+                  ? {}
+                  : { previousState: event.previousState }),
                 recordedAt: event.at,
               }),
             };

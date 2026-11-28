@@ -6,6 +6,7 @@ import type {
   AutomationEventSourceChoice,
   AutomationDefinition,
   AutomationDefinitionDraft,
+  AutomationDetailResponse,
   AutomationNotificationDeliveryQueryResponse,
   AutomationNotificationDeliveryReceipt,
   AutomationRun,
@@ -1032,9 +1033,11 @@ function AutomationDetail(props: {
         <span>
           {automation.trigger.kind === "file-arrival"
             ? "Runs on settled file changes"
-            : automation.nextDueAt === null
-              ? "Not scheduled"
-              : `Next run: ${automationNextRunLabel(automation.nextDueAt, props.format)}`}
+            : automation.trigger.kind === "thread-finished"
+              ? "Runs once when the watched thread finishes"
+              : automation.nextDueAt === null
+                ? "Not scheduled"
+                : `Next run: ${automationNextRunLabel(automation.nextDueAt, props.format)}`}
         </span>
       </p>
       {automation.blockedReason === undefined ? null : (
@@ -1189,6 +1192,58 @@ function AutomationDetail(props: {
           refresh={controller.retryDetail}
         />
       ) : null}
+
+      {controller.detail.finishWait === undefined
+        ? null
+        : (() => {
+            const wait = controller.detail.finishWait;
+            return (
+              <div className="automation-detail__blocked" role="status">
+                <p>{finishWaitDetailSummary(wait, props.format)}</p>
+                {wait.state === "missed" || wait.state === "armed" ? (
+                  <div className="automation-detail__actions">
+                    {wait.state === "missed" ? (
+                      <OctantButton
+                        onClick={() =>
+                          void controller.execute(
+                            {
+                              kind: "run-missed-finish-wait",
+                              automationId: automation.id,
+                              expectedVersion: automation.version,
+                              waitId: wait.waitId,
+                              runNowRequestId: props.generateId() as never,
+                            },
+                            "Missed finish wait started.",
+                          )
+                        }
+                        type="button"
+                        variant="solid"
+                      >
+                        Run now
+                      </OctantButton>
+                    ) : null}
+                    <OctantButton
+                      onClick={() =>
+                        void controller.execute(
+                          {
+                            kind: "cancel-finish-wait",
+                            automationId: automation.id,
+                            expectedVersion: automation.version,
+                            waitId: wait.waitId,
+                          },
+                          "Thread wait cancelled.",
+                        )
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      Cancel wait
+                    </OctantButton>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
 
       <dl className="automation-detail__facts">
         <div>
@@ -1483,5 +1538,28 @@ export type { AutomationDefinition };
 function triggerKindIcon(trigger: AutomationSummary["trigger"]): IconComponent {
   if (trigger.kind === "integration-event") return Webhook;
   if (trigger.kind === "file-arrival") return FolderInput;
+  if (trigger.kind === "thread-finished") return CalendarClock;
   return trigger.kind === "once" ? CalendarClock : History;
+}
+
+function finishWaitDetailSummary(
+  wait: NonNullable<AutomationDetailResponse["finishWait"]>,
+  format: AutomationFormatOptions | undefined,
+): string {
+  const target = `thread ${String(wait.targetThreadId).slice(0, 8)}`;
+  const condition = wait.condition === "done" ? "is marked done" : "finishes its turn";
+  switch (wait.state) {
+    case "armed":
+      return `Waiting for ${target} (${condition}). Expires ${formatAutomationInstant(wait.expiresAt, format)}.`;
+    case "missed":
+      return `Missed: ${target} finished past the lateness window. Choose Run now or Cancel wait.`;
+    case "expired":
+      return `Expired: ${target} did not finish before ${formatAutomationInstant(wait.expiresAt, format)}.`;
+    case "unavailable":
+      return `Cannot be checked: ${target} is missing, archived, or moved out of scope.`;
+    case "fired":
+      return `Triggered when ${target} finished.`;
+    case "cancelled":
+      return `Wait for ${target} was cancelled.`;
+  }
 }

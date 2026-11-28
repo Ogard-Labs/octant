@@ -1,11 +1,16 @@
 import { principalActsAsHostPerson } from "../clientPrincipal";
 import { randomUUID } from "node:crypto";
 import {
+  AUTOMATION_THREAD_FINISHED_READS_FLAG,
   AutomationEventSourceChoices,
   type AutomationEventSourceChoice,
   decodeAutomationCommandResult,
   decodeAutomationCommand,
+  decodeAutomationFinishWaitId,
+  decodeAutomationFinishWaitSpec,
+  decodeAutomationFinishWaitTargetsResponse,
   decodeAutomationFollowUpRequest,
+  decodeAutomationThreadFinishedTrigger,
   decodeAutomationThreadRoutineRequest,
   decodeAutomationScheduledTrigger,
   decodeRoutineProposalDecision,
@@ -22,18 +27,25 @@ import {
   type AutomationCommandFailure,
   type AutomationCommandResult,
   type AutomationDefinition,
+  type AutomationFinishWaitTargetCandidate,
   type AutomationId,
+  type AutomationMode,
   type AutomationRun,
   type HostId,
   type ProjectId,
   type RoutineChangeRequest,
+  type RoutineFinishWaitProposal,
   type RoutineProposal,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { WindowId } from "@octant/contracts";
 import type { AutomationEventSourcePreparation } from "./automationEventSources";
-import { resolveNextAutomationOccurrence } from "@octant/domain";
+import {
+  defaultThreadFinishWaitExpiry,
+  resolveNextAutomationOccurrence,
+  type ThreadFinishTargetFacts,
+} from "@octant/domain";
 import { ClientPrincipalError, WINDOW_CAPABILITY_HEADER } from "../clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "../principalRouteContext";
 import type { ProjectService } from "../projectService";
@@ -42,7 +54,7 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthor
 import type { AutomationCommandService } from "./automationCommandService";
 import type { AutomationProjection } from "./automationProjection";
 import type { RoutineProposalService } from "./routineProposalService";
-import type { ThreadRoutineDraftResult } from "./threadRoutineDraft";
+import type { ThreadRoutineDraftInput, ThreadRoutineDraftResult } from "./threadRoutineDraft";
 import type {
   AutomationFileSourcePreparation,
   AutomationFileSourceRearmPreparation,
@@ -95,8 +107,21 @@ export interface AutomationRouteDependencies {
    */
   readonly proposals?: {
     readonly service: Pick<RoutineProposalService, "list" | "claim">;
-    readonly draft: (proposal: RoutineProposal) => ThreadRoutineDraftResult;
+    readonly draft: (proposal: ThreadRoutineDraftInput) => ThreadRoutineDraftResult;
   };
+  /**
+   * Reads a local target thread's current finish state (including baseline
+   * completed turn id) when arming a `thread-finished` trigger or one-shot wait.
+   */
+  readonly readFinishWaitTarget?: (input: {
+    readonly threadId: string;
+    readonly mode: AutomationMode;
+    readonly projectId: string;
+  }) => ThreadFinishTargetFacts;
+  /** Lists local threads the caller can open, for the finish-wait picker sheet. */
+  readonly listFinishWaitTargets?: (input: {
+    readonly accessible: ReadonlyMap<string, "chat" | "work" | "code">;
+  }) => ReadonlyArray<AutomationFinishWaitTargetCandidate>;
   readonly now?: () => number;
   readonly uuid?: () => string;
   /**
@@ -228,10 +253,34 @@ export function createAutomationRouteHandler(dependencies: AutomationRouteDepend
         return await handleCommand(dependencies, context, body, origin, request);
       }
       if (route === "proposals" && request.method === "GET") {
+        const readsFinish = readsThreadFinished(url);
+        const all = dependencies.proposals?.service.list(context.scopeId) ?? [];
+        const proposals = readsFinish
+          ? all
+          : all.filter((item) => !("kind" in item && item.kind === "routine-finish-wait-proposal"));
         return jsonResponse(
           decodeRoutineProposalList({
             kind: "routine-proposal-list",
-            proposals: dependencies.proposals?.service.list(context.scopeId) ?? [],
+            proposals,
+          }),
+          200,
+          origin,
+        );
+      }
+      if (route === "finish-wait-targets" && request.method === "GET") {
+        if (!principalActsAsHostPerson(context.principal)) {
+          return failureResponse(
+            "Only a local window or a device paired at Full access can arm a thread-finished wait.",
+            403,
+            origin,
+          );
+        }
+        const accessible = await accessibleProjects(dependencies, context);
+        const targets = dependencies.listFinishWaitTargets?.({ accessible }) ?? [];
+        return jsonResponse(
+          decodeAutomationFinishWaitTargetsResponse({
+            kind: "automation-finish-wait-targets",
+            targets,
           }),
           200,
           origin,
@@ -290,10 +339,11 @@ async function handleList(
   url: URL,
   origin: string | null,
 ): Promise<Response> {
-  const allowed = new Set(["mode", "projectId", "search", "limit", "cursor"]);
+  const allowed = new Set(["mode", "projectId", "search", "limit", "cursor", "reads"]);
   if (![...url.searchParams.keys()].every((key) => allowed.has(key))) {
     return failureResponse("Automation list request is invalid.", 400, origin);
   }
+  const includeThreadFinished = readsThreadFinished(url);
   const mode = url.searchParams.get("mode") ?? "all";
   if (mode !== "all" && mode !== "chat" && mode !== "work" && mode !== "code") {
     return failureResponse("Automation list mode is invalid.", 400, origin);
@@ -342,6 +392,7 @@ async function handleList(
     ...(search === undefined ? {} : { search }),
     limit,
     ...(cursor === undefined ? {} : { cursor }),
+    includeThreadFinished,
   });
   const items = page.items.filter((item) => accessible.get(String(item.projectId)) === item.mode);
   const totals = dependencies.projection.totals({
@@ -352,6 +403,7 @@ async function handleList(
     since: new Date(
       (dependencies.now ?? Date.now)() - AUTOMATION_TOTALS_WINDOW_DAYS * 86_400_000,
     ).toISOString() as UtcTimestamp,
+    includeThreadFinished,
   });
   return jsonResponse(
     decodeAutomationQueryResponse({
@@ -371,9 +423,14 @@ async function handleGet(
   url: URL,
   origin: string | null,
 ): Promise<Response> {
-  if (url.searchParams.size !== 1 || !url.searchParams.has("automationId")) {
+  const allowed = new Set(["automationId", "reads"]);
+  if (
+    !url.searchParams.has("automationId") ||
+    ![...url.searchParams.keys()].every((key) => allowed.has(key))
+  ) {
     return failureResponse("Automation get request is invalid.", 400, origin);
   }
+  const includeThreadFinished = readsThreadFinished(url);
   const automationId = parseAutomationId(url.searchParams.get("automationId"));
   if (automationId === undefined) {
     return failureResponse("Automation ID is invalid.", 400, origin);
@@ -382,17 +439,25 @@ async function handleGet(
   const accessible = await accessibleProjects(dependencies, context);
   // Fail closed with the same not-found for unknown and foreign automations
   // so probes cannot distinguish existence from access.
-  if (definition === undefined || !isDefinitionAccessible(definition, accessible)) {
+  if (
+    definition === undefined ||
+    !isDefinitionAccessible(definition, accessible) ||
+    (!includeThreadFinished && definition.trigger.kind === "thread-finished")
+  ) {
     return failureResponse("Automation is unavailable.", 404, origin);
   }
   const runs = dependencies.projection.listRuns({ automationId, limit: DETAIL_RUNS_LIMIT });
   const fileSource = dependencies.projection.getFileSourceSummary(automationId);
   const eventSource = dependencies.projection.getEventSource(automationId);
+  const finishWait = includeThreadFinished
+    ? dependencies.projection.getFinishWait(automationId)
+    : undefined;
   return jsonResponse(
     decodeAutomationQueryResponse({
       kind: "automation-detail",
       ...(fileSource === undefined ? {} : { fileSource }),
       ...(eventSource === undefined ? {} : { eventSource }),
+      ...(finishWait === undefined ? {} : { finishWait }),
       automation: definition,
       runs: runs.runs,
     }),
@@ -771,7 +836,8 @@ async function handleCommand(
       : dependencies.commands.execute(command, undefined, preparation, eventPreparation);
   if (
     result.kind === "automation-run-confirmed" ||
-    (command.kind === "run-now-automation" && result.kind === "automation-run-accepted")
+    ((command.kind === "run-now-automation" || command.kind === "run-missed-finish-wait") &&
+      result.kind === "automation-run-accepted")
   ) {
     const definition = dependencies.projection.getDefinition(result.run.automationId);
     if (definition !== undefined) {
@@ -839,6 +905,25 @@ async function handleProposalDecision(
   };
   try {
     if ("kind" in claimed.proposal) {
+      if (claimed.proposal.kind === "routine-finish-wait-proposal") {
+        const armed = await confirmFinishWaitProposal(dependencies, context, claimed.proposal);
+        if (armed.kind !== "automation-created" && armed.kind !== "automation-updated") {
+          return refuse(
+            armed.kind === "automation-command-failed"
+              ? armed
+              : commandFailure("invalid", "The finish wait was not armed."),
+          );
+        }
+        claimed.settle({ status: "confirmed", automationId: armed.automation.id });
+        return jsonResponse(
+          decodeRoutineProposalDecisionResult({
+            kind: "routine-proposal-confirmed",
+            automation: armed.automation,
+          }),
+          200,
+          origin,
+        );
+      }
       const changed = await changeThreadRoutine(dependencies, context, claimed.proposal);
       if (changed.kind !== "automation-paused" && changed.kind !== "automation-archived") {
         return refuse(
@@ -891,7 +976,7 @@ async function handleProposalDecision(
 async function createThreadRoutine(
   dependencies: AutomationRouteDependencies,
   context: PrincipalRouteContext,
-  proposal: RoutineProposal,
+  proposal: ThreadRoutineDraftInput,
 ): Promise<AutomationCommandResult> {
   if (dependencies.historyAvailable?.() === false) {
     return commandFailure(
@@ -988,7 +1073,6 @@ async function handleThreadRoutine(
     );
   }
   const result = await createThreadRoutine(dependencies, context, {
-    proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),
     threadId: request.threadId,
     mode: request.mode,
     projectId: request.projectId,
@@ -996,8 +1080,6 @@ async function handleThreadRoutine(
     taskPrompt: request.taskPrompt,
     trigger: request.trigger,
     missedRunPolicy: request.missedRunPolicy,
-    firstRunAt,
-    requestedAt: now,
   });
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
 }
@@ -1024,6 +1106,14 @@ async function handleFollowUp(
     return failureResponse("Follow-up request is invalid.", 400, origin);
   }
   const nowMs = (dependencies.now ?? Date.now)();
+  if (request.kind === "arm-thread-finish-follow-up") {
+    const result = await armThreadFinishFollowUp(dependencies, context, request, nowMs);
+    return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+  }
+  if (request.kind === "arm-routine-finish-wait") {
+    const result = await armRoutineFinishWait(dependencies, context, request, nowMs);
+    return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+  }
   if (Date.parse(request.scheduledAt) <= nowMs) {
     return jsonResponse(
       decodeAutomationCommandResult(commandFailure("invalid", "Pick a time in the future.")),
@@ -1037,7 +1127,6 @@ async function handleFollowUp(
   });
   if (request.kind === "schedule-follow-up") {
     const result = await createThreadRoutine(dependencies, context, {
-      proposalId: decodeRoutineProposalId((dependencies.uuid ?? randomUUID)()),
       threadId: request.threadId,
       mode: request.mode,
       projectId: request.projectId,
@@ -1046,8 +1135,6 @@ async function handleFollowUp(
       trigger,
       missedRunPolicy: "run-once",
       targetPolicy: "same-thread",
-      firstRunAt: request.scheduledAt,
-      requestedAt: new Date(nowMs).toISOString() as RoutineProposal["requestedAt"],
     });
     return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
   }
@@ -1102,6 +1189,204 @@ async function handleFollowUp(
     origin: { kind: "interactive" },
   } as AutomationCommand);
   return jsonResponse(decodeAutomationCommandResult(result), 200, origin);
+}
+
+async function armThreadFinishFollowUp(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  request: Extract<
+    ReturnType<typeof decodeAutomationFollowUpRequest>,
+    { readonly kind: "arm-thread-finish-follow-up" }
+  >,
+  nowMs: number,
+): Promise<AutomationCommandResult> {
+  if (!principalActsAsHostPerson(context.principal)) {
+    return commandFailure(
+      "unauthorized",
+      "Only a local window or a device paired at Full access can arm a thread-finished wait.",
+    );
+  }
+  const accessible = await accessibleProjects(dependencies, context);
+  if (accessible.get(String(request.targetProjectId)) !== request.targetMode) {
+    return commandFailure(
+      "unauthorized",
+      "You can only wait on a thread in a Project you can open.",
+    );
+  }
+  const armedAt = new Date(nowMs).toISOString() as UtcTimestamp;
+  const expiresAt = request.expiresAt ?? defaultThreadFinishWaitExpiry(armedAt);
+  const baselineTurnId = readBaselineTurnId(dependencies, {
+    threadId: String(request.targetThreadId),
+    mode: request.targetMode,
+    projectId: String(request.targetProjectId),
+  });
+  let trigger;
+  try {
+    trigger = decodeAutomationThreadFinishedTrigger({
+      kind: "thread-finished",
+      targetThreadId: request.targetThreadId,
+      targetMode: request.targetMode,
+      targetProjectId: request.targetProjectId,
+      ...(request.targetMemberId === undefined ? {} : { targetMemberId: request.targetMemberId }),
+      condition: request.condition,
+      armedAt,
+      expiresAt,
+      ...(baselineTurnId === undefined ? {} : { baselineTurnId }),
+    });
+  } catch {
+    return commandFailure("invalid", "The wait expiry must be after now.");
+  }
+  return createThreadRoutine(dependencies, context, {
+    threadId: request.threadId,
+    mode: request.mode,
+    projectId: request.projectId,
+    displayName: request.displayName ?? FOLLOW_UP_DISPLAY_NAME,
+    taskPrompt: request.taskPrompt,
+    trigger,
+    missedRunPolicy: "run-once",
+    targetPolicy: request.action,
+  });
+}
+
+async function armRoutineFinishWait(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  request: Extract<
+    ReturnType<typeof decodeAutomationFollowUpRequest>,
+    { readonly kind: "arm-routine-finish-wait" }
+  >,
+  nowMs: number,
+): Promise<AutomationCommandResult> {
+  if (!principalActsAsHostPerson(context.principal)) {
+    return commandFailure(
+      "unauthorized",
+      "Only a local window or a device paired at Full access can arm a thread-finished wait.",
+    );
+  }
+  if (dependencies.historyAvailable?.() === false) {
+    return commandFailure(
+      "unsupported",
+      "Automation history could not be loaded, so Automations cannot change.",
+    );
+  }
+  const accessible = await accessibleProjects(dependencies, context);
+  if (accessible.get(String(request.targetProjectId)) !== request.targetMode) {
+    return commandFailure(
+      "unauthorized",
+      "You can only wait on a thread in a Project you can open.",
+    );
+  }
+  const armedAt = new Date(nowMs).toISOString() as UtcTimestamp;
+  const expiresAt = request.expiresAt ?? defaultThreadFinishWaitExpiry(armedAt);
+  const baselineTurnId = readBaselineTurnId(dependencies, {
+    threadId: String(request.targetThreadId),
+    mode: request.targetMode,
+    projectId: String(request.targetProjectId),
+  });
+  let wait;
+  try {
+    wait = decodeAutomationFinishWaitSpec({
+      waitId: decodeAutomationFinishWaitId((dependencies.uuid ?? randomUUID)()),
+      targetThreadId: request.targetThreadId,
+      targetMode: request.targetMode,
+      targetProjectId: request.targetProjectId,
+      ...(request.targetMemberId === undefined ? {} : { targetMemberId: request.targetMemberId }),
+      condition: request.condition,
+      armedAt,
+      expiresAt,
+      ...(baselineTurnId === undefined ? {} : { baselineTurnId }),
+    });
+  } catch {
+    return commandFailure("invalid", "The wait expiry must be after now.");
+  }
+  const command = {
+    kind: "arm-finish-wait" as const,
+    automationId: request.automationId,
+    expectedVersion: request.expectedVersion,
+    wait,
+  };
+  const denial = authorizeCommandProject(dependencies, command, accessible);
+  if (denial !== undefined) return denial;
+  return dependencies.commands.execute({
+    ...command,
+    principal: context.principal,
+    origin: { kind: "interactive" },
+  } as AutomationCommand);
+}
+
+async function confirmFinishWaitProposal(
+  dependencies: AutomationRouteDependencies,
+  context: PrincipalRouteContext,
+  proposal: RoutineFinishWaitProposal,
+): Promise<AutomationCommandResult> {
+  const nowMs = (dependencies.now ?? Date.now)();
+  if (proposal.action === "run-routine") {
+    if (proposal.targetRoutineId === undefined) {
+      return commandFailure("invalid", "Routine finish-wait proposal is missing targetRoutineId.");
+    }
+    const existing = dependencies.projection.getDefinition(proposal.targetRoutineId);
+    if (existing === undefined) {
+      return commandFailure("not-found", "The target routine no longer exists.");
+    }
+    return armRoutineFinishWait(
+      dependencies,
+      context,
+      {
+        kind: "arm-routine-finish-wait",
+        automationId: existing.id,
+        expectedVersion: existing.version,
+        targetThreadId: proposal.targetThreadId,
+        targetMode: proposal.targetMode,
+        targetProjectId: proposal.targetProjectId,
+        condition: proposal.condition,
+        expiresAt: proposal.expiresAt,
+      },
+      nowMs,
+    );
+  }
+  if (proposal.taskPrompt === undefined) {
+    return commandFailure("invalid", "Finish-wait proposal is missing its prompt.");
+  }
+  return armThreadFinishFollowUp(
+    dependencies,
+    context,
+    {
+      kind: "arm-thread-finish-follow-up",
+      action: proposal.action,
+      threadId: proposal.threadId,
+      mode: proposal.mode,
+      projectId: proposal.projectId,
+      displayName: proposal.displayName,
+      taskPrompt: proposal.taskPrompt,
+      targetThreadId: proposal.targetThreadId,
+      targetMode: proposal.targetMode,
+      targetProjectId: proposal.targetProjectId,
+      condition: proposal.condition,
+      expiresAt: proposal.expiresAt,
+    },
+    nowMs,
+  );
+}
+
+function readBaselineTurnId(
+  dependencies: AutomationRouteDependencies,
+  target: {
+    readonly threadId: string;
+    readonly mode: AutomationMode;
+    readonly projectId: string;
+  },
+): string | undefined {
+  const facts = dependencies.readFinishWaitTarget?.(target);
+  return facts?.kind === "present" ? facts.latestCompletedTurn?.turnId : undefined;
+}
+
+function readsThreadFinished(url: URL): boolean {
+  const raw = url.searchParams.get("reads");
+  if (raw === null) return false;
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .includes(AUTOMATION_THREAD_FINISHED_READS_FLAG);
 }
 
 /**

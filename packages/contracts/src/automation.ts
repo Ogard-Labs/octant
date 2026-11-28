@@ -17,6 +17,13 @@ import {
   AutomationIntegrationEvent,
 } from "./automationEvents";
 export * from "./automationEvents";
+import {
+  AutomationFinishWaitId,
+  AutomationFinishWaitState,
+  AutomationThreadFinishCondition,
+  parseAutomationThreadFinishedTurnPrompt,
+} from "./automationThreadFinished";
+export * from "./automationThreadFinished";
 import { Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AgentRunAuthority } from "./agentRun";
@@ -107,6 +114,7 @@ export const AutomationTriggerKind = Schema.Literal(
   "weekly-local",
   "file-arrival",
   "integration-event",
+  "thread-finished",
 );
 export type AutomationTriggerKind = typeof AutomationTriggerKind.Type;
 
@@ -145,7 +153,8 @@ export function automationFollowUpTurnPrompt(taskPrompt: string): string {
 /** The fixed prompt of a follow-up's turn text, or undefined when the text is not one. */
 export function parseAutomationFollowUpTurnPrompt(text: string): string | undefined {
   const prefix = `${AUTOMATION_FOLLOW_UP_TURN_HEADING}\n\n`;
-  return text.startsWith(prefix) ? text.slice(prefix.length) : undefined;
+  if (text.startsWith(prefix)) return text.slice(prefix.length);
+  return parseAutomationThreadFinishedTurnPrompt(text)?.prompt;
 }
 
 export const AutomationLifecycle = Schema.Literal("enabled", "paused", "exhausted", "archived");
@@ -270,6 +279,53 @@ export const AutomationWeeklyLocalTrigger = Schema.Struct({
 }).annotations(strict);
 export type AutomationWeeklyLocalTrigger = typeof AutomationWeeklyLocalTrigger.Type;
 
+export const AutomationThreadFinishedTrigger = Schema.Struct({
+  kind: Schema.Literal("thread-finished"),
+  targetThreadId: AutomationThreadId,
+  targetMode: Schema.Literal("chat", "work", "code"),
+  targetProjectId: ProjectId,
+  /** Optional hub member owning the target thread; omitted for local waits. */
+  targetMemberId: Schema.optional(HostId),
+  condition: AutomationThreadFinishCondition,
+  armedAt: UtcTimestamp,
+  expiresAt: UtcTimestamp,
+  /** Newest completed turn on the target when armed, so older turns do not fire. */
+  baselineTurnId: Schema.optional(AutomationOpaqueReference),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((trigger) => trigger.expiresAt > trigger.armedAt));
+export type AutomationThreadFinishedTrigger = typeof AutomationThreadFinishedTrigger.Type;
+
+const AutomationFinishWaitSpecFields = {
+  waitId: AutomationFinishWaitId,
+  targetThreadId: AutomationThreadId,
+  targetMode: Schema.Literal("chat", "work", "code"),
+  targetProjectId: ProjectId,
+  targetMemberId: Schema.optional(HostId),
+  condition: AutomationThreadFinishCondition,
+  armedAt: UtcTimestamp,
+  expiresAt: UtcTimestamp,
+  baselineTurnId: Schema.optional(AutomationOpaqueReference),
+} as const;
+
+export const AutomationFinishWaitSpec = Schema.Struct(AutomationFinishWaitSpecFields)
+  .annotations(strict)
+  .pipe(Schema.filter((wait) => wait.expiresAt > wait.armedAt));
+export type AutomationFinishWaitSpec = typeof AutomationFinishWaitSpec.Type;
+
+export const AutomationFinishWaitRecord = Schema.Struct({
+  ...AutomationFinishWaitSpecFields,
+  state: AutomationFinishWaitState,
+  updatedAt: UtcTimestamp,
+  attestedTurnId: Schema.optional(AutomationOpaqueReference),
+  finishedAt: Schema.optional(UtcTimestamp),
+  runId: Schema.optional(AutomationRunId),
+  reason: Schema.optional(boundedText(512)),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((wait) => wait.expiresAt > wait.armedAt));
+export type AutomationFinishWaitRecord = typeof AutomationFinishWaitRecord.Type;
+
 export const AutomationScheduledTrigger = Schema.Union(
   AutomationOnceTrigger,
   AutomationIntervalTrigger,
@@ -280,6 +336,7 @@ export const AutomationTrigger = Schema.Union(
   AutomationScheduledTrigger,
   AutomationFileArrivalTrigger,
   AutomationIntegrationEventTrigger,
+  AutomationThreadFinishedTrigger,
 );
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 
@@ -698,6 +755,12 @@ export function automationLevelFitsTrigger(
   definition: Pick<AutomationDefinitionDraft, "trigger" | "projectLevel" | "runLevel">,
 ): boolean {
   const trigger = definition.trigger;
+  if (trigger.kind === "thread-finished") {
+    return (
+      definition.projectLevel === undefined &&
+      (definition.runLevel === undefined || definition.runLevel === "ask-first")
+    );
+  }
   if (
     trigger.kind !== "integration-event" ||
     trigger.integrationId !== AUTOMATION_WEBHOOK_INTEGRATION_ID
@@ -715,6 +778,9 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
     ((definition.trigger.kind === "file-arrival" ||
       definition.trigger.kind === "integration-event") &&
       (definition.mode === "chat" || definition.targetPolicy !== "new-thread")) ||
+    (definition.trigger.kind === "thread-finished" &&
+      definition.targetPolicy === "new-thread" &&
+      definition.mode === "chat") ||
     definition.mode !== definition.binding.kind ||
     definition.binding.hostId !== definition.hostId ||
     definition.binding.projectId !== definition.projectId ||
@@ -737,7 +803,8 @@ function automationDefinitionDraftMatchesPolicy(definition: AutomationDefinition
     // A follow-up runs once, and late rather than never while inside its
     // missed window; the window, not the missed-run policy, bounds it.
     (definition.targetPolicy === "same-thread" &&
-      (definition.trigger.kind !== "once" || definition.missedRunPolicy !== "run-once")) ||
+      ((definition.trigger.kind !== "once" && definition.trigger.kind !== "thread-finished") ||
+        definition.missedRunPolicy !== "run-once")) ||
     // One level choice at most: follow the Project's, or name one.
     (definition.projectLevel !== undefined && definition.runLevel !== undefined) ||
     // Chat has no level to pick, and its routine, a follow-up included,
@@ -787,7 +854,8 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
     definition.nextDueAt === null
       ? definition.nextDueResolution === undefined
       : definition.trigger.kind === "file-arrival" ||
-          definition.trigger.kind === "integration-event"
+          definition.trigger.kind === "integration-event" ||
+          definition.trigger.kind === "thread-finished"
         ? false
         : definition.trigger.kind === "once"
           ? definition.nextDueAt === definition.trigger.scheduledAt &&
@@ -802,7 +870,9 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
               );
   const enabledDueMatches =
     definition.lifecycle !== "enabled" ||
-    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
+    (definition.trigger.kind === "file-arrival" ||
+    definition.trigger.kind === "integration-event" ||
+    definition.trigger.kind === "thread-finished"
       ? definition.nextDueAt === null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt === definition.trigger.scheduledAt
@@ -890,11 +960,23 @@ export const AutomationIntegrationEventOccurrence = Schema.Struct({
 }).annotations(strict);
 export type AutomationIntegrationEventOccurrence = typeof AutomationIntegrationEventOccurrence.Type;
 
+export const AutomationThreadFinishedOccurrence = Schema.Struct({
+  kind: Schema.Literal("thread-finished"),
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  targetThreadId: AutomationThreadId,
+  attestedTurnId: AutomationOpaqueReference,
+  finishedAt: UtcTimestamp,
+  waitId: Schema.optional(AutomationFinishWaitId),
+}).annotations(strict);
+export type AutomationThreadFinishedOccurrence = typeof AutomationThreadFinishedOccurrence.Type;
+
 export const AutomationOccurrence = Schema.Union(
   AutomationScheduledOccurrence,
   AutomationManualOccurrence,
   AutomationFileArrivalOccurrence,
   AutomationIntegrationEventOccurrence,
+  AutomationThreadFinishedOccurrence,
 );
 export type AutomationOccurrence = typeof AutomationOccurrence.Type;
 
@@ -925,6 +1007,10 @@ export function deriveAutomationOccurrenceKey(
     return decodeAutomationOccurrenceKeyText(
       `event:${occurrence.automationId}:${occurrence.definitionRevision}:${occurrence.source.checkpoint.sourceIdentity}:${occurrence.source.checkpoint.observationRevision}:${occurrence.source.event.id}`,
     );
+  if (occurrence.kind === "thread-finished")
+    return decodeAutomationOccurrenceKeyText(
+      `thread-finished:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.targetThreadId)}:${String(occurrence.attestedTurnId)}`,
+    );
   return decodeAutomationOccurrenceKeyText(
     `manual:${String(occurrence.automationId)}:${occurrence.definitionRevision}:${String(occurrence.runNowRequestId)}`,
   );
@@ -946,6 +1032,7 @@ function automationScheduledAtMatchesTrigger(
   switch (trigger.kind) {
     case "file-arrival":
     case "integration-event":
+    case "thread-finished":
       return false;
     case "once":
       return scheduledAt === trigger.scheduledAt;
@@ -1340,6 +1427,22 @@ export const AutomationCommand = Schema.Union(
     cancelRunRequestId: AutomationCancelRunRequestId,
     expectedRunVersion: AggregateVersion,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("arm-finish-wait"),
+    ...AutomationCommandFields,
+    wait: AutomationFinishWaitSpec,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("cancel-finish-wait"),
+    ...AutomationCommandFields,
+    waitId: AutomationFinishWaitId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("run-missed-finish-wait"),
+    ...AutomationCommandFields,
+    waitId: AutomationFinishWaitId,
+    runNowRequestId: AutomationRunNowRequestId,
+  }).annotations(strict),
 );
 export type AutomationCommand = typeof AutomationCommand.Type;
 export const AutomationDefinitionCommand = AutomationCommand;
@@ -1445,6 +1548,8 @@ export const AutomationSummary = Schema.Struct({
   originThreadId: Schema.optional(AutomationThreadId),
   /** Present when the routine is a follow-up in its origin thread. */
   targetPolicy: Schema.optional(AutomationTargetPolicy),
+  /** Present when the routine has a thread-finished wait (own trigger or one-shot wait). */
+  finishWait: Schema.optional(AutomationFinishWaitRecord),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
 }).annotations(strict);
@@ -1506,8 +1611,44 @@ export const RoutineChangeRequest = Schema.Struct({
 }).annotations(strict);
 export type RoutineChangeRequest = typeof RoutineChangeRequest.Type;
 
-/** What a thread's agent is waiting on the person for: a new routine, or a change to one. */
-export const RoutineAgentRequest = Schema.Union(RoutineProposal, RoutineChangeRequest);
+/**
+ * A thread's agent proposing a wait-on-thread follow-up or routine run.
+ * Always waits on the person's card at every guardrail level; nothing is armed
+ * until the person confirms.
+ */
+export const RoutineFinishWaitProposal = Schema.Struct({
+  kind: Schema.Literal("routine-finish-wait-proposal"),
+  proposalId: RoutineProposalId,
+  threadId: AutomationThreadId,
+  mode: AutomationMode,
+  projectId: ProjectId,
+  action: Schema.Literal("same-thread", "new-thread", "run-routine"),
+  displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  taskPrompt: Schema.optional(boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH)),
+  targetRoutineId: Schema.optional(AutomationId),
+  targetThreadId: AutomationThreadId,
+  targetMode: AutomationMode,
+  targetProjectId: ProjectId,
+  condition: AutomationThreadFinishCondition,
+  expiresAt: UtcTimestamp,
+  requestedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((proposal) =>
+      proposal.action === "run-routine"
+        ? proposal.targetRoutineId !== undefined && proposal.taskPrompt === undefined
+        : proposal.taskPrompt !== undefined && proposal.targetRoutineId === undefined,
+    ),
+  );
+export type RoutineFinishWaitProposal = typeof RoutineFinishWaitProposal.Type;
+
+/** What a thread's agent is waiting on the person for: a new routine, a finish wait, or a change to one. */
+export const RoutineAgentRequest = Schema.Union(
+  RoutineProposal,
+  RoutineChangeRequest,
+  RoutineFinishWaitProposal,
+);
 export type RoutineAgentRequest = typeof RoutineAgentRequest.Type;
 
 export const RoutineProposalList = Schema.Struct({
@@ -1560,6 +1701,32 @@ export const AutomationFollowUpRequest = Schema.Union(
     automationId: AutomationId,
     expectedVersion: AggregateVersion,
     scheduledAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("arm-thread-finish-follow-up"),
+    action: Schema.Literal("same-thread", "new-thread"),
+    threadId: AutomationThreadId,
+    mode: AutomationMode,
+    projectId: ProjectId,
+    displayName: Schema.optional(boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH)),
+    taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
+    targetThreadId: AutomationThreadId,
+    targetMode: AutomationMode,
+    targetProjectId: ProjectId,
+    targetMemberId: Schema.optional(HostId),
+    condition: AutomationThreadFinishCondition,
+    expiresAt: Schema.optional(UtcTimestamp),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("arm-routine-finish-wait"),
+    automationId: AutomationId,
+    expectedVersion: AggregateVersion,
+    targetThreadId: AutomationThreadId,
+    targetMode: AutomationMode,
+    targetProjectId: ProjectId,
+    targetMemberId: Schema.optional(HostId),
+    condition: AutomationThreadFinishCondition,
+    expiresAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
 );
 export type AutomationFollowUpRequest = typeof AutomationFollowUpRequest.Type;
@@ -1648,6 +1815,7 @@ export type AutomationListResponse = typeof AutomationListResponse.Type;
 export const AutomationDetailResponse = Schema.Struct({
   eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   fileSource: Schema.optional(AutomationFileSourceSummary),
+  finishWait: Schema.optional(AutomationFinishWaitRecord),
   kind: Schema.Literal("automation-detail"),
   automation: AutomationDefinition,
   runs: Schema.Array(AutomationRun).pipe(Schema.maxItems(MAX_AUTOMATION_HISTORY_ENTRIES)),
@@ -1679,6 +1847,7 @@ export const AutomationDefinitionCreated = Schema.Struct({
   eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
+  finishWait: Schema.optional(AutomationFinishWaitRecord),
 })
   .annotations(strict)
   .pipe(
@@ -1693,7 +1862,13 @@ export const AutomationDefinitionCreated = Schema.Struct({
           (event.automation.trigger.kind === "file-arrival" &&
             !event.fileSource.baselineReady &&
             event.fileSource.observationRevision === 1 &&
-            event.fileSource.armGeneration === 1)),
+            event.fileSource.armGeneration === 1)) &&
+        (event.finishWait === undefined ||
+          (event.automation.trigger.kind === "thread-finished" &&
+            event.finishWait.state === "armed" &&
+            String(event.finishWait.targetThreadId) ===
+              String(event.automation.trigger.targetThreadId) &&
+            event.finishWait.condition === event.automation.trigger.condition)),
     ),
   );
 export type AutomationDefinitionCreated = typeof AutomationDefinitionCreated.Type;
@@ -1901,10 +2076,20 @@ export const AutomationRunResultReported = Schema.Struct({
 }).annotations(strict);
 export type AutomationRunResultReported = typeof AutomationRunResultReported.Type;
 
+export const AutomationFinishWaitChanged = Schema.Struct({
+  automationId: AutomationId,
+  definitionRevision: AutomationDefinitionRevision,
+  wait: AutomationFinishWaitRecord,
+  previousState: Schema.optional(AutomationFinishWaitState),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type AutomationFinishWaitChanged = typeof AutomationFinishWaitChanged.Type;
+
 export const AUTOMATION_EVENT_NAMES = [
   "automation-event-source-observed@1",
   "automation-file-source-observed@1",
   "automation-file-source-window-changed@1",
+  "automation-finish-wait-changed@1",
   "automation-definition-created@1",
   "automation-definition-updated@1",
   "automation-definition-lifecycle-changed@1",
@@ -1935,6 +2120,10 @@ export const AutomationEvent = Schema.Union(
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-window-changed@1"),
     payload: AutomationFileSourceWindowChanged,
+  }).annotations(strict),
+  Schema.Struct({
+    eventName: Schema.Literal("automation-finish-wait-changed@1"),
+    payload: AutomationFinishWaitChanged,
   }).annotations(strict),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-created@1"),
@@ -2033,6 +2222,17 @@ export const decodeAutomationThreadId = Schema.decodeUnknownSync(AutomationThrea
 export const decodeRoutineProposalId = Schema.decodeUnknownSync(RoutineProposalId);
 export const decodeRoutineProposal = Schema.decodeUnknownSync(RoutineProposal);
 export const decodeRoutineChangeRequest = Schema.decodeUnknownSync(RoutineChangeRequest);
+export const decodeRoutineFinishWaitProposal = Schema.decodeUnknownSync(RoutineFinishWaitProposal);
+export const decodeAutomationFinishWaitSpec = Schema.decodeUnknownSync(AutomationFinishWaitSpec);
+export const decodeAutomationFinishWaitRecord = Schema.decodeUnknownSync(
+  AutomationFinishWaitRecord,
+);
+export const decodeAutomationFinishWaitChanged = Schema.decodeUnknownSync(
+  AutomationFinishWaitChanged,
+);
+export const decodeAutomationThreadFinishedTrigger = Schema.decodeUnknownSync(
+  AutomationThreadFinishedTrigger,
+);
 export const decodeAutomationRunReportedResult = Schema.decodeUnknownSync(
   AutomationRunReportedResult,
 );

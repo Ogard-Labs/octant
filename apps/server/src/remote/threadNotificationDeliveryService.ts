@@ -133,7 +133,7 @@ interface ReceiptEvent {
   readonly payload: unknown;
 }
 
-interface CommittedFact {
+export interface CommittedFact {
   readonly eventName: string;
   readonly aggregateId: string;
   readonly payload: unknown;

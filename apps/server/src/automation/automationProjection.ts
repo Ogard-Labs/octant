@@ -3,8 +3,10 @@ import {
   type AutomationEventSourceCheckpoint,
   AutomationFileSourceObserved,
   AutomationFileSourceWindowChanged,
+  AutomationFinishWaitChanged,
   automationFileActivityWindowLimit,
   type AutomationFileSourceCheckpoint,
+  type AutomationFinishWaitRecord,
   AutomationBlocked,
   AutomationDefinitionCreated,
   AutomationDefinitionExhausted,
@@ -51,6 +53,7 @@ import {
   AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_WINDOW_CHANGED,
+  AUTOMATION_FINISH_WAIT_CHANGED,
   AUTOMATION_BLOCKED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_EXHAUSTED,
@@ -70,6 +73,7 @@ import {
 
 const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
 const decodeFileSourceWindowChanged = Schema.decodeUnknownSync(AutomationFileSourceWindowChanged);
+const decodeFinishWaitChanged = Schema.decodeUnknownSync(AutomationFinishWaitChanged);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -102,6 +106,8 @@ export interface ListAutomationSummariesInput {
   readonly search?: string | undefined;
   readonly limit: number;
   readonly cursor?: string | undefined;
+  /** False for older clients that did not opt in with `?reads=thread-finished`. */
+  readonly includeThreadFinished?: boolean;
 }
 
 export interface AutomationTotalsInput {
@@ -112,6 +118,7 @@ export interface AutomationTotalsInput {
   readonly accessible: ReadonlyMap<string, "chat" | "work" | "code">;
   /** Runs created at or after this instant count toward `runs` and `succeeded`. */
   readonly since: UtcTimestamp;
+  readonly includeThreadFinished?: boolean;
 }
 
 export interface AutomationTotals {
@@ -157,6 +164,7 @@ export class AutomationProjection implements Projection {
   readonly dependencies: ReadonlyArray<string> = [];
   readonly #fileSources = new Map<AutomationId, AutomationFileSourceCheckpoint>();
   readonly #eventSources = new Map<AutomationId, AutomationEventSourceCheckpoint>();
+  readonly #finishWaits = new Map<AutomationId, AutomationFinishWaitRecord>();
   readonly #definitions = new Map<AutomationId, AutomationDefinition>();
   readonly #runs = new Map<AutomationRunId, AutomationRun>();
   readonly #runsByAutomation = new Map<AutomationId, Set<AutomationRunId>>();
@@ -169,6 +177,7 @@ export class AutomationProjection implements Projection {
   clear(): void {
     this.#fileSources.clear();
     this.#eventSources.clear();
+    this.#finishWaits.clear();
     this.#definitions.clear();
     this.#runs.clear();
     this.#runsByAutomation.clear();
@@ -213,7 +222,22 @@ export class AutomationProjection implements Projection {
           validateFileSourceFrame(payload.fileSource, event);
           this.#fileSources.set(payload.automation.id, payload.fileSource);
         }
+        if (!this.#definitions.has(payload.automation.id) && payload.finishWait !== undefined) {
+          this.#finishWaits.set(payload.automation.id, payload.finishWait);
+        }
         this.#upsertDefinition(payload.automation);
+        return;
+      }
+      case AUTOMATION_FINISH_WAIT_CHANGED: {
+        const payload = decodeFinishWaitChanged(event.payload);
+        const definition = this.#definitions.get(payload.automationId);
+        if (definition === undefined || definition.version >= event.aggregateVersion) return;
+        this.#finishWaits.set(payload.automationId, payload.wait);
+        this.#definitions.set(payload.automationId, {
+          ...definition,
+          version: event.aggregateVersion,
+          updatedAt: payload.recordedAt,
+        });
         return;
       }
       case AUTOMATION_FILE_SOURCE_OBSERVED:
@@ -331,6 +355,48 @@ export class AutomationProjection implements Projection {
     return this.#eventSources.get(automationId);
   }
 
+  getFinishWait(automationId: AutomationId): AutomationFinishWaitRecord | undefined {
+    return this.#finishWaits.get(automationId);
+  }
+
+  /** All definitions that currently hold an `armed` finish wait (own trigger or attached). */
+  listArmedFinishWaits(): ReadonlyArray<{
+    readonly definition: AutomationDefinition;
+    readonly wait: AutomationFinishWaitRecord;
+  }> {
+    const armed: Array<{
+      readonly definition: AutomationDefinition;
+      readonly wait: AutomationFinishWaitRecord;
+    }> = [];
+    for (const [automationId, wait] of this.#finishWaits.entries()) {
+      if (wait.state !== "armed") continue;
+      const definition = this.#definitions.get(automationId);
+      if (definition === undefined || definition.lifecycle !== "enabled") continue;
+      armed.push({ definition, wait });
+    }
+    return armed;
+  }
+
+  /** Active armed wait counts for host-wide (32) and per-thread (8) arming bounds. */
+  countActiveFinishWaits(originThreadId?: string): {
+    readonly host: number;
+    readonly thread: number;
+  } {
+    let host = 0;
+    let thread = 0;
+    for (const entry of this.listArmedFinishWaits()) {
+      host += 1;
+      if (
+        originThreadId !== undefined &&
+        entry.definition.originThreadId !== undefined &&
+        String(entry.definition.originThreadId) === originThreadId
+      ) {
+        thread += 1;
+      }
+    }
+    return { host, thread };
+  }
+
   getDefinition(automationId: AutomationId): AutomationDefinition | undefined {
     return this.#definitions.get(automationId);
   }
@@ -381,9 +447,11 @@ export class AutomationProjection implements Projection {
   listSummaries(input: ListAutomationSummariesInput): AutomationSummaryPage {
     const limit = clampLimit(input.limit, MAX_AUTOMATION_QUERY_LIMIT);
     const search = input.search?.toLowerCase();
+    const includeThreadFinished = input.includeThreadFinished ?? true;
     const matches = [...this.#definitions.values()]
       .filter((definition) => {
         if (String(definition.hostId) !== String(input.hostId)) return false;
+        if (!includeThreadFinished && definition.trigger.kind === "thread-finished") return false;
         if (input.mode !== "all" && definition.mode !== input.mode) return false;
         if (
           input.projectId !== undefined &&
@@ -404,7 +472,7 @@ export class AutomationProjection implements Projection {
       input.cursor,
     );
     return {
-      items: page.items.map((definition) => this.#summarize(definition)),
+      items: page.items.map((definition) => this.#summarize(definition, includeThreadFinished)),
       ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
     };
   }
@@ -419,8 +487,10 @@ export class AutomationProjection implements Projection {
     let enabled = 0;
     let runs = 0;
     let succeeded = 0;
+    const includeThreadFinished = input.includeThreadFinished ?? true;
     for (const definition of this.#definitions.values()) {
       if (String(definition.hostId) !== String(input.hostId)) continue;
+      if (!includeThreadFinished && definition.trigger.kind === "thread-finished") continue;
       if (input.mode !== "all" && definition.mode !== input.mode) continue;
       if (
         input.projectId !== undefined &&
@@ -454,7 +524,7 @@ export class AutomationProjection implements Projection {
     };
   }
 
-  #summarize(definition: AutomationDefinition): AutomationSummary {
+  #summarize(definition: AutomationDefinition, includeThreadFinished = true): AutomationSummary {
     const latest = this.latestRun(definition.id);
     const latestEventRun = this.#runsNewestFirst(definition.id).find(
       (run) =>
@@ -469,7 +539,9 @@ export class AutomationProjection implements Projection {
           : undefined;
     const source = this.#fileSources.get(definition.id);
     const eventSource = this.#eventSources.get(definition.id);
+    const finishWait = includeThreadFinished ? this.#finishWaits.get(definition.id) : undefined;
     return {
+      ...(finishWait === undefined ? {} : { finishWait }),
       ...(latestEventRun === undefined || eventReceipt === undefined
         ? {}
         : {
@@ -932,7 +1004,12 @@ function nextDueStateAfter(
   trigger: AutomationDefinition["trigger"],
   after: UtcTimestamp,
 ): DueLedgerState | undefined {
-  if (trigger.kind === "file-arrival") return { nextDueAt: null };
+  if (
+    trigger.kind === "file-arrival" ||
+    trigger.kind === "integration-event" ||
+    trigger.kind === "thread-finished"
+  )
+    return { nextDueAt: null };
   try {
     const nextDueAt = resolveNextAutomationOccurrence({ trigger, after });
     if (nextDueAt === undefined) return { nextDueAt: null };

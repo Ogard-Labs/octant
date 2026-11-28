@@ -104,7 +104,7 @@ export interface NextRunCell {
 export function nextRunCell(
   summary: Pick<
     AutomationSummary,
-    "lifecycle" | "trigger" | "nextDueAt" | "recentRuns" | "latestRunLifecycle"
+    "lifecycle" | "trigger" | "nextDueAt" | "recentRuns" | "latestRunLifecycle" | "finishWait"
   >,
   now: string,
   options: AutomationFormatOptions = {},
@@ -142,6 +142,51 @@ export function nextRunCell(
   if (summary.trigger.kind === "file-arrival") {
     return {
       primary: "On new files",
+      ...(since === undefined ? {} : { secondary: since }),
+      tone: "default",
+    };
+  }
+  if (summary.finishWait !== undefined) {
+    switch (summary.finishWait.state) {
+      case "armed":
+        return {
+          primary: "Waiting on thread",
+          ...(since === undefined ? {} : { secondary: since }),
+          tone: "default",
+        };
+      case "missed":
+        return {
+          primary: "Missed",
+          secondary: "needs decision",
+          tone: "paused",
+        };
+      case "unavailable":
+        return {
+          primary: "Cannot be checked",
+          ...(since === undefined ? {} : { secondary: since }),
+          tone: "quiet",
+        };
+      case "expired":
+        return {
+          primary: "Expired",
+          ...(since === undefined ? {} : { secondary: since }),
+          tone: "quiet",
+        };
+      case "fired":
+      case "cancelled":
+        if (summary.trigger.kind === "thread-finished") {
+          return {
+            primary: summary.finishWait.state === "fired" ? "Done" : "Cancelled",
+            ...(since === undefined ? {} : { secondary: since }),
+            tone: "quiet",
+          };
+        }
+        break;
+    }
+  }
+  if (summary.trigger.kind === "thread-finished") {
+    return {
+      primary: "Waiting on thread",
       ...(since === undefined ? {} : { secondary: since }),
       tone: "default",
     };

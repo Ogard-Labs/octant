@@ -1,10 +1,12 @@
 import {
   decodeRoutineChangeRequest,
+  decodeRoutineFinishWaitProposal,
   decodeRoutineProposal,
   decodeRoutineProposalId,
   type AutomationId,
   type RoutineAgentRequest,
   type RoutineChangeRequest,
+  type RoutineFinishWaitProposal,
   type RoutineProposal,
   type RoutineProposalId,
   type WindowId,
@@ -129,6 +131,21 @@ export class RoutineProposalService {
         requestedAt: new Date(this.#options.now()).toISOString(),
       }),
     });
+  }
+
+  /** Ask the person to arm a wait-on-thread follow-up or routine run; always waits on the card. */
+  proposeFinishWait(input: {
+    readonly windowId: WindowId;
+    readonly proposal: Omit<RoutineFinishWaitProposal, "kind" | "proposalId" | "requestedAt">;
+    readonly signal?: AbortSignal;
+  }): Promise<RoutineAskOutcome> {
+    return this.#hold(input.windowId, input.signal, (stamp) =>
+      decodeRoutineFinishWaitProposal({
+        ...input.proposal,
+        kind: "routine-finish-wait-proposal",
+        ...stamp,
+      }),
+    );
   }
 
   /** Ask the person to pause or archive one routine; nothing changes until they confirm. */

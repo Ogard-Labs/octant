@@ -93,6 +93,15 @@ export interface AutomationDispatchServiceOptions {
    * still active before launching on a same-process re-offer.
    */
   readonly isConfirmedScopeCurrent?: (windowId: WindowId) => boolean;
+  /**
+   * When a `thread-finished` follow-up resumes a coordinator thread (Action 1),
+   * counts the turn in the coordinator's hourly wake bound and refuses if the
+   * bound is exceeded. Starts no worker.
+   */
+  readonly admitCoordinatorWake?: (
+    threadId: string,
+    nowMs: number,
+  ) => { readonly allowed: true } | { readonly allowed: false; readonly message: string };
 }
 
 const DEFAULT_LAUNCH_CLAIM_LEASE_MS = 300_000;
@@ -123,6 +132,9 @@ export class AutomationDispatchService implements AutomationDispatchPort {
   readonly #isConfirmedScopeCurrent:
     | AutomationDispatchServiceOptions["isConfirmedScopeCurrent"]
     | undefined;
+  readonly #admitCoordinatorWake:
+    | AutomationDispatchServiceOptions["admitCoordinatorWake"]
+    | undefined;
   readonly #inflight = new Set<string>();
   /**
    * In-memory only: remembers the person's confirming window across
@@ -152,6 +164,7 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       });
     this.#onRunStatusChanged = options.onRunStatusChanged;
     this.#isConfirmedScopeCurrent = options.isConfirmedScopeCurrent;
+    this.#admitCoordinatorWake = options.admitCoordinatorWake;
   }
 
   offer(offer: AutomationDispatchOffer): void {
@@ -406,6 +419,13 @@ export class AutomationDispatchService implements AutomationDispatchPort {
       return undefined;
     }
     if (decision.kind === "waiting") return undefined;
+    if (run.occurrence.kind === "thread-finished" && this.#admitCoordinatorWake !== undefined) {
+      const wake = this.#admitCoordinatorWake(String(threadId), Date.parse(this.#now()));
+      if (!wake.allowed) {
+        this.#failRun(run, "authority-mismatch", wake.message);
+        return undefined;
+      }
+    }
     return this.#recordIntent(definition, run, threadId);
   }
 

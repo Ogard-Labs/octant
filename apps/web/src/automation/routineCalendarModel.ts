@@ -150,8 +150,12 @@ function placeRoutine(
   readonly truncated: boolean;
 } {
   const trigger = routine.trigger;
-  // File observations have no promised future date to place on a calendar.
-  if (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+  // File, integration, and thread-finish observations have no promised future date to place on a calendar.
+  if (
+    trigger.kind === "file-arrival" ||
+    trigger.kind === "integration-event" ||
+    trigger.kind === "thread-finished"
+  )
     return { entries: [], truncated: false };
   if (isSubDaily(trigger)) {
     // Enumerating a fifteen-minute routine would bury the day it sits on. The

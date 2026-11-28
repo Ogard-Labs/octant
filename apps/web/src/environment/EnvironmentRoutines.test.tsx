@@ -458,4 +458,82 @@ describe("EnvironmentRoutines", () => {
     expect(await screen.findByRole("menuitem", { name: "Pause" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Change time" })).not.toBeInTheDocument();
   });
+
+  it("arms a thread-finish follow-up through the picker and surfaces missed waits with Run now and Cancel", async () => {
+    const waitId = "cc000000-0000-4000-8000-000000000001";
+    const missed = automationSummaryFixture({
+      displayName: "Follow up after build",
+      originThreadId: thisThread,
+      targetPolicy: "same-thread",
+      trigger: { kind: "thread-finished", condition: "turn-finished" },
+      nextDueAt: null,
+      finishWait: {
+        waitId,
+        targetThreadId: otherThread,
+        targetMode: "code",
+        targetProjectId: AUTOMATION_UI_TEST_IDS.project,
+        condition: "turn-finished",
+        armedAt: "2026-08-01T10:00:00.000Z",
+        expiresAt: "2026-08-18T10:00:00.000Z",
+        state: "missed",
+        updatedAt: "2026-08-10T10:00:00.000Z",
+      },
+    } as never);
+    const base = client([missed]);
+    const fake = {
+      ...base,
+      listFinishWaitTargets: vi.fn(async () => ({
+        kind: "automation-finish-wait-targets" as const,
+        targets: [
+          {
+            threadId: otherThread,
+            mode: "code" as const,
+            projectId: AUTOMATION_UI_TEST_IDS.project as never,
+            projectName: "Reports",
+            title: "Build migration",
+            status: "idle" as const,
+            alreadyTurnFinished: true,
+            alreadyDone: false,
+            hostId: "local" as never,
+          },
+        ],
+      })),
+    };
+    const first = renderRoutines(fake);
+    await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
+    expect(screen.getByText(/Missed — needs your decision/)).toBeInTheDocument();
+
+    // Open the picker and submit a new thread-finish follow-up.
+    await userEvent.click(screen.getByRole("button", { name: "Add a routine" }));
+    await userEvent.click(
+      await screen.findByRole("menuitem", { name: "Follow up when a thread finishes" }),
+    );
+    expect(await screen.findByText(/already finished its last turn/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Wait for thread" }));
+    expect(fake.followUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "arm-thread-finish-follow-up",
+        threadId: thisThread,
+        targetThreadId: otherThread,
+        condition: "turn-finished",
+      }),
+    );
+
+    // Run now on the missed wait sends run-missed-finish-wait with its waitId.
+    first.unmount();
+    const fakeMissed = client([missed]);
+    renderRoutines(fakeMissed);
+    await userEvent.click(await screen.findByRole("button", { name: "Routines 1 routine" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Actions for Follow up after build" }),
+    );
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Run now" }));
+    expect(fakeMissed.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "run-missed-finish-wait",
+        automationId: AUTOMATION_UI_TEST_IDS.automation,
+        waitId,
+      }),
+    );
+  });
 });

@@ -38,7 +38,11 @@ import { RoutineProposalService, type RoutineProposalOutcome } from "./routinePr
 import { createRoutineProposalTools } from "./routineProposalTools";
 import { createRoutineTools } from "./routineTools";
 import { automationRunForDefinition } from "./automationTestFixtures";
-import { buildThreadRoutineDraft, type RoutineSourceThread } from "./threadRoutineDraft";
+import {
+  buildThreadRoutineDraft,
+  type RoutineSourceThread,
+  type ThreadRoutineDraftInput,
+} from "./threadRoutineDraft";
 
 const NOW = "2026-10-31T12:00:00.000Z";
 const NOW_MS = Date.parse(NOW);
@@ -124,7 +128,7 @@ function harness(options: { readonly mode?: "chat" | "work" | "code" } = {}) {
         : {}),
     },
   };
-  const draft = (proposal: RoutineProposal) =>
+  const draft = (proposal: ThreadRoutineDraftInput) =>
     buildThreadRoutineDraft(
       {
         hostId: "local",
@@ -850,7 +854,7 @@ describe("one-time follow-ups in the same thread", () => {
     const h = harness({ mode: "chat" });
     const chat = h.tools();
     expect(chat.definitions.map((definition) => definition.inputSchema)).toMatchObject([
-      { properties: { trigger: { enum: ["follow-up"] } } },
+      { properties: { trigger: { enum: ["follow-up", "thread-finished"] } } },
     ]);
     const once = JSON.stringify({ ...JSON.parse(followUpInput), trigger: "once" });
     // Saying the person asked does not open another kind of routine to Chat.

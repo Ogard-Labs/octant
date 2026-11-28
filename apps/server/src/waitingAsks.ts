@@ -236,6 +236,9 @@ function routineProposalWords(request: RoutineAgentRequest): AskWords {
     // The card shows the schedule and the task; a row names the routine only.
   };
   if ("kind" in request) {
+    if (request.kind === "routine-finish-wait-proposal") {
+      return { ...base, text: `Wait on thread and run ${request.displayName}?` };
+    }
     const verb = request.change === "pause" ? "Pause" : "Archive";
     return { ...base, text: `${verb} the routine ${request.displayName}?` };
   }

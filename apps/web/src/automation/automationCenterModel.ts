@@ -194,6 +194,10 @@ export function automationTriggerSummary(
         .join(", ");
       return `Weekly on ${days} at ${trigger.localTime} (${trigger.timeZone})`;
     }
+    case "thread-finished":
+      return trigger.condition === "done"
+        ? "When thread is marked done"
+        : "When thread finishes its turn";
   }
 }
 
@@ -316,8 +320,9 @@ export function automationRunLevelOptionsFor(trigger: {
   readonly kind: string;
   readonly integrationId?: string;
 }): typeof AUTOMATION_RUN_LEVEL_OPTIONS {
-  return trigger.kind === "integration-event" &&
-    trigger.integrationId === AUTOMATION_WEBHOOK_INTEGRATION_ID
+  return trigger.kind === "thread-finished" ||
+    (trigger.kind === "integration-event" &&
+      trigger.integrationId === AUTOMATION_WEBHOOK_INTEGRATION_ID)
     ? AUTOMATION_RUN_LEVEL_OPTIONS.filter((option) => option.id === "ask-first")
     : AUTOMATION_RUN_LEVEL_OPTIONS;
 }
