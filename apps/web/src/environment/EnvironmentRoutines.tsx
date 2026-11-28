@@ -340,7 +340,7 @@ export function EnvironmentRoutines(props: {
                 : finishWait.state === "missed"
                   ? "Missed — needs your decision"
                   : finishWait.state === "unavailable"
-                    ? "Target cannot be checked"
+                    ? "Thread cannot be checked"
                     : finishWait.state === "expired"
                       ? "Expired"
                       : finishWait.state === "armed"
