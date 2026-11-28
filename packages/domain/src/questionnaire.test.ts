@@ -174,6 +174,17 @@ describe("provider question options", () => {
     expect(optionRecommendation(label)).toEqual(expected);
   });
 
+  it("reads a long run of spaces and tabs before the mark in linear time", () => {
+    const label = `Plan first${" \t".repeat(50_000)}x`;
+    const started = performance.now();
+    expect(optionRecommendation(label)).toEqual({ label, recommended: false });
+    expect(optionRecommendation(`Plan first${" \t".repeat(50_000)}(Recommended)`)).toEqual({
+      label: "Plan first",
+      recommended: true,
+    });
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("keeps a label that is nothing but the mark", () => {
     expect(optionRecommendation("(Recommended)")).toEqual({
       label: "(Recommended)",

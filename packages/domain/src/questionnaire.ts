@@ -96,6 +96,8 @@ export function questionAnswerIsAllowed(
   );
 }
 
+const RECOMMENDED_MARK = "(recommended)";
+
 /**
  * A provider's option label with its recommendation read out. Claude, Codex
  * and OpenCode tell their models to mark the option they recommend by adding
@@ -106,11 +108,16 @@ export function optionRecommendation(label: string): {
   readonly label: string;
   readonly recommended: boolean;
 } {
-  const stripped = label
-    .replace(/^\s*\(recommended\)\s*/i, "")
-    .replace(/\s*\(recommended\)\s*$/i, "")
-    .trim();
-  return stripped.length === 0 || stripped === label.trim()
+  // Plain prefix and suffix checks: a label is model output, and a pattern
+  // with whitespace on both sides of the mark took seconds on a label padded
+  // with a long run of spaces and tabs.
+  const trimmed = label.trim();
+  let stripped = trimmed;
+  if (stripped.toLowerCase().startsWith(RECOMMENDED_MARK))
+    stripped = stripped.slice(RECOMMENDED_MARK.length).trimStart();
+  if (stripped.toLowerCase().endsWith(RECOMMENDED_MARK))
+    stripped = stripped.slice(0, -RECOMMENDED_MARK.length).trimEnd();
+  return stripped.length === 0 || stripped === trimmed
     ? { label, recommended: false }
     : { label: stripped, recommended: true };
 }
