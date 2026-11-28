@@ -124,7 +124,9 @@ The design rests on a small set of invariants that every package obeys:
   own tailnet, or their own tunnel or proxy) for visitor links, webhook
   triggers, and their own paired devices; it takes inbound requests only,
   adds no outbound call, and Octant runs no part of it (maintainer decision,
-  2026-11-26; partly built and run only on loopback; the apps do not use the device relay yet). Four host-initiated
+  2026-11-26; partly built and run only on loopback; desktop and phone apps use
+  the device relay, with no WebSocket routes inside a relay or relay through a
+  standby yet). Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed (the
   same feed serves a host the headless build it installs on a server over SSH,
   only while the person has that sheet open and no suitable build is on the
@@ -21054,7 +21056,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   user guide documents that setup, and nothing in the product changes for it:
   the listener's address rules, certificate pinning, and device-key proofs
   apply unchanged through it. The person's own hub may also act as their
-  relay (maintainer decision, 2026-11-26; partly built and run only on loopback; the apps do not use the device relay yet): its
+  relay (maintainer decision, 2026-11-26; partly built and run only on
+  loopback; desktop and phone apps use the device relay, with no WebSocket
+  routes inside a relay or relay through a standby yet): its
   [public entrance](design/hub-and-spokes.md#public-entrance) is a separate
   listener, bound to loopback or to the hub's Tailscale address for one named
   front, with a closed route table (visitor page, stream and comments,
@@ -23524,7 +23528,9 @@ documents its authority, privacy, and release boundaries):
   thread, signed webhook triggers that start a defined routine on a spoke,
   and an end-to-end encrypted channel for the person's own paired devices,
   with failover to the standby (maintainer decision, 2026-11-26, replacing
-  the private-only rule for these routes; partly built and run only on loopback; the apps do not use the device relay yet). An
+  the private-only rule for these routes; partly built and run only on
+  loopback; desktop and phone apps use the device relay, with no WebSocket
+  routes inside a relay or relay through a standby yet). An
   Octant-run relay or tunnel is not in scope; phone push for the store build
   stays on the minimal push gateway.
 - Connectors (MCP servers added by hand, imported from other tools on this Mac,
