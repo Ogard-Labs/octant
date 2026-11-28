@@ -57,13 +57,49 @@ try {
   process.exit(1);
 }
 if (exitCode !== 0) {
+  const missing = /no artifact|not found|no valid artifacts/i.test(output);
+  // A design-change run whose screens all matched uploads nothing (the
+  // workflow uploads with if-no-files-found: ignore), so a run that passed
+  // and never listed a visual-check artifact changed no picture. An expired
+  // artifact is still listed, so that run keeps the error below.
+  if (missing && passedWithoutPictures(runId)) {
+    console.log(`Run ${runId} changed no pictures; there is nothing to commit.`);
+    process.exit(0);
+  }
   console.error(output);
   console.error(
-    /no artifact|not found|no valid artifacts/i.test(output)
+    missing
       ? `Run ${runId} has no visual-check artifact: it may have expired, or the run never drew the screens.`
       : `gh could not download the visual-check artifact of run ${runId}. Check gh auth status and the run id.`,
   );
   process.exit(1);
+}
+
+/** The run concluded success and lists no visual-check artifact, expired or not. */
+function passedWithoutPictures(id: string): boolean {
+  const gh = (args: ReadonlyArray<string>) => {
+    const result = Bun.spawnSync(["gh", ...args], { stdout: "pipe", stderr: "pipe" });
+    return result.exitCode === 0 ? result.stdout.toString().trim() : undefined;
+  };
+  const conclusion = gh([
+    "run",
+    "view",
+    id,
+    "--repo",
+    "Ogard-Labs/octant",
+    "--json",
+    "conclusion",
+    "--jq",
+    ".conclusion",
+  ]);
+  if (conclusion !== "success") return false;
+  const listed = gh([
+    "api",
+    `repos/Ogard-Labs/octant/actions/runs/${id}/artifacts?per_page=100`,
+    "--jq",
+    '[.artifacts[] | select(.name | startswith("visual-check"))] | length',
+  ]);
+  return listed === "0";
 }
 
 function* actuals(directory: string): Generator<string> {
