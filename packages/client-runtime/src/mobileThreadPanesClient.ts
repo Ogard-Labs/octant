@@ -211,7 +211,7 @@ export function parseMobileUnifiedDiff(text: string): ReadonlyArray<MobileDiffFi
       path: file.path,
       additions: file.additions,
       deletions: file.deletions,
-      binary: file.binary,
+      binary: file.binaryContent === true,
       lines,
     };
   });

@@ -91,6 +91,8 @@ export interface ParsedDiffFile {
   readonly modified: string;
   /** True when the diff carried no textual hunks (binary or metadata only). */
   readonly binary: boolean;
+  /** True only when the diff carried binary or non-empty blob content with no textual hunks. */
+  readonly binaryContent?: true;
   /** The changed regions in order, as git printed them. */
   readonly hunks: ReadonlyArray<DiffHunk>;
   readonly source?: DiffSourceRange & { readonly headerEnd: number };
@@ -373,6 +375,9 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     original: accumulator.original.join("\n"),
     modified: accumulator.modified.join("\n"),
     binary: !accumulator.sawHunk,
+    ...(!accumulator.sawHunk && accumulator.sawBinaryContent
+      ? { binaryContent: true as const }
+      : {}),
     hunks: accumulator.hunks.map(({ oldNext: _oldNext, newNext: _newNext, ...hunk }) => hunk),
     ...(accumulator.source === undefined ? {} : { source: { ...accumulator.source } }),
   };

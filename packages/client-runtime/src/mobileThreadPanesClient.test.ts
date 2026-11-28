@@ -88,6 +88,25 @@ describe("phone thread panes", () => {
     ]);
   });
 
+  it("distinguishes mode-only and empty-file patches from real binary patches", () => {
+    const metadataAndBinary = [
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "diff --git a/empty.txt b/empty.txt",
+      "new file mode 100644",
+      "index 0000000..e69de29",
+      "diff --git a/assets/icon.png b/assets/icon.png",
+      "Binary files a/assets/icon.png and b/assets/icon.png differ",
+    ].join("\n");
+    const files = parseMobileUnifiedDiff(metadataAndBinary);
+    expect(files.map((file) => [file.path, file.binary, file.lines.length])).toEqual([
+      ["scripts/run.sh", false, 0],
+      ["empty.txt", false, 0],
+      ["assets/icon.png", true, 0],
+    ]);
+  });
+
   it("reads uncommitted changes by observing Git and resolving the diff it handed back", async () => {
     const paths: string[] = [];
     const transport = transportAnswering(({ path, body }) => {
