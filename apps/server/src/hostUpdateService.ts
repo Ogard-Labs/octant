@@ -229,6 +229,9 @@ export class HostUpdateService {
   readonly #preparedHeadless = new Map<string, PreparedHeadlessState>();
   readonly #journaledResults = new Set<string>();
   #activeRequestId: string | undefined;
+  #startingHeadless:
+    | { readonly key: string; readonly promise: Promise<HostUpdateStatus> }
+    | undefined;
   #latestRequestId: string | undefined;
   #desktopPending: ActiveDesktopRequest | undefined;
   #startupWatcher: ReturnType<typeof setInterval> | undefined;
@@ -737,6 +740,12 @@ export class HostUpdateService {
     const currentVersion = this.#options.currentVersion();
     const ring = this.#options.currentRing();
 
+    // Coalesce concurrent identical-requestId starts while async build
+    // verification is still in flight so only one verification and runner run.
+    if (this.#startingHeadless?.key === key) {
+      return this.#startingHeadless.promise;
+    }
+
     // Idempotent by requestId: if this exact request already started or finished,
     // return its status without starting a second update.
     const existing = this.#statuses.get(key);
@@ -818,9 +827,13 @@ export class HostUpdateService {
       return status;
     }
 
-    // Standalone headless host start
+    // Standalone headless host start: validate synchronously, then reserve
+    // ownership BEFORE the first await so concurrent start requests with
+    // different request IDs are immediately refused and identical request IDs
+    // coalesce on the single in-flight start.
     const target = headlessTargetFor(this.#options.platform, this.#options.arch);
-    if (target === undefined || this.#options.builds === undefined) {
+    const builds = this.#options.builds;
+    if (target === undefined || builds === undefined) {
       return {
         requestId,
         hostKind: "headless",
@@ -833,119 +846,163 @@ export class HostUpdateService {
       };
     }
 
-    const prepared = this.#preparedHeadless.get(key);
-    const buildPath = prepared?.buildPath ?? (await this.#options.builds.find(target));
-    if (buildPath === undefined) {
-      return {
-        requestId,
-        hostKind: "headless",
-        state: "refused",
-        fromVersion: currentVersion,
-        ring,
-        step: "verify",
-        failureReason: ring === "preview" ? "ring-no-headless-build" : "build-unverified",
-        message:
-          ring === "preview"
-            ? "Its release ring publishes no headless build."
-            : "No verified newer release build is prepared on this computer.",
-      };
-    }
-
-    // Always re-verify the build bytes + signature before draining or swapping.
-    const verified = await this.#options.builds.check(buildPath, target);
-    if (verified.status === "refused") {
-      const mapped = mapBuildCheckRefusal(verified.reason);
-      const status: HostUpdateStatus = {
-        requestId,
-        hostKind: "headless",
-        state: "refused",
-        fromVersion: currentVersion,
-        ring,
-        step: "verify",
-        failureReason: mapped.failureReason,
-        message: mapped.message,
-      };
-      this.#statuses.set(key, status);
-      this.#latestRequestId = key;
-      return status;
-    }
-    if (!isNewerVersion(verified.version, currentVersion)) {
-      const status: HostUpdateStatus = {
-        requestId,
-        hostKind: "headless",
-        state: "refused",
-        fromVersion: currentVersion,
-        toVersion: verified.version,
-        ring: verified.ring,
-        step: "verify",
-        failureReason: "downgrade-refused",
-        message: `Refused Octant ${verified.version}, which is not newer than ${currentVersion}.`,
-      };
-      this.#statuses.set(key, status);
-      this.#latestRequestId = key;
-      return status;
-    }
-    const currentStoreVersion =
-      prepared?.currentStoreVersion ??
-      (await (this.#options.readInstalledStoreVersion ?? defaultReadInstalledStoreVersion)(
-        this.#options.installRoot,
-      )) ??
-      0;
-    if (verified.storeVersion < currentStoreVersion) {
-      const status: HostUpdateStatus = {
-        requestId,
-        hostKind: "headless",
-        state: "refused",
-        fromVersion: currentVersion,
-        toVersion: verified.version,
-        ring: verified.ring,
-        step: "verify",
-        failureReason: "downgrade-refused",
-        message: "Refused an older store version that would downgrade this computer's store.",
-      };
-      this.#statuses.set(key, status);
-      this.#latestRequestId = key;
-      return status;
-    }
-
-    const storeMigration = verified.storeVersion > currentStoreVersion;
     this.#activeRequestId = key;
     this.#latestRequestId = key;
-
-    this.#journalRequested({
+    const startPromise = this.#startHeadlessReserved({
+      key,
       requestId,
       actor,
-      hostKind: "headless",
-      fromVersion: currentVersion,
-      toVersion: verified.version,
-      ring: verified.ring,
+      currentVersion,
+      ring,
       drain,
+      target,
+      builds,
+    }).finally(() => {
+      if (this.#startingHeadless?.key === key) {
+        this.#startingHeadless = undefined;
+      }
     });
+    this.#startingHeadless = { key, promise: startPromise };
+    return startPromise;
+  }
 
-    const initialStatus: HostUpdateStatus = {
-      requestId,
-      hostKind: "headless",
-      state: "running",
-      fromVersion: currentVersion,
-      toVersion: verified.version,
-      ring: verified.ring,
-      storeMigration,
-      drain,
-      step: "drain",
+  async #startHeadlessReserved(input: {
+    readonly key: string;
+    readonly requestId: AggregateId;
+    readonly actor: EventActor;
+    readonly currentVersion: string;
+    readonly ring: HostUpdateRing;
+    readonly drain: HostUpdateDrain;
+    readonly target: MemberInstallTarget;
+    readonly builds: HeadlessBuilds;
+  }): Promise<HostUpdateStatus> {
+    const { key, requestId, actor, currentVersion, ring, drain, target, builds } = input;
+    const releaseReservation = () => {
+      if (this.#activeRequestId === key) {
+        this.#activeRequestId = undefined;
+      }
     };
-    this.#statuses.set(key, initialStatus);
+    let launched = false;
+    try {
+      const prepared = this.#preparedHeadless.get(key);
+      const buildPath = prepared?.buildPath ?? (await builds.find(target));
+      if (buildPath === undefined) {
+        releaseReservation();
+        const status: HostUpdateStatus = {
+          requestId,
+          hostKind: "headless",
+          state: "refused",
+          fromVersion: currentVersion,
+          ring,
+          step: "verify",
+          failureReason: ring === "preview" ? "ring-no-headless-build" : "build-unverified",
+          message:
+            ring === "preview"
+              ? "Its release ring publishes no headless build."
+              : "No verified newer release build is prepared on this computer.",
+        };
+        this.#statuses.set(key, status);
+        return status;
+      }
 
-    void this.#runHeadlessUpgrade({
-      requestId,
-      actor,
-      fromVersion: currentVersion,
-      buildPath,
-      build: verified,
-      storeMigration,
-      drain,
-    }).catch(() => undefined);
+      // Always re-verify the build bytes + signature before draining or swapping.
+      const verified = await builds.check(buildPath, target);
+      if (verified.status === "refused") {
+        releaseReservation();
+        const mapped = mapBuildCheckRefusal(verified.reason);
+        const status: HostUpdateStatus = {
+          requestId,
+          hostKind: "headless",
+          state: "refused",
+          fromVersion: currentVersion,
+          ring,
+          step: "verify",
+          failureReason: mapped.failureReason,
+          message: mapped.message,
+        };
+        this.#statuses.set(key, status);
+        return status;
+      }
+      if (!isNewerVersion(verified.version, currentVersion)) {
+        releaseReservation();
+        const status: HostUpdateStatus = {
+          requestId,
+          hostKind: "headless",
+          state: "refused",
+          fromVersion: currentVersion,
+          toVersion: verified.version,
+          ring: verified.ring,
+          step: "verify",
+          failureReason: "downgrade-refused",
+          message: `Refused Octant ${verified.version}, which is not newer than ${currentVersion}.`,
+        };
+        this.#statuses.set(key, status);
+        return status;
+      }
+      const currentStoreVersion =
+        prepared?.currentStoreVersion ??
+        (await (this.#options.readInstalledStoreVersion ?? defaultReadInstalledStoreVersion)(
+          this.#options.installRoot,
+        )) ??
+        0;
+      if (verified.storeVersion < currentStoreVersion) {
+        releaseReservation();
+        const status: HostUpdateStatus = {
+          requestId,
+          hostKind: "headless",
+          state: "refused",
+          fromVersion: currentVersion,
+          toVersion: verified.version,
+          ring: verified.ring,
+          step: "verify",
+          failureReason: "downgrade-refused",
+          message: "Refused an older store version that would downgrade this computer's store.",
+        };
+        this.#statuses.set(key, status);
+        return status;
+      }
 
-    return initialStatus;
+      const storeMigration = verified.storeVersion > currentStoreVersion;
+
+      this.#journalRequested({
+        requestId,
+        actor,
+        hostKind: "headless",
+        fromVersion: currentVersion,
+        toVersion: verified.version,
+        ring: verified.ring,
+        drain,
+      });
+
+      const initialStatus: HostUpdateStatus = {
+        requestId,
+        hostKind: "headless",
+        state: "running",
+        fromVersion: currentVersion,
+        toVersion: verified.version,
+        ring: verified.ring,
+        storeMigration,
+        drain,
+        step: "drain",
+      };
+      this.#statuses.set(key, initialStatus);
+
+      launched = true;
+      void this.#runHeadlessUpgrade({
+        requestId,
+        actor,
+        fromVersion: currentVersion,
+        buildPath,
+        build: verified,
+        storeMigration,
+        drain,
+      }).catch(() => undefined);
+
+      return initialStatus;
+    } catch (error) {
+      if (!launched) releaseReservation();
+      throw error;
+    }
   }
 
   async #runHeadlessUpgrade(input: {

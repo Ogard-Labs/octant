@@ -3,7 +3,7 @@ import type { AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates
 import type {
   DesktopHostUpdatePending,
   DesktopHostUpdateReport,
-} from "@octant/contracts/host-control";
+} from "@octant/contracts/host-update";
 import { canonicalReleaseBytes } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { createFeedVerifier } from "./appUpdateFeed";

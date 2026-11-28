@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import { sep } from "node:path";
 import { decodeUtcTimestamp } from "@octant/contracts";
-import type { HostUpdateFailureReason, HostUpdateStep } from "@octant/contracts/host-control";
+import type { HostUpdateFailureReason, HostUpdateStep } from "@octant/contracts/host-update";
 import {
   acquireHostRuntimeOwner,
   deriveHostRuntimeHostId,

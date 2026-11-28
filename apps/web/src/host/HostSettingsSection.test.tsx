@@ -69,7 +69,6 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
     lifecycle:
       overrides.lifecycle ??
       (async (action) => ({ kind: "accepted", action, message: "Accepted." })),
-    update: async () => ({ hostKind: "headless", state: "idle", fromVersion: "0.4.0" }),
     backup:
       overrides.backup ??
       (async () => ({

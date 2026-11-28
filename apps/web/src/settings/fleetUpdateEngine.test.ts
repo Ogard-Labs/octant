@@ -879,6 +879,7 @@ describe("fleetUpdateEngine", () => {
       return { status: 404, json: { message: "not found" } };
     });
 
+    let desktopStatusPolls = 0;
     const remoteDesktopBridge = makeBridgeFor((path, body) => {
       if (path === "/api/providers/bootstrap") {
         return { status: 200, json: { instances: [], observedStates: [], defaults: {} } };
@@ -909,6 +910,18 @@ describe("fleetUpdateEngine", () => {
               fromVersion: "0.1.0",
               toVersion: "0.2.0",
               ring: "stable",
+            },
+          };
+        }
+        if (req.action === "status") {
+          desktopStatusPolls += 1;
+          return {
+            status: 200,
+            json: {
+              requestId: req.requestId,
+              hostKind: "desktop",
+              state: "idle",
+              fromVersion: "0.2.0",
             },
           };
         }
@@ -1002,6 +1015,119 @@ describe("fleetUpdateEngine", () => {
     expect(executionOrder.at(-1)).toBe("local-app");
     expect(executionOrder).toContain("headless-start");
     expect(executionOrder).toContain("desktop-start");
+    expect(desktopStatusPolls).toBeGreaterThan(0);
+  });
+
+  it("keeps observing a relaunching remote desktop host and holds local app relaunch if the replacement has an incompatible protocol range", async () => {
+    let remoteLifecycleState: "ready" | "reconnecting" | "incompatible" = "ready";
+    let statusCalls = 0;
+    const installAppUpdate = vi.fn(async () => ({ kind: "installing" as const }));
+
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "ready" }),
+        downloadAppUpdate: vi.fn(async () => localAppState({ status: "ready" })),
+        installAppUpdate,
+      },
+      hostFederationLifecycle: {
+        list: () =>
+          [
+            {
+              hostId: "desktop-incompat",
+              displayName: "Studio Mac",
+              kind: "remote" as const,
+              state: remoteLifecycleState,
+              serverBuildVersion: "0.1.0",
+            },
+          ] as never,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const hosts = [
+      {
+        hostId: "desktop-incompat",
+        displayName: "Studio Mac",
+        kind: "remote" as const,
+        isHeadless: false,
+        connectionState: "ready" as const,
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "remote-desktop" as const,
+          currentVersion: "0.1.0",
+          availableVersion: "0.3.0",
+          requestId: "33333333-3333-4333-8333-333333333333",
+          state: "update-available" as const,
+        },
+        providers: [],
+      },
+      {
+        hostId: "local",
+        displayName: "This Mac",
+        kind: "local" as const,
+        isHeadless: false,
+        connectionState: "ready" as const,
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "local-app" as const,
+          status: "ready" as const,
+          currentVersion: "0.1.0",
+          availableVersion: "0.2.0",
+        },
+        providers: [],
+      },
+    ];
+    const plan = planFleetUpdate(hosts);
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory: {
+        hosts,
+        remoteProviderClients: new Map(),
+        remoteHostControlClients: new Map([
+          [
+            "desktop-incompat",
+            {
+              update: async (req) => {
+                if (req.action === "start") {
+                  // Remote desktop main accepted relaunch, while federation still sees the old compatible host.
+                  return {
+                    hostKind: "desktop",
+                    state: "installing",
+                    fromVersion: "0.1.0",
+                    toVersion: "0.3.0",
+                  };
+                }
+                statusCalls += 1;
+                if (statusCalls === 1) {
+                  remoteLifecycleState = "reconnecting";
+                  throw new Error("remote host restarting");
+                }
+                // Replacement host came back with an incompatible protocol range.
+                remoteLifecycleState = "incompatible";
+                throw new Error("protocol incompatible");
+              },
+            },
+          ],
+        ]),
+        sshServersById: new Map(),
+      },
+      sources,
+      drain: { kind: "wait", minutes: 10 },
+      onStepStatesChange: () => undefined,
+    });
+
+    const byHost = new Map(states.map((s) => [s.step.hostId, s]));
+    expect(statusCalls).toBeGreaterThanOrEqual(2);
+    expect(byHost.get("desktop-incompat")?.status).toBe("failed");
+    expect(byHost.get("desktop-incompat")?.message).toBe(
+      "This computer's protocol range does not cover this app.",
+    );
+    expect(byHost.get("local")?.status).toBe("held");
+    expect(installAppUpdate).not.toHaveBeenCalled();
   });
 
   it("reports post-update protocol incompatibility clearly without stopping other hosts", async () => {

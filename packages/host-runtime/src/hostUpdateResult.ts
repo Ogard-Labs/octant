@@ -8,7 +8,7 @@ import {
   HostUpdateHostKind,
   HostUpdateRing,
   HostUpdateStep,
-} from "@octant/contracts/host-control";
+} from "@octant/contracts/host-update";
 import { Schema } from "effect";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };

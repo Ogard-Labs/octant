@@ -114,6 +114,7 @@ import {
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
 import { createDesktopHostUpdateRouteHandler } from "../desktopHostUpdateRoutes";
+import { resolveHostUpdateEnvironment } from "../hostUpdateRunner";
 import { HostUpdateService } from "../hostUpdateService";
 import { createPersonQuitRouteHandler } from "../personQuit";
 import {
@@ -3503,13 +3504,13 @@ export function wireRemote(deps: RemoteDependencies) {
     installRoot: hostUpdateInstallRoot,
     resultPath: join(hostUpdateStateDirectory, "host-update-result.json"),
     pendingPath: join(hostUpdateStateDirectory, "host-update-pending.json"),
-    environment: {
-      OCTANT_DATA_DIR: persistence.dataDirectory,
-      OCTANT_INSTALL_ROOT: hostUpdateInstallRoot,
-      ...(process.env.OCTANT_SERVER_PORT === undefined
-        ? {}
-        : { OCTANT_SERVER_PORT: process.env.OCTANT_SERVER_PORT }),
-    },
+    environment: resolveHostUpdateEnvironment({
+      platform: process.platform,
+      dataDirectory: persistence.dataDirectory,
+      stateDirectory: hostUpdateStateDirectory,
+      installRoot: hostUpdateInstallRoot,
+      env: process.env,
+    }),
     builds: headlessBuilds,
     drain: deps.hostDrain,
     connection: persistence.connection,

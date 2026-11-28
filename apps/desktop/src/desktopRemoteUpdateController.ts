@@ -4,7 +4,7 @@ import {
   type DesktopHostUpdatePending,
   type DesktopHostUpdateReport,
   type HostUpdateFailureReason,
-} from "@octant/contracts/host-control";
+} from "@octant/contracts/host-update";
 import type { UpdateWorkInFlight } from "@octant/domain";
 import { probeLocalHost, type LocalHostProbe } from "./localHostProbe";
 

@@ -23,6 +23,8 @@ import {
   HEADLESS_ARTIFACT_SIGNATURE_FILENAME,
   encodeHeadlessArtifactManifest,
   encodeHeadlessArtifactSignature,
+  isPathConfinedWithin,
+  resolveHostRuntimePaths,
   signHeadlessArtifactManifest,
   writeHostUpdateResultFile,
   type HeadlessArtifactManifest,
@@ -37,7 +39,7 @@ import {
 } from "./desktopHostUpdateRoutes";
 import { createHostControlRouteHandler } from "./hostControlRoutes";
 import { HostDrain } from "./hostDrain";
-import { launchOutOfServiceUpgrade } from "./hostUpdateRunner";
+import { launchOutOfServiceUpgrade, resolveHostUpdateEnvironment } from "./hostUpdateRunner";
 import { HostUpdateService } from "./hostUpdateService";
 import { Journal } from "./persistence/journal";
 import { MIGRATIONS, applyMigrations } from "./persistence/migrations";
@@ -746,6 +748,163 @@ describe("HostUpdateService standalone headless lifecycle", () => {
     const plist = readFileSync(plistPath ?? "", "utf8");
     expect(plist).toContain("AbandonProcessGroup");
     expect(plist).not.toContain("--self-built");
+  });
+
+  it("preserves default Linux XDG paths without OCTANT_DATA_DIR so the upgrade runner resolves the same state directory", async () => {
+    const hostPaths = resolveHostRuntimePaths(
+      {
+        env: {},
+        platform: "linux",
+        home: "/home/deploy",
+        temporaryDirectory: "/tmp",
+        uid: 1000,
+      },
+      { createDataDirectory: false },
+    );
+    const installRoot = join(hostPaths.stateDirectory, "install");
+    const runnerEnv = resolveHostUpdateEnvironment({
+      platform: "linux",
+      dataDirectory: hostPaths.dataDirectory,
+      stateDirectory: hostPaths.stateDirectory,
+      installRoot,
+      env: {},
+    });
+    expect(runnerEnv.OCTANT_DATA_DIR).toBeUndefined();
+    expect(runnerEnv.XDG_DATA_HOME).toBe("/home/deploy/.local/share");
+    expect(runnerEnv.XDG_STATE_HOME).toBe("/home/deploy/.local/state");
+
+    const runnerPaths = resolveHostRuntimePaths(
+      {
+        env: runnerEnv,
+        platform: "linux",
+        home: "/home/deploy",
+        temporaryDirectory: "/tmp",
+        uid: 1000,
+      },
+      { createDataDirectory: false },
+    );
+    expect(runnerPaths.dataDirectory).toBe(hostPaths.dataDirectory);
+    expect(runnerPaths.stateDirectory).toBe(hostPaths.stateDirectory);
+    const contextPath = join(hostPaths.stateDirectory, "host-update", "req-1", "context.json");
+    expect(isPathConfinedWithin(runnerPaths.stateDirectory, contextPath)).toBe(true);
+
+    // Explicit OCTANT_DATA_DIR still forwards OCTANT_DATA_DIR cleanly.
+    const explicitHostPaths = resolveHostRuntimePaths(
+      {
+        env: { OCTANT_DATA_DIR: "/srv/octant" },
+        platform: "linux",
+        home: "/home/deploy",
+        temporaryDirectory: "/tmp",
+        uid: 1000,
+      },
+      { createDataDirectory: false },
+    );
+    const explicitEnv = resolveHostUpdateEnvironment({
+      platform: "linux",
+      dataDirectory: explicitHostPaths.dataDirectory,
+      stateDirectory: explicitHostPaths.stateDirectory,
+      installRoot: join(explicitHostPaths.stateDirectory, "install"),
+      env: { OCTANT_DATA_DIR: "/srv/octant" },
+    });
+    expect(explicitEnv.OCTANT_DATA_DIR).toBe(explicitHostPaths.dataDirectory);
+    expect(explicitEnv.XDG_STATE_HOME).toBeUndefined();
+  });
+
+  it("reserves headless starts before async verification, refusing concurrent different request IDs and coalescing identical request IDs", async () => {
+    const keys = makeKeyPair();
+    const fixture = buildSignedHeadlessFixture({
+      version: "0.2.0",
+      storeVersion: 1,
+      ring: "stable",
+      privateKeyBase64: keys.privateKeyBase64,
+    });
+    const { dir, connection, journal } = createJournalFixture();
+    const stateDirectory = join(dir, "state");
+    const buildsFolder = join(dir, "builds");
+    mkdirSync(buildsFolder, { recursive: true });
+    writeFileSync(join(buildsFolder, `octant-0.2.0-${TARGET}.tar.gz`), fixture.tarBytes);
+
+    const realBuilds = createHeadlessBuilds({
+      folder: buildsFolder,
+      trustedKeys: { stable: [keys.publicKeyBase64], candidate: [], preview: [] },
+    });
+    let releaseCheck!: () => void;
+    const checkGate = new Promise<void>((resolve) => {
+      releaseCheck = resolve;
+    });
+    let checkCalls = 0;
+    const gatedBuilds = {
+      ...realBuilds,
+      check: async (path: string, target: typeof TARGET) => {
+        checkCalls += 1;
+        await checkGate;
+        return realBuilds.check(path, target);
+      },
+    };
+    const launched: string[] = [];
+    const service = new HostUpdateService({
+      hostKind: "headless",
+      currentVersion: () => "0.1.0",
+      currentRing: () => "stable",
+      platform: PLATFORM,
+      arch: ARCH,
+      uid: 501,
+      stateDirectory,
+      installRoot: join(stateDirectory, "install"),
+      resultPath: join(stateDirectory, "host-update-result.json"),
+      pendingPath: join(stateDirectory, "host-update-pending.json"),
+      builds: gatedBuilds,
+      drain: new HostDrain({ now: () => NOW_MS }),
+      connection,
+      journal,
+      clock: () => "2026-11-28T14:00:00.000Z",
+      uuid: randomUUID,
+      sleep: async () => undefined,
+      readInstalledStoreVersion: async () => 1,
+      launchUpgrade: async (input) => {
+        launched.push(input.requestId);
+        return { status: "launched" };
+      },
+    });
+
+    const firstId = decodeAggregateId(randomUUID());
+    const competingId = decodeAggregateId(randomUUID());
+    const startFirst = service.handle({
+      action: "start",
+      requestId: firstId,
+      expectedCurrentVersion: "0.1.0",
+      drain: { kind: "stop-now" },
+    });
+    const startSameId = service.handle({
+      action: "start",
+      requestId: firstId,
+      expectedCurrentVersion: "0.1.0",
+      drain: { kind: "stop-now" },
+    });
+    const startCompeting = service.handle({
+      action: "start",
+      requestId: competingId,
+      expectedCurrentVersion: "0.1.0",
+      drain: { kind: "stop-now" },
+    });
+
+    // Competing different request ID is immediately refused while verification is still awaiting.
+    const competingResult = await startCompeting;
+    expect(competingResult.state).toBe("refused");
+    expect(competingResult.failureReason).toBe("already-updating");
+
+    releaseCheck();
+    const [firstResult, sameIdResult] = await Promise.all([startFirst, startSameId]);
+    expect(firstResult.state).toBe("running");
+    expect(sameIdResult).toEqual(firstResult);
+    expect(checkCalls).toBe(1);
+
+    for (let i = 0; i < 40 && launched.length === 0; i += 1) {
+      await new Promise((done) => setTimeout(done, 25));
+    }
+    expect(launched).toEqual([String(firstId)]);
+    expect(readJournalEvents(connection, HOST_UPDATE_REQUESTED_EVENT_NAME)).toHaveLength(1);
+    service.dispose();
   });
 
   it("coordinates remote desktop app updates over loopback /api/desktop/host-update with bridge-secret auth", async () => {

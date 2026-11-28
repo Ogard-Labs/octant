@@ -113,6 +113,43 @@ const ALLOWED_ENV_KEYS = new Set([
   "XDG_STATE_HOME",
 ]);
 
+/**
+ * Builds the path environment forwarded to the out-of-service upgrade runner so
+ * `resolveHostRuntimePaths` resolves the exact same `stateDirectory` as the
+ * running host. Matches `resolveServiceEnvironment` in `@octant/cli`: an
+ * explicit `OCTANT_DATA_DIR` (or macOS / data-backed layout) forwards
+ * `OCTANT_DATA_DIR`, whereas Linux XDG installations forward `XDG_DATA_HOME`
+ * and `XDG_STATE_HOME` (and `XDG_CONFIG_HOME` when set) without inventing
+ * `OCTANT_DATA_DIR`.
+ */
+export function resolveHostUpdateEnvironment(input: {
+  readonly platform: NodeJS.Platform;
+  readonly dataDirectory: string;
+  readonly stateDirectory: string;
+  readonly installRoot: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): Readonly<Record<string, string>> {
+  const environment: Record<string, string> = {
+    OCTANT_INSTALL_ROOT: input.installRoot,
+  };
+  const dataBackedPaths =
+    input.platform === "darwin" || input.stateDirectory === join(input.dataDirectory, "state");
+  if (input.env.OCTANT_DATA_DIR !== undefined || dataBackedPaths) {
+    environment.OCTANT_DATA_DIR = input.dataDirectory;
+  } else {
+    environment.XDG_DATA_HOME = dirname(input.dataDirectory);
+    environment.XDG_STATE_HOME = dirname(input.stateDirectory);
+    if (input.env.XDG_CONFIG_HOME !== undefined) {
+      environment.XDG_CONFIG_HOME = input.env.XDG_CONFIG_HOME;
+    }
+  }
+  for (const key of ["OCTANT_LOGS_DIR", "OCTANT_SERVER_PORT"] as const) {
+    const value = input.env[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  return environment;
+}
+
 function safeUpgradeEnvironment(
   source: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {

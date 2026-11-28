@@ -3,7 +3,7 @@ import {
   type DesktopHostUpdatePending,
   type DesktopHostUpdateReport,
   type HostUpdateStatus,
-} from "@octant/contracts/host-control";
+} from "@octant/contracts/host-update";
 import { admitDesktopBroker } from "./desktopBrokerAdmission";
 import { isLoopbackHostname } from "./shellRoutes";
 

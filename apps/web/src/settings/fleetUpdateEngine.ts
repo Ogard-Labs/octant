@@ -1,25 +1,20 @@
-import {
-  askRemoteSessionStanding,
-  createHostControlClient,
-  createRemoteProductFetch,
-  HostControlClientError,
-  type HostControlClient,
-} from "@octant/client-runtime";
+import { askRemoteSessionStanding, createRemoteProductFetch } from "@octant/client-runtime";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
+import {
+  createHostUpdateClient,
+  HostUpdateClientError,
+  type HostUpdateClient,
+} from "@octant/client-runtime/host-update-client";
 import {
   createProviderClient,
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import {
-  LOCAL_HOST_ID,
-  type AggregateId,
-  type HostUpdateStatus,
-  type ProviderInstanceId,
-} from "@octant/contracts";
+import { LOCAL_HOST_ID, type AggregateId, type ProviderInstanceId } from "@octant/contracts";
 import type { AppUpdateState } from "@octant/contracts/app-updates";
+import type { HostUpdateStatus } from "@octant/contracts/host-update";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type {
   MemberBuildDownload,
@@ -86,7 +81,7 @@ export interface FleetUpdateInventorySnapshot {
     string,
     Pick<ProviderClient, "bootstrap" | "execute">
   >;
-  readonly remoteHostControlClients: ReadonlyMap<string, Pick<HostControlClient, "update">>;
+  readonly remoteHostControlClients: ReadonlyMap<string, Pick<HostUpdateClient, "update">>;
   readonly sshServersById: ReadonlyMap<string, ShieldServer>;
 }
 
@@ -376,7 +371,7 @@ function newRequestId(): AggregateId {
 }
 
 async function prepareHostControlOctantInventory(input: {
-  readonly client: Pick<HostControlClient, "update">;
+  readonly client: Pick<HostUpdateClient, "update">;
   readonly currentVersion: string | undefined;
   readonly signal?: AbortSignal | undefined;
   readonly sleep: (ms: number) => Promise<void>;
@@ -408,7 +403,7 @@ async function prepareHostControlOctantInventory(input: {
       expectedCurrentVersion: version,
     });
   } catch (error) {
-    if (error instanceof HostControlClientError) {
+    if (error instanceof HostUpdateClientError) {
       if (error.statusCode === 404 || error.statusCode === 405) {
         return {
           octant: {
@@ -574,7 +569,7 @@ export async function collectFleetUpdateInventory(
   const pollMs = sources.pollMs ?? DEFAULT_POLL_MS;
   const sleep = sources.sleep ?? ((ms: number) => defaultSleep(ms, signal));
   const remoteProviderClients = new Map<string, Pick<ProviderClient, "bootstrap" | "execute">>();
-  const remoteHostControlClients = new Map<string, Pick<HostControlClient, "update">>();
+  const remoteHostControlClients = new Map<string, Pick<HostUpdateClient, "update">>();
   const sshServersById = new Map<string, ShieldServer>();
 
   // 1. Read local desktop update state (refreshing check if desktop bridge supports it).
@@ -736,16 +731,16 @@ export async function collectFleetUpdateInventory(
           remoteProviderClients.set(hostId, remoteClient);
           const providersPromise = readProvidersInventory({ client: remoteClient });
           if (matchedSsh === undefined) {
-            const hostControlClient = createHostControlClient({
+            const hostUpdateClient = createHostUpdateClient({
               baseUrl: REMOTE_CLIENT_BASE_URL,
               fetch: productFetch,
               windowCapability: "",
             });
-            remoteHostControlClients.set(hostId, hostControlClient);
+            remoteHostControlClients.set(hostId, hostUpdateClient);
             const [resolvedProviders, resolvedHostControl] = await Promise.all([
               providersPromise,
               prepareHostControlOctantInventory({
-                client: hostControlClient,
+                client: hostUpdateClient,
                 currentVersion,
                 signal,
                 sleep,
@@ -1041,17 +1036,23 @@ async function runSshMemberStep(input: {
   });
 }
 
+function remoteHostSnapshot(
+  lifecycle: FleetUpdateSources["hostFederationLifecycle"],
+  hostId: string,
+) {
+  return lifecycle?.list().find((item) => String(item.hostId) === hostId);
+}
+
 function hostIsProtocolIncompatible(
   lifecycle: FleetUpdateSources["hostFederationLifecycle"],
   hostId: string,
 ): boolean {
-  const snapshot = lifecycle?.list().find((item) => String(item.hostId) === hostId);
-  return snapshot?.state === "incompatible";
+  return remoteHostSnapshot(lifecycle, hostId)?.state === "incompatible";
 }
 
 async function runHostControlUpdateStep(input: {
   readonly step: Extract<FleetUpdateStep, { readonly phase: "remote-octant-host-control" }>;
-  readonly client: Pick<HostControlClient, "update"> | undefined;
+  readonly client: Pick<HostUpdateClient, "update"> | undefined;
   readonly hostFederationLifecycle: FleetUpdateSources["hostFederationLifecycle"];
   readonly drain: MemberUpdateDrain;
   readonly reprepareFirst: boolean;
@@ -1088,7 +1089,7 @@ async function runHostControlUpdateStep(input: {
       }
     } catch (error) {
       if (
-        error instanceof HostControlClientError &&
+        error instanceof HostUpdateClientError &&
         (error.statusCode === 404 || error.statusCode === 405)
       ) {
         return { status: "failed", message: MANUAL_UPDATE_REQUIRED_MESSAGE };
@@ -1123,7 +1124,7 @@ async function runHostControlUpdateStep(input: {
     });
   } catch (error) {
     if (
-      error instanceof HostControlClientError &&
+      error instanceof HostUpdateClientError &&
       (error.statusCode === 404 || error.statusCode === 405)
     ) {
       return { status: "failed", message: MANUAL_UPDATE_REQUIRED_MESSAGE };
@@ -1134,8 +1135,11 @@ async function runHostControlUpdateStep(input: {
     };
   }
 
+  let sawInstalling = status.state === "installing";
+
   for (let attempt = 0; attempt < MAX_UPDATE_POLLS; attempt += 1) {
-    if (hostIsProtocolIncompatible(input.hostFederationLifecycle, step.hostId)) {
+    const snapshot = remoteHostSnapshot(input.hostFederationLifecycle, step.hostId);
+    if (snapshot?.state === "incompatible") {
       return { status: "failed", message: INCOMPATIBLE_PROTOCOL_MESSAGE };
     }
     if (status.state === "updated") {
@@ -1145,12 +1149,17 @@ async function runHostControlUpdateStep(input: {
       };
     }
     if (status.state === "installing") {
-      return {
-        status: "succeeded",
-        message:
-          status.message ??
-          `${step.hostDisplayName} is relaunching to Octant ${status.toVersion ?? step.toVersion}.`,
-      };
+      sawInstalling = true;
+      // Remote desktop updates report `installing` as soon as the native
+      // updater accepts relaunch, before the replacement host reconnects.
+      // Keep observing until the replacement host confirms both the target
+      // version and protocol compatibility.
+      if (snapshot?.state === "ready" && snapshot.serverBuildVersion === step.toVersion) {
+        return {
+          status: "succeeded",
+          message: `${step.hostDisplayName} runs Octant ${step.toVersion}.`,
+        };
+      }
     }
     if (status.state === "waiting-for-work") {
       return {
@@ -1176,6 +1185,7 @@ async function runHostControlUpdateStep(input: {
     await input.sleep(input.pollMs);
     try {
       status = await client.update({ action: "status", requestId });
+      if (status.state === "installing") sawInstalling = true;
       // If the host restarted onto the new version and reports idle on the new version,
       // treat that as completed after checking protocol compatibility.
       if (status.state === "idle" && status.fromVersion === step.toVersion) {
@@ -1189,8 +1199,19 @@ async function runHostControlUpdateStep(input: {
       }
     } catch {
       // Transient disconnect while the remote computer restarts; keep polling.
-      if (hostIsProtocolIncompatible(input.hostFederationLifecycle, step.hostId)) {
+      const nextSnapshot = remoteHostSnapshot(input.hostFederationLifecycle, step.hostId);
+      if (nextSnapshot?.state === "incompatible") {
         return { status: "failed", message: INCOMPATIBLE_PROTOCOL_MESSAGE };
+      }
+      if (
+        sawInstalling &&
+        nextSnapshot?.state === "ready" &&
+        nextSnapshot.serverBuildVersion === step.toVersion
+      ) {
+        return {
+          status: "succeeded",
+          message: `${step.hostDisplayName} runs Octant ${step.toVersion}.`,
+        };
       }
     }
   }

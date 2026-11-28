@@ -4,7 +4,6 @@ import {
   decodeHostBackupRequest,
   decodeHostDrainRequest,
   decodeHostLifecycleRequest,
-  decodeHostUpdateRequest,
   decodeSetHostMemoryLimitsRequest,
   type HostBackupOutcome,
   type HostControlPolicy,
@@ -15,11 +14,14 @@ import {
   type HostRestartRecovery,
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
-  type HostUpdateRequest,
-  type HostUpdateStatus,
   type SetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
+import {
+  decodeHostUpdateRequest,
+  type HostUpdateRequest,
+  type HostUpdateStatus,
+} from "@octant/contracts/host-update";
 import {
   decodeSetWebSearchKeyRequest,
   decodeSetWebSearchSettingsRequest,
