@@ -67,6 +67,7 @@ export function decideLinearAgentRead(input: LinearAgentReadInput): LinearAgentR
 
 export interface LinearIssueMatchCandidate {
   readonly identifier: string;
+  readonly accountRef?: string | undefined;
   readonly teamId?: string | undefined;
   readonly teamKey?: string | undefined;
   readonly projectId?: string | undefined;
@@ -78,6 +79,15 @@ export interface ProjectLinearMatchCandidate {
   readonly linearTarget?: ProjectLinearTarget | undefined;
 }
 
+export interface MatchProjectForLinearIssueOptions {
+  /**
+   * The host's legacy account ref when known, so an existing Project target
+   * without `accountRef` still matches issues from the legacy account without
+   * ever matching a second connected account that shares a team key (e.g. ENG).
+   */
+  readonly legacyAccountRef?: string | undefined;
+}
+
 function issueTeamKey(issue: LinearIssueMatchCandidate): string | undefined {
   if (issue.teamKey !== undefined && issue.teamKey.trim() !== "") {
     return issue.teamKey.trim().toUpperCase();
@@ -87,6 +97,19 @@ function issueTeamKey(issue: LinearIssueMatchCandidate): string | undefined {
   return issue.identifier.slice(0, dash).toUpperCase();
 }
 
+function matchesAccount(
+  target: ProjectLinearTarget,
+  issue: LinearIssueMatchCandidate,
+  legacyAccountRef: string | undefined,
+): boolean {
+  if (target.accountRef === undefined && issue.accountRef === undefined) return true;
+  const targetAccount = target.accountRef ?? legacyAccountRef;
+  const issueAccount = issue.accountRef ?? legacyAccountRef;
+  return (
+    targetAccount !== undefined && issueAccount !== undefined && targetAccount === issueAccount
+  );
+}
+
 function matchesTeam(target: ProjectLinearTarget, issue: LinearIssueMatchCandidate): boolean {
   if (issue.teamId !== undefined) return target.teamId === issue.teamId;
   const key = issueTeamKey(issue);
@@ -94,18 +117,21 @@ function matchesTeam(target: ProjectLinearTarget, issue: LinearIssueMatchCandida
 }
 
 /**
- * Find the single active Octant Project mapped to a Linear issue, preferring an
- * exact team + Linear project binding over a team-wide binding. Returns
- * undefined when zero or multiple Projects match so callers never guess.
+ * Find the single active Octant Project mapped to a Linear issue, requiring the
+ * same Linear account first and preferring an exact team + Linear project
+ * binding over a team-wide binding. Returns undefined when zero or multiple
+ * Projects match so callers never guess.
  */
 export function matchProjectForLinearIssue<T extends ProjectLinearMatchCandidate>(
   projects: ReadonlyArray<T>,
   issue: LinearIssueMatchCandidate,
+  options: MatchProjectForLinearIssueOptions = {},
 ): T | undefined {
   const activeBound = projects.filter(
     (project) =>
       (project.lifecycle === undefined || project.lifecycle === "active") &&
-      project.linearTarget !== undefined,
+      project.linearTarget !== undefined &&
+      matchesAccount(project.linearTarget, issue, options.legacyAccountRef),
   );
   if (issue.projectId !== undefined) {
     const exact = activeBound.filter(

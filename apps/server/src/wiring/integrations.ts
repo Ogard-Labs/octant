@@ -476,11 +476,16 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     const linearConnected = () => integrationService.hasConnectedAccount?.("linear") === true;
     const linearIssueContextService = new LinearIssueContextService({
       reader: {
-        snapshot: (signal) => integrationService.snapshot("linear", signal),
-        executeGetIssue: async (id, signal) =>
+        snapshot: (signal, accountRef) => integrationService.snapshot("linear", signal, accountRef),
+        executeGetIssue: async (id, signal, accountRef) =>
           integrationService.executeOperation(
             "linear",
-            { kind: "operation", operationId: LINEAR_ISSUE_GET_OPERATION, input: { id } },
+            {
+              kind: "operation",
+              operationId: LINEAR_ISSUE_GET_OPERATION,
+              input: { id },
+              ...(accountRef === undefined ? {} : { accountRef }),
+            },
             signal,
           ),
       },
@@ -490,11 +495,16 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     });
     const linearReadToolService = new LinearReadToolService({
       reader: {
-        snapshot: (signal) => integrationService.snapshot("linear", signal),
-        executeOperation: (operationId, input, signal) =>
+        snapshot: (signal, accountRef) => integrationService.snapshot("linear", signal, accountRef),
+        executeOperation: (operationId, input, signal, accountRef) =>
           integrationService.executeOperation(
             "linear",
-            { kind: "operation", operationId, input },
+            {
+              kind: "operation",
+              operationId,
+              input,
+              ...(accountRef === undefined ? {} : { accountRef }),
+            },
             signal,
           ),
       },
@@ -504,14 +514,29 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // The issues a thread is linked to, and the tracker writes made for them.
     // Linear is reached only through its plugin's operations and GitHub only
     // through the host's `gh` issue port; neither holds a credential here.
-    const runLinearOperation: LinearOperationRunner = (operationId, input, signal) =>
+    const runLinearOperation: LinearOperationRunner = (operationId, input, signal, accountRef) =>
       linearIntegrationIsEffective()
         ? integrationService.executeOperation(
             "linear",
-            { kind: "operation", operationId, input },
+            {
+              kind: "operation",
+              operationId,
+              input,
+              ...(accountRef === undefined ? {} : { accountRef }),
+            },
             signal,
           )
         : Promise.resolve({ kind: "refused", reason: "Connect Linear to authorize this host." });
+    const linearAccountForThread = (threadId: string): string | undefined => {
+      try {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (thread === undefined) return undefined;
+        const project = persistence.readProject(thread.projectId);
+        return project?.type === "code" ? project.linearTarget?.accountRef : undefined;
+      } catch {
+        return undefined;
+      }
+    };
     const threadLinkedIssueStore = new ThreadLinkedIssueStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -523,6 +548,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       store: threadLinkedIssueStore,
       writes: new TrackerIssueWrites({
         store: threadLinkedIssueStore,
+        linearAccountForThread,
         port: createTrackerIssuePort({
           linear: runLinearOperation,
           github:
@@ -534,8 +560,8 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           githubIsEffective: githubIntegrationIsEffective,
         }),
       }),
-      resolveLinear: (identifier: string, signal: AbortSignal) =>
-        resolveLinearIdentifier(runLinearOperation, identifier, signal),
+      resolveLinear: (identifier: string, signal: AbortSignal, accountRef?: string) =>
+        resolveLinearIdentifier(runLinearOperation, identifier, signal, accountRef),
     };
     // The person's own command-line homes, where those tools keep sessions.
     const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");

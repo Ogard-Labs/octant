@@ -67,15 +67,15 @@ export function linearTrackerSource(input: {
   return {
     connected: input.connected,
     list: async (query, signal) => {
-      const result = await input.run(
-        LINEAR_ISSUE_LIST_OPERATION,
-        {
-          ...("identifier" in query ? { identifier: query.identifier } : { search: query.search }),
-          pageSize: PAGE_SIZE,
-          ...(query.teamId === undefined ? {} : { filter: { teamId: query.teamId } }),
-        },
-        signal,
-      );
+      const inputPayload = {
+        ...("identifier" in query ? { identifier: query.identifier } : { search: query.search }),
+        pageSize: PAGE_SIZE,
+        ...(query.teamId === undefined ? {} : { filter: { teamId: query.teamId } }),
+      };
+      const result =
+        query.accountRef === undefined
+          ? await input.run(LINEAR_ISSUE_LIST_OPERATION, inputPayload, signal)
+          : await input.run(LINEAR_ISSUE_LIST_OPERATION, inputPayload, signal, query.accountRef);
       return result.kind === "ok" ? decodeLinearIssueListPage(result.value).rows : [];
     },
   };

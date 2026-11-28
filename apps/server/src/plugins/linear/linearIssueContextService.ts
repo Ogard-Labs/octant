@@ -72,8 +72,12 @@ export type LinearIssueContextResult =
     };
 
 export interface LinearIssueContextReader {
-  snapshot(signal: AbortSignal): Promise<IntegrationAuthenticationSnapshot>;
-  executeGetIssue(id: string, signal: AbortSignal): Promise<IntegrationExecutionResult>;
+  snapshot(signal: AbortSignal, accountRef?: string): Promise<IntegrationAuthenticationSnapshot>;
+  executeGetIssue(
+    id: string,
+    signal: AbortSignal,
+    accountRef?: string,
+  ): Promise<IntegrationExecutionResult>;
 }
 
 export interface LinearIssueContextServiceOptions {
@@ -109,11 +113,17 @@ export class LinearIssueContextService {
     if (this.#isEffective?.() === false) {
       return refused("unavailable");
     }
-    const snapshot = await this.#reader.snapshot(signal);
+    const snapshot =
+      request.accountRef === undefined
+        ? await this.#reader.snapshot(signal)
+        : await this.#reader.snapshot(signal, request.accountRef);
     if (!linearIssueBrowseAvailable(snapshot.capabilities)) {
       return refused(mapSnapshotRefusal(snapshot));
     }
-    const response = await this.#reader.executeGetIssue(request.id, signal);
+    const response =
+      request.accountRef === undefined
+        ? await this.#reader.executeGetIssue(request.id, signal)
+        : await this.#reader.executeGetIssue(request.id, signal, request.accountRef);
     if (response.kind === "refused") {
       return refused(mapExecutionRefusal(response.reason));
     }
@@ -157,7 +167,10 @@ export class LinearIssueContextService {
     const recorded = this.#ingestion.record({
       threadId: input.threadId,
       provenance: { origin: "external-content", sourceLabel: ISSUE_CONTEXT_SOURCE_LABEL },
-      contentReference: `linear-issue-${input.request.id}`,
+      contentReference:
+        input.request.accountRef === undefined
+          ? `linear-issue-${input.request.id}`
+          : `linear-issue-${input.request.accountRef}-${input.request.id}`,
       correlationId: this.#uuid(),
       authorized: true,
     });
