@@ -277,7 +277,7 @@ describe("answering a Needs-you row from the sidebar", () => {
     expect(within(group).getByRole("button", { name: "Deny" })).toBeInTheDocument();
   });
 
-  it("reads once for a row that can only open its thread, and follows Chat only while a row offers answers", async () => {
+  it("reads for a row that can only open its thread only when Chat moved, since every other change reaches the window's read", async () => {
     const question = codeRequest({
       threadId: "thread-waiting",
       threadTitle: "Rotate the dev API keys",
@@ -288,25 +288,34 @@ describe("answering a Needs-you row from the sidebar", () => {
     });
     const clients = answerClients();
     const reader = pendingReader([question]);
-    const at = (chatRevision: number) => ({
-      ...source([], clients, 0, chatRevision),
+    const at = (feedRevision: number, chatRevision: number) => ({
+      ...source([], clients, feedRevision, chatRevision),
       reader,
     });
-    const { rerender } = render(<Sidebar source={at(0)} />);
+    const settled = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const { rerender } = render(<Sidebar source={at(0, 0)} />);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^Rotate the dev API keys/ })).toHaveTextContent(
         "Which key should go first?",
       ),
     );
     expect(reader.list).toHaveBeenCalledOnce();
-    rerender(<Sidebar source={at(1)} />);
-    rerender(<Sidebar source={at(2)} />);
-    await Promise.resolve();
+    // Chat streaming elsewhere moves no waiting row, so nothing is read.
+    rerender(<Sidebar source={at(0, 1)} />);
+    rerender(<Sidebar source={at(0, 2)} />);
+    await settled();
     expect(reader.list).toHaveBeenCalledOnce();
-    // The thread moved while it waits, so what it asks may have changed.
-    const moved = { ...waiting, updatedAt: new Date(BOARD_NOW - 60_000).toISOString() };
-    rerender(<Sidebar source={at(2)} thread={moved} />);
+    // A Chat thread that moves while it waits reaches no other read.
+    const movedInChat = { ...waiting, updatedAt: new Date(BOARD_NOW - 60_000).toISOString() };
+    rerender(<Sidebar source={at(0, 3)} thread={movedInChat} />);
     await waitFor(() => expect(reader.list).toHaveBeenCalledTimes(2));
+    // A Code thread that moves arrives with a Code change, which the window's
+    // read already follows: one read, not one from each.
+    const movedInCode = { ...waiting, updatedAt: new Date(BOARD_NOW - 30_000).toISOString() };
+    rerender(<Sidebar source={at(1, 3)} thread={movedInCode} />);
+    await waitFor(() => expect(reader.list).toHaveBeenCalledTimes(3));
+    await settled();
+    expect(reader.list).toHaveBeenCalledTimes(3);
 
     const following = pendingReader([approval]);
     const answering = (chatRevision: number) => ({
@@ -350,7 +359,8 @@ describe("answering a Needs-you row from the sidebar", () => {
     expect(answers()).toBeNull();
     rerender(<Sidebar openThreadIds={["thread-waiting"]} source={shown} />);
     expect(answers()).toBeNull();
-    await Promise.resolve();
+    await waitFor(() => expect(shown.reader.list).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(shown.reader.list).toHaveBeenCalledOnce();
   });
 
