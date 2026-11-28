@@ -38,6 +38,7 @@ import {
   areSamePullRequestRepositoryInProject,
   canonicalPullRequestRepositoryInProject,
   emptyPullRequestLinkRegistryState,
+  listMergedPullRequestLinkIds,
   listPullRequestDisplayAliases,
   missingPullRequestForgeIds,
   pullRequestDisplayFieldsChanged,
@@ -188,6 +189,11 @@ export interface PullRequestLinkReader {
   ): PullRequestLinkRecord | undefined;
   resolveLink(query: PullRequestLinkLookupQuery): PullRequestLinkRecord | undefined;
   displayAliasesForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestDisplayCoordinate>;
+  mergedLinkIdsForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestLinkId>;
+  repositoryAliasesFor(
+    projectId: ProjectId,
+    candidate: { readonly owner: string; readonly name: string },
+  ): ReadonlyArray<{ readonly owner: string; readonly name: string }>;
   areSameRepository(
     projectId: ProjectId,
     left: { readonly owner: string; readonly name: string },
@@ -425,6 +431,40 @@ export class PullRequestLinkService implements PullRequestLinkOwner {
 
   displayAliasesForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestDisplayCoordinate> {
     return listPullRequestDisplayAliases(this.#state, linkId);
+  }
+
+  mergedLinkIdsForLink(linkId: PullRequestLinkId): ReadonlyArray<PullRequestLinkId> {
+    return listMergedPullRequestLinkIds(this.#state, linkId);
+  }
+
+  repositoryAliasesFor(
+    projectId: ProjectId,
+    candidate: { readonly owner: string; readonly name: string },
+  ): ReadonlyArray<{ readonly owner: string; readonly name: string }> {
+    const key = `${candidate.owner.toLowerCase()}/${candidate.name.toLowerCase()}`;
+    const byKey = new Map<string, { readonly owner: string; readonly name: string }>();
+    const addName = (owner: string, name: string) => {
+      const normalized = `${owner.toLowerCase()}/${name.toLowerCase()}`;
+      if (!byKey.has(normalized)) byKey.set(normalized, { owner, name });
+    };
+    addName(candidate.owner, candidate.name);
+    for (const entry of this.#repositoryAliases.values()) {
+      if (String(entry.projectId) !== String(projectId)) continue;
+      if (!entry.names.has(key)) continue;
+      if (this.#repositoryNameOwnedByDifferentNode(projectId, key, entry.baseRepositoryNodeId)) {
+        continue;
+      }
+      for (const aliasKey of entry.names) {
+        if (
+          this.#repositoryNameOwnedByDifferentNode(projectId, aliasKey, entry.baseRepositoryNodeId)
+        ) {
+          continue;
+        }
+        const split = splitRepositoryName(aliasKey);
+        if (split !== undefined) addName(split.owner, split.name);
+      }
+    }
+    return [...byKey.values()];
   }
 
   areSameRepository(
