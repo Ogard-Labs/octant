@@ -34,7 +34,12 @@ export function QuestionnaireSummary(props: {
               .join(", ");
           return (
             <div key={question.id}>
-              <dt>{question.prompt}</dt>
+              <dt>
+                {question.header === undefined ? null : (
+                  <span className="questionnaire__header">{question.header}</span>
+                )}
+                {question.prompt}
+              </dt>
               <dd>{text || "None selected"}</dd>
             </div>
           );

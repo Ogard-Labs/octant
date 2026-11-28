@@ -67,6 +67,24 @@ export interface PendingRequestRowProps {
   readonly onOpenThread: (request: PendingRequest) => void;
 }
 
+/**
+ * "3 questions · Layout, Checks, Approval": how many questions wait, and their
+ * headers when the row's text does not already name them.
+ */
+function questionnaireWords(
+  questionnaire: { readonly questions: ReadonlyArray<{ readonly header?: string | undefined }> },
+  text: string,
+): string {
+  const count = questionnaire.questions.length;
+  const counted = `${String(count)} ${count === 1 ? "question" : "questions"}`;
+  const headers = questionnaire.questions.flatMap((question) =>
+    question.header === undefined ? [] : [question.header],
+  );
+  return headers.length === 0 || headers.join(" · ") === text
+    ? counted
+    : `${counted} · ${headers.join(", ")}`;
+}
+
 /** Why no second opinion came, in words a tooltip can carry. */
 const NO_REVIEW_REASON = {
   failed: "The reviewer's answer could not be read",
@@ -114,7 +132,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       mounted.current = false;
     };
   }, []);
-  const choices = pendingRequestChoices(request);
+  // A set of questions is answered whole in its thread's card; one choice
+  // from a row would answer only its first question.
+  const questionnaire =
+    request.kind === "question" && "questionnaire" in request ? request.questionnaire : undefined;
+  const choices = questionnaire === undefined ? pendingRequestChoices(request) : [];
   const open = props.settled !== true && props.outcome === undefined;
 
   async function answer(response: PendingRequestResponse) {
@@ -271,6 +293,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           {request.text}
         </p>
       )}
+      {deferred || questionnaire === undefined ? null : (
+        <p className="oct-meta pending-request__questions">
+          {questionnaireWords(questionnaire, request.text)}
+        </p>
+      )}
       {deferred || decision?.why === undefined ? null : (
         <p className="oct-meta pending-request__why" title={decision.why}>
           {decision.why}
@@ -332,6 +359,16 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
               variant="outline"
             >
               Review request
+            </OctantButton>
+          ) : questionnaire !== undefined ? (
+            <OctantButton
+              disabled={busy}
+              onClick={() => props.onOpenThread(request)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Open
             </OctantButton>
           ) : request.kind === "approval" ? (
             <>

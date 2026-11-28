@@ -28,6 +28,7 @@ import {
   type CodeTurnChangedFiles,
   type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
+  type Questionnaire,
   type StrictKeptProtections,
   type TurnLoopNotice,
   type TurnStallNotice,
@@ -61,6 +62,11 @@ export type CodeProviderRequest =
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      /**
+       * The whole set, when the agent asked several things at once; one card
+       * answers it with one JSON response.
+       */
+      readonly questionnaire?: Questionnaire;
       /** The provider asks for a secret: answered masked, never put as evidence. */
       readonly secret?: true;
     };
@@ -160,14 +166,19 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
     };
   }
-  // App questionnaires follow the session read so answers from another window
-  // withdraw the card here too; provider-native questions keep their event path.
-  if (event.kind === "input-requested" && event.questionnaire === undefined) {
+  // Octant's own harness questionnaire follows the session read, so answers
+  // from another window withdraw the card here too; a provider's questions,
+  // a whole set included, keep this event path.
+  if (
+    event.kind === "input-requested" &&
+    !(event.harness === true && event.questionnaire !== undefined)
+  ) {
     return {
       kind: "input",
       requestId: event.requestId,
       prompt: event.prompt,
       options: event.options,
+      ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
       ...(event.secret === true ? { secret: true } : {}),
     };
   }

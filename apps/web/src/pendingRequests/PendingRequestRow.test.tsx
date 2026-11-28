@@ -351,6 +351,53 @@ describe("a waiting subagent row", () => {
   });
 });
 
+describe("a row for several questions asked at once", () => {
+  it("counts the questions with their headers and offers only Open, never a quick reply", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = decodePendingRequest({
+      ...codeQuestion(),
+      text: "Before I start",
+      options: [],
+      questionnaire: {
+        allowComment: false,
+        questions: [
+          {
+            id: "q0",
+            header: "Layout",
+            prompt: "Which layout?",
+            selection: "single",
+            options: [{ id: "o0", label: "Grid" }],
+          },
+          {
+            id: "q1",
+            header: "Checks",
+            prompt: "Which checks?",
+            selection: "multiple",
+            options: [{ id: "o0", label: "Lint" }],
+          },
+        ],
+      },
+    });
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const row = screen.getByRole("group", { name: "Fix the parser is waiting for you" });
+    expect(within(row).getByText("2 questions · Layout, Checks")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Reply…" })).not.toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Open" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    await user.keyboard("1");
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+});
+
 describe("an agent approval row", () => {
   it("says the agent needs approval and offers only Review request, never Approve or Deny", async () => {
     const user = userEvent.setup();

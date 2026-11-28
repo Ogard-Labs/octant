@@ -3,7 +3,7 @@ import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/th
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeWindowId } from "@octant/contracts/shell";
 import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { SubagentsTray } from "../agents/ComposerSubagentsTray";
 import { TurnSubagentRows, ThreadSubagentsContext } from "../agents/threadSubagents";
@@ -58,6 +58,7 @@ import {
 } from "./fixtures";
 import { ComposerInput } from "../composer/ComposerInput";
 import { groundRenderers } from "./groundScenes";
+import { QuestionnaireCard } from "../transcript/QuestionnaireCard";
 
 export interface VisualScene extends SceneMeta {
   readonly render: () => ReactNode;
@@ -562,7 +563,89 @@ const RENDERERS: ReadonlyArray<SceneRenderer> = [
   { id: "rail-beside", render: () => <RailBesideScene /> },
   { id: "subagent-progress", render: () => <SubagentProgressScene /> },
   ...groundRenderers(() => <HomeScene />),
+  { id: "questionnaire-card", render: () => <QuestionnaireCardScene /> },
 ];
+
+const SCENE_QUESTIONNAIRE = {
+  allowComment: false,
+  questions: [
+    {
+      id: "q0",
+      header: "Layout",
+      prompt: "How should the settings page be laid out?",
+      selection: "single" as const,
+      options: [
+        {
+          id: "o0",
+          label: "Two columns",
+          description: "Sections on the left, the chosen section's fields on the right.",
+          recommended: true,
+        },
+        { id: "o1", label: "One long page", description: "Every section stacked in order." },
+      ],
+    },
+    {
+      id: "q1",
+      header: "Checks",
+      prompt: "Which checks should run before the pull request opens?",
+      selection: "multiple" as const,
+      options: [
+        { id: "o0", label: "Lint", description: "Style and obvious mistakes." },
+        { id: "o1", label: "Type check" },
+        { id: "o2", label: "Unit tests", description: "The fast suite only." },
+      ],
+    },
+    {
+      id: "q2",
+      header: "Approval",
+      prompt: "Who signs off on the change?",
+      selection: "single" as const,
+      options: [
+        { id: "o0", label: "Me" },
+        { id: "o1", label: "The design lead" },
+      ],
+    },
+  ],
+};
+
+/**
+ * The card an agent's several questions arrive in: a choice made, two checks
+ * ticked, and a written answer typed in place of the last question's options,
+ * with Send kept at the card's foot. The answers are entered through the page
+ * as a person would, since the card keeps its draft to itself.
+ */
+function QuestionnaireCardScene() {
+  const pane = useRef<HTMLDivElement>(null);
+  // StrictMode runs the effect twice; a second pass would untick the checks.
+  const entered = useRef(false);
+  useEffect(() => {
+    const root = pane.current;
+    if (root === null || entered.current) return;
+    entered.current = true;
+    const click = (name: string) =>
+      [...root.querySelectorAll<HTMLElement>("[role='radio'], input[type='checkbox']")]
+        .find((choice) => (choice.closest("label, button")?.textContent ?? "").startsWith(name))
+        ?.click();
+    click("Two columns");
+    click("Lint");
+    click("Unit tests");
+    const written = root.querySelectorAll<HTMLTextAreaElement>("textarea")[2];
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    if (written === undefined || setValue === undefined) return;
+    setValue.call(written, "Whoever reviews the design system that week");
+    written.dispatchEvent(new Event("input", { bubbles: true }));
+  }, []);
+  return (
+    <div className="visual-check__pane visual-check__pane--padded" ref={pane}>
+      <QuestionnaireCard
+        onAnswer={noop}
+        onDismiss={noop}
+        prompt="Layout · Checks · Approval"
+        questionnaire={SCENE_QUESTIONNAIRE}
+      />
+    </div>
+  );
+}
 
 const FOLDED_TRAY_STORAGE = { getItem: () => "false", setItem: noop };
 

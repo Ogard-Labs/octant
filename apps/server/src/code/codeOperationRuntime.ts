@@ -5262,6 +5262,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,
+        harness: true,
       } as never,
     });
     active.cursor = frame.cursor;

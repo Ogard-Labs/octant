@@ -3545,6 +3545,69 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("answers a provider's several questions in one card with one send", async () => {
+    const user = userEvent.setup();
+    const answerProviderRequest = vi.fn(
+      async () => true,
+    ) as CodeController["answerProviderRequest"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          answerProviderRequest,
+          providerRequests: [
+            {
+              kind: "input",
+              requestId: "req-2",
+              prompt: "Layout · Checks",
+              options: [],
+              questionnaire: {
+                allowComment: false,
+                questions: [
+                  {
+                    id: "q0",
+                    header: "Layout",
+                    prompt: "Which layout?",
+                    selection: "single",
+                    options: [
+                      { id: "o0", label: "Grid", recommended: true },
+                      { id: "o1", label: "List" },
+                    ],
+                  },
+                  {
+                    id: "q1",
+                    header: "Checks",
+                    prompt: "Which checks?",
+                    selection: "multiple",
+                    options: [
+                      { id: "o0", label: "Lint" },
+                      { id: "o1", label: "Types" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findAllByRole("form", { name: "Questionnaire" })).toHaveLength(1);
+    await user.click(screen.getByRole("radio", { name: /List/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Types/ }));
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    expect(answerProviderRequest).toHaveBeenCalledExactlyOnceWith({
+      kind: "input",
+      requestId: "req-2",
+      response: JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "q0", selectedOptionIds: ["o1"] },
+          { questionId: "q1", selectedOptionIds: ["o1"] },
+        ],
+      }),
+    });
+  });
+
   it("offers a paired device the answer controls a window on the host has for a provider approval", () => {
     const providerRequests = [
       {

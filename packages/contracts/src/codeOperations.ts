@@ -2116,6 +2116,12 @@ const QuestionEvent = Schema.Struct({
    * it was answered is recorded.
    */
   secret: Schema.optional(Schema.Literal(true)),
+  /**
+   * Octant's own harness asked this, not the provider. Its questionnaire is
+   * drawn from the harness session read, which also withdraws it when
+   * another window answers, so a thread does not draw it from this event.
+   */
+  harness: Schema.optional(Schema.Literal(true)),
 }).annotations({ ...strict, ...personDecides });
 /**
  * Journaled once, just before a turn's terminal state, on every settled

@@ -10150,8 +10150,74 @@ html[data-octant-reduced-motion="true"] .skeleton::after {
   min-width: 0;
 }
 .questionnaire__question legend {
+  display: grid;
+  gap: 2px;
+  padding: 0;
   font-weight: var(--oct-weight-medium);
   overflow-wrap: anywhere;
+}
+/* What the card needs, then its title: the eyebrow names the ask so a card
+   of several questions is not read as one. */
+.questionnaire__heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.questionnaire__eyebrow {
+  margin: 0;
+  color: var(--oct-accent-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+.questionnaire__title {
+  overflow-wrap: anywhere;
+}
+/* A question's short header ("Layout") sits above its prompt, quieter. */
+.questionnaire__header {
+  display: block;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+}
+/* Space, not a rule, between questions: a fieldset draws its top border
+   through its legend, which split a question's header from its prompt. */
+.questionnaire__question + .questionnaire__question {
+  margin-top: var(--oct-space-3);
+}
+.questionnaire__option-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-width: 0;
+}
+.questionnaire__recommended {
+  flex: 0 0 auto;
+}
+/* A chosen option reads at a glance: the accent edge, drawn twice as thick as
+   the resting hairline, over the accent's soft ground. */
+.questionnaire .provider-question-card__choice[data-checked] {
+  background: var(--oct-accent-soft);
+  border-color: var(--oct-accent);
+  box-shadow: inset 0 0 0 1px var(--oct-accent);
+}
+/* The answers stay in view while the questions scroll: questions taller than
+   the space above the composer scroll inside the card, and Send stays its
+   last row. A Canvas form is a page and grows instead. */
+.questionnaire__body {
+  display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+.questionnaire:not(.canvas-choice .questionnaire) .questionnaire__body {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.questionnaire__actions {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
 }
 .questionnaire__checkbox {
   display: flex;

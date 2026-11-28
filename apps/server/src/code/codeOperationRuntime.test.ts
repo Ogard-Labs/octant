@@ -5896,8 +5896,10 @@ describe("CodeOperationRuntime", () => {
       }),
     ).toBe(true);
     const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+    // Marked as the harness's own, so a thread draws it from the session read.
     expect(frames.find((frame) => frame.event.kind === "input-requested")?.event).toMatchObject({
       questionnaire,
+      harness: true,
     });
     const result = await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",

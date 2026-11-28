@@ -3060,8 +3060,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <ProviderQuestionCard
                   key={request.requestId}
                   className="code-thread-workspace__provider-request"
+                  draftIdentity={{
+                    scope: `code:${String(thread.id)}`,
+                    requestId: request.requestId,
+                  }}
+                  questionnaire={request.questionnaire}
+                  // A refused answer keeps a questionnaire's draft on screen.
                   onAnswer={(response) =>
-                    void props.controller.answerProviderRequest({
+                    props.controller.answerProviderRequest({
                       kind: "input",
                       requestId: request.requestId,
                       response,
