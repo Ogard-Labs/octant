@@ -2944,6 +2944,7 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 - Answers only and Failures only sit below Low and hide rather than fold (maintainer decision, 2026-11-26). Approvals, questions, credential requests, Shield and reviewer decisions, errors, failed or unfinished calls, and failed or waiting subagents and tasks always show, and every hidden step shows while Find is open. A level a reader does not know reads as Low.
 - A running turn ends with one working line under its reply, and only a change of step is announced (maintainer decision, 2026-11-24).
 - A turn's durations are journaled host facts, never renderer guesses, and a call whose bounds cannot be trusted shows no time.
+- A turn's steps are parted by their height alone, with no line between rows, so a settled turn reads as a few quiet lines rather than a table (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Thread view: Reply detail](thread-view.md#reply-detail), [Turn activity rows](thread-view.md#turn-activity-rows) and [Workspace: Reply detail in the thread in front](workspace.md#reply-detail-in-the-thread-in-front).
 

@@ -188,7 +188,9 @@ sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
-mark (spinner, check, cross), parted by hairlines and indented together; at
+mark (spinner, check, cross), indented together and parted by their height
+alone, with no line between them (a hairline under every row made a turn's
+steps read as a table); at
 the default Reply detail (below) a settled turn folds them behind "N tool
 calls". An approval Octant Shield
 answered is a 28px line among them, not a disclosure: a 14px shield mark
