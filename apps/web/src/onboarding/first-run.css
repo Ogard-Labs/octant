@@ -424,7 +424,6 @@ button.first-run__fact-action {
   display: flex;
   align-items: flex-start;
   gap: var(--oct-space-3);
-  cursor: pointer;
 }
 
 .first-run__discovered-text {

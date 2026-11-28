@@ -438,7 +438,9 @@ for headings, and 700 nowhere in chrome.
 
 **Window manners.** Chrome behaves like a window, not a page: its text does not
 select (`user-select: none` on the root, with reading matter opting back in),
-controls keep the arrow and only a link in content shows the hand, nothing in
+controls keep the arrow and only a link or a mention in reading text shows the
+hand (a disclosure's summary and a choice's label keep the arrow too, and a
+contract test lists every hand), nothing in
 chrome underlines on pointer hover, there is no tap highlight and no focus edge
 on a click (see Focus), icons and links do not drag, and scroll areas draw the
 system's overlay scrollbars. The desktop app already withholds the browser's
