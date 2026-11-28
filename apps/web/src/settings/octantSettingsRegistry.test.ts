@@ -804,6 +804,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "sync-approver-*": "sync-members",
   "sync-join-request-*": "sync-members",
   "sync-member-*": "sync-members",
+  "linear-account-*": "linear-connection",
   "linear-project-*": "linear-projects",
 };
 
