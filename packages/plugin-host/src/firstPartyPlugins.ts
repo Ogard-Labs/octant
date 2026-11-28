@@ -14,6 +14,7 @@ import {
 export type FirstPartyPluginComponentId =
   | "board"
   | "second-model-pull-request-reviewer"
+  | "bundled-pull-request-guide-writer"
   | "github-integration"
   | "linear-integration"
   | "azure-arm-integration"
@@ -25,6 +26,11 @@ export const SECOND_MODEL_PULL_REQUEST_REVIEWER_EXTENSION_ID =
   "10000000-0000-4000-8000-000000000061" as const;
 export const SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID =
   "second-model-pull-request-reviewer" as const;
+
+export const BUNDLED_PULL_REQUEST_GUIDE_WRITER_EXTENSION_ID =
+  "10000000-0000-4000-8000-000000000062" as const;
+export const BUNDLED_PULL_REQUEST_GUIDE_WRITER_COMPONENT_ID =
+  "bundled-pull-request-guide-writer" as const;
 
 const digest = (nibble: string) => decodeExtensionContentDigest(`sha256:${nibble.repeat(64)}`);
 
@@ -487,6 +493,42 @@ function secondModelPullRequestReviewerPlugin(): ExtensionPackageManifest {
 }
 
 /**
+ * Bundled pull request review guide writer: a Code-only
+ * `pull-request-guide-writer` component resolved through the same effective
+ * activation seam a third-party guide writer plugin uses.
+ */
+function bundledPullRequestGuideWriterPlugin(): ExtensionPackageManifest {
+  return firstPartyManifest({
+    manifestVersion: 1,
+    extensionId: BUNDLED_PULL_REQUEST_GUIDE_WRITER_EXTENSION_ID,
+    packageId: "20000000-0000-4000-8000-000000000062",
+    slug: "pull-request-guide-writer",
+    displayName: "PR review guide writer",
+    version: "1.0.0",
+    digest: digest("7"),
+    source: { kind: "bundled", sourceRef: "app:pull-request-guide-writer" },
+    provenance: { publisher: "Octant", reviewed: true },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: {
+      platforms: ["macos", "linux"],
+      modes: ["code"],
+      providerFamilies: [],
+    },
+    declaredCapabilities: [],
+    primaryComponentId: BUNDLED_PULL_REQUEST_GUIDE_WRITER_COMPONENT_ID,
+    components: [
+      {
+        id: BUNDLED_PULL_REQUEST_GUIDE_WRITER_COMPONENT_ID,
+        kind: "pull-request-guide-writer",
+        displayName: "PR review guide writer",
+        declaredCapabilities: [],
+      },
+    ],
+    contributions: [],
+  });
+}
+
+/**
  * Every first-party plugin, and whether a person may switch it off in
  * Settings. A switchable plugin starts on and keeps its data while off; the
  * others are core parts of Octant that have no switch.
@@ -503,6 +545,7 @@ function firstPartyPlugins(): ReadonlyArray<FirstPartyPlugin> {
   return (firstPartyPluginsCache ??= [
     { manifest: boardPlugin(), switchable: true },
     { manifest: secondModelPullRequestReviewerPlugin(), switchable: true },
+    { manifest: bundledPullRequestGuideWriterPlugin(), switchable: true },
     { manifest: githubPlugin(), switchable: true },
     { manifest: linearPlugin(), switchable: false },
     { manifest: azurePlugin(), switchable: false },

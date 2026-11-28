@@ -38,10 +38,8 @@ import {
   type PullRequestGuideView,
 } from "@octant/contracts/pull-request-guide";
 import { pullRequestReviewTargetKey } from "@octant/domain";
-import type {
-  PullRequestGuideStopProposal,
-  PullRequestGuideWriter,
-} from "@octant/plugin-api/pull-request-guide-writer";
+import type { PullRequestGuideStopProposal } from "@octant/plugin-api/pull-request-guide-writer";
+import type { PullRequestGuideWriterRegistry } from "./pullRequestGuideWriterRegistry";
 import type {
   PullRequestReviewDiffSnapshot,
   PullRequestReviewTurnResult,
@@ -180,6 +178,7 @@ export type PullRequestGuideRunResult =
 
 export type PullRequestGuideRefusal =
   | "not-authorized"
+  | "not-effective"
   | "no-model"
   | "running"
   | "no-thread"
@@ -233,7 +232,7 @@ export interface PullRequestGuideServiceOptions {
     | "spendCeiling"
     | "recordUsage"
   >;
-  readonly writer: PullRequestGuideWriter;
+  readonly writers: PullRequestGuideWriterRegistry;
   readonly uuid: () => string;
   readonly clock?: () => string;
   readonly turnTimeoutMs?: number;
@@ -298,6 +297,9 @@ export class PullRequestGuideService {
         reason: authority.status === "disconnected" ? "unavailable" : "not-authorized",
       };
     }
+    if (this.#options.writers.resolve() === undefined) {
+      return { status: "refused", reason: "not-effective" };
+    }
     if (this.#options.guideRoute(target.projectId) === undefined) {
       return { status: "refused", reason: "no-model" };
     }
@@ -327,6 +329,9 @@ export class PullRequestGuideService {
     if (own.status !== "resolved") return { status: "refused", reason: own.reason };
     const thread = this.#options.readThread(threadId);
     if (thread === undefined) return { status: "refused", reason: "no-thread" };
+    if (this.#options.writers.resolve() === undefined) {
+      return { status: "refused", reason: "not-effective" };
+    }
     if (this.#options.guideRoute(own.target.projectId) === undefined) {
       return { status: "refused", reason: "no-model" };
     }
@@ -367,6 +372,8 @@ export class PullRequestGuideService {
     requestedBy: PullRequestGuideRequester,
     signal?: AbortSignal,
   ): Promise<PullRequestGuideStartResult> {
+    const activeWriter = this.#options.writers.resolve();
+    if (activeWriter === undefined) return { status: "refused", reason: "not-effective" };
     const route = this.#options.guideRoute(target.projectId);
     if (route === undefined) return { status: "refused", reason: "no-model" };
     const linkId = pullRequestReviewTargetKey(target);
@@ -384,6 +391,10 @@ export class PullRequestGuideService {
       signal?.removeEventListener("abort", abort);
       if (this.#running.get(linkId) === controller) this.#running.delete(linkId);
     };
+    if (this.#options.writers.resolve(activeWriter.writerId) === undefined) {
+      release();
+      return { status: "refused", reason: "not-effective" };
+    }
     if (headSha === undefined) {
       release();
       return { status: "refused", reason: "unavailable" };
@@ -408,7 +419,16 @@ export class PullRequestGuideService {
     }
     // `done` never rejects: a person's run is not awaited, and a journal that
     // closed under it (shutdown) must not leave the link running.
-    const done = this.#run({ target, thread, route, headSha, guideId, reservationId, controller })
+    const done = this.#run({
+      target,
+      thread,
+      route,
+      writerId: activeWriter.writerId,
+      headSha,
+      guideId,
+      reservationId,
+      controller,
+    })
       .catch((): PullRequestGuideRunResult => ({ status: "failed", reason: "unavailable" }))
       .then((result) => {
         if (result.status === "failed") {
@@ -432,13 +452,14 @@ export class PullRequestGuideService {
     readonly target: PullRequestReviewTarget;
     readonly thread: CodeThread;
     readonly route: PullRequestReviewRoute;
+    readonly writerId: string;
     readonly headSha: string;
     readonly guideId: PullRequestGuide["guideId"];
     readonly reservationId: ReturnType<typeof decodeSpendCeilingReservationId>;
     readonly controller: AbortController;
   }): Promise<PullRequestGuideRunResult> {
     const { runtime } = this.#options;
-    const { target, thread, route, headSha, reservationId } = input;
+    const { target, thread, route, writerId, headSha, reservationId } = input;
     const signal = input.controller.signal;
     const spend = runtime.spendCeiling;
     if (
@@ -456,11 +477,12 @@ export class PullRequestGuideService {
     let usage: TurnUsage | undefined;
     let turnStarted = false;
     let oversized = false;
-    let outcome: Awaited<ReturnType<PullRequestGuideServiceOptions["writer"]["write"]>>;
+    let outcome: Awaited<ReturnType<PullRequestGuideWriterRegistry["run"]>>;
     try {
-      outcome = await this.#options.writer.write(
-        { target, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
-        {
+      outcome = await this.#options.writers.run({
+        writerId,
+        request: { target, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
+        host: {
           readPullRequestDiff: async (diffSignal) => {
             const captured = await runtime.capturePullRequestDiff(
               { target, thread, headSha, baseRef: thread.deliveryTarget.proposedBaseBranch },
@@ -535,7 +557,7 @@ export class PullRequestGuideService {
           },
         },
         signal,
-      );
+      });
     } finally {
       // Settled or abandoned however the writer ends, a throw included, so a
       // failed run never keeps its reservation against the thread's ceiling.
@@ -570,6 +592,10 @@ export class PullRequestGuideService {
     // GitHub not answering is not a push.
     if (currentHead === undefined) return { status: "failed", reason: "unavailable" };
     if (currentHead !== headSha) return { status: "failed", reason: "head-stale" };
+    // Re-check activation bound to the exact writer registration right before
+    // persisting so disabling or replacing the plugin during the final head
+    // lookup still withholds publication.
+    if (!outcome.stillEffective()) return { status: "failed", reason: "unavailable" };
     const stops = validateGuideStops(outcome.stops, diff ?? { files: [] });
     // A guide with no stop says nothing, and recording it would replace the
     // saved one: a diff GitHub failed to give, or a reply whose every stop was

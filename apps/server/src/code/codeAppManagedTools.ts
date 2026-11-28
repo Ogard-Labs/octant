@@ -1378,6 +1378,8 @@ async function pullRequestGuideWriteTool(
 
 function pullRequestGuideRefusal(reason: string): string {
   switch (reason) {
+    case "not-effective":
+      return "No pull request guide writer plugin is active. Ask the person to enable one in Settings → Skills & Extensions → Installed.";
     case "no-model":
       return "No guide model is picked for this Project. Ask the person to pick one in Project settings.";
     case "running":

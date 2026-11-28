@@ -12,6 +12,10 @@ import {
 
 const encoder = new TextEncoder();
 
+export const BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID =
+  "octant/bundled-pull-request-guide-writer" as const;
+export const BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME = "PR review guide writer" as const;
+
 const SYSTEM_INSTRUCTIONS = [
   "You write a review guide for a person reading a pull request inside Octant, at Plan's read-only gate.",
   "A guide walks the reader through the change in the order that makes it easiest to understand: start where the change begins, end with tests and cleanup.",

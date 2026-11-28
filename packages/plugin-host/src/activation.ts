@@ -61,6 +61,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "language-server",
     "debug-adapter",
     "pull-request-reviewer",
+    "pull-request-guide-writer",
     "canvas-export-target",
     ...rendererKinds,
     ...providerDriverKind,
@@ -111,9 +112,14 @@ export function isExtensionComponentHostAdmitted(
 ): boolean {
   // A cloud machine target calls a cloud provider on the person's account, and
   // no launch class yet confines a process that needs that network reach, so
-  // no platform runs one from a stored package. Pull request reviewer plugins
-  // likewise have no out-of-process confined worker launch class yet.
-  if (component.kind === "cloud-machine-target" || component.kind === "pull-request-reviewer") {
+  // no platform runs one from a stored package. Pull request reviewer and
+  // guide writer plugins likewise have no out-of-process confined worker
+  // launch class yet.
+  if (
+    component.kind === "cloud-machine-target" ||
+    component.kind === "pull-request-reviewer" ||
+    component.kind === "pull-request-guide-writer"
+  ) {
     return false;
   }
   if (component.kind === "provider-driver") {
