@@ -186,6 +186,9 @@ function pendingRequestFrom(request: WorkRequest, threadTitle: string): PendingR
         kind: "question",
         text: request.detail.prompt,
         options: request.detail.options.map((label) => ({ label })),
+        ...(request.detail.questionnaire === undefined
+          ? {}
+          : { questionnaire: request.detail.questionnaire }),
         ...(request.detail.secret === true ? { secret: true } : {}),
       };
 }

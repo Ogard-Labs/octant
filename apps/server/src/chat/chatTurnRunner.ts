@@ -1,4 +1,8 @@
-import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contracts";
+import {
+  MAX_QUESTION_OPTIONS,
+  NativeHarnessAskUserArguments,
+  type Questionnaire,
+} from "@octant/contracts";
 import type { StalledTurnScope } from "../providers/turnBudget";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
@@ -112,8 +116,16 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 // Needs you and never turns into a refusal by timing out.
 const APP_MANAGED_TOOL_DEADLINE_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
-// contract; longer option lists are cut, not refused.
-const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
+// contract. Providers are refused above it before they reach a turn; a list
+// that still runs longer says in its prompt how many choices are not shown.
+const MAX_ATTEMPT_QUESTION_OPTIONS = MAX_QUESTION_OPTIONS;
+
+/** A prompt that says how many choices it could not show, so none goes missing unsaid. */
+function withHiddenChoices(prompt: string, hidden: number): string {
+  if (hidden <= 0) return prompt;
+  const note = ` (${String(hidden)} more choices are not shown; write your answer instead.)`;
+  return `${prompt.slice(0, 2_000 - note.length).trimEnd()}${note}`;
+}
 
 /**
  * Caps one line of a provider question at the attempt record's bound. The
@@ -1848,7 +1860,10 @@ export class ChatTurnRunner {
                   const answer = yield* parkOnQuestion(
                     decodeChatAttemptQuestion({
                       requestId: event.requestId,
-                      prompt: boundedQuestionText(event.prompt),
+                      prompt: withHiddenChoices(
+                        boundedQuestionText(event.prompt),
+                        event.options.length - MAX_ATTEMPT_QUESTION_OPTIONS,
+                      ),
                       ...(event.questionnaire === undefined
                         ? {}
                         : { questionnaire: event.questionnaire }),

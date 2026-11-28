@@ -62,7 +62,7 @@ const WorkRequestProviderOptionValue = Schema.String.pipe(
   Schema.maxLength(16_384),
 );
 const WorkRequestProviderOptionValues = Schema.Array(WorkRequestProviderOptionValue).pipe(
-  Schema.maxItems(8),
+  Schema.maxItems(MAX_QUESTION_OPTIONS),
 );
 export type WorkRequestProviderOptionValues = typeof WorkRequestProviderOptionValues.Type;
 

@@ -1,4 +1,4 @@
-import { decodeAgentRunId, type Questionnaire } from "@octant/contracts";
+import { decodeAgentRunId, MAX_QUESTION_OPTIONS, type Questionnaire } from "@octant/contracts";
 import type {
   AgentRun,
   AgentRunAuthority,
@@ -220,7 +220,7 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       !current(input.run, input.signal) ||
       input.prompt.length > 8_192 ||
       input.options.some((option) => option.length > 256) ||
-      input.options.length > 8
+      input.options.length > MAX_QUESTION_OPTIONS
     )
       return { status: "cancelled" as const };
     const parent = scope(input.run);
@@ -270,6 +270,19 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       readonly event: Extract<ProviderRuntimeEvent, { readonly kind: "user-input-request" }>;
       readonly signal: AbortSignal;
     }): Promise<string | undefined> => {
+      // A provider child's whole question set reaches the person as the
+      // same one questionnaire its parent's would, answered once; its one
+      // answer goes back to the child's provider as the set's reply.
+      const questionnaire = input.event.secret === true ? undefined : input.event.questionnaire;
+      if (questionnaire !== undefined) {
+        const outcome = await ask({
+          ...input,
+          prompt: input.event.prompt,
+          questionnaire,
+          options: [],
+        });
+        return outcome.status === "answered" ? outcome.answer : undefined;
+      }
       const choices = input.event.options;
       const prompt = [
         input.event.prompt,

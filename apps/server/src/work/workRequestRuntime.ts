@@ -1,6 +1,7 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import {
+  MAX_WORK_REQUEST_OPTIONS,
   decodeWorkRequestId,
   decodeWorkRequestRecordInput,
   type ProviderLevelChangeRequest,
@@ -430,7 +431,10 @@ export class WorkRequestRuntime {
               }
             : {
                 kind: "user-input",
-                prompt: sanitizeRequestText(event.prompt, "Input requested"),
+                prompt: withHiddenChoices(
+                  sanitizeRequestText(event.prompt, "Input requested"),
+                  event.options.length - MAX_WORK_REQUEST_OPTIONS,
+                ),
                 options: optionValues!.labels,
                 ...(event.questionnaire === undefined
                   ? {}
@@ -607,19 +611,34 @@ function isPlanLayoutOrPrintable(character: string): boolean {
   return (code >= 0x20 && code !== 0x7f) || code === 0x09 || code === 0x0a || code === 0x0d;
 }
 
+/**
+ * The choices a Work question shows, each the provider's own label made safe,
+ * and the values the provider takes back. An answer is matched to its value
+ * by label, so two labels the redaction made alike (two paths, say) are told
+ * apart by a number after the repeat rather than one shadowing the other.
+ * Every choice is kept: providers are refused above the shared ceiling before
+ * they reach here.
+ */
 function requestOptions(options: ReadonlyArray<{ readonly label: string }>): {
   readonly labels: ReadonlyArray<string>;
   readonly values: ReadonlyArray<string>;
 } {
-  const values = options.slice(0, 8).map((option) => option.label);
-  const labels = values.map((option, index) => {
-    const label = `Option ${index + 1}: ${sanitizeRequestText(option, "Option unavailable")}`.slice(
-      0,
-      2_000,
-    );
-    return label;
+  const values = options.slice(0, MAX_WORK_REQUEST_OPTIONS).map((option) => option.label);
+  const seen = new Map<string, number>();
+  const labels = values.map((option) => {
+    const label = sanitizeRequestText(option, "Option unavailable").slice(0, 1_990).trim();
+    const count = (seen.get(label) ?? 0) + 1;
+    seen.set(label, count);
+    return count === 1 ? label : `${label} (${String(count)})`;
   });
   return { labels, values };
+}
+
+/** A prompt that says how many choices it could not show, so none goes missing unsaid. */
+function withHiddenChoices(prompt: string, hidden: number): string {
+  if (hidden <= 0) return prompt;
+  const note = ` (${String(hidden)} more choices are not shown; write your answer instead.)`;
+  return `${prompt.slice(0, 2_000 - note.length).trimEnd()}${note}`;
 }
 
 function requestRuntimeFailure(message: string): ProviderFailure {
@@ -638,11 +657,13 @@ function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
     questions: questionnaire.questions.map((question) => ({
       ...question,
       prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024).trim(),
-      options: question.options.map((option, index) => ({
+      ...(question.header === undefined
+        ? {}
+        : { header: sanitizeRequestText(question.header, "Question").slice(0, 64).trim() }),
+      // A questionnaire answer names choices by id, so a label needs no number.
+      options: question.options.map((option) => ({
         ...option,
-        label: `Option ${index + 1}: ${sanitizeRequestText(option.label, "Choice")}`
-          .slice(0, 256)
-          .trim(),
+        label: sanitizeRequestText(option.label, "Choice").slice(0, 256).trim(),
         ...(option.description === undefined
           ? {}
           : {

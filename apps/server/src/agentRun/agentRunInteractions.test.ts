@@ -333,6 +333,66 @@ describe("managed child interactions", () => {
     expect(await interactions.askUser(input)).toBeUndefined();
   });
 
+  it("asks a provider child's whole question set on its parent as one questionnaire", async () => {
+    const response = JSON.stringify({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o0"] },
+        { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+      ],
+    });
+    const question = vi.fn<NativeHarnessQuestionStore["ask"]>(async () => ({
+      status: "answered",
+      answer: response,
+      questionId: "77777777-7777-4777-8777-777777777780" as never,
+    }));
+    const interactions = createAgentRunInteractions({
+      parentLead,
+      parentAuthority: () => run.authority,
+      getById: () => run,
+      approvals: { ask: vi.fn() },
+      questions: { ask: question },
+    });
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Store",
+          prompt: "Which database?",
+          selection: "single" as const,
+          options: [{ id: "o0", label: "SQLite", description: "One file", recommended: true }],
+        },
+        {
+          id: "q1",
+          header: "Checks",
+          prompt: "Which checks?",
+          selection: "multiple" as const,
+          options: [
+            { id: "o0", label: "Unit" },
+            { id: "o1", label: "Smoke" },
+          ],
+        },
+      ],
+    };
+    const answer = await interactions.askUser({
+      run,
+      signal: new AbortController().signal,
+      event: {
+        ...eventFacts,
+        kind: "user-input-request",
+        requestId: "question-set",
+        prompt: "Store · Checks",
+        options: [],
+        questionnaire,
+      },
+    });
+    expect(answer).toBe(response);
+    expect(question).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Store · Checks", questionnaire, options: [] }),
+    );
+  });
+
   it("asks a child's secret question on its parent as one, so its answer is never journaled", async () => {
     const question = vi.fn<NativeHarnessQuestionStore["ask"]>(async () => ({
       status: "answered",

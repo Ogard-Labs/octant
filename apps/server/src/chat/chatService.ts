@@ -1924,6 +1924,9 @@ export class ChatService {
             threadTitle: thread.title,
             text: question.prompt,
             options: question.options,
+            ...(question.questionnaire === undefined
+              ? {}
+              : { questionnaire: question.questionnaire }),
             // A secret question's row finds the thread; only its masked field answers it.
             ...(question.secret === true ? { secret: true } : {}),
             // A question carries no time of its own; journaling it is the

@@ -5464,6 +5464,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
             ...(event.secret === true ? { secret: true } : {}),
           });
         }
