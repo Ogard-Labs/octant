@@ -1738,11 +1738,14 @@ function ActivityThreadButton(props: {
   // answered or opened from its row; one on screen has its card in the thread.
   // A thread whose pane sits behind a page such as Board stays open, but its
   // card is not on screen, so the window's shown threads decide, not the open ones.
+  // Whether it waits is the thread's own fact, the one Status groups it under
+  // Needs you by, not the Status mark: a person who hides that mark still
+  // finds the thread under Needs you and can still answer it there.
   const pendingRequests = useContext(SidebarPendingRequestsContext);
   const onScreen =
     pendingRequests?.shows(rowId) ??
     (selected || props.openThreadIds?.some((candidate) => candidate === rowId) === true);
-  const answersHere = rowState.state?.status === "attention" && !onScreen;
+  const answersHere = props.thread.activity === "attention" && !onScreen;
   const listWaiting = pendingRequests?.listWaiting;
   const waitingThreadId = props.thread.threadId;
   const movedAt = props.thread.updatedAt;

@@ -15,19 +15,37 @@ import {
   pendingRequestKey,
   type PendingRequestAnswerResult,
 } from "../pendingRequests/pendingRequests";
-import type { PendingRequestFreshness } from "../pendingRequests/usePendingRequests";
+import type { SharedPendingRequestRead } from "../pendingRequests/usePendingRequests";
 import {
   usePendingRequestRows,
   type PendingRequestRowEntry,
-  type PendingRequestRowsSource,
 } from "../pendingRequests/usePendingRequestRows";
+import type { PendingRequestAnswerClients } from "../pendingRequests/pendingRequests";
 
 /**
  * What the sidebar needs to answer a waiting thread's approval on its row: the
- * window's pending-request reader and the clients each thread view already
- * answers through. A window without one (a remote client) offers only Open.
+ * window's pending-request read and the clients each thread view already
+ * answers through. A window without a reader (a remote client) offers only Open.
  */
-export type SidebarPendingRequestSource = Omit<PendingRequestRowsSource, "modes">;
+export interface SidebarPendingRequestSource {
+  /**
+   * The window's one pending-request read, which also counts the threads a
+   * subagent or the agent itself holds waiting. It re-reads on Work, Code and
+   * tool-approval signals and the shell's settings and workspace. The sidebar
+   * lists from it rather than reading on its own: the host reads every request
+   * source for each read, and two readers following the same signals made it
+   * do that twice for every Code navigation change.
+   */
+  readonly shared: SharedPendingRequestRead;
+  /**
+   * Bumps on the Chat navigation topic, which the shared read does not follow
+   * because a streaming Chat reply moves it on every delta.
+   */
+  readonly chatRevision: number;
+  readonly answerClients: PendingRequestAnswerClients;
+  /** The clock the waits read, advanced once a minute by the shell. */
+  readonly now: number;
+}
 
 /** What one Needs-you row can say and do about the request its thread waits on. */
 export interface SidebarThreadAsk {
@@ -55,9 +73,9 @@ export interface SidebarPendingRequests {
    * A Needs-you row whose thread the window does not show lists it while it
    * waits, with when the thread last moved, and calls the returned function
    * when it stops. A thread that starts waiting, or moves while it waits, is
-   * read once. The reader goes on following the host's change signals only
-   * while some listed row offers answers, so a sidebar whose rows can only
-   * open their threads reads nothing more.
+   * read once. While some listed row offers answers the sidebar also re-reads
+   * on Chat navigation, the one signal the window's shared read leaves out;
+   * a sidebar whose rows can only open their threads adds no other read.
    */
   readonly listWaiting: (threadId: string, movedAt: string | undefined) => () => void;
 }
@@ -68,16 +86,6 @@ export const SidebarPendingRequestsContext = createContext<SidebarPendingRequest
 );
 
 const EVERY_MODE: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
-
-/**
- * Change signals a reader that has not followed yet is given: they never
- * change, so it reads when it starts and when a row asks, and at no other time.
- */
-const NOT_FOLLOWING: PendingRequestFreshness = {
-  feedRevision: 0,
-  settings: undefined,
-  workspace: undefined,
-};
 
 /**
  * Whether a row may answer this request in place. Only an approval the host
@@ -106,31 +114,32 @@ function waitingThreadId(key: string): string {
 }
 
 /**
- * The sidebar's one pending-request reader, matched to rows by thread. It reads
- * only while some row waits, and follows the same signals the Needs you card
- * uses only while some waiting row offers answers. The host re-checks every
- * answer; a row only offers what the host listed.
+ * The window's pending-request read, matched to the sidebar's rows by thread.
+ * Rows list from it only while some row waits. The sidebar adds a read only
+ * where the shared read would not make one: when a waiting row appears or its
+ * thread moves while no row offers answers, and on Chat navigation while some
+ * row does. The host re-checks every answer; a row only offers what the host
+ * listed.
  */
 export function useSidebarPendingRequests(
   source: SidebarPendingRequestSource | undefined,
   waiting: ReadonlyArray<string>,
 ): SidebarPendingRequests["forThread"] {
-  const reading = waiting.length > 0 && source?.pendingRequestClient !== undefined;
+  const reading = waiting.length > 0 && source !== undefined;
   const [following, setFollowing] = useState(false);
-  // A reader that stops following keeps the last signals it followed, so
-  // stopping is not itself a change that reads again; starting again reads
-  // once if anything moved meanwhile.
-  const [held, setHeld] = useState<PendingRequestFreshness>(NOT_FOLLOWING);
-  const feedRevision = source?.feedRevision ?? 0;
-  const settings = source?.settings;
-  const workspace = source?.workspace;
-  useEffect(() => {
-    if (following) setHeld({ feedRevision, settings, workspace });
-  }, [feedRevision, following, settings, workspace]);
   const { rows, answer, refresh } = usePendingRequestRows(
-    reading && source !== undefined
-      ? { ...source, ...(following ? {} : held), modes: EVERY_MODE }
-      : undefined,
+    source === undefined
+      ? undefined
+      : {
+          answerClients: source.answerClients,
+          feedRevision: 0,
+          modes: EVERY_MODE,
+          now: source.now,
+          pendingRequestClient: undefined,
+          settings: undefined,
+          shared: source.shared,
+          workspace: undefined,
+        },
   );
   const byThread = useMemo(() => {
     const grouped = new Map<string, PendingRequestRowEntry[]>();
@@ -162,16 +171,30 @@ export function useSidebarPendingRequests(
   );
   const answersSome = waiting.some((key) => forThread(waitingThreadId(key))?.answer !== undefined);
   useEffect(() => setFollowing(answersSome), [answersSome]);
+  // The Chat revision the sidebar last asked for a read at. Starting to follow
+  // again reads once only if Chat moved meanwhile.
+  const chatRevision = source?.chatRevision ?? 0;
+  const readAtChat = useRef(chatRevision);
+  useEffect(() => {
+    if (!following || readAtChat.current === chatRevision) return;
+    readAtChat.current = chatRevision;
+    refresh();
+  }, [chatRevision, following, refresh]);
   // A row that starts waiting, or whose thread moved, needs one read to say
-  // what it asks. The read the reader makes when it starts covers the first.
+  // what it asks. The shared read's first read covers rows listed before it
+  // lands, and while the sidebar follows, the signals that moved the row also
+  // move a read, so a second one here would only repeat it.
+  const loaded = source?.shared.read.status === "ready";
   const listed = useRef<ReadonlySet<string>>(new Set());
   const waitingList = waiting.join("\t");
   useEffect(() => {
     const now = waitingList === "" ? [] : waitingList.split("\t");
     const before = listed.current;
     listed.current = new Set(now);
-    if (before.size > 0 && now.some((key) => !before.has(key))) refresh();
-  }, [waitingList, refresh]);
+    if (following || !loaded || !now.some((key) => !before.has(key))) return;
+    readAtChat.current = chatRevision;
+    refresh();
+  }, [chatRevision, following, loaded, waitingList, refresh]);
   return forThread;
 }
 

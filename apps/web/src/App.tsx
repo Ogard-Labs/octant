@@ -3151,13 +3151,15 @@ function LaunchedShell(
   // approval, a proposal, a Browser ask). A subagent's ask or settle and the
   // agent's own approval move the Work and Code topics; an ask moves the
   // tool-approvals topic. Chat navigation moves on every streaming delta, so
-  // following it would re-read pending requests for every token.
-  const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
+  // following it would re-read pending requests for every token. The sidebar's
+  // Needs-you rows list from this same read instead of reading on their own.
+  const windowPendingRequestRead = usePendingRequestRead(pendingRequestClient, {
     feedRevision:
       machineChanges.workNavigation + machineChanges.codeNavigation + machineChanges.toolApprovals,
     settings: controller.settings,
     workspace: controller.workspace,
-  }).read;
+  });
+  const subagentWaitRead = windowPendingRequestRead.read;
   // A Review request pressed before this window's thread list held the parent
   // waits here for one re-read: it opens once the parent is listed, and says so
   // when the re-read still does not list it.
@@ -6617,27 +6619,26 @@ function LaunchedShell(
     [extensionClient, needsYouProjectClient],
   );
   // The sidebar answers a waiting thread's approval through the same clients
-  // the thread view and the Needs you card answer through; it adds no route.
+  // the thread view and the Needs you card answer through; it adds no route,
+  // and it lists from the window's read rather than a read of its own.
+  const sidebarChatRevision = machineChanges.chatNavigation;
   const sidebarPendingRequests = useMemo(
     () =>
       pendingRequestClient === undefined
         ? undefined
         : {
             answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
-            feedRevision: pendingRequestFeedRevision,
+            chatRevision: sidebarChatRevision,
             now: snoozeClockNow.getTime(),
-            pendingRequestClient,
-            settings: controller.settings,
-            workspace: controller.workspace,
+            shared: windowPendingRequestRead,
           },
     [
       chatClient,
       codeClient,
-      controller.settings,
-      controller.workspace,
       pendingRequestClient,
-      pendingRequestFeedRevision,
+      sidebarChatRevision,
       snoozeClockNow,
+      windowPendingRequestRead,
       workRequestClient,
       workTurnClient,
     ],

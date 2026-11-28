@@ -433,7 +433,7 @@ that matched nothing keeps its own message, which says nothing was deleted.
 
 **Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
 Needs-you row in Status or the Activity feed whose thread the window does not
-show says on its
+show, whether or not the row shows its Status mark, says on its
 third line what the thread asks, and carries its answers under it: **Allow
 once** and **Deny**, the approval card's own words, then **Open**, after the
 row and its own hover actions in keyboard order. A thread the window shows is
@@ -453,11 +453,14 @@ same answer command the thread's approval card and Home's Needs you card send,
 through the clients the thread view already holds; Allow once never remembers
 the answer for the Project, which stays on the card. The host re-checks the
 answer, and a refusal is one quiet line under the buttons until the host stops
-listing the request. The window reads pending requests for this only while a
-waiting row the window does not show is listed: once when such a row appears
-or its thread moves, and on the same signals the Needs you card reads only
-while some listed row offers answers, never on a timer. Rows that can only
-open their threads read nothing more. A thread the window shows offers nothing:
+listing the request. The rows list from the window's own pending-request read,
+the one that counts the threads a subagent or the agent itself holds waiting,
+which re-reads on Work, Code and tool-approval changes; the sidebar does not
+read alongside it, so one Code change is one host read. The sidebar adds a read
+only while a waiting row the window does not show is listed: once when such a
+row appears or its thread moves while no row offers answers, and on Chat
+navigation, which the window's read leaves out because a streaming reply moves
+it on every delta, only while some listed row offers answers. Never on a timer. A thread the window shows offers nothing:
 its card is in the thread. A server Project's rows under On your servers keep
 the Project tree's row in every arrangement, so they offer no answers in place;
 the row opens the thread, whose card answers it. The arrangement belongs to the
@@ -3066,6 +3069,12 @@ that changes the thread's level shows, as the app's card does, the whole plan
 the agent hands over and then the level it moves to, directly above the y/n
 line. The panel ends the bottom-pinned transcript, so a long plan scrolls above
 those two lines instead of pushing them out of view.
+A Code approval is answered with y or n only when the host lists it as one
+tool call (`approves: "tool-call"`). The pending list does not carry a Code
+plan, so an approval to enter or leave Plan, or one from a host that does not
+say what it approves, shows its summary and asks the person to open the thread
+in the app, where the card shows the plan and the level it moves to; the
+terminal sends no answer for it.
 
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal

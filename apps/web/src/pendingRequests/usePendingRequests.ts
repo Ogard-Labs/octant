@@ -4,7 +4,7 @@ import type {
   PendingRequestList,
   WaitingAsk,
 } from "@octant/contracts/pending-requests";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * What can change the list without a change-feed signal: the shell settings
@@ -33,6 +33,13 @@ export type PendingRequestRead =
       /** Counts completed reads, so a caller can tell a fresh answer from the last one. */
       readonly read: number;
     };
+
+/** A read one surface owns and lends to another, so both show one fetch. */
+export interface SharedPendingRequestRead {
+  readonly read: PendingRequestRead;
+  /** Reads again now, or once more after the read in flight lands. */
+  readonly refresh: () => void;
+}
 
 /**
  * Every approval and question this window can answer, read when the card
@@ -98,7 +105,9 @@ export function usePendingRequests(
     queue.current?.request();
   }, [client, feedRevision, nudge, settings, workspace]);
   const refresh = useCallback(() => setNudge((current) => current + 1), []);
-  return { read, refresh };
+  // Stable while nothing changed, so a surface lent this read re-renders only
+  // when a read lands.
+  return useMemo(() => ({ read, refresh }), [read, refresh]);
 }
 
 interface ReadQueue {
