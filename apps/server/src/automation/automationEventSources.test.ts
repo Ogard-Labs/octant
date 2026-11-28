@@ -442,11 +442,12 @@ describe("durable routine integration polling", () => {
       return created.automation;
     };
     let wakes = 0;
+    const staleRoutineIds = new Set<string>();
     const sources = new AutomationEventSources({
       projection,
       scheduler,
       sources: provider,
-      current: () => true,
+      current: (definition) => !staleRoutineIds.has(String(definition.id)),
       now,
       monotonic: () => elapsed,
       wake: () => {
@@ -484,6 +485,9 @@ describe("durable routine integration polling", () => {
       setActiveEndpoint: (endpointId: string, secret: string) => {
         activeEndpointId = endpointId;
         activeSecret = secret;
+      },
+      invalidateAuthority: (automationId: AutomationId) => {
+        staleRoutineIds.add(String(automationId));
       },
     };
   }
@@ -656,6 +660,29 @@ describe("durable routine integration polling", () => {
     await f.poll(hourly.id);
     expect(f.deliver(17)).toEqual({ status: "accepted" });
     expect(f.deliver(18)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
+  });
+
+  it("does not let an authority-invalidated sibling routine stall shared webhook capacity", async () => {
+    const f = await webhookFixture();
+    const stale = await f.createRoutine({ pollMinutes: 60 });
+    const healthy = await f.createRoutine({
+      id: "33333333-3333-4333-8333-333333333333" as AutomationId,
+      pollMinutes: 1,
+    });
+
+    await f.poll(stale.id);
+    await f.poll(healthy.id, 60_000);
+    // Invalidate the first routine's captured authority (e.g. its Project version moved).
+    f.invalidateAuthority(stale.id);
+
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Healthy routine claims delivery-0 and frees its slot even though stale can no longer poll.
+    await f.poll(healthy.id, 60_000);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
     f.sources.stop();
   });
 });

@@ -322,6 +322,7 @@ export class AutomationEventSources {
       if (
         String(other.id) === String(input.definition.id) ||
         other.lifecycle !== "enabled" ||
+        !this.#options.current(other) ||
         other.trigger.kind !== "integration-event" ||
         other.trigger.integrationId !== input.trigger.integrationId ||
         other.trigger.sourceId !== input.trigger.sourceId
