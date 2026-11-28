@@ -469,4 +469,43 @@ describe("CodeGitPane", () => {
     expect(client.executeOperation).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /stage|commit|push/i })).not.toBeInTheDocument();
   });
+
+  it("hides the repository picker for a single repository and switches repositories when several are reachable", async () => {
+    const user = userEvent.setup();
+    const onSelectRepository = vi.fn();
+    const repoB = "10000000-0000-4000-8000-000000000099" as never;
+    const { rerender } = render(
+      <CodeGitPane
+        client={codeClient()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={gitObservation}
+        onSelectRepository={onSelectRepository}
+        repositories={[{ checkoutId: scope.checkoutId, label: "repo-a" }]}
+        scope={scope}
+      />,
+    );
+    expect(screen.queryByLabelText("Repository")).not.toBeInTheDocument();
+
+    rerender(
+      <CodeGitPane
+        client={codeClient()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={gitObservation}
+        onSelectRepository={onSelectRepository}
+        repositories={[
+          { checkoutId: scope.checkoutId, label: "repo-a" },
+          { checkoutId: repoB, label: "repo-b" },
+        ]}
+        scope={scope}
+      />,
+    );
+    const picker = screen.getByRole("combobox", { name: "Repository" });
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "repo-b" }));
+    expect(onSelectRepository).toHaveBeenCalledWith(repoB);
+  });
 });

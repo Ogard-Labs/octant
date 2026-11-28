@@ -21,8 +21,14 @@ import type {
   CodeThreadId,
   CodeThreadView,
 } from "@octant/contracts/code";
+import { threadReachesCheckout } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CodeDiffPane, type CodeDiffProjection } from "../code/CodeDiffPane";
+import {
+  defaultGitCheckoutId,
+  reachableGitRepositoriesForThread,
+  type CodeRepositoryOption,
+} from "../code/threadRepositories";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
@@ -68,13 +74,41 @@ export function DockReviewTool(props: DockReviewToolProps) {
     props.view !== undefined && String(props.view.thread.id) === String(props.threadId)
       ? props.view
       : undefined;
-  const checkoutId = props.checkoutId ?? view?.checkout.id;
+  const repositories = useMemo(
+    () => (view === undefined ? [] : reachableGitRepositoriesForThread(view)),
+    [view],
+  );
+  const isReachable = (candidate: CodeCheckoutId): boolean =>
+    (props.checkoutId !== undefined && String(candidate) === String(props.checkoutId)) ||
+    (view !== undefined &&
+      threadReachesCheckout(view.thread, candidate, "git-and-review").reachable);
+  const [selectedCheckoutId, setSelectedCheckoutId] = useState<CodeCheckoutId | undefined>();
+  useEffect(() => {
+    setSelectedCheckoutId(undefined);
+  }, [props.threadId]);
+  useEffect(() => {
+    const requested = props.requestedCodeReviewFile?.checkoutId;
+    if (
+      requested !== undefined &&
+      ((props.checkoutId !== undefined && String(requested) === String(props.checkoutId)) ||
+        (view !== undefined &&
+          threadReachesCheckout(view.thread, requested, "git-and-review").reachable))
+    ) {
+      setSelectedCheckoutId(requested);
+    }
+  }, [props.checkoutId, props.requestedCodeReviewFile, view]);
+  const defaultCheckout = view === undefined ? undefined : defaultGitCheckoutId(view);
+  const activeSelected =
+    selectedCheckoutId !== undefined && isReachable(selectedCheckoutId)
+      ? selectedCheckoutId
+      : undefined;
+  const checkoutId = activeSelected ?? props.checkoutId ?? defaultCheckout;
   if (props.client === undefined || view === undefined || checkoutId === undefined) {
     return <OctantEmpty state="loading" title="Loading review" />;
   }
   if (
     props.requestedCodeReviewFile !== undefined &&
-    props.requestedCodeReviewFile.checkoutId !== checkoutId
+    !isReachable(props.requestedCodeReviewFile.checkoutId)
   )
     return (
       <OctantEmpty
@@ -113,6 +147,8 @@ export function DockReviewTool(props: DockReviewToolProps) {
         : { defaultDiffLayout: props.defaultDiffLayout })}
       threadId={props.threadId}
       view={view}
+      repositories={repositories}
+      onSelectRepository={setSelectedCheckoutId}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
       {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
@@ -158,6 +194,8 @@ function BoundReview(props: {
   readonly onSendLineNotes?: (message: string) => Promise<CodeLineNotesSendResult>;
   readonly lineNotesSendUnavailable?: string;
   readonly pullRequestReviewClient?: import("@octant/client-runtime").PullRequestReviewClient;
+  readonly repositories?: ReadonlyArray<CodeRepositoryOption>;
+  readonly onSelectRepository?: (checkoutId: CodeCheckoutId) => void;
 }) {
   const nextUuid = useCallback(
     () => props.createUuid?.() ?? globalThis.crypto.randomUUID(),
@@ -242,6 +280,15 @@ function BoundReview(props: {
         createOperationId={() => nextUuid() as never}
         defaultLayout={props.defaultDiffLayout ?? "unified"}
         diff={projection}
+        {...(props.repositories !== undefined &&
+        props.repositories.length > 1 &&
+        props.onSelectRepository !== undefined
+          ? {
+              repositories: props.repositories,
+              selectedCheckoutId: props.checkoutId,
+              onSelectRepository: props.onSelectRepository,
+            }
+          : {})}
         info="Checkout changes only. Edits in extra Project folders are left out. Review is local; it cannot change anything on GitHub."
         onRefresh={() => {
           setRefreshTick((value) => value + 1);

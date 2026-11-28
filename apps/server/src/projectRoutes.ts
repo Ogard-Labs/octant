@@ -15,6 +15,9 @@ import {
   decodeProjectCommand,
   decodeProjectId,
   type ProjectFailure,
+  type ProjectId,
+  type ProjectRepositoriesList,
+  type WindowId,
 } from "@octant/contracts";
 import type { CodeEnvironmentServiceApi } from "./codeEnvironmentService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
@@ -43,6 +46,12 @@ export interface ProjectRouteDependencies {
   readonly customIcons?: Pick<ProjectCustomIconStore, "write" | "remove">;
   /** Memory changes agents asked for, answered by the window whose turn raised them. */
   readonly memoryProposals?: Pick<ProjectMemoryProposalService, "list" | "decide">;
+  /** Read-only bounded repository discovery for a bound Code Project. */
+  readonly listRepositories?: (
+    windowId: WindowId,
+    projectId: ProjectId,
+    signal: AbortSignal,
+  ) => Promise<ProjectRepositoriesList>;
   /** Read-only first-run provider folder discovery and one-click Code Project import. */
   readonly providerFolderScan?: ProviderFolderScanApi;
   readonly maxRequestBodySize?: number;
@@ -85,6 +94,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     const isMemory = memoryMatch !== null;
     const environmentMatch = /^\/api\/projects\/([^/]+)\/environment$/.exec(url.pathname);
     const isEnvironment = environmentMatch !== null;
+    const repositoriesMatch = /^\/api\/projects\/([^/]+)\/repositories$/.exec(url.pathname);
+    const isRepositories = repositoriesMatch !== null;
     const iconMatch = /^\/api\/projects\/([^/]+)\/icon$/.exec(url.pathname);
     const isIcon = iconMatch !== null;
     if (
@@ -98,6 +109,7 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       !isProviderFolderImport &&
       !isMemory &&
       !isEnvironment &&
+      !isRepositories &&
       !isIcon
     )
       return undefined;
@@ -109,7 +121,12 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
       isProviderFolderImport;
     const changesIcon = isIcon && (request.method === "PUT" || request.method === "DELETE");
     if (
-      ((isBootstrap || isSearch || isMemory || isMemoryProposals || isEnvironment) &&
+      ((isBootstrap ||
+        isSearch ||
+        isMemory ||
+        isMemoryProposals ||
+        isEnvironment ||
+        isRepositories) &&
         request.method !== "GET") ||
       (isIcon && request.method !== "GET" && !changesIcon) ||
       (isPost && request.method !== "POST")
@@ -141,7 +158,8 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
     if (
       (isBootstrap && url.search !== "") ||
       (isSearch && [...url.searchParams.keys()].some((key) => key !== "q")) ||
-      ((isPost || isMemory || isMemoryProposals || isIcon) && url.search !== "") ||
+      ((isPost || isMemory || isMemoryProposals || isIcon || isRepositories) &&
+        url.search !== "") ||
       (isEnvironment &&
         [...url.searchParams.keys()].some((key) => key !== "threadId" && key !== "fresh"))
     ) {
@@ -249,6 +267,36 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         }
         headers.set("content-type", icon.mediaType);
         return new Response(icon.bytes, { status: 200, headers });
+      }
+      if (isRepositories) {
+        if (dependencies.listRepositories === undefined) {
+          return response(
+            { category: "unavailable", message: "Repository discovery is unavailable." },
+            503,
+            origin,
+          );
+        }
+        let projectId;
+        try {
+          projectId = decodeProjectId(decodeURIComponent(repositoriesMatch[1] ?? ""));
+        } catch {
+          return response({ category: "invalid", message: "Project ID is invalid." }, 400, origin);
+        }
+        if (
+          actScope !== undefined &&
+          hubActRefusal(actScope, String(projectId), "start") !== undefined
+        ) {
+          return response(
+            { category: "unauthorized", message: "Project request is unauthorized." },
+            403,
+            origin,
+          );
+        }
+        return response(
+          await dependencies.listRepositories(windowId, projectId, request.signal),
+          200,
+          origin,
+        );
       }
       if (isEnvironment) {
         const freshValue = url.searchParams.get("fresh");

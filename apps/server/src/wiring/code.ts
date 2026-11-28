@@ -17,9 +17,12 @@ import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { GitHistoryPort } from "../code/gitHistoryPort";
 import {
+  deriveExistingWorktreeCheckoutId,
   MINIMUM_GIT_VERSION,
   type RepositoryIdentityObservation,
 } from "../code/repositoryIdentity";
+import { discoverProjectRepositories } from "../code/projectRepositoryDiscovery";
+export { deriveExistingWorktreeCheckoutId };
 import { createHash, randomUUID } from "node:crypto";
 import { CODE_HOME_DELIVERY_OBSERVED } from "@octant/contracts/code-home-activity";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -30,6 +33,7 @@ import { join } from "node:path";
 import {
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
+  type CodePreparedLinkedCheckout,
   type CodeProjectPullRequestRow,
   type CodeRepositoryId,
   type CodeWorktreeRemoteFacts,
@@ -41,12 +45,19 @@ import {
   decodeCodeThreadId,
   type CodeThreadId,
   decodeWindowId,
+  MAX_CODE_THREAD_LINKED_CHECKOUTS,
   type ProjectId,
   type ProviderInstance,
   type ProviderModel,
   type WindowId,
 } from "@octant/contracts";
-import { defaultShellSettings, projectExtraFolderRoots } from "@octant/domain";
+import {
+  defaultShellSettings,
+  folderContainsPath,
+  projectExtraFolderRoots,
+  resolveStrict,
+  threadReachesCheckout,
+} from "@octant/domain";
 import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
@@ -202,6 +213,81 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
             return false;
           }
         };
+      const primaryCheck = String(checkout.id) === String(thread.checkoutId);
+      if (!primaryCheck) {
+        const reach = threadReachesCheckout(thread, checkout.id, "git-and-review");
+        if (
+          !reach.reachable ||
+          reach.role !== "linked" ||
+          checkout.kind !== "existing-worktree" ||
+          String(checkout.repositoryId) !== String(reach.repositoryId)
+        ) {
+          return undefined;
+        }
+        const extraFolders = projectExtraFolderRoots(project);
+        const discovered = await discoverProjectRepositories(
+          {
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            mainRoot: repositoryRoot,
+            extraFolders,
+            homeDirectory: homedir(),
+            strict: false,
+          },
+          { repository: options.repository },
+          signal ?? new AbortController().signal,
+        );
+        if (abandoned()) return undefined;
+        const matched = discovered.repositories.find(
+          (entry) =>
+            String(entry.checkoutId) === String(checkout.id) &&
+            String(entry.repositoryId) === String(checkout.repositoryId),
+        );
+        if (matched === undefined) return undefined;
+        const owningExtraFolder =
+          matched.source === "extra-folder"
+            ? extraFolders.find((folder) => folderContainsPath(folder, matched.canonicalRoot))
+            : undefined;
+        if (matched.source === "extra-folder" && owningExtraFolder === undefined) return undefined;
+        let linkedObservation: RepositoryIdentityObservation;
+        try {
+          linkedObservation = await options.repository.observe(
+            matched.canonicalRoot,
+            signal ?? new AbortController().signal,
+          );
+        } catch (error) {
+          if (abandoned()) return undefined;
+          throw error;
+        }
+        if (abandoned()) return undefined;
+        if (
+          linkedObservation.status !== "available" ||
+          linkedObservation.repositoryId !== checkout.repositoryId ||
+          linkedObservation.repositoryRoot !== matched.canonicalRoot ||
+          linkedObservation.checkout.canonicalPath !== matched.canonicalRoot ||
+          linkedObservation.checkout.locked !== undefined ||
+          linkedObservation.checkout.prunable !== undefined ||
+          !observedCheckoutHeadMatches(linkedObservation.checkout, checkout.head)
+        ) {
+          return undefined;
+        }
+        const linkedIdentity = await options.statIdentity(matched.canonicalRoot);
+        if (abandoned() || !bindingCurrent()) return undefined;
+        const baseProof = currentProof(matched.canonicalRoot, linkedIdentity);
+        return {
+          fileId: stableCodeFileId(thread.id, checkout.id, relativePath),
+          rootPath: matched.canonicalRoot,
+          rootIdentity: linkedIdentity,
+          current: () => {
+            if (!baseProof()) return false;
+            if (owningExtraFolder === undefined) return true;
+            const latest = options.readProject(thread.projectId);
+            return (
+              latest?.type === "code" && projectExtraFolderRoots(latest).includes(owningExtraFolder)
+            );
+          },
+        };
+      }
       let rootPath: string;
       if (checkout.kind === "plain-folder") {
         // No repository to observe: the folder is the checkout. Its identity
@@ -353,6 +439,8 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
    * Absent means required, which is what Code always demanded.
    */
   readonly requireGitRepository?: () => boolean;
+  readonly homeDirectory?: () => string;
+  readonly isProjectStrict?: (projectId: string) => boolean;
 }): CodeCheckoutObservationPort {
   return {
     observe: async (windowId, projectId) => {
@@ -374,30 +462,69 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
       }
 
       const root = project.binding.canonicalRoot;
-      const observation = await options.repository.observe(root, new AbortController().signal);
-      if (
-        observation.status === "unavailable" &&
-        observation.reason === "not-repository" &&
-        options.requireGitRepository?.() === false
-      ) {
-        // The folder is the checkout. Everything Git-backed reads the `none`
-        // head and reports itself unavailable instead of pretending.
-        const plain = plainFolderCheckoutIdentity({
-          projectId,
-          bindingRevisionId: revision.revisionId,
-          canonicalRoot: root,
-        });
-        return {
-          bindingRevisionId: revision.revisionId,
-          checkout: decodeCodeCheckoutIdentity({
-            id: plain.checkoutId,
-            repositoryId: plain.repositoryId,
-            kind: "plain-folder",
-            availability: "available",
-            head: { kind: "none" },
-            observedAt: options.clock(),
-          }),
-        };
+      const extraFolders = projectExtraFolderRoots(project);
+      const signal = new AbortController().signal;
+      const observation = await options.repository.observe(root, signal);
+      const discoverLinked = async (
+        excludeRepositoryId?: string,
+        excludeCanonicalRoot?: string,
+      ): Promise<ReadonlyArray<CodePreparedLinkedCheckout>> => {
+        const discovered = await discoverProjectRepositories(
+          {
+            projectId,
+            bindingRevisionId: revision.revisionId,
+            mainRoot: root,
+            extraFolders,
+            homeDirectory: options.homeDirectory?.() ?? homedir(),
+            strict: options.isProjectStrict?.(String(projectId)) ?? false,
+          },
+          { repository: options.repository },
+          signal,
+        );
+        const now = options.clock();
+        return discovered.repositories
+          .filter(
+            (repo) =>
+              repo.canonicalRoot !== excludeCanonicalRoot &&
+              String(repo.repositoryId) !== excludeRepositoryId,
+          )
+          .slice(0, MAX_CODE_THREAD_LINKED_CHECKOUTS)
+          .map((repo) => ({
+            label: repo.name,
+            checkout: decodeCodeCheckoutIdentity({
+              id: repo.checkoutId,
+              repositoryId: repo.repositoryId,
+              kind: "existing-worktree",
+              availability: "available",
+              head: repo.head,
+              observedAt: now,
+            }),
+          }));
+      };
+      if (observation.status === "unavailable" && observation.reason === "not-repository") {
+        // A plain folder that holds Git repositories (1-2 levels down or in
+        // granted extra folders) may bind as a Code Project even while
+        // `requireGitRepository` is on.
+        const linkedCheckouts = await discoverLinked();
+        if (options.requireGitRepository?.() === false || linkedCheckouts.length > 0) {
+          const plain = plainFolderCheckoutIdentity({
+            projectId,
+            bindingRevisionId: revision.revisionId,
+            canonicalRoot: root,
+          });
+          return {
+            bindingRevisionId: revision.revisionId,
+            checkout: decodeCodeCheckoutIdentity({
+              id: plain.checkoutId,
+              repositoryId: plain.repositoryId,
+              kind: "plain-folder",
+              availability: "available",
+              head: { kind: "none" },
+              observedAt: options.clock(),
+            }),
+            ...(linkedCheckouts.length === 0 ? {} : { linkedCheckouts }),
+          };
+        }
       }
       // Say which of these it is. Every one of them used to arrive at the
       // composer as "this folder has no Git checkout, run git init", which is
@@ -437,6 +564,12 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
         head,
         observedAt: options.clock(),
       });
+      // Only discover linked repositories when the Project has extra folders or
+      // nested repositories; single-repository Projects emit no linkedCheckouts.
+      const linkedCheckouts =
+        extraFolders.length > 0
+          ? await discoverLinked(observation.repositoryId, observation.repositoryRoot)
+          : [];
       // D3: observe authoritative remote facts from the Git repository so the
       // composer can decide whether "Start from origin" is available. Fail
       // closed with no remotes when the observation is unavailable.
@@ -465,32 +598,11 @@ export function createExistingWorktreeCodeCheckoutObservation(options: {
       return {
         bindingRevisionId: revision.revisionId,
         checkout,
+        ...(linkedCheckouts.length === 0 ? {} : { linkedCheckouts }),
         ...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts }),
       };
     },
   };
-}
-
-export function deriveExistingWorktreeCheckoutId(input: {
-  readonly projectId: string;
-  readonly bindingRevisionId: string;
-  readonly repositoryId: string;
-  readonly canonicalRoot: string;
-}) {
-  const digest = createHash("sha256")
-    .update("octant.existing-worktree-checkout.v1\0")
-    .update(input.projectId)
-    .update("\0")
-    .update(input.bindingRevisionId)
-    .update("\0")
-    .update(input.repositoryId)
-    .update("\0")
-    .update(input.canonicalRoot)
-    .digest("hex")
-    .slice(0, 32);
-  return decodeCodeCheckoutId(
-    `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20)}`,
-  );
 }
 
 /**
@@ -983,6 +1095,43 @@ export function wireCode(deps: CodeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    const listProjectRepositories = async (
+      windowId: WindowId,
+      projectId: ProjectId,
+      signal: AbortSignal,
+    ) => {
+      const bootstrap = await projectService.bootstrap(windowId);
+      const summary = bootstrap.active.find(
+        (candidate) => candidate.id === projectId && candidate.type === "code",
+      );
+      const project = persistence.readProject(projectId);
+      const revision = project?.type === "code" ? project.bindingHistory.at(-1) : undefined;
+      if (
+        summary?.type !== "code" ||
+        project?.type !== "code" ||
+        project.lifecycle !== "active" ||
+        revision === undefined ||
+        summary.binding.canonicalRoot !== project.binding.canonicalRoot ||
+        revision.currentBinding.canonicalRoot !== project.binding.canonicalRoot
+      ) {
+        throw new Error("Code Project binding is unavailable.");
+      }
+      return await discoverProjectRepositories(
+        {
+          projectId,
+          bindingRevisionId: revision.revisionId,
+          mainRoot: project.binding.canonicalRoot,
+          extraFolders: projectExtraFolderRoots(project),
+          homeDirectory: homedir(),
+          strict: resolveStrict({
+            project,
+            settings: persistence.readCodeSettings()?.settings,
+          }),
+        },
+        { repository },
+        signal,
+      );
+    };
     const projectRoutes = createProjectRouteHandler({
       service: projectService,
       environmentService,
@@ -991,6 +1140,7 @@ export function wireCode(deps: CodeDependencies) {
       customIcons: projectCustomIcons,
       memoryProposals: deps.projectMemoryAccess.proposals,
       providerFolderScan,
+      listRepositories: listProjectRepositories,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       hubActScope: deps.hubActScopeSlot.current,
     });
@@ -1101,6 +1251,7 @@ export function wireCode(deps: CodeDependencies) {
             canBrowseProject: isCodeProject,
             canAccessProject: canAccessCodeProject,
           },
+          listProjectRepositories,
           checkouts,
           // A file in a Project's extra folder is named by absolute path and
           // opens, reads, saves and lists under the folder as its own root.

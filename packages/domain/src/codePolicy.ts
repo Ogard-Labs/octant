@@ -1,9 +1,99 @@
+import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type {
   PermissionPersistence,
   ProviderDriverKind,
   ProviderExecutionPolicy,
 } from "@octant/contracts/providers";
 import { isNativeHarnessDriverKind } from "./providerPolicy";
+
+export type CodeCheckoutReachScope = "primary-only" | "git-and-review";
+
+export interface ThreadCheckoutMembership {
+  readonly checkoutId: CodeCheckoutId;
+  readonly repositoryId: CodeRepositoryId;
+  readonly linkedCheckouts?:
+    | ReadonlyArray<{
+        readonly checkoutId: CodeCheckoutId;
+        readonly repositoryId: CodeRepositoryId;
+        readonly label: string;
+      }>
+    | undefined;
+}
+
+export type ThreadCheckoutReach =
+  | {
+      readonly reachable: true;
+      readonly role: "primary" | "linked";
+      readonly checkoutId: CodeCheckoutId;
+      readonly repositoryId: CodeRepositoryId;
+      readonly label?: string;
+    }
+  | { readonly reachable: false };
+
+/**
+ * Whether `thread` may address `checkoutId` under `scope`.
+ *
+ * Diff, staging, commit, push, and pull-request operations may target either
+ * the thread's primary checkout or one of its explicitly linked checkouts
+ * (`git-and-review`). Every other operation stays primary-only so linked
+ * repositories never widen turns, terminals, tests, rewinds, or child runs.
+ */
+export function threadReachesCheckout(
+  thread: ThreadCheckoutMembership,
+  checkoutId: CodeCheckoutId,
+  scope: CodeCheckoutReachScope = "git-and-review",
+): ThreadCheckoutReach {
+  if (String(thread.checkoutId) === String(checkoutId)) {
+    return {
+      reachable: true,
+      role: "primary",
+      checkoutId: thread.checkoutId,
+      repositoryId: thread.repositoryId,
+    };
+  }
+  if (scope !== "git-and-review") return { reachable: false };
+  const linked = thread.linkedCheckouts?.find(
+    (entry) => String(entry.checkoutId) === String(checkoutId),
+  );
+  if (linked === undefined) return { reachable: false };
+  return {
+    reachable: true,
+    role: "linked",
+    checkoutId: linked.checkoutId,
+    repositoryId: linked.repositoryId,
+    label: linked.label,
+  };
+}
+
+/**
+ * Operations whose checkout scope may target any repository linked to the
+ * thread (diff, staging, commit, push, pull request). Everything else stays
+ * on the primary checkout.
+ */
+const GIT_AND_REVIEW_OPERATION_KINDS = new Set<string>([
+  "observe-git",
+  "prepare-git-hunks",
+  "stage-git-hunks",
+  "unstage-git-hunks",
+  "reverse-git-hunks",
+  "stage-git",
+  "unstage-git",
+  "discard-git-changes",
+  "commit-git",
+  "push-git",
+  "draft-git-text",
+  "switch-git-branch",
+  "create-pull-request",
+  "update-pull-request",
+  "comment-pull-request",
+  "merge-pull-request",
+  "observe-pull-request",
+  "prepare-review-target",
+]);
+
+export function codeOperationReachScope(commandKind: string): CodeCheckoutReachScope {
+  return GIT_AND_REVIEW_OPERATION_KINDS.has(commandKind) ? "git-and-review" : "primary-only";
+}
 
 export type CodeActor = "local-user" | "agent" | "remote-client";
 export type CodeOperation =

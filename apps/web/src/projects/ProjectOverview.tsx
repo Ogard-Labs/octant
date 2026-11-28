@@ -609,6 +609,15 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                     onRemove: (canonicalRoot: string) =>
                       onRemoveExtraFolder(props.project.id, canonicalRoot),
                   })}
+              {...(props.project.type === "code" &&
+              props.projectClient?.listRepositories !== undefined
+                ? (() => {
+                    const list = props.projectClient.listRepositories;
+                    return {
+                      listRepositories: (signal?: AbortSignal) => list(props.project.id, signal),
+                    };
+                  })()
+                : {})}
               project={props.project}
             />
             {unavailable ? (

@@ -1,5 +1,5 @@
 import type { RequiredChecksState } from "@octant/domain/code-pull-request-action-policy";
-import type { CodeThreadId } from "@octant/contracts";
+import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
 import type { CodeOperationPullRequestPort } from "./codeOperationService";
 import {
   GhPullRequestPort,
@@ -685,7 +685,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function createGhPullRequestPort(options: {
   readonly command: GhCommandPort;
-  readonly resolveTarget: (threadId: CodeThreadId) => Promise<GhDeliveryTarget | undefined>;
+  readonly resolveTarget: (
+    threadId: CodeThreadId,
+    checkoutId?: CodeCheckoutId,
+  ) => Promise<GhDeliveryTarget | undefined>;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
 }): CodeOperationPullRequestPort {
   const inherited =
@@ -702,7 +705,8 @@ export function createGhPullRequestPort(options: {
     ensure: (input, signal) => port.ensure(input, signal),
     update: (input, signal) => port.update(input, signal),
     observeReview: (input, signal) => port.observeReview(input, signal),
-    locate: (threadId, state, signal) => port.locate(threadId, state, signal),
+    locate: (threadId, state, signal, checkoutId) =>
+      port.locate(threadId, state, signal, checkoutId),
     actions: {
       editLabels: (input, signal) => actions.editLabels(input, signal),
       comment: (input, signal) => actions.comment(input, signal),

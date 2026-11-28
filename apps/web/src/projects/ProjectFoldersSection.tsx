@@ -1,9 +1,15 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectSummary } from "@octant/contracts/projects";
+import type {
+  DiscoveredProjectRepository,
+  DiscoveredWorkspaceFolder,
+  ProjectRepositoriesList,
+} from "@octant/contracts/project-repositories";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { FolderPicker } from "./FolderPicker";
@@ -21,6 +27,8 @@ export interface ProjectFoldersSectionProps {
   /** `confirmHomeFolder` resends a home folder the person confirmed after its warning. */
   readonly onAdd?: (receiptId: string, confirmHomeFolder?: boolean) => Promise<ExtraFolderChange>;
   readonly onRemove?: (canonicalRoot: string) => Promise<ProjectChange>;
+  /** Discovered Git repositories and `.code-workspace` entries for a Code Project. */
+  readonly listRepositories?: (signal?: AbortSignal) => Promise<ProjectRepositoriesList>;
   /** True for an archived Project or a stale snapshot: the folders are listed, never changed. */
   readonly disabled?: boolean;
 }
@@ -30,8 +38,11 @@ type Notice =
   | { readonly kind: "done"; readonly message: string }
   | { readonly kind: "failed"; readonly message: string };
 
-const EXTRA_FOLDERS_RULE =
+const WORK_EXTRA_FOLDERS_RULE =
   "Extra folders get the same access as the main folder. Checkouts and Git stay in the main folder. A terminal or action can start in any of them.";
+
+const CODE_EXTRA_FOLDERS_RULE =
+  "Extra folders share the main folder's access. Git repositories inside granted folders are reachable per repository in Diff and Git. A terminal or action can start in any of them.";
 
 const NO_NOTICE: Notice = { kind: "none" };
 const SELECTION_UNAVAILABLE: Notice = {
@@ -41,27 +52,30 @@ const SELECTION_UNAVAILABLE: Notice = {
 
 /**
  * The folders a Work or Code Project reaches: its main folder, then the extra
- * folders the person added. Extra folders get the main folder's access at each
- * thread's level, so adding one is a grant and the page says so; the host
- * decides which folders it accepts and this section shows its reason when it
- * refuses one.
+ * folders the person added. For Code Projects, also lists repositories
+ * discovered inside those granted folders and any outside folders named by a
+ * `.code-workspace` file (offered through the existing extra-folder picker).
  */
 export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
-  const { onAdd, onRemove } = props;
+  const { onAdd, onRemove, listRepositories } = props;
   const alive = useRef(true);
   const [notice, setNotice] = useState<Notice>(NO_NOTICE);
   const [pending, setPending] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [discovered, setDiscovered] = useState<ProjectRepositoriesList>();
   // The host stopped at the home folder warning; Confirm spends its fresh receipt.
   const [homeWarning, setHomeWarning] = useState<
     | { readonly canonicalRoot: string; readonly receiptId: string; readonly warning: string }
     | undefined
   >();
   const extras = props.project.extraFolders ?? [];
+  const extraRootsKey = extras.map((folder) => folder.canonicalRoot).join("\0");
   const mode = props.project.type === "code" ? "code" : "work";
   const editable = props.disabled !== true;
   const canAdd = editable && onAdd !== undefined;
   const canRemove = editable && onRemove !== undefined;
+  const extraFoldersRule =
+    props.project.type === "code" ? CODE_EXTRA_FOLDERS_RULE : WORK_EXTRA_FOLDERS_RULE;
 
   useEffect(() => {
     alive.current = true;
@@ -69,6 +83,36 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
       alive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (props.project.type !== "code" || listRepositories === undefined) {
+      setDiscovered(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    void listRepositories(controller.signal)
+      .then((result) => {
+        if (active && alive.current && !controller.signal.aborted) {
+          setDiscovered(result);
+        }
+      })
+      .catch(() => {
+        if (active && alive.current && !controller.signal.aborted) {
+          setDiscovered(undefined);
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    listRepositories,
+    props.project.id,
+    props.project.type,
+    props.project.binding.canonicalRoot,
+    extraRootsKey,
+  ]);
 
   async function settle(change: Promise<ExtraFolderChange>, done: string) {
     setPending(true);
@@ -129,11 +173,24 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
   }
 
   const failed = notice.kind === "failed";
+  const discoveredRepos = discovered?.repositories ?? [];
+  const workspaceFolders = discovered?.workspaceFolders ?? [];
+  const mainIsPlainMultiRepo =
+    props.project.type === "code" &&
+    discoveredRepos.length > 0 &&
+    !discoveredRepos.some((repo) => repo.source === "main-folder");
+
   return (
     <div className="project-folders">
       <ul aria-label="Project folders" className="project-folders__list">
         <FolderRow
-          label={props.project.type === "code" ? "Main repository" : "Main directory"}
+          label={
+            props.project.type === "code"
+              ? mainIsPlainMultiRepo
+                ? "Main folder"
+                : "Main repository"
+              : "Main directory"
+          }
           path={props.project.binding.canonicalRoot}
         />
         {extras.map((folder) => (
@@ -161,10 +218,45 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
           />
         ))}
       </ul>
+      {discoveredRepos.length > 0 ? (
+        <div className="project-folders__repositories">
+          <p className="project-folders__subheading">
+            Repositories ({discoveredRepos.length}
+            {discovered?.truncated === true ? "+" : ""})
+          </p>
+          <ul aria-label="Discovered repositories" className="project-folders__list">
+            {discoveredRepos.map((repo) => (
+              <RepositoryRow key={repo.canonicalRoot} repository={repo} />
+            ))}
+          </ul>
+          {discovered?.truncated === true ? (
+            <p className="project-folders__note">
+              Showing the first {discoveredRepos.length} repositories in this Project&apos;s
+              folders.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {workspaceFolders.length > 0 ? (
+        <div className="project-folders__workspace-folders">
+          <p className="project-folders__subheading">Workspace file folders</p>
+          <ul aria-label="Workspace file folders" className="project-folders__list">
+            {workspaceFolders.map((entry) => (
+              <WorkspaceFolderRow
+                key={`${entry.workspaceFile}:${entry.path}`}
+                entry={entry}
+                canAdd={canAdd}
+                pending={pending}
+                onChoose={() => void choose()}
+              />
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {canAdd || extras.length > 0 ? (
-        <p className="project-folders__note" title={EXTRA_FOLDERS_RULE}>
+        <p className="project-folders__note" title={extraFoldersRule}>
           Extra folders share the main folder&apos;s access.
-          <span className="sr-only"> {EXTRA_FOLDERS_RULE}</span>
+          <span className="sr-only"> {extraFoldersRule}</span>
         </p>
       ) : null}
       {canAdd ? (
@@ -249,6 +341,74 @@ function FolderRow(props: {
         <span className="sr-only">{props.path}</span>
       </strong>
       {props.trailing}
+    </li>
+  );
+}
+
+function RepositoryRow(props: { readonly repository: DiscoveredProjectRepository }) {
+  const { repository } = props;
+  const headLabel =
+    repository.head.kind === "branch"
+      ? String(repository.head.name)
+      : repository.head.kind === "detached"
+        ? "Detached HEAD"
+        : undefined;
+  return (
+    <li className="project-folders__row project-folders__row--repo">
+      <span className="project-folders__label">{repository.name}</span>
+      <strong className="project-folders__path" title={repository.canonicalRoot}>
+        <span aria-hidden="true">{homeRelativePath(repository.canonicalRoot)}</span>
+        <span className="sr-only">{repository.canonicalRoot}</span>
+      </strong>
+      {headLabel === undefined ? null : <OctantBadge variant="secondary">{headLabel}</OctantBadge>}
+      {repository.submodules !== undefined && repository.submodules.length > 0 ? (
+        <ul aria-label={`Submodules in ${repository.name}`} className="project-folders__submodules">
+          {repository.submodules.map((sub) => (
+            <li key={sub.path} className="project-folders__submodule">
+              <span>{sub.path}</span>
+              <OctantBadge variant="secondary">
+                {sub.initialized ? "Submodule" : "Submodule · uninitialized"}
+              </OctantBadge>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+function WorkspaceFolderRow(props: {
+  readonly entry: DiscoveredWorkspaceFolder;
+  readonly canAdd: boolean;
+  readonly pending: boolean;
+  readonly onChoose: () => void;
+}) {
+  const { entry } = props;
+  return (
+    <li className="project-folders__row">
+      <span className="project-folders__label" title={entry.workspaceFile}>
+        {entry.name}
+      </span>
+      <strong className="project-folders__path" title={entry.path}>
+        <span aria-hidden="true">{homeRelativePath(entry.path)}</span>
+        <span className="sr-only">{entry.path}</span>
+      </strong>
+      {entry.status === "available" && props.canAdd ? (
+        <OctantButton
+          aria-label={`Add ${entry.name} from ${entry.workspaceFile}`}
+          disabled={props.pending}
+          onClick={props.onChoose}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          Add folder…
+        </OctantButton>
+      ) : entry.status === "already-included" ? (
+        <OctantBadge variant="secondary">Included</OctantBadge>
+      ) : entry.status === "refused" ? (
+        <span className="project-folders__note">{entry.reason ?? "Unavailable."}</span>
+      ) : null}
     </li>
   );
 }

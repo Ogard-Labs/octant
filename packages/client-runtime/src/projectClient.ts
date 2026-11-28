@@ -13,6 +13,7 @@ import {
   ProjectMemoryProposalDecisionResult,
   ProjectMemoryProposalList,
   ProjectMemoryView,
+  ProjectRepositoriesList,
   ProjectSummary,
   ProviderFolderScanResult,
   decodeHostAnswer,
@@ -62,6 +63,8 @@ export interface ProjectClient {
   ): Promise<DesignSystemDocument>;
   /** Create (no base revision) or replace exactly the revision it was edited from. */
   saveDesignSystem(request: DesignSystemWriteRequest): Promise<DesignSystemWriteResult>;
+  /** Discovered Git repositories and `.code-workspace` folders for a Code Project. */
+  listRepositories?(projectId: ProjectId, signal?: AbortSignal): Promise<ProjectRepositoriesList>;
   /** Host-side read-only scan of folders used by local providers during first run. */
   scanProviderFolders?(signal?: AbortSignal): Promise<ProviderFolderScanResult>;
   /** Import ticked opaque provider folder IDs as Code Projects through host folder receipts. */
@@ -211,6 +214,17 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           body: JSON.stringify(body),
         },
         decodeHostAnswer(DesignSystemWriteResult),
+      );
+    },
+    listRepositories(projectId, signal) {
+      return request(
+        options.fetch,
+        new URL(
+          `/api/projects/${encodeURIComponent(projectId)}/repositories`,
+          options.baseUrl,
+        ).toString(),
+        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
+        decodeHostAnswer(ProjectRepositoriesList),
       );
     },
     scanProviderFolders(signal) {

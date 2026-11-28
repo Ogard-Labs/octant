@@ -85,7 +85,7 @@
     "apps/web/src/chat/chatMarkdownExport.ts": 1,
     "apps/web/src/chat/useChatController.ts": 2,
     "apps/web/src/code/CodeOverview.tsx": 3,
-    "apps/web/src/code/CodeWorkspace.tsx": 3,
+    "apps/web/src/code/CodeWorkspace.tsx": 1,
     "apps/web/src/preview/usePreviewController.ts": 1,
     "apps/web/src/projects/ProjectSidebarSection.tsx": 4,
     "apps/web/src/providers/ComposerModelPicker.tsx": 1,

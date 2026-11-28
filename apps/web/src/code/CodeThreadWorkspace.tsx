@@ -34,6 +34,7 @@ import { decodeMentionableThreadId } from "@octant/contracts";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
+  type CodeCheckoutId,
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts/code";
@@ -2798,14 +2799,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                             message.status !== "incomplete" &&
                             message.status !== "waiting"
                               ? {
-                                  onReviewFile: (path: string) => {
+                                  onReviewFile: (path: string, fileCheckoutId?: CodeCheckoutId) => {
+                                    const targetCheckoutId = fileCheckoutId ?? message.checkoutId;
                                     if (
-                                      message.checkoutId === undefined ||
+                                      targetCheckoutId === undefined ||
                                       message.operationId === undefined
                                     )
                                       return;
                                     props.onOpenReview?.({
-                                      checkoutId: message.checkoutId,
+                                      checkoutId: targetCheckoutId,
                                       path,
                                       receiptOperationId: message.operationId,
                                     });
