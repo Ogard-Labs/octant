@@ -7,7 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
+import { MAX_QUESTION_OPTIONS, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
@@ -202,9 +202,15 @@ function mapQuestion(
       }),
     ];
   }
+  // Every question path shares one ceiling of choices, and a question that
+  // offers more is refused whole, as Claude and Codex are, rather than asked
+  // one at a time with every choice.
   if (
     questions.some(
-      (question) => question.multiple === true || normalizeText(question.question) === undefined,
+      (question) =>
+        question.multiple === true ||
+        normalizeText(question.question) === undefined ||
+        question.options.length > MAX_QUESTION_OPTIONS,
     )
   ) {
     return [

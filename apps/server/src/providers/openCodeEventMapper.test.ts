@@ -462,6 +462,39 @@ describe("mapOpenCodeEvent", () => {
     expect(results).toMatchObject([{ kind: "failed", failure: { category: "unsupported" } }]);
   });
 
+  it("refuses a question offering more than twenty choices rather than asking it uncut", () => {
+    const results = mapOpenCodeEvent(
+      context(),
+      official({
+        id: "crowded-set",
+        type: "question.v2.asked",
+        properties: {
+          id: "question-set",
+          sessionID: "provider-session",
+          questions: [
+            {
+              header: "Region",
+              question: "Which region?",
+              options: Array.from({ length: 21 }, (_, index) => ({
+                label: `region-${String(index)}`,
+                description: "A region",
+              })),
+            },
+          ],
+        },
+      }),
+    );
+    expect(results).toMatchObject([
+      {
+        kind: "failed",
+        failure: {
+          category: "unsupported",
+          message: expect.stringContaining("up to twenty choices each"),
+        },
+      },
+    ]);
+  });
+
   it("maps an idle status to completion with an opaque resume cursor", () => {
     expect(
       mapped(

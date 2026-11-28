@@ -2301,7 +2301,8 @@ same way and answered in the subagent's own session. The written posture
 allows `question` at every level, Plan included, since a question changes
 nothing, and the capability is reported `supported`. A question asking for
 several answers (a multiselect field) is asked as one, and only a set the
-questionnaire cannot hold that has one fails the turn as too large to show. A form with a question that asks for a password,
+questionnaire cannot hold that has one, or a question offering more than twenty
+choices, fails the turn as too large to show. A form with a question that asks for a password,
 passphrase, API key, access token, or private key is never shown or
 journaled: each of its fields is answered at once with the refusal Codex
 gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
