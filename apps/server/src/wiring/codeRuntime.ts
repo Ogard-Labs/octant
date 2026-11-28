@@ -19,9 +19,11 @@ import { designSystemTurnContext } from "../designSystems/designSystemContext";
 import {
   appToolThreadLevel,
   browserToolTransport,
+  threadReachesCheckout,
   threadToolStepLimit,
   usageLimitFromReading,
 } from "@octant/domain";
+import { resolveConnectedGitHubRepository } from "../code/connectedRepository";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -2385,10 +2387,73 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           propose: async (_windowId, threadId, draft) =>
             codePlannerService.propose(threadId, draft),
         },
-        resolvePullRequestTarget: async (threadId) => {
+        resolvePullRequestTarget: async (threadId, checkoutId) => {
           const thread = persistence.readCodeThread(threadId);
           if (thread === undefined) return undefined;
-          const threadLinks = pullRequestLinkService.listForThread(threadId);
+          // For a linked repository checkout in a multi-repo thread, resolve
+          // GitHub identity and branch directly from that checkout's own root.
+          if (checkoutId !== undefined && String(checkoutId) !== String(thread.checkoutId)) {
+            const reach = threadReachesCheckout(thread, checkoutId, "git-and-review");
+            if (!reach.reachable || reach.role !== "linked") return undefined;
+            const linkedCheckout = persistence.readCodeCheckout(checkoutId);
+            if (
+              linkedCheckout === undefined ||
+              linkedCheckout.availability !== "available" ||
+              linkedCheckout.head.kind !== "branch"
+            ) {
+              return undefined;
+            }
+            const resolved = await roots.resolve(
+              ROUTINE_HOST_SCOPE_ID,
+              thread,
+              linkedCheckout,
+              rootProbePath,
+            );
+            if (resolved === undefined) return undefined;
+            const observed = await gitObservationPort.observe(resolved.rootPath);
+            if (observed.status !== "ready") return undefined;
+            const github = resolveConnectedGitHubRepository(observed.remotes);
+            if (github === undefined) return undefined;
+            const headBranch =
+              observed.head.kind === "branch"
+                ? observed.head.name
+                : String(linkedCheckout.head.name);
+            const baseRepository = `${github.owner}/${github.repository}`;
+            return {
+              authorization: "confirmed-delivery-target",
+              baseRepository,
+              baseBranch: thread.deliveryTarget.proposedBaseBranch,
+              head: `${github.owner}:${headBranch}`,
+            };
+          }
+          const allThreadLinks = pullRequestLinkService.listForThread(threadId);
+          let threadLinks = allThreadLinks;
+          if (thread.linkedCheckouts !== undefined && thread.linkedCheckouts.length > 0) {
+            const primaryCheckout = persistence.readCodeCheckout(thread.checkoutId);
+            if (
+              primaryCheckout === undefined ||
+              primaryCheckout.availability !== "available" ||
+              primaryCheckout.kind === "plain-folder"
+            ) {
+              return undefined;
+            }
+            const resolvedPrimary = await roots.resolve(
+              ROUTINE_HOST_SCOPE_ID,
+              thread,
+              primaryCheckout,
+              rootProbePath,
+            );
+            if (resolvedPrimary === undefined) return undefined;
+            const observedPrimary = await gitObservationPort.observe(resolvedPrimary.rootPath);
+            if (observedPrimary.status !== "ready") return undefined;
+            const primaryGitHub = resolveConnectedGitHubRepository(observedPrimary.remotes);
+            if (primaryGitHub === undefined) return undefined;
+            const expectedRepo = `${primaryGitHub.owner}/${primaryGitHub.repository}`.toLowerCase();
+            threadLinks = allThreadLinks.filter(
+              (link) =>
+                `${link.repositoryOwner}/${link.repositoryName}`.toLowerCase() === expectedRepo,
+            );
+          }
           const matchingLink =
             threadLinks.find(
               (link) =>

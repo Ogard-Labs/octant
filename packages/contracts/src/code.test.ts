@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import * as codeContracts from "./code";
+import { decodeProjectRepositoriesList } from "./projectRepositories";
 import { decodeHostAnswer } from "./hostAnswer";
 import {
   decodeCodeCheckoutIdentity,
@@ -1286,5 +1287,73 @@ describe("Code managed thread creation contracts", () => {
         items: [{ kind: "thread-done", threadId: ids.thread, extra: true }],
       }),
     ).toThrow();
+  });
+
+  it("decodes optional linked checkouts on Code threads within bounds and rejects empty or oversized lists", () => {
+    const linkedCheckout = {
+      checkoutId: codeContracts.decodeCodeCheckoutId("00000000-0000-4000-8000-000000000901"),
+      repositoryId: `repo_${"1".repeat(64)}`,
+      label: "repo-a",
+    };
+
+    // Single-repo threads omit linkedCheckouts completely.
+    const single = decodeCodeThread(thread);
+    expect(single.linkedCheckouts).toBeUndefined();
+    expect("linkedCheckouts" in single).toBe(false);
+
+    // Multi-repo threads carry 1..MAX_CODE_THREAD_LINKED_CHECKOUTS entries.
+    const multi = decodeCodeThread({ ...thread, linkedCheckouts: [linkedCheckout] });
+    expect(multi.linkedCheckouts).toEqual([linkedCheckout]);
+
+    // Empty and oversized linkedCheckouts arrays are rejected.
+    expect(() => decodeCodeThread({ ...thread, linkedCheckouts: [] })).toThrow();
+    expect(() =>
+      decodeCodeThread({
+        ...thread,
+        linkedCheckouts: Array.from(
+          { length: codeContracts.MAX_CODE_THREAD_LINKED_CHECKOUTS + 1 },
+          (_, index) => ({
+            checkoutId: codeContracts.decodeCodeCheckoutId(
+              `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+            ),
+            repositoryId: `repo_${String(index % 10).repeat(64)}`,
+            label: `repo-${index}`,
+          }),
+        ),
+      }),
+    ).toThrow();
+
+    // Repository discovery list response decodes cleanly.
+    expect(
+      decodeProjectRepositoriesList({
+        kind: "project-repositories",
+        projectId: ids.project,
+        bindingRevisionId: ids.bindingRevision,
+        repositories: [
+          {
+            repositoryId,
+            checkoutId: ids.checkout,
+            canonicalRoot: "/workspace/repo-a",
+            name: "repo-a",
+            source: "nested",
+            head: { kind: "branch", name: "main", oid: "a".repeat(40) },
+            submodules: [{ name: "core", path: "libs/core", initialized: true }],
+          },
+        ],
+        workspaceFolders: [
+          {
+            workspaceFile: "app.code-workspace",
+            path: "/workspace/shared",
+            name: "shared",
+            status: "available",
+          },
+        ],
+        truncated: false,
+      }),
+    ).toMatchObject({
+      kind: "project-repositories",
+      projectId: ids.project,
+      truncated: false,
+    });
   });
 });

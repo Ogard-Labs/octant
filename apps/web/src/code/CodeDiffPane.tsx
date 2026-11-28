@@ -52,6 +52,8 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { CodeRepositoryPicker } from "./CodeRepositoryPicker";
+import type { CodeRepositoryOption } from "./threadRepositories";
 import {
   clearCodeDiffLayout,
   readCodeDiffLayout,
@@ -134,6 +136,10 @@ export interface CodeDiffPaneProps {
   readonly statusTrail?: ReactNode;
   /** Words that explain the review's scope, shown on an info icon's tooltip. */
   readonly info?: string;
+  /** Reachable Git repositories when this thread spans multiple repositories. */
+  readonly repositories?: ReadonlyArray<CodeRepositoryOption>;
+  readonly selectedCheckoutId?: CodeCheckoutId;
+  readonly onSelectRepository?: (checkoutId: CodeCheckoutId) => void;
 }
 
 type ContentState =
@@ -159,6 +165,18 @@ const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
 };
 
 export function CodeDiffPane(props: CodeDiffPaneProps) {
+  const picker =
+    props.repositories !== undefined &&
+    props.repositories.length > 1 &&
+    props.selectedCheckoutId !== undefined &&
+    props.onSelectRepository !== undefined ? (
+      <CodeRepositoryPicker
+        label="Repository"
+        onSelect={props.onSelectRepository}
+        repositories={props.repositories}
+        selectedCheckoutId={props.selectedCheckoutId}
+      />
+    ) : null;
   if (
     props.diff.state === "available" ||
     props.diff.state === "run" ||
@@ -167,28 +185,46 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     const summary = snapshot(props.diff);
     if (summary.changedPaths.length === 0) {
       return (
-        <OctantEmpty
-          message={
-            props.diff.state === "turn"
-              ? "This captured version has no readable changed paths. Later checkout edits may be uncaptured."
-              : "This checkout has no local changes to review."
-          }
-          state="neutral"
-          title={props.diff.state === "turn" ? "No paths in this capture" : "Checkout is clean"}
-        />
+        <>
+          {picker}
+          <OctantEmpty
+            message={
+              props.diff.state === "turn"
+                ? "This captured version has no readable changed paths. Later checkout edits may be uncaptured."
+                : "This checkout has no local changes to review."
+            }
+            state="neutral"
+            title={props.diff.state === "turn" ? "No paths in this capture" : "Checkout is clean"}
+          />
+        </>
       );
     }
     return (
-      <AvailableDiff
-        key={String(props.diff.threadId)}
-        {...props}
-        diff={props.diff}
-        snapshot={summary}
-      />
+      <>
+        {picker}
+        <AvailableDiff
+          key={`${String(props.diff.threadId)}:${String(props.diff.checkoutId)}`}
+          {...props}
+          diff={props.diff}
+          snapshot={summary}
+        />
+      </>
     );
   }
-  if (props.diff.state === "loading") return <OctantEmpty state="loading" title="Loading diff" />;
-  return <ChangesUnreadable message={props.diff.message} onRetry={props.onRefresh} />;
+  if (props.diff.state === "loading") {
+    return (
+      <>
+        {picker}
+        <OctantEmpty state="loading" title="Loading diff" />
+      </>
+    );
+  }
+  return (
+    <>
+      {picker}
+      <ChangesUnreadable message={props.diff.message} onRetry={props.onRefresh} />
+    </>
+  );
 }
 
 /**

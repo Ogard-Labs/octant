@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  isSubmoduleCommonDirectory,
   observeRepositoryIdentity,
   parseWorktreePorcelain,
   type RepositoryIdentityDependencies,
@@ -321,5 +322,87 @@ describe("observeRepositoryIdentity", () => {
     expect(linked.repositoryId).toBe(main.repositoryId);
     expect(linked.checkout.canonicalPath).toBe(await realpath(fixture.linked));
     expect(linked.worktrees).toHaveLength(2);
+  });
+
+  it("refuses a submodule common directory in both main checkouts and linked worktrees", () => {
+    expect(isSubmoduleCommonDirectory("/repo/.git/modules/sub")).toBe(true);
+    expect(isSubmoduleCommonDirectory("/repo/.git/modules/parent/modules/nested")).toBe(true);
+    expect(isSubmoduleCommonDirectory("/repo/.git/worktrees/wt-1/modules/sub")).toBe(true);
+    expect(
+      isSubmoduleCommonDirectory("/repo/.git/worktrees/wt-1/modules/parent/modules/nested"),
+    ).toBe(true);
+    expect(isSubmoduleCommonDirectory("C:\\repo\\.git\\worktrees\\wt-1\\modules\\sub")).toBe(true);
+    expect(isSubmoduleCommonDirectory("/repo/.git")).toBe(false);
+    expect(isSubmoduleCommonDirectory("/repo/.git/worktrees/wt-1")).toBe(false);
+  });
+
+  it("reports a real submodule inside a linked worktree as ineligible", async () => {
+    const fixture = await createTemporaryGitRepository();
+    const subOrigin = join(fixture.main, "..", "sub-origin");
+    const env = {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GCM_INTERACTIVE: "Never",
+    };
+    const run = (args: readonly string[]) =>
+      execFileAsync("git", args, { encoding: "utf8", env, shell: false });
+    await run(["init", "-b", "main", subOrigin]);
+    await run([
+      "-C",
+      subOrigin,
+      "-c",
+      "user.name=Octant Test",
+      "-c",
+      "user.email=test@octant.local",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "sub initial",
+    ]);
+    await run([
+      "-C",
+      fixture.main,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      subOrigin,
+      "libs/sub",
+    ]);
+    await run([
+      "-C",
+      fixture.main,
+      "-c",
+      "user.name=Octant Test",
+      "-c",
+      "user.email=test@octant.local",
+      "commit",
+      "-m",
+      "add submodule",
+    ]);
+    await fixture.git(["worktree", "add", "-b", "feature/with-sub", fixture.linked, "HEAD"]);
+    await run([
+      "-C",
+      fixture.linked,
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "update",
+      "--init",
+    ]);
+
+    const mainSub = await observeRepositoryIdentity(
+      join(fixture.main, "libs/sub"),
+      fixture.dependencies,
+      signal,
+    );
+    const linkedSub = await observeRepositoryIdentity(
+      join(fixture.linked, "libs/sub"),
+      fixture.dependencies,
+      signal,
+    );
+    expect(mainSub).toEqual({ status: "ineligible", reason: "submodule" });
+    expect(linkedSub).toEqual({ status: "ineligible", reason: "submodule" });
   });
 });

@@ -1385,6 +1385,38 @@ describe("Project icon change route", () => {
       localUser,
     );
   });
+
+  it("authenticates project repository discovery requests and rejects unauthenticated or malformed calls", async () => {
+    const discovered = {
+      projectId,
+      repositories: [],
+      workspaceFolders: [],
+      truncated: false,
+    };
+    const listRepositories = vi.fn().mockResolvedValue(discovered);
+    const { route } = routeFixtureWithClock({}, undefined, {}, undefined, listRepositories);
+
+    const unauthorized = await route(
+      new Request(`http://127.0.0.1/api/projects/${projectId}/repositories`),
+    );
+    expect(unauthorized?.status).toBe(401);
+
+    const invalid = await route(
+      new Request("http://127.0.0.1/api/projects/not-a-uuid/repositories", {
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(invalid?.status).toBe(400);
+
+    const response = await route(
+      new Request(`http://127.0.0.1/api/projects/${projectId}/repositories`, {
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(discovered);
+    expect(listRepositories).toHaveBeenCalledWith(windowId, projectId, expect.any(AbortSignal));
+  });
 });
 
 function routeFixture(
@@ -1399,6 +1431,11 @@ function routeFixtureWithClock(
   maxRequestBodySize?: number,
   environmentOverrides: Record<string, unknown> = {},
   memoryProposals?: Record<string, unknown>,
+  listRepositories?: (
+    windowId: unknown,
+    projectId: unknown,
+    signal?: AbortSignal,
+  ) => Promise<unknown>,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
@@ -1423,6 +1460,7 @@ function routeFixtureWithClock(
       now: () => now.value,
       ...(maxRequestBodySize === undefined ? {} : { maxRequestBodySize }),
       ...(memoryProposals === undefined ? {} : { memoryProposals: memoryProposals as never }),
+      ...(listRepositories === undefined ? {} : { listRepositories: listRepositories as never }),
     }),
     now,
   };

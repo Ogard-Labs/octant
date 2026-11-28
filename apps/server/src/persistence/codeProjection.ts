@@ -942,7 +942,18 @@ export function readCodeThreadView(
   if (thread === undefined) return undefined;
   const checkout = readCodeCheckout(connection, thread.checkoutId);
   if (checkout === undefined) return undefined;
-  return decodeCodeThreadView({ thread, checkout, lastSequence: thread.version });
+  const linkedCheckouts =
+    thread.linkedCheckouts === undefined
+      ? undefined
+      : thread.linkedCheckouts
+          .map((entry) => readCodeCheckout(connection, entry.checkoutId))
+          .filter((entry): entry is CodeCheckoutIdentity => entry !== undefined);
+  return decodeCodeThreadView({
+    thread,
+    checkout,
+    ...(linkedCheckouts !== undefined && linkedCheckouts.length > 0 ? { linkedCheckouts } : {}),
+    lastSequence: thread.version,
+  });
 }
 
 /**
