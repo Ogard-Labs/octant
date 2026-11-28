@@ -11,7 +11,21 @@ export interface SceneMeta {
   readonly scrollTo?: string;
   /** The scene is also drawn at 760 wide, where its table or panel reflows. */
   readonly narrow?: boolean;
+  /**
+   * How far a colour channel may move before a pixel counts as changed, when
+   * the scene needs a finer eye than the check's default. The ground scenes
+   * do: the ASCII field inks at most 38 of 255 and sits under a half-opacity
+   * backdrop, so clearing it moves a pixel by about 19, inside the default.
+   */
+  readonly tolerance?: number;
 }
+
+/**
+ * The ground scenes' tolerance. Their baselines are drawn on the same CI
+ * runner that checks them, and two runs of the same ground differ by at most
+ * 1 per channel, so 6 leaves room for that and still sees a faint field go.
+ */
+export const GROUND_TOLERANCE = 6;
 
 export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   {
@@ -55,31 +69,31 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "subagent-progress", narrow: true },
   // The application ground under the sidebar and a workspace column; see
   // groundScenes.tsx for what each one covers.
-  { id: "ground-builtin" },
-  { id: "ground-builtin-everywhere-strong" },
-  { id: "ground-builtin-pixelate" },
-  { id: "ground-builtin-dither-subtle" },
-  { id: "ground-builtin-ascii" },
-  { id: "ground-photo" },
-  { id: "ground-photo-everywhere-subtle-tint" },
-  { id: "ground-photo-pixelate" },
-  { id: "ground-photo-dither-strong" },
-  { id: "ground-photo-ascii-strong-tint" },
-  { id: "ground-characters" },
-  { id: "ground-characters-everywhere" },
-  { id: "ground-characters-subtle" },
-  { id: "ground-characters-everywhere-strong-tint" },
-  { id: "ground-pixels" },
-  { id: "ground-pixels-ridges-pixelate-everywhere" },
-  { id: "ground-pixels-burst-strong" },
-  { id: "ground-pixels-picture-subtle" },
-  { id: "ground-flowing" },
-  { id: "ground-flowing-everywhere-subtle" },
-  { id: "ground-none" },
-  { id: "ground-none-strong" },
-  { id: "ground-none-subtle-tint-floor" },
-  { id: "ground-reduced-transparency" },
-  { id: "ground-increased-contrast" },
+  { id: "ground-builtin", tolerance: GROUND_TOLERANCE },
+  { id: "ground-builtin-everywhere-strong", tolerance: GROUND_TOLERANCE },
+  { id: "ground-builtin-pixelate", tolerance: GROUND_TOLERANCE },
+  { id: "ground-builtin-dither-subtle", tolerance: GROUND_TOLERANCE },
+  { id: "ground-builtin-ascii", tolerance: GROUND_TOLERANCE },
+  { id: "ground-photo", tolerance: GROUND_TOLERANCE },
+  { id: "ground-photo-everywhere-subtle-tint", tolerance: GROUND_TOLERANCE },
+  { id: "ground-photo-pixelate", tolerance: GROUND_TOLERANCE },
+  { id: "ground-photo-dither-strong", tolerance: GROUND_TOLERANCE },
+  { id: "ground-photo-ascii-strong-tint", tolerance: GROUND_TOLERANCE },
+  { id: "ground-characters", tolerance: GROUND_TOLERANCE },
+  { id: "ground-characters-everywhere", tolerance: GROUND_TOLERANCE },
+  { id: "ground-characters-subtle", tolerance: GROUND_TOLERANCE },
+  { id: "ground-characters-everywhere-strong-tint", tolerance: GROUND_TOLERANCE },
+  { id: "ground-pixels", tolerance: GROUND_TOLERANCE },
+  { id: "ground-pixels-ridges-pixelate-everywhere", tolerance: GROUND_TOLERANCE },
+  { id: "ground-pixels-burst-strong", tolerance: GROUND_TOLERANCE },
+  { id: "ground-pixels-picture-subtle", tolerance: GROUND_TOLERANCE },
+  { id: "ground-flowing", tolerance: GROUND_TOLERANCE },
+  { id: "ground-flowing-everywhere-subtle", tolerance: GROUND_TOLERANCE },
+  { id: "ground-none", tolerance: GROUND_TOLERANCE },
+  { id: "ground-none-strong", tolerance: GROUND_TOLERANCE },
+  { id: "ground-none-subtle-tint-floor", tolerance: GROUND_TOLERANCE },
+  { id: "ground-reduced-transparency", tolerance: GROUND_TOLERANCE },
+  { id: "ground-increased-contrast", tolerance: GROUND_TOLERANCE },
 ];
 
 /** The two window sizes a scene is drawn at. */

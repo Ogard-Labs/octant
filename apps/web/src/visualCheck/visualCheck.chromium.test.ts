@@ -43,6 +43,7 @@ interface Shot {
   readonly scene: string;
   readonly scheme: "light" | "dark";
   readonly size: { readonly width: number; readonly height: number };
+  readonly tolerance: number;
 }
 
 function shots(): ReadonlyArray<Shot> {
@@ -53,6 +54,7 @@ function shots(): ReadonlyArray<Shot> {
         scene: scene.id,
         scheme,
         size,
+        tolerance: scene.tolerance ?? CHANNEL_TOLERANCE,
       })),
     ),
   );
@@ -68,7 +70,12 @@ interface Comparison {
 }
 
 /** Draws both pictures on canvases and counts the pixels that differ visibly. */
-async function compare(page: Page, actual: Buffer, baseline: Buffer): Promise<Comparison> {
+async function compare(
+  page: Page,
+  actual: Buffer,
+  baseline: Buffer,
+  tolerance: number,
+): Promise<Comparison> {
   return page.evaluate(
     async ({ actualUrl, baselineUrl, tolerance }) => {
       const load = (url: string) =>
@@ -141,7 +148,7 @@ async function compare(page: Page, actual: Buffer, baseline: Buffer): Promise<Co
     {
       actualUrl: `data:image/png;base64,${actual.toString("base64")}`,
       baselineUrl: `data:image/png;base64,${baseline.toString("base64")}`,
-      tolerance: CHANNEL_TOLERANCE,
+      tolerance,
     },
   );
 }
@@ -289,7 +296,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
                 outcomes[index] = { failures: shotFailures };
                 continue;
               }
-              const result = await compare(comparer, actual, baseline);
+              const result = await compare(comparer, actual, baseline, shot.tolerance);
               if (result.sizesMatch && result.differing <= PIXEL_LIMIT) {
                 outcomes[index] = {
                   noise: `${shot.name}=${String(result.differing)}`,

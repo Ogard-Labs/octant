@@ -2898,6 +2898,7 @@ A new window, its background and its drafts behave predictably.
 
 - Without a saved choice, a wide window opens the right dock where the active pane has a dock subject; an explicit show or hide is restored per window.
 - A ground is drawn as chosen and stays readable: the ASCII field stays the default, and no set or density inks heavier than it. A photo comes from the host's library, and the host refuses to delete one while it shows.
+- A still ground holds one frame: a Pixel ground or ASCII field set to still always shows its first frame, so it looks the same on every load and the Visual check's ground scenes can hold it to a fine tolerance.
 - Plugins offer character grounds as data only, while installed, trusted and enabled; a pick copies the values.
 - A new-task composer keeps its identity while its Project changes; a refused binding keeps the prior authorized Project and the draft. A failed first turn returns its text to the composer with the reason.
 - Closing a file tab, the Files tool, its thread or the window checks for unsaved Code Files edits, even when Files is hidden; Save must succeed to continue.
