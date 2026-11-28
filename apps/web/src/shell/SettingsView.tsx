@@ -3670,7 +3670,7 @@ function UsageSettingsSection(props: {
           description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset."
           focused={props.focusedSetting === settingId("usage-limit-resume-by-default")}
           label="Resume at reset by default"
-          more="Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
+          more="Never for a billing problem, a turn an automation or an agent started, or a provider that refuses Octant's own continuations."
           scope="host"
           settingId="usage-limit-resume-by-default"
         >

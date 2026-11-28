@@ -35,7 +35,7 @@ describe("asking for a routine in your own words", () => {
     const { onConfirm } = composer();
 
     await user.type(screen.getByLabelText("What do you want automated?"), "Every hour, check CI");
-    await user.click(screen.getByRole("button", { name: "Review this routine" }));
+    await user.click(screen.getByRole("button", { name: "Review this automation" }));
 
     expect(onConfirm).toHaveBeenCalledOnce();
     expect(onConfirm.mock.calls[0]?.[0]).toMatchObject({ needsSchedule: false });

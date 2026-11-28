@@ -83,8 +83,8 @@ export function AutomationFileSourceStatus(props: {
         disposition,
       },
       disposition === "skip"
-        ? "Input skipped and routine re-armed."
-        : "Reviewed input admitted once; routine re-armed.",
+        ? "Input skipped and automation re-armed."
+        : "Reviewed input admitted once; automation re-armed.",
     );
     if (current !== epoch.current) return;
     setBusy(false);
@@ -115,8 +115,8 @@ export function AutomationFileSourceStatus(props: {
       </p>
       {source?.reason === "activity-history-limit" ? (
         <p>
-          This routine started more runs than its activity history holds, so it cannot tell when its
-          input is quiet. Finish its Project tasks and cleanup, then clear its activity history
+          This automation started more runs than its activity history holds, so it cannot tell when
+          its input is quiet. Finish its Project tasks and cleanup, then clear its activity history
           below; it watches again after one quiet check.
         </p>
       ) : null}
@@ -199,8 +199,8 @@ export function AutomationFileSourceStatus(props: {
               </code>
             </p>
             <p>
-              These changes may be outside arrivals or routine output; Octant cannot identify their
-              writer.
+              These changes may be outside arrivals or automation output; Octant cannot identify
+              their writer.
             </p>
             {review === undefined ? null : (
               <dl className="automation-detail__facts">
@@ -402,7 +402,7 @@ function AutomationFileActivityWindow(props: {
         </OctantButton>
       </div>
       <p>
-        Clear only once this routine&apos;s runs and their cleanup are finished; it then watches
+        Clear only once this automation&apos;s runs and their cleanup are finished; it then watches
         again after one quiet check.
       </p>
       {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}

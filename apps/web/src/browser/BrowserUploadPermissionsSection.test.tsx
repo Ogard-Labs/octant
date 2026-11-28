@@ -63,7 +63,7 @@ it("reviews the exact routine, folder, file contents, site and quotas before gra
   );
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "New upload manifest…" }));
-  await user.click(screen.getByRole("combobox", { name: "Upload routine" }));
+  await user.click(screen.getByRole("combobox", { name: "Upload automation" }));
   await user.click(await screen.findByRole("option", { name: "Send report" }));
   await user.click(screen.getByRole("combobox", { name: "Upload account profile" }));
   await user.click(await screen.findByRole("option", { name: "Personal" }));

@@ -111,9 +111,9 @@ export function RoutineEventFields(props: {
       <p className="automation-editor__note">
         The first complete check is a baseline and starts no task. The host must stay running. After
         a gap, the missed-run choice covers only surviving observed events. New events during a run,
-        or events attributed to routine output, wait for review. Re-arm explicitly skips held events
-        and restores the allowance. Event text is external data; it cannot change this task or its
-        authority.
+        or events attributed to automation output, wait for review. Re-arm explicitly skips held
+        events and restores the allowance. Event text is external data; it cannot change this task
+        or its authority.
       </p>
     </>
   );

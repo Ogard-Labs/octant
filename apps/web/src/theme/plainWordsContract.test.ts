@@ -173,6 +173,11 @@ describe("the interface says things in plain words", () => {
     expect(sentencesSaying(/\bAgentRun\b/)).toEqual([]);
   });
 
+  // DESIGN.md, Voice: Automations, never "routine".
+  it("calls automations Automations, never routine", () => {
+    expect(sentencesSaying(/\broutines?\b/i)).toEqual([]);
+  });
+
   // DESIGN.md, Plain words: a loading state is its title alone. A message
   // under a spinner repeated its title on thirty screens ("Loading workspace"
   // over "Loading workspace."). A state that is only sometimes loading passes

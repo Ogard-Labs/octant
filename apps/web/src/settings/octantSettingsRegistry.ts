@@ -1754,7 +1754,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("agent-routines-start-active"),
-          label: "Start agent-created routines active at Full access",
+          label: "Start agent-created automations active at Full access",
           scope: "host",
           keywords: "routines automation agent created paused enabled active full access",
         },

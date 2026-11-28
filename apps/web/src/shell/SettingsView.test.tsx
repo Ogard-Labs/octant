@@ -530,7 +530,7 @@ describe("SettingsView", () => {
       "Coordinators",
       "Pull requests",
       "Waiting",
-      "Routines",
+      "Automations",
     ]);
   });
 

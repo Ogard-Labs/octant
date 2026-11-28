@@ -104,7 +104,7 @@ describe("the active-work overview", () => {
     ).toBeVisible();
     const running = screen.getByRole("region", { name: "In progress (2)" });
     expect(within(running).getByText("Subagent · For Draft the notes · mini")).toBeVisible();
-    expect(within(running).getByText("Routine run · mini")).toBeVisible();
+    expect(within(running).getByText("Automation run · mini")).toBeVisible();
     const ready = screen.getByRole("region", { name: "Ready (1)" });
     expect(within(ready).getByText("Coordinator · studio")).toBeVisible();
   });

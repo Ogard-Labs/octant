@@ -313,7 +313,7 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="Keep the computer awake while agents work"
-          description="Prevents idle system sleep while turns, child runs, workers, or a routine due within 5 minutes are active."
+          description="Prevents idle system sleep while turns, child runs, workers, or an automation due within 5 minutes are active."
           more="Display sleep is not prevented."
           scope="host"
           settingId="resource-keepAwake"

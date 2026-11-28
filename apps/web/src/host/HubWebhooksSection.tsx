@@ -135,7 +135,7 @@ const OUTCOME_COPY: Readonly<Record<string, string>> = {
   "stale-timestamp": "Refused: too old",
   "unknown-endpoint": "Refused: no such endpoint",
   "public-not-granted": "Refused: Public is not ticked",
-  busy: "Held on the hub: the routine has not caught up",
+  busy: "Held on the hub: the automation has not caught up",
   paused: "Held on the hub: remote access is paused",
 };
 
@@ -342,7 +342,7 @@ export default function HubWebhooksSection(props: {
 
   return (
     <SettingsSection
-      description="Let a service start one of this computer's routines by sending a signed request to the hub."
+      description="Let a service start one of this computer's automations by sending a signed request to the hub."
       title="Webhook endpoints"
     >
       {!props.member ? null : (
@@ -350,7 +350,7 @@ export default function HubWebhooksSection(props: {
           <div className="settings-panel__stack">
             <p className="setrow-hint" ref={formHint} tabIndex={-1}>
               {props.publicGranted
-                ? "Name it and pick how the sender signs. A delivery is event data for its routine and never changes what the routine may do."
+                ? "Name it and pick how the sender signs. A delivery is event data for its automation and never changes what the automation may do."
                 : "Tick Public in this computer's hub grant to make one."}
             </p>
             <OctantField>
@@ -524,7 +524,7 @@ export default function HubWebhooksSection(props: {
                     }${
                       endpoint.deliveries === 0
                         ? ""
-                        : ` · ${endpoint.deliveries} waiting for the routine`
+                        : ` · ${endpoint.deliveries} waiting for the automation`
                     }`}
                   </p>
                   <div className="setrow-control">
@@ -634,9 +634,9 @@ export default function HubWebhooksSection(props: {
           >
             {confirming.kind === "rotate"
               ? confirming.endpoint.scheme === "stripe"
-                ? "The old URL and secret stop at once. Give Stripe the new URL and paste the secret it shows; routines that named this endpoint keep working."
-                : "The old URL and secret stop at once. Give the sender the new pair; routines that named this endpoint keep working."
-              : "Its URL stops answering at once, and routines that named it get no more deliveries."}
+                ? "The old URL and secret stop at once. Give Stripe the new URL and paste the secret it shows; automations that named this endpoint keep working."
+                : "The old URL and secret stop at once. Give the sender the new pair; automations that named this endpoint keep working."
+              : "Its URL stops answering at once, and automations that named it get no more deliveries."}
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>

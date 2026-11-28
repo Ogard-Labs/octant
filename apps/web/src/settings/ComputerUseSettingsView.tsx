@@ -144,7 +144,7 @@ export function ComputerUseSettingsView(props: {
           <SettingRow
             settingId="computer-use-update-check"
             label="Update check"
-            description="Checks again without waiting for the daily routine."
+            description="Checks again without waiting for the daily check."
             scope="host"
           >
             <div className="settings-view__actions">

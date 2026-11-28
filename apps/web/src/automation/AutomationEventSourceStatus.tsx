@@ -53,7 +53,7 @@ export function AutomationEventSourceStatus(props: {
         definition,
         rearmEvents: true,
       },
-      "Held events skipped. The routine is ready again with a fresh baseline.",
+      "Held events skipped. The automation is ready again with a fresh baseline.",
     );
     setBusy(false);
     if (result.kind === "automation-updated") {
@@ -62,7 +62,7 @@ export function AutomationEventSourceStatus(props: {
     }
     setUnconfirmed(true);
     setMessage(
-      "Re-arm is unconfirmed. Refresh the routine and its history before another decision.",
+      "Re-arm is unconfirmed. Refresh the automation and its history before another decision.",
     );
   }
   return (
@@ -78,17 +78,17 @@ export function AutomationEventSourceStatus(props: {
       {source?.reason === undefined ? null : (
         <p role="status">
           {source.reason === "busy-input"
-            ? "Events arrived during routine activity and need review."
+            ? "Events arrived during automation activity and need review."
             : source.reason === "activity-history-limit"
-              ? "This routine may still be active. Finish and review its tasks and helpers. If its history is full, archive it and make a new one."
+              ? "This automation may still be active. Finish and review its tasks and helpers. If its history is full, archive it and make a new one."
               : source.reason === "routine-output"
-                ? "Events may come from routine output and need review."
+                ? "Events may come from automation output and need review."
                 : source.reason === "automatic-start-limit"
                   ? "The automatic allowance is used up."
                   : source.reason === "source-limit"
                     ? "Octant could not see everything from this source. Narrow it, or review and re-arm."
                     : source.reason === "source-changed"
-                      ? "The source changed. Check its connection, and make a new routine for a different account or source."
+                      ? "The source changed. Check its connection, and make a new automation for a different account or source."
                       : "The source is unavailable. Its place and allowance are kept."}
         </p>
       )}
@@ -149,7 +149,8 @@ export function AutomationEventSourceStatus(props: {
             </p>
             {message === undefined && !stale ? null : (
               <OctantAlert tone="warning">
-                {message ?? "The routine changed. Close this review and refresh its current state."}
+                {message ??
+                  "The automation changed. Close this review and refresh its current state."}
               </OctantAlert>
             )}
             <OctantButton

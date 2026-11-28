@@ -25,7 +25,7 @@ const KIND_LABEL: Readonly<Record<ActiveWorkKind, string | undefined>> = {
   thread: undefined,
   coordinator: "Coordinator",
   subagent: "Subagent",
-  "routine-run": "Routine run",
+  "routine-run": "Automation run",
 };
 
 const SECTIONS = THREAD_BOARD_PROJECT_STATUS_ORDER.filter((status) => status !== "done");
