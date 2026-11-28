@@ -103,6 +103,8 @@ const NO_REVIEW_REASON = {
  * words as the thread's next turn. A waiting subagent's request, and the
  * agent's own approval or Work question, are only found here: each has one
  * action, Review request, and no answer; the thread's own cards decide them.
+ * A question set, whoever asked it, says how many questions wait and offers
+ * only Open.
  * The row owns only its own busy state and its refusal line; it carries no
  * authority and knows nothing about the card or board that lists it.
  */
@@ -133,9 +135,15 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     };
   }, []);
   // A set of questions is answered whole in its thread's card; one choice
-  // from a row would answer only its first question.
+  // from a row would answer only its first question. The agent's and a
+  // subagent's own sets are counted the same way.
   const questionnaire =
-    request.kind === "question" && "questionnaire" in request ? request.questionnaire : undefined;
+    (request.kind === "question" ||
+      request.kind === "lead-question" ||
+      request.kind === "child-question") &&
+    "questionnaire" in request
+      ? request.questionnaire
+      : undefined;
   const choices = questionnaire === undefined ? pendingRequestChoices(request) : [];
   const open = props.settled !== true && props.outcome === undefined;
 
@@ -351,7 +359,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       ) : null}
       {open && !deferred ? (
         <div className="pending-request__actions">
-          {isFindOnlyPendingRequest(request) ? (
+          {isFindOnlyPendingRequest(request) && questionnaire === undefined ? (
             <OctantButton
               onClick={() => props.onOpenThread(request)}
               size="sm"

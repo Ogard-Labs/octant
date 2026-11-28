@@ -652,7 +652,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Work request lifecycle update failed.";
 }
 
-function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
+/** A questionnaire with Work's request text in every prompt, header and choice. */
+export function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
   return {
     ...(questionnaire.allowComment === undefined
       ? {}

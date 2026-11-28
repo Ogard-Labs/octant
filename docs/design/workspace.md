@@ -3071,7 +3071,7 @@ capability uses the provider-neutral app tool boundary.
 A waiting questionnaire is found from everywhere a person looks for what waits
 on them. A Needs you, Inbox or Home row says how many questions wait, with
 their headers, and offers only **Open**, so the set is answered whole on its
-own card. A sidebar row whose thread waits on a question says **Input**, and an
+own card; a Work agent's own set and a subagent's set are counted the same way. A sidebar row whose thread waits on a question says **Input**, and an
 approval keeps **Needs you**. The phone shows the same one card in Work,
 native-harness, Chat and Code threads, keeps its unsent draft in memory per
 request while the person leaves the thread and comes back, and its rows say

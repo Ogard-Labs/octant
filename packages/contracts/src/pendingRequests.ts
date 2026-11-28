@@ -249,6 +249,7 @@ const ChildPendingRequestFields = {
 } as const;
 
 const isWorkRequestText = Schema.is(WorkRequestSanitizedText);
+const isWorkQuestionnaire = Schema.is(WorkQuestionnaire);
 const isCodeApprovalText = Schema.is(CodeApprovalSummaryText);
 const isCodeQuestionText = Schema.is(CodeQuestionPromptText);
 
@@ -331,6 +332,8 @@ const LeadQuestionFields = {
   projectId: ProjectId,
   threadId: WorkThreadId,
   text: WorkRequestSanitizedText,
+  /** The whole set when the lead asked several things at once, so the row can count them. */
+  questionnaire: Schema.optional(WorkQuestionnaire),
 } as const;
 
 export const PendingRequest = Schema.Union(
@@ -422,9 +425,23 @@ export const PendingRequest = Schema.Union(
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-question"),
+    /**
+     * The whole set when the subagent asked several things at once, so the
+     * row can count them; a Work subagent's is Work's redacted questionnaire.
+     */
+    questionnaire: Schema.optional(Questionnaire),
   })
     .annotations(strict)
-    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
+    .pipe(
+      Schema.filter(
+        (request) =>
+          childTextKeepsModeBounds(request) &&
+          (request.mode !== "work" ||
+            request.questionnaire === undefined ||
+            isWorkQuestionnaire(request.questionnaire)),
+        { jsonSchema: {} },
+      ),
+    ),
   Schema.Struct(LeadApprovalFields)
     .annotations(strict)
     .pipe(Schema.filter(leadTextKeepsModeBounds, { jsonSchema: {} })),

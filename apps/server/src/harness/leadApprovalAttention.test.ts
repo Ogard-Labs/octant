@@ -11,6 +11,7 @@ import {
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
   type NativeHarnessInteractionSource,
   type OctantMode,
+  type Questionnaire,
 } from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -480,6 +481,7 @@ describe("the rows a window lists for a Work lead's waiting question", () => {
       readonly child?: boolean;
       readonly prompt?: string;
       readonly signal?: AbortSignal;
+      readonly questionnaire?: Questionnaire;
     } = {},
   ) {
     return stores.questions.ask({
@@ -489,6 +491,7 @@ describe("the rows a window lists for a Work lead's waiting question", () => {
       lead,
       ...(input.child === true ? { source: child } : {}),
       prompt: input.prompt ?? "Which report should I update?",
+      ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
       options: ["Q3", "Q4"],
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -532,6 +535,47 @@ describe("the rows a window lists for a Work lead's waiting question", () => {
     expect(stores.questions.answer(thread, String(pending?.id), "Q4")).toBe("answered");
     await outcome;
     expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
+  });
+
+  it("carries the lead's question set, with Work's redaction, so the row can say how many questions wait", async () => {
+    const stores = fixture();
+    void askQuestion(stores, {
+      prompt: "Report · Format",
+      questionnaire: {
+        questions: [
+          {
+            id: "report",
+            header: "Report",
+            prompt: "Which report, the one at /srv/reports/q4.md?",
+            selection: "single",
+            options: [
+              { id: "q3", label: "Q3" },
+              { id: "q4", label: "Q4" },
+            ],
+          },
+          {
+            id: "format",
+            header: "Format",
+            prompt: "Which format?",
+            selection: "single",
+            options: [
+              { id: "pdf", label: "PDF" },
+              { id: "doc", label: "Doc" },
+            ],
+          },
+        ],
+      },
+    });
+    const [row] = await listLeadQuestionRequests(rowSources(stores), windowId);
+    expect(row).toMatchObject({
+      kind: "lead-question",
+      questionnaire: {
+        questions: [
+          { id: "report", header: "Report", prompt: "Which report, the one at [redacted path]" },
+          { id: "format", header: "Format" },
+        ],
+      },
+    });
   });
 
   it("stops listing it when the turn is cancelled", async () => {

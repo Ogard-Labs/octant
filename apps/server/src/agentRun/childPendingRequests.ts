@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import {
   decodePendingRequest,
   MAX_CHILD_PENDING_REQUEST_TASK_LENGTH,
@@ -9,12 +10,14 @@ import {
   type NativeHarnessSessionView,
   type PendingRequest,
   type ProjectId,
+  type Questionnaire,
   type UtcTimestamp,
   type WindowWorkspace,
+  WorkQuestionnaire,
 } from "@octant/contracts";
 import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
-import { sanitizeRequestText } from "../work/workRequestRuntime";
+import { sanitizeRequestText, sanitizedQuestionnaire } from "../work/workRequestRuntime";
 import { windowCanAccessCodeProject, windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export interface ChildPendingRequestSources {
@@ -180,6 +183,7 @@ export async function listChildPendingRequests(
       if (!mayOpen) continue;
     }
     const text = modeText(run.routingReceipt.mode, wait.kind, item.text);
+    const questionnaire = modeQuestionnaire(run.routingReceipt.mode, item.questionnaire);
     const task = cut(
       run.routingReceipt.mode === "work"
         ? sanitizeRequestText(run.task, "Subagent task")
@@ -207,6 +211,7 @@ export async function listChildPendingRequests(
             modelId: item.source.modelId,
           },
           text,
+          ...(wait.kind === "question" && questionnaire !== undefined ? { questionnaire } : {}),
           requestedAt: item.askedAt,
         }),
       );
@@ -224,6 +229,7 @@ function pendingItem(
   | {
       readonly source: NativeHarnessInteractionSource;
       readonly text: string;
+      readonly questionnaire?: Questionnaire;
       readonly askedAt: UtcTimestamp;
     }
   | undefined {
@@ -237,9 +243,28 @@ function pendingItem(
   return {
     source: item.source,
     text: "summary" in item ? item.summary : item.prompt,
+    ...("questionnaire" in item && item.questionnaire !== undefined
+      ? { questionnaire: item.questionnaire }
+      : {}),
     askedAt: item.askedAt,
   };
 }
+
+/**
+ * A question set as the parent mode's own rows would carry it: Work redacts
+ * every prompt, header and choice as a Work request does, and leaves the set
+ * out when its ids are not Work's; Code carries it as asked.
+ */
+export function modeQuestionnaire(
+  mode: "work" | "code",
+  questionnaire: Questionnaire | undefined,
+): Questionnaire | undefined {
+  if (questionnaire === undefined || mode === "code") return questionnaire;
+  const redacted = sanitizedQuestionnaire(questionnaire);
+  return isWorkQuestionnaire(redacted) ? redacted : undefined;
+}
+
+const isWorkQuestionnaire = Schema.is(WorkQuestionnaire);
 
 /**
  * The request text as the parent mode's own rows would carry it: Work redacts
