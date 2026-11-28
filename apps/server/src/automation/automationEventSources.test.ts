@@ -10,6 +10,9 @@ import {
   AUTOMATION_WEBHOOK_SOURCE_ID,
   EventActor,
   decodeAutomationCommand,
+  decodeProject,
+  decodeProviderInstance,
+  decodeProviderInstanceId,
   type AutomationId,
   type AutomationIntegrationEvent,
   type AutomationIntegrationEventOccurrence,
@@ -410,8 +413,9 @@ describe("durable routine integration polling", () => {
       readonly id?: AutomationId;
       readonly endpointId?: string;
       readonly pollMinutes?: number;
+      readonly providerInstanceId?: string;
     }) => {
-      const draft = automationDefinitionDraftFixture({
+      const baseDraft = automationDefinitionDraftFixture({
         missedRunPolicy: "run-once",
         trigger: {
           kind: "integration-event",
@@ -424,6 +428,16 @@ describe("durable routine integration polling", () => {
           automaticStartLimit: 8,
         },
       });
+      const draft =
+        options?.providerInstanceId === undefined
+          ? baseDraft
+          : {
+              ...baseDraft,
+              executionProfile: {
+                ...baseDraft.executionProfile,
+                providerInstanceId: decodeProviderInstanceId(options.providerInstanceId),
+              },
+            };
       const preparation = await prepareAutomationEventDefinition({
         definition: draft,
         sources: provider,
@@ -451,7 +465,7 @@ describe("durable routine integration polling", () => {
     };
     let wakes = 0;
     const staleProjectRoutineIds = new Set<string>();
-    const disabledProviderRoutineIds = new Set<string>();
+    const disabledProviderInstanceIds = new Set<string>();
     const evaluateAuthority = (
       definition: (typeof projection)["listDefinitions"] extends () => ReadonlyArray<infer D>
         ? D
@@ -465,27 +479,53 @@ describe("durable routine integration polling", () => {
           capturedAt: now(),
         },
       };
+      const binding = { canonicalRoot: directory } as const;
+      const project = staleProjectRoutineIds.has(String(definition.id))
+        ? undefined
+        : decodeProject({
+            id: String(definition.projectId),
+            name: "Webhook Project",
+            type: "work",
+            lifecycle: "active",
+            pinned: false,
+            rank: "0/1",
+            version: definition.projectVersion,
+            createdAt: now(),
+            updatedAt: now(),
+            binding,
+            bindingHistory: [
+              {
+                revisionId: AUTOMATION_TEST_IDS.bindingRevision,
+                revision: 1,
+                currentBinding: binding,
+                actor: { kind: "local-user", actorId: AUTOMATION_TEST_IDS.actor },
+                changedAt: now(),
+              },
+            ],
+          });
+      const providerInstance = decodeProviderInstance({
+        id: String(definition.executionProfile.providerInstanceId),
+        displayName: "Routine Provider",
+        driverKind: "openai-compatible",
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://gateway.example/v1/",
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: [String(definition.executionProfile.modelId)],
+        },
+        enabled: !disabledProviderInstanceIds.has(
+          String(definition.executionProfile.providerInstanceId),
+        ),
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now(),
+        updatedAt: now(),
+      });
       const facts = buildAutomationAuthorityFactsFromHost({
         hostId: String(definition.hostId),
-        project: staleProjectRoutineIds.has(String(definition.id))
-          ? undefined
-          : ({
-              id: definition.projectId,
-              type: definition.mode,
-              lifecycle: "active",
-              version: definition.projectVersion,
-              binding: { canonicalRoot: directory },
-              bindingHistory: [
-                {
-                  revisionId: AUTOMATION_TEST_IDS.bindingRevision,
-                  currentBinding: { canonicalRoot: directory },
-                },
-              ],
-            } as never),
-        providerInstance: {
-          id: definition.executionProfile.providerInstanceId,
-          enabled: !disabledProviderRoutineIds.has(String(definition.id)),
-        } as never,
+        project,
+        providerInstance,
         providerSupportsModel: true,
         executionProfileMatches: true,
         authorityDigestMatches: true,
@@ -542,9 +582,9 @@ describe("durable routine integration polling", () => {
       invalidateAuthority: (automationId: AutomationId) => {
         staleProjectRoutineIds.add(String(automationId));
       },
-      setProviderDisabled: (automationId: AutomationId, disabled: boolean) => {
-        if (disabled) disabledProviderRoutineIds.add(String(automationId));
-        else disabledProviderRoutineIds.delete(String(automationId));
+      setProviderDisabled: (providerInstanceId: string, disabled: boolean) => {
+        if (disabled) disabledProviderInstanceIds.add(providerInstanceId);
+        else disabledProviderInstanceIds.delete(providerInstanceId);
       },
     };
   }
@@ -745,15 +785,18 @@ describe("durable routine integration polling", () => {
 
   it("keeps the shared webhook acknowledgement barrier while one sibling's provider is temporarily disabled so re-enabling never overflows its pending list", async () => {
     const f = await webhookFixture();
-    const paused = await f.createRoutine({ pollMinutes: 60 });
+    const pausedProviderId = AUTOMATION_TEST_IDS.providerInstance;
+    const healthyProviderId = "aa000000-0000-4000-8000-000000000071";
+    const paused = await f.createRoutine({ pollMinutes: 60, providerInstanceId: pausedProviderId });
     const healthy = await f.createRoutine({
       id: "44444444-4444-4444-8444-444444444444" as AutomationId,
       pollMinutes: 1,
+      providerInstanceId: healthyProviderId,
     });
 
-    // First routine baselines an empty endpoint, then its provider is temporarily turned off.
+    // First routine baselines an empty endpoint, then its provider instance is temporarily turned off.
     await f.poll(paused.id);
-    f.setProviderDisabled(paused.id, true);
+    f.setProviderDisabled(pausedProviderId, true);
 
     // 16 deliveries fill the endpoint; the second routine baselines all 16, but frees zero slots
     // because the first routine's disabled provider is recoverable and still holds the barrier.
@@ -766,7 +809,7 @@ describe("durable routine integration polling", () => {
     // Re-enabling the first routine's provider leaves it with at most 16 fresh deliveries (never >32
     // or needs-rearm). Claiming delivery-0 frees exactly that 1 slot because both routines have now
     // finished with delivery-0.
-    f.setProviderDisabled(paused.id, false);
+    f.setProviderDisabled(pausedProviderId, false);
     await f.poll(paused.id);
     const checkpoint = f.projection.getEventSource(paused.id);
     expect(checkpoint?.phase).toBe("watching");
