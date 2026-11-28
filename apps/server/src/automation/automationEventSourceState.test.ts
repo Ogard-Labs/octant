@@ -106,4 +106,45 @@ describe("routine integration observations", () => {
       automaticStarts: 8,
     });
   });
+
+  it("reports acknowledged event ids only for baselined, claimed, or dropped events and never while busy", () => {
+    const baselined = observe(initial, [event("base-1"), event("base-2")]);
+    expect(baselined.acknowledgedEventIds).toEqual(["base-1", "base-2"]);
+
+    const baseline = state(baselined);
+    const claimed = observe(baseline, [event("base-1"), event("base-2"), event("a"), event("b")]);
+    expect(claimed.kind).toBe("claim");
+    expect(claimed.acknowledgedEventIds).toEqual(["a"]);
+
+    // While busy, neither pending events nor fresh arrivals are acknowledged.
+    const whileBusy = observe(
+      state(claimed),
+      [event("base-1"), event("base-2"), event("a"), event("b")],
+      {
+        busy: true,
+      },
+    );
+    expect(whileBusy.acknowledgedEventIds).toBeUndefined();
+    const busyFresh = observe(
+      state(claimed),
+      [event("base-1"), event("base-2"), event("a"), event("b"), event("c")],
+      {
+        busy: true,
+      },
+    );
+    expect(busyFresh.acknowledgedEventIds).toBeUndefined();
+
+    // Coverage gaps acknowledge every dropped event plus any claimed event.
+    const skipped = observe(baseline, [event("g-1"), event("g-2")], {
+      coverageGap: true,
+      missedRunPolicy: "skip",
+    });
+    expect(skipped.acknowledgedEventIds).toEqual(["g-1", "g-2"]);
+    const runOnce = observe(baseline, [event("g-1"), event("g-2"), event("g-3")], {
+      coverageGap: true,
+      missedRunPolicy: "run-once",
+    });
+    expect(runOnce.kind).toBe("claim");
+    expect(runOnce.acknowledgedEventIds).toEqual(["g-1", "g-2", "g-3"]);
+  });
 });

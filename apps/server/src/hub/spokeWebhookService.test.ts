@@ -145,7 +145,7 @@ describe("webhook deliveries on the spoke", () => {
     expect((await readEvents(service, created.endpointId)).events).toHaveLength(1);
   });
 
-  it("answers busy past sixteen unread deliveries, and takes more once the routine reads", async () => {
+  it("answers busy past sixteen unread deliveries, and takes more only once acknowledged", async () => {
     const { service } = setup();
     const created = await service.create({ scheme: "github", label: "Repository pushes" });
     if (created.status !== "created") throw new Error(created.status);
@@ -161,7 +161,11 @@ describe("webhook deliveries on the spoke", () => {
       );
     for (let index = 0; index < 16; index += 1) expect(send(index)).toEqual({ status: "accepted" });
     expect(send(16)).toEqual({ status: "refused", kind: "busy" });
-    expect((await readEvents(service, created.endpointId)).events).toHaveLength(16);
+    const firstRead = await readEvents(service, created.endpointId);
+    expect(firstRead.events).toHaveLength(16);
+    // Reading alone never frees slots while a routine has not taken an event.
+    expect(send(16)).toEqual({ status: "refused", kind: "busy" });
+    await firstRead.source.acknowledge?.([firstRead.events[0]!.id]);
     expect(send(16)).toEqual({ status: "accepted" });
   });
 
@@ -179,7 +183,10 @@ describe("webhook deliveries on the spoke", () => {
       });
     expect(service.receive(envelope("first", '{"n":"first"}'))).toEqual({ status: "accepted" });
     for (let index = 0; index < 6_000; index += 1) {
-      if (index % 16 === 0) await readEvents(service, created.endpointId);
+      if (index % 16 === 0) {
+        const batch = await readEvents(service, created.endpointId);
+        await batch.source.acknowledge?.(batch.events.map((event) => event.id));
+      }
       service.receive(envelope(`other-${index}`, `{"n":${index}}`));
     }
     expect(service.receive(envelope("replayed", '{"n":"first"}'))).toEqual({
@@ -336,7 +343,7 @@ describe("webhook deliveries on the spoke", () => {
     expect(after.events.map((event) => event.id)).toEqual([`${rotated.endpointId}:after-rotation`]);
   });
 
-  it("frees one slot per routine read, so a burst waits on the hub rather than overflow a busy routine", async () => {
+  it("frees only acknowledged slots so a long busy routine never overflows its 32-event waiting list and baselined bursts clear at once", async () => {
     const { service } = setup();
     const created = await service.create({ scheme: "github", label: "Pushes" });
     if (created.status !== "created") throw new Error(created.status);
@@ -347,13 +354,31 @@ describe("webhook deliveries on the spoke", () => {
           secret: created.secret,
           guid: `guid-${index}`,
           body: `{"n":${index}}`,
-          receivedAt: NOW,
+          receivedAt: NOW + index * 1_000,
         }),
       );
-    for (let index = 0; index < 16; index += 1) send(index);
-    await readEvents(service, created.endpointId);
-    expect(send(16)).toEqual({ status: "accepted" });
-    expect(send(17)).toEqual({ status: "refused", kind: "busy" });
+    // 16 deliveries arrive before arming and are baselined together on the first look:
+    // acknowledging all 16 frees every slot immediately instead of one per hourly poll.
+    for (let index = 0; index < 16; index += 1) expect(send(index)).toEqual({ status: "accepted" });
+    expect(send(16)).toEqual({ status: "refused", kind: "busy" });
+    const initial = await readEvents(service, created.endpointId);
+    await initial.source.acknowledge?.(initial.events.map((event) => event.id));
+    for (let index = 16; index < 32; index += 1)
+      expect(send(index)).toEqual({ status: "accepted" });
+    expect(send(32)).toEqual({ status: "refused", kind: "busy" });
+
+    // Acknowledging one claimed event frees exactly one slot; subsequent reads while
+    // busy acknowledge nothing and leave every extra delivery refused as busy.
+    const next = await readEvents(service, created.endpointId);
+    const claimed = next.events.find((event) => event.id.endsWith(":guid-16"));
+    expect(claimed).toBeDefined();
+    await next.source.acknowledge?.([claimed!.id]);
+    expect(send(32)).toEqual({ status: "accepted" });
+    expect(send(33)).toEqual({ status: "refused", kind: "busy" });
+    for (let look = 0; look < 25; look += 1) {
+      await next.source.read(new AbortController().signal);
+      expect(send(33 + look)).toEqual({ status: "refused", kind: "busy" });
+    }
   });
 
   it("a read with nothing new to mark leaves the state file alone", async () => {
