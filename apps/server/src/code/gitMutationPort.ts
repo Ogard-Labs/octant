@@ -1093,16 +1093,23 @@ export class GitMutationPort {
   }
 
   /**
-   * The paths whose changes a working-tree capture cannot carry: a submodule
-   * with uncommitted or untracked changes of its own, and an untracked folder
-   * that is a repository of its own. `add -A` records each only as a commit
-   * pointer, so laying a capture down elsewhere would silently leave that
-   * work behind. Sorted; undefined when the checkout could not be read.
+   * The paths whose changes a working-tree capture cannot carry, separated by
+   * kind: submodules with uncommitted or untracked changes of their own, and
+   * untracked folders that hold a separate repository. `add -A` records each
+   * only as a commit pointer, so laying a capture down elsewhere would
+   * silently leave that work behind. Sorted; undefined when the checkout could
+   * not be read.
    */
   async uncopyableNestedChanges(
     input: { readonly checkoutRoot: string },
     signal?: AbortSignal,
-  ): Promise<ReadonlyArray<string> | undefined> {
+  ): Promise<
+    | {
+        readonly submodules: ReadonlyArray<string>;
+        readonly nestedRepositories: ReadonlyArray<string>;
+      }
+    | undefined
+  > {
     const status = await this.#run(
       [
         "-C",
@@ -1120,7 +1127,8 @@ export class GitMutationPort {
       "approval-gated",
     );
     if (status.exitCode !== 0) return undefined;
-    const found = new Set<string>();
+    const submodules = new Set<string>();
+    const nestedRepositories = new Set<string>();
     const budget = { walked: 0 };
     const records = status.stdout.split("\0");
     for (let index = 0; index < records.length; index += 1) {
@@ -1131,7 +1139,7 @@ export class GitMutationPort {
         // `S<c><m><u>`: m and u are the submodule's own tracked and untracked changes.
         const path = fields.slice(record.startsWith("1 ") ? 8 : 9).join(" ");
         if (submodule.startsWith("S") && (submodule[2] === "M" || submodule[3] === "U")) {
-          found.add(path);
+          submodules.add(path);
         }
         // A rename's original path follows as its own record.
         if (record.startsWith("2 ")) index += 1;
@@ -1145,10 +1153,13 @@ export class GitMutationPort {
           budget,
         );
         if (nested === undefined) return undefined;
-        for (const path of nested) found.add(path);
+        for (const path of nested) nestedRepositories.add(path);
       }
     }
-    return [...found].sort();
+    return {
+      submodules: [...submodules].sort(),
+      nestedRepositories: [...nestedRepositories].sort(),
+    };
   }
 
   /** Which of these untracked checkout-relative paths Git ignores; undefined when Git could not say. */

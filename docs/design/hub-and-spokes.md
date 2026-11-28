@@ -3226,9 +3226,22 @@ Built for a hub and its spokes (slice 24) and a standing-in standby (slice 26).
   are never evicted to make room: a spoke holding 16 of an endpoint's
   deliveries its routine has not taken, or whose claims are full, answers
   busy and the hub keeps that endpoint's deliveries for a later look within
-  the hold, while other endpoints on the spoke go on. A routine starts at
-  most one run a look, so each look frees one of those 16 places, and a
-  burst waits on the hub rather than overflow a busy routine. A spoke whose
+  the hold, while other endpoints on the spoke go on. Reading the endpoint is
+  read-only; the spoke frees an unread slot only after the scheduler commits
+  an observation and acknowledges deliveries that every enabled routine
+  watching that endpoint without a permanent authority mismatch (including
+  across rotated endpoint ids; recoverable pauses such as a temporarily disabled
+  provider keep the barrier so re-enabling cannot overflow its pending list) has
+  finished with — initial baseline, claimed for a run, or dropped by a
+  missed-run policy — and never for deliveries still pending or arriving while
+  busy. Subsequent committed polls reconcile completed ids idempotently from
+  each routine's durable checkpoint so a failed state write, restart, or
+  run-first claim recovery never strands unread slots. A routine starts at most
+  one run a look, so each new-claim look frees at most one of those 16 places
+  (zero when another routine on the same endpoint still needs that delivery;
+  while initial baselining, missed-run drops, and retry reconciliation free
+  every already-finished place together), and a burst waits on the hub rather
+  than overflow a busy routine. A spoke whose
   person paused remote access answers paused, and the hub keeps its
   deliveries for the hold without waking it. The hub drops the endpoints and
   queue of a spoke its roster no longer lists.

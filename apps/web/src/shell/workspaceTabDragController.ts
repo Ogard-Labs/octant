@@ -43,6 +43,7 @@ export class WorkspaceSurfaceDragController {
   }
 
   start(pointerId: number, source: WorkspaceSurfaceDragSource, point: WorkspaceDragPoint): void {
+    this.#suppressedClickKey = null;
     this.#pointerId = pointerId;
     this.#origin = point;
     this.#setSnapshot({ phase: "pending", source, point, destination: null });
@@ -79,11 +80,24 @@ export class WorkspaceSurfaceDragController {
     if (destination !== null) this.#options.onDrop(dropped.source, destination);
   }
 
-  cancel(): void {
+  /**
+   * Ends an active drag without dropping. Pass `suppressReleaseClick: true`
+   * when cancelled while the pointer button may still be held (Escape or blur),
+   * so releasing over the dragged row does not fire a stray click; callers
+   * disarm that suppression once the release passes or a new gesture begins.
+   * Native `pointercancel` produces no trailing click, so it clears suppression.
+   */
+  cancel(options?: { readonly suppressReleaseClick?: boolean }): void {
     if (this.#snapshot.phase === "idle") return;
-    if (this.#snapshot.phase === "dragging")
-      this.#suppressedClickKey = this.#snapshot.source.dragKey;
+    this.#suppressedClickKey =
+      options?.suppressReleaseClick === true && this.#snapshot.phase === "dragging"
+        ? this.#snapshot.source.dragKey
+        : null;
     this.#reset();
+  }
+
+  clearClickSuppression(): void {
+    this.#suppressedClickKey = null;
   }
 
   consumeClickSuppression(dragKey: string): boolean {

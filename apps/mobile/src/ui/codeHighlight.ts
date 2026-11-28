@@ -203,7 +203,7 @@ export async function highlightCode(
 
 /** A diff row as the highlighter needs it: its kind, and its text with the mark. */
 export interface DiffRowSource {
-  readonly kind: "added" | "removed" | "context" | "hunk";
+  readonly kind: "added" | "removed" | "context" | "hunk" | "meta";
   readonly text: string;
 }
 
@@ -221,7 +221,7 @@ export function diffSides(rows: ReadonlyArray<DiffRowSource>): {
   const oldLines: string[] = [];
   const newLines: string[] = [];
   const rowLines = rows.map((row) => {
-    if (row.kind === "hunk") return null;
+    if (row.kind === "hunk" || row.kind === "meta") return null;
     const text = row.text.slice(1);
     if (row.kind === "removed") {
       oldLines.push(text);

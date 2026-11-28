@@ -78,17 +78,65 @@ function deviceKey() {
   };
 }
 
+/** Extract and unmask RFC 6455 WebSocket frame payloads after the HTTP upgrade header. */
+function decodeWebSocketPayloads(stream: Buffer): Buffer {
+  const headerEnd = stream.indexOf("\r\n\r\n");
+  if (headerEnd === -1) return Buffer.alloc(0);
+  const payloads: Buffer[] = [];
+  let offset = headerEnd + 4;
+  while (offset + 2 <= stream.length) {
+    const second = stream[offset + 1];
+    if (second === undefined) break;
+    const masked = (second & 0x80) !== 0;
+    let length = second & 0x7f;
+    offset += 2;
+    if (length === 126) {
+      if (offset + 2 > stream.length) break;
+      length = stream.readUInt16BE(offset);
+      offset += 2;
+    } else if (length === 127) {
+      if (offset + 8 > stream.length) break;
+      length = Number(stream.readBigUInt64BE(offset));
+      offset += 8;
+    }
+    let mask: Buffer | undefined;
+    if (masked) {
+      if (offset + 4 > stream.length) break;
+      mask = stream.subarray(offset, offset + 4);
+      offset += 4;
+    }
+    if (offset + length > stream.length) break;
+    const payload = Buffer.from(stream.subarray(offset, offset + length));
+    offset += length;
+    if (mask !== undefined) {
+      for (let i = 0; i < payload.length; i += 1) {
+        payload[i] = (payload[i] ?? 0) ^ (mask[i & 3] ?? 0);
+      }
+    }
+    payloads.push(payload);
+  }
+  return Buffer.concat(payloads);
+}
+
 /** Everything between the device and the entrance passes here, as a front would carry it. */
 async function recordingFront(targetPort: number) {
   const seen: Buffer[] = [];
+  const connections: Array<{
+    readonly clientToServer: Buffer[];
+    readonly serverToClient: Buffer[];
+  }> = [];
   const server: Server = createTcpServer((inbound) => {
     const outbound = connectTcp({ host: "127.0.0.1", port: targetPort });
+    const record = { clientToServer: [] as Buffer[], serverToClient: [] as Buffer[] };
+    connections.push(record);
     inbound.on("data", (chunk: Buffer) => {
       seen.push(chunk);
+      record.clientToServer.push(chunk);
       outbound.write(chunk);
     });
     outbound.on("data", (chunk: Buffer) => {
       seen.push(chunk);
+      record.serverToClient.push(chunk);
       inbound.write(chunk);
     });
     inbound.on("close", () => outbound.destroy());
@@ -100,7 +148,17 @@ async function recordingFront(targetPort: number) {
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("No front port.");
   cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
-  return { port: address.port, seen: () => Buffer.concat(seen) };
+  return {
+    port: address.port,
+    seen: () => Buffer.concat(seen),
+    decodedPayloads: () =>
+      Buffer.concat(
+        connections.flatMap((connection) => [
+          decodeWebSocketPayloads(Buffer.concat(connection.clientToServer)),
+          decodeWebSocketPayloads(Buffer.concat(connection.serverToClient)),
+        ]),
+      ),
+  };
 }
 
 async function setUp(options: { readonly grant?: HubGrant } = {}) {
@@ -108,18 +166,34 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
   // What the hub names as its relay: its entrance through the recording front,
   // known once both are listening.
   let relayAddress: RelayAddress | undefined;
+  const productMarker = randomBytes(24).toString("base64url");
+  const productDispatches: Array<{ readonly path: string; readonly deviceId: string }> = [];
   const hub = await startHubTestHost({
     name: "Mac mini",
     address: "100.101.104.1",
     network,
     cleanups,
     relayAddress: () => relayAddress,
+    useNodeServe: true,
   });
   const spoke = await startHubTestHost({
     name: "Laptop",
     address: "100.101.104.2",
     network,
     cleanups,
+    useNodeServe: true,
+    productDispatch: async (handoff) => {
+      const path = new URL(handoff.request.url).pathname;
+      if (handoff.request.method === "GET" && path === "/api/projects") {
+        productDispatches.push({ path, deviceId: String(handoff.principal.deviceId) });
+        return Response.json({
+          projects: [{ id: "proj-relayed-1", name: "Relayed Project" }],
+          deviceId: String(handoff.principal.deviceId),
+          marker: productMarker,
+        });
+      }
+      return undefined;
+    },
   });
   hub.hub.enable(window);
   await join(hub, spoke);
@@ -181,6 +255,8 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
     entrance,
     front,
     relayedFetch,
+    productMarker,
+    productDispatches,
     pauseHub: (value: boolean) => {
       paused = value;
       if (value) hub.relayHub.closeAll();
@@ -216,20 +292,73 @@ function upgradeStatus(port: number): Promise<number> {
 }
 
 describe("your own devices through the hub", () => {
-  it("carries a paired device's pinned TLS to its host, and the hub sees only ciphertext", async () => {
-    const { relayedFetch, spoke, front } = await setUp();
+  it("carries a paired device's pinned TLS to its host over the shipped Node listener adapter, signs in, and runs a signed product request while the hub sees only ciphertext", async () => {
+    const {
+      relayedFetch,
+      spoke,
+      device,
+      registered,
+      deviceId,
+      front,
+      productMarker,
+      productDispatches,
+    } = await setUp();
     const marker = randomBytes(32).toString("base64url");
+    const fetchThroughRelay = relayedFetch();
     const url = new URL("/api/remote/hello", spoke.origin);
     url.searchParams.set(HOST_HELLO_CLIENT_NONCE_PARAMETER, marker);
-    const response = await relayedFetch()(url, { headers: { "x-octant-probe": marker } });
+    const response = await fetchThroughRelay(url, { headers: { "x-octant-probe": marker } });
     expect(response.status).toBe(200);
     const hello = JSON.stringify(await response.json());
     // The host answered this very request: its hello echoes the nonce.
     expect(hello).toContain(marker);
-    // Neither the request nor the answer crossed the hub readable.
-    expect(front.seen().byteLength).toBeGreaterThan(0);
-    expect(front.seen().includes(Buffer.from(marker))).toBe(false);
-    expect(front.seen().includes(Buffer.from("/api/remote/hello"))).toBe(false);
+
+    // Sign the paired device in over the same relayed listener path and send a signed product request.
+    const connection = createRemoteConnection({
+      origin: spoke.origin,
+      webBuildVersion: "0.1.0",
+      fetch: fetchThroughRelay,
+      deviceKey: {
+        loadOrCreate: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        current: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        sign: async (payload) => device.sign(payload),
+        clear: async () => undefined,
+      },
+      knownDevice: {
+        hostId: spoke.hostId,
+        deviceId,
+        credentialGeneration: registered.credentialGeneration,
+        hostKeyFingerprint: createHash("sha256")
+          .update(Buffer.from(spoke.hostPublicKey, "base64url"))
+          .digest("hex"),
+      },
+    });
+    cleanups.push(() => connection.disconnect());
+    await connection.connect();
+    const product = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/projects",
+    });
+    expect(product.status).toBe(200);
+    expect(await product.json()).toEqual({
+      projects: [{ id: "proj-relayed-1", name: "Relayed Project" }],
+      deviceId,
+      marker: productMarker,
+    });
+    expect(productDispatches).toEqual([{ path: "/api/projects", deviceId }]);
+
+    // Neither the pre-auth hello nor the signed product request or answer crossed the hub readable,
+    // even after unmasking RFC 6455 client-to-server WebSocket frames.
+    const seen = front.seen();
+    const decoded = front.decodedPayloads();
+    expect(seen.byteLength).toBeGreaterThan(0);
+    expect(decoded.byteLength).toBeGreaterThan(0);
+    for (const captured of [seen, decoded]) {
+      expect(captured.includes(Buffer.from(marker))).toBe(false);
+      expect(captured.includes(Buffer.from("/api/remote/hello"))).toBe(false);
+      expect(captured.includes(Buffer.from("/api/projects"))).toBe(false);
+      expect(captured.includes(Buffer.from(productMarker))).toBe(false);
+    }
   }, 30_000);
 
   it("a relayed connection cannot reach pairing", async () => {
@@ -625,6 +754,8 @@ describe.each(phoneStreams)("a phone through the hub over $name", ({ runs, comma
       expect(response.status).toBe(200);
       expect(JSON.stringify(await response.json())).toContain(marker);
       expect(front.seen().includes(Buffer.from(marker))).toBe(false);
+      expect(front.decodedPayloads().byteLength).toBeGreaterThan(0);
+      expect(front.decodedPayloads().includes(Buffer.from(marker))).toBe(false);
     },
     60_000,
   );

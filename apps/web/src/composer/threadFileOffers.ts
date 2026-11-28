@@ -16,15 +16,16 @@ export function offerRowFiles(
 
 /**
  * Hands this Chat thread's offered files to its composer while it is open.
- * `take` resolves with the reason it refused a file, at once or while the
- * file uploaded, so a drop of several files can name every refusal.
+ * `take` resolves with whether Chat accepted the file or refused it with a
+ * reason, so a drop of several files can name every refusal.
  */
 export function takeChatFiles(
   threadId: string,
-  take: (file: File) => Promise<string | undefined>,
+  take: (
+    file: File,
+  ) => Promise<
+    { readonly status: "accepted" } | { readonly status: "refused"; readonly reason: string }
+  >,
 ): () => void {
-  return threadImageOffers.subscribe(threadImageOfferKey("chat", threadId), async (file) => {
-    const reason = await take(file);
-    return reason === undefined ? { status: "accepted" } : { status: "refused", reason };
-  });
+  return threadImageOffers.subscribe(threadImageOfferKey("chat", threadId), (file) => take(file));
 }

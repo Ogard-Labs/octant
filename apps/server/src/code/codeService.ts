@@ -681,6 +681,8 @@ export type CodeCheckoutCapture =
       readonly status: "refused";
       readonly reason: "nested-changes";
       readonly paths: ReadonlyArray<string>;
+      readonly submodulePaths?: ReadonlyArray<string>;
+      readonly nestedRepositoryPaths?: ReadonlyArray<string>;
     };
 
 /**
@@ -5727,14 +5729,24 @@ export class CodeService {
   ): Promise<CodeCommandResult> {
     const refused = (
       reason: CodeThreadWorktreeMoveRefusal,
-      paths?: ReadonlyArray<string>,
+      nested?: {
+        readonly paths?: ReadonlyArray<string>;
+        readonly submodulePaths?: ReadonlyArray<string>;
+        readonly nestedRepositoryPaths?: ReadonlyArray<string>;
+      },
     ): CodeCommandResult => ({
       kind: "thread-moved-to-worktree",
       threadId: current.id,
       outcome: {
         status: "refused",
         reason,
-        ...(paths === undefined ? {} : { paths: paths.slice(0, 50) }),
+        ...(nested?.paths === undefined ? {} : { paths: nested.paths.slice(0, 50) }),
+        ...(nested?.submodulePaths === undefined || nested.submodulePaths.length === 0
+          ? {}
+          : { submodulePaths: nested.submodulePaths.slice(0, 50) }),
+        ...(nested?.nestedRepositoryPaths === undefined || nested.nestedRepositoryPaths.length === 0
+          ? {}
+          : { nestedRepositoryPaths: nested.nestedRepositoryPaths.slice(0, 50) }),
       },
     });
     if (command.expectedVersion !== current.version) {
@@ -5794,7 +5806,13 @@ export class CodeService {
     if (this.#forkPoints === undefined || creation === undefined) return refused("unavailable");
     const point = await this.#forkPoints.capture(windowId, current);
     if (point.status === "refused" && point.reason === "nested-changes") {
-      return refused("nested-changes", point.paths);
+      return refused("nested-changes", {
+        paths: point.paths,
+        ...(point.submodulePaths === undefined ? {} : { submodulePaths: point.submodulePaths }),
+        ...(point.nestedRepositoryPaths === undefined
+          ? {}
+          : { nestedRepositoryPaths: point.nestedRepositoryPaths }),
+      });
     }
     if (point.status !== "resolved") return refused("capture-failed");
     const branch =

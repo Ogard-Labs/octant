@@ -1,3 +1,4 @@
+import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
 import {
   parseSideTaskReportDelivery,
   type SideTaskReportCardBlock,
@@ -48,7 +49,16 @@ function SideTaskReportCard(props: { readonly block: SideTaskReportCardBlock }) 
       <header className="child-result__head">
         <span className="child-result__title">Report from side task</span>
         <span className="child-result__attribution">
-          {block.title} · {OUTCOME_WORDS[block.outcome]}
+          {block.childThreadId === undefined ? (
+            block.title
+          ) : (
+            <LazyThreadReferenceChip
+              look="link"
+              threadId={block.childThreadId}
+              title={block.title}
+            />
+          )}{" "}
+          · {OUTCOME_WORDS[block.outcome]}
         </span>
       </header>
       {block.text === undefined ? (

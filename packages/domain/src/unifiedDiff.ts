@@ -71,6 +71,11 @@ export interface ParsedDiffFile {
    */
   readonly emptyFile?: true;
   /**
+   * True only when Git's `index` line explicitly proved an empty blob opposite
+   * a null object ID (distinguishing a real empty file from a truncated header).
+   */
+  readonly emptyFileIndex?: true;
+  /**
    * True when Git quoted a path whose octal byte escapes were not valid UTF-8,
    * so `path` retains the escaped form rather than substituting U+FFFD.
    */
@@ -91,6 +96,8 @@ export interface ParsedDiffFile {
   readonly modified: string;
   /** True when the diff carried no textual hunks (binary or metadata only). */
   readonly binary: boolean;
+  /** True only when Git explicitly reported a binary patch (`Binary files ...` or `GIT binary patch`). */
+  readonly binaryContent?: true;
   /** The changed regions in order, as git printed them. */
   readonly hunks: ReadonlyArray<DiffHunk>;
   readonly source?: DiffSourceRange & { readonly headerEnd: number };
@@ -124,6 +131,8 @@ interface FileAccumulator {
   modified: string[];
   sawHunk: boolean;
   sawBinaryContent: boolean;
+  sawExplicitBinary: boolean;
+  sawEmptyFileIndex: boolean;
   hunks: HunkAccumulator[];
   source?: { start: number; end: number; headerEnd: number };
 }
@@ -162,6 +171,8 @@ function newAccumulator(): FileAccumulator {
     modified: [],
     sawHunk: false,
     sawBinaryContent: false,
+    sawExplicitBinary: false,
+    sawEmptyFileIndex: false,
     hunks: [],
   };
 }
@@ -364,6 +375,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     ...(accumulator.fileMode === undefined ? {} : { fileMode: accumulator.fileMode }),
     ...(modeOnly ? { modeOnly: true as const } : {}),
     ...(emptyFile ? { emptyFile: true as const } : {}),
+    ...(emptyFile && accumulator.sawEmptyFileIndex ? { emptyFileIndex: true as const } : {}),
     ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
     ...(nonUtf8PreviousPath ? { nonUtf8PreviousPath: true as const } : {}),
     ...(renamed && accumulator.copied ? { copied: true as const } : {}),
@@ -373,6 +385,9 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     original: accumulator.original.join("\n"),
     modified: accumulator.modified.join("\n"),
     binary: !accumulator.sawHunk,
+    ...(!accumulator.sawHunk && accumulator.sawExplicitBinary
+      ? { binaryContent: true as const }
+      : {}),
     hunks: accumulator.hunks.map(({ oldNext: _oldNext, newNext: _newNext, ...hunk }) => hunk),
     ...(accumulator.source === undefined ? {} : { source: { ...accumulator.source } }),
   };
@@ -475,17 +490,19 @@ export function parseUnifiedDiff(
     if (!accumulator.sawHunk) {
       if (line.startsWith("Binary files ") || line === "GIT binary patch") {
         accumulator.sawBinaryContent = true;
+        accumulator.sawExplicitBinary = true;
         continue;
       }
       const indexMatch = CONTENT_INDEX.exec(line);
-      if (
-        indexMatch?.[1] !== undefined &&
-        indexMatch[2] !== undefined &&
-        indexMatch[1] !== indexMatch[2] &&
-        !isEmptyFileIndexPair(indexMatch[1], indexMatch[2])
-      ) {
-        accumulator.sawBinaryContent = true;
-        continue;
+      if (indexMatch?.[1] !== undefined && indexMatch[2] !== undefined) {
+        if (isEmptyFileIndexPair(indexMatch[1], indexMatch[2])) {
+          accumulator.sawEmptyFileIndex = true;
+          continue;
+        }
+        if (indexMatch[1] !== indexMatch[2]) {
+          accumulator.sawBinaryContent = true;
+          continue;
+        }
       }
     }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {

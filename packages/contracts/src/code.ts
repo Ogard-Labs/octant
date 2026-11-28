@@ -1783,6 +1783,10 @@ export const CodeThreadWorktreeMoveOutcome = Schema.Union(
      * changes a copy would leave behind, so nothing is claimed as copied.
      */
     paths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
+    /** With `nested-changes`: submodules with uncommitted or untracked changes of their own. */
+    submodulePaths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
+    /** With `nested-changes`: untracked folders that hold a separate Git repository. */
+    nestedRepositoryPaths: Schema.optional(Schema.Array(Schema.String).pipe(Schema.maxItems(50))),
   }).annotations(strict),
 );
 export type CodeThreadWorktreeMoveOutcome = typeof CodeThreadWorktreeMoveOutcome.Type;

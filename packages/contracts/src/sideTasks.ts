@@ -292,6 +292,12 @@ export const SideTaskReportOwed = Schema.Struct({
   reportId: Schema.UUID,
   parentThreadId: Schema.UUID,
   parentMode: OctantMode,
+  /**
+   * The thread whose turn ended. A title can be shared by several side tasks,
+   * so only this says which one reported. Absent on reports journaled before
+   * it was carried.
+   */
+  childThreadId: Schema.optional(Schema.UUID),
   /** The offer's title: how the parent and its agent know the task. */
   title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
   outcome: SideTaskReportOutcome,

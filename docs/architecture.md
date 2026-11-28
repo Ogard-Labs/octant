@@ -2872,9 +2872,9 @@ hold it, so the task would keep editing that folder), a running turn, and
 another thread's running turn on the same checkout, and reads the last
 two again inside the journal unit that records the move, so a turn started
 during the copy refuses it. A second move of the same thread is refused
-while the first runs. It refuses too, naming the paths, when a
-submodule has changes of its own or an untracked folder, at any depth below
-an untracked parent, is a repository of its own: a capture records either
+while the first runs. It refuses too, naming the paths and which case applies, when a
+submodule has changes of its own (commit them there first) or an untracked folder, at any depth below
+an untracked parent, is a repository of its own (move it out, add it to `.gitignore`, or add it as a submodule): a capture records either
 only as a commit pointer, so a copy would leave that work behind. The search
 for such folders walks at most 100,000 untracked entries per move, skipping
 folders Git ignores; past that it refuses rather than claim a full copy. A
@@ -4843,7 +4843,9 @@ CI or reviewers should be woken, not left polling; maintainer request,
   binds to the switch service (maintainer decision, 2026-11-26). Every read
   compares the pull request's node id with the link's and refuses a number
   that now names another pull request. `ci-logs` reads every check on the
-  current head with `gh pr checks`; only a check whose link is a job in the
+  current head with `gh pr checks --json` (added in GitHub CLI 2.50.0;
+  `ghAuthenticationPort` requires GitHub CLI 2.81.0 or newer so both
+  `gh auth status --json hosts` and `gh pr checks --json` are supported); only a check whose link is a job in the
   same repository's Actions counts as one, and only when its run's head is
   the current head and the run lists that job (anything else is reported as
   an outside service's check or another commit's: a commit status may pair
@@ -4955,16 +4957,23 @@ third-party reviewer plugin could not take.
 Guide tab and Viewed checkboxes (maintainer decision, 2026-11-26).
 
 - **Writer seam.** A guide is written by a `pull-request-guide-writer`
-  contribution (`@octant/plugin-api/pull-request-guide-writer`). Like a
-  reviewer, it gets a port with two calls: read the host-verified diff at the
-  head, and run one read-only turn at Plan's gate with zero tools in a scratch
-  folder outside the Project. It has no checkout, shell, credential or forge
-  token. It only proposes stops; the host owns the limits and the journal.
-  Octant bundles one writer. The run uses the reviewer's host runtime: the same
-  diff capture, route inspection, read-only turn, usage record and spend
-  ceiling. GitHub stays a separable integration: the guide service reaches the
-  thread's own pull request through the pull-request switch service's resolver,
-  and Viewed through its own `gh` port.
+  contribution (`@octant/plugin-api/pull-request-guide-writer` and
+  `@octant/plugin-host/pull-request-guide-writers`). Like a reviewer, it gets
+  a port with two calls: read the host-verified diff at the head, and run one
+  read-only turn at Plan's gate with zero tools in a scratch folder outside the
+  Project. It has no checkout, shell, credential or forge token. It only
+  proposes stops; the host owns the limits and the journal. Octant bundles one
+  switchable first-party writer plugin (`pull-request-guide-writer`, component
+  `bundled-pull-request-guide-writer`, id
+  `octant/bundled-pull-request-guide-writer`) resolved through
+  `@octant/plugin-host` effective activation; installation, trust, and
+  enablement remain separate preconditions, discovery grants nothing, and when
+  no writer plugin is active every guide run is refused (`not-effective`)
+  before asking or billing anything. The run uses the reviewer's host runtime:
+  the same diff capture, route inspection, read-only turn, usage record and
+  spend ceiling. GitHub stays a separable integration: the guide service
+  reaches the thread's own pull request through the pull-request switch
+  service's resolver, and Viewed through its own `gh` port.
 - **Model and budget.** The guide model is `guideRoute` on the Project's
   pull-request review settings (`pull-request-review.project-settings-updated@1`
   gains the optional field; older events replay unchanged). There is no
@@ -16165,7 +16174,7 @@ and the marketplace and plugin registry are no longer extraction candidates.
 | Zen                                                                                            | Switchable bundled plugin; appearance contributions and their scoped state                                                                                                                                                                                    |
 | Linear, Azure Resource Manager reads                                                           | Bundled Integration plugins with no switch; integration ports and contributed views                                                                                                                                                                           |
 | Declarative Code tools                                                                         | Installed package declarations through the public Code-tool port; credential policy, consent and execution stay host-owned                                                                                                                                    |
-| Pull request reviewers                                                                         | Code-only plugin seam (`pull-request-reviewer`); host owns Plan read-only turns, head-staleness, findings, and opt-ins                                                                                                                                        |
+| Pull request reviewers and guide writers                                                       | Code-only plugin seams (`pull-request-reviewer`, `pull-request-guide-writer`); host owns Plan read-only turns, head-staleness, findings/guides, spend ceilings, and opt-ins                                                                                   |
 | Canvas, preview viewers, backgrounds, theme presets                                            | Core; scoped artifact contracts, registered viewers, and appearance contributions                                                                                                                                                                             |
 | Usage, diagnostics, Navigator, automations UI                                                  | Core; underlying authority stays in the host                                                                                                                                                                                                                  |
 | Project memory and its agent tool                                                              | Core; the journal, the person's confirmation, and purge stay host-owned                                                                                                                                                                                       |
@@ -16356,25 +16365,32 @@ schema, offered-side rules and task-owned command presentation are unchanged.
 The core's additional command presentation stays in a private server adapter;
 it is not added to the installed-plugin port's fixed metadata types.
 
-**Pull request reviewers** (seam and bundled second-model reviewer built). A
-plugin may contribute a Code-only `pull-request-reviewer` component through
-`@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`.
+**Pull request reviewers and guide writers** (seams and bundled plugins built).
+A plugin may contribute a Code-only `pull-request-reviewer` component through
+`@octant/plugin-api/pull-request-reviewer` and `@octant/plugin-host/pull-request-reviewers`,
+or a Code-only `pull-request-guide-writer` component through
+`@octant/plugin-api/pull-request-guide-writer` and
+`@octant/plugin-host/pull-request-guide-writers`.
 Installation, trust, and enablement stay separate preconditions evaluated on
-every lookup, and colliding reviewer ids are withheld together. Stored
-third-party packages remain host-prohibited until an out-of-process confined
-worker launch class exists. A reviewer receives one immutable
-`PullRequestReviewRequest` for a specific pushed PR head and one
-capability-scoped `PullRequestReviewHostPort` carrying no raw filesystem path,
-shell handle, credential, forge token, or direct host-service access. The host
-enforces effectiveness and PR head currency before and after every await, runs
-any model review turn at Plan's read-only gate under the configured route
-without silent fallback, verifies finding anchors and run ownership before
-writing `CodeReviewFinding` records, caps PR publication to at most one summary
+every lookup, discovery grants nothing, and colliding reviewer or writer ids
+are withheld together. Stored third-party packages remain host-prohibited until
+an out-of-process confined worker launch class exists. A reviewer or guide
+writer receives one immutable request for a specific pushed PR head and one
+capability-scoped host port carrying no raw filesystem path, shell handle,
+credential, forge token, or direct host-service access. The host enforces
+plugin effectiveness before and after every await (including immediately before
+recording a guide), checks PR head currency when capturing the diff and again
+before persisting (reviewers also check head currency around each stage), runs
+any model turn at Plan's read-only gate under the configured route without
+silent fallback, verifies anchors and run ownership before writing
+`CodeReviewFinding` or `pull-request-guide` records, caps PR publication to at most one summary
 comment behind a default-off Project opt-in (formal forge reviews — approve or
 request changes — are structurally absent from the port), and gates blocking
 finding hand-back to the worker behind a default-off per-PR opt-in. If the head
-moves or the plugin becomes inactive during a review, the host withholds
-publication and records the outcome as `stale` or `refused`.
+moves or the plugin becomes inactive during a run, the host withholds
+publication and records the outcome as `stale` or `refused`, and when no writer
+plugin is active guide runs are refused (`not-effective`) before billing
+anything.
 
 Preserve the sequence: establish a provider-neutral port and renderer seam
 before moving a feature behind them, and keep that work separate from unrelated

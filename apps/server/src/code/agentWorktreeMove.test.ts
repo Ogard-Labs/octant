@@ -22,11 +22,18 @@ function deps(results: ReadonlyArray<CodeCommandResult | Error>) {
   };
 }
 
-const refused = (reason: string, paths?: ReadonlyArray<string>) =>
+const refused = (
+  reason: string,
+  extra?: {
+    readonly paths?: ReadonlyArray<string>;
+    readonly submodulePaths?: ReadonlyArray<string>;
+    readonly nestedRepositoryPaths?: ReadonlyArray<string>;
+  },
+) =>
   ({
     kind: "thread-moved-to-worktree",
     threadId,
-    outcome: { status: "refused", reason, ...(paths === undefined ? {} : { paths }) },
+    outcome: { status: "refused", reason, ...extra },
   }) as unknown as CodeCommandResult;
 
 describe("an agent's move into a worktree the person allowed", () => {
@@ -37,9 +44,49 @@ describe("an agent's move into a worktree the person allowed", () => {
       threadId,
       expect.stringContaining("Another task is working in this checkout"),
     );
-    const nested = deps([refused("nested-changes", ["vendor/lib"])]);
-    await runAllowedWorktreeMove({ windowId, threadId, turnCompleted: true }, nested.deps);
-    expect(nested.notify).toHaveBeenCalledWith(threadId, expect.stringContaining("vendor/lib"));
+    const submodule = deps([
+      refused("nested-changes", { paths: ["vendor/lib"], submodulePaths: ["vendor/lib"] }),
+    ]);
+    await runAllowedWorktreeMove({ windowId, threadId, turnCompleted: true }, submodule.deps);
+    expect(submodule.notify).toHaveBeenCalledWith(
+      threadId,
+      expect.stringMatching(/vendor\/lib.*Commit them there first/i),
+    );
+    expect(submodule.notify).not.toHaveBeenCalledWith(
+      threadId,
+      expect.stringContaining(".gitignore"),
+    );
+
+    const nestedRepo = deps([
+      refused("nested-changes", { paths: ["scratch"], nestedRepositoryPaths: ["scratch"] }),
+    ]);
+    await runAllowedWorktreeMove({ windowId, threadId, turnCompleted: true }, nestedRepo.deps);
+    expect(nestedRepo.notify).toHaveBeenCalledWith(
+      threadId,
+      expect.stringMatching(/scratch.*move.*out.*\.gitignore.*submodule/i),
+    );
+    expect(nestedRepo.notify).not.toHaveBeenCalledWith(
+      threadId,
+      expect.stringContaining("Commit them there first"),
+    );
+
+    const both = deps([
+      refused("nested-changes", {
+        paths: ["scratch", "vendor/lib"],
+        submodulePaths: ["vendor/lib"],
+        nestedRepositoryPaths: ["scratch"],
+      }),
+    ]);
+    await runAllowedWorktreeMove({ windowId, threadId, turnCompleted: true }, both.deps);
+    expect(both.notify).toHaveBeenCalledWith(
+      threadId,
+      expect.stringMatching(/vendor\/lib.*commit/i),
+    );
+    expect(both.notify).toHaveBeenCalledWith(
+      threadId,
+      expect.stringMatching(/scratch.*move.*out.*\.gitignore.*submodule/i),
+    );
+
     const failed = deps([new Error("conflict")]);
     await runAllowedWorktreeMove({ windowId, threadId, turnCompleted: true }, failed.deps);
     expect(failed.notify).toHaveBeenCalledWith(threadId, expect.stringContaining("did not happen"));

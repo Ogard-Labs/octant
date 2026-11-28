@@ -24,7 +24,7 @@ function renderComposer(overrides: Partial<ChatComposerProps> = {}) {
     isSending: false,
     model: { options: [{ id: "model-a", label: "Model A" }], value: "model-a" },
     onDraftChange: vi.fn(),
-    onFileSelected: vi.fn(),
+    onFileSelected: vi.fn(() => ({ status: "accepted" as const })),
     onModelChange: vi.fn(),
     onProviderChange: vi.fn(),
     onResearchEnabledChange: vi.fn(),
@@ -51,7 +51,7 @@ function renderControlled(overrides: Partial<ChatComposerProps> = {}) {
   } = {
     isSending: false,
     model: { options: [{ id: "model-a", label: "Model A" }], value: "model-a" },
-    onFileSelected: vi.fn(),
+    onFileSelected: vi.fn(() => ({ status: "accepted" as const })),
     onModelChange: vi.fn(),
     onProviderChange: vi.fn(),
     onResearchEnabledChange: vi.fn(),
@@ -145,7 +145,7 @@ describe("ChatComposer thread mentions", () => {
         <ControlledComposer
           isSending={false}
           model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
-          onFileSelected={vi.fn()}
+          onFileSelected={vi.fn(() => ({ status: "accepted" as const }))}
           onModelChange={vi.fn()}
           onProviderChange={vi.fn()}
           onResearchEnabledChange={vi.fn()}
@@ -331,7 +331,7 @@ describe("ChatComposer thread mentions", () => {
           isSending={false}
           model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
           onDraftChange={setDraft}
-          onFileSelected={vi.fn()}
+          onFileSelected={vi.fn(() => ({ status: "accepted" as const }))}
           onModelChange={vi.fn()}
           onProviderChange={vi.fn()}
           onResearchEnabledChange={vi.fn()}
@@ -457,7 +457,7 @@ describe("ChatComposer @file absence", () => {
 
 describe("ChatComposer image paste", () => {
   it("turns a pasted PNG into a pending attachment through the ordinary file path", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     renderComposer({ onFileSelected, imageAttachment: { kind: "supported" } });
 
     const file = imageFile();
@@ -468,7 +468,7 @@ describe("ChatComposer image paste", () => {
   });
 
   it("accepts every image type Chat allows", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     renderComposer({ onFileSelected, imageAttachment: { kind: "supported" } });
 
     pasteImage(screen.getByLabelText("Message"), [
@@ -482,7 +482,7 @@ describe("ChatComposer image paste", () => {
   });
 
   it("does not read image bytes when the provider cannot accept images", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     const onImagePasteRejected = vi.fn();
     renderComposer({
       onFileSelected,
@@ -512,7 +512,7 @@ describe("ChatComposer image paste", () => {
   });
 
   it("puts an ordinary text paste into the message as plain text", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     const { props } = renderComposer({ onFileSelected, imageAttachment: { kind: "supported" } });
 
     const event = new Event("paste", { bubbles: true, cancelable: true });
@@ -533,7 +533,7 @@ describe("ChatComposer image paste", () => {
   });
 
   it("reports an out-of-bounds image instead of attaching it", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     const onImagePasteRejected = vi.fn();
     renderComposer({
       onFileSelected,
@@ -550,7 +550,7 @@ describe("ChatComposer image paste", () => {
   });
 
   it("pastes an image onto a message queued while a response is streaming", () => {
-    const onFileSelected = vi.fn();
+    const onFileSelected = vi.fn(() => ({ status: "accepted" as const }));
     renderComposer({ onFileSelected, imageAttachment: { kind: "supported" }, isSending: true });
 
     pasteImage(screen.getByLabelText("Message"), [imageFile()]);

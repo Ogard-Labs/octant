@@ -2,6 +2,7 @@ import { matchKeybinding } from "@octant/domain";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { isApplePlatform } from "../platform";
+import { ZenThreadReferences } from "./ZenThreadReferences";
 
 export interface ZenRootProps {
   readonly active: boolean;
@@ -72,7 +73,7 @@ export function ZenRoot(props: ZenRootProps) {
       </div>
       {props.active ? (
         <div className="zen-root__surface" data-testid="zen-root-surface">
-          {props.zen}
+          <ZenThreadReferences onLeave={props.onExit}>{props.zen}</ZenThreadReferences>
         </div>
       ) : null}
     </div>

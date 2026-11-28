@@ -78,7 +78,12 @@ import { PullRequestReviewerRegistry } from "../pullRequestReviewers/pullRequest
 import { createPullRequestReviewHostRuntime } from "../pullRequestReviewers/pullRequestReviewHostRuntime";
 import { createPullRequestReviewRouteHandler } from "../pullRequestReviewers/pullRequestReviewRoutes";
 import { PullRequestReviewService } from "../pullRequestReviewers/pullRequestReviewService";
-import { createBundledPullRequestGuideWriter } from "../pullRequestGuides/bundledPullRequestGuideWriter";
+import {
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+  createBundledPullRequestGuideWriter,
+} from "../pullRequestGuides/bundledPullRequestGuideWriter";
+import { PullRequestGuideWriterRegistry } from "../pullRequestGuides/pullRequestGuideWriterRegistry";
 import {
   createPullRequestGuideRouteHandler,
   pullRequestViewedViewOf,
@@ -90,7 +95,10 @@ import {
   SECOND_MODEL_PULL_REQUEST_REVIEWER_ID,
   createSecondModelPullRequestReviewer,
 } from "../pullRequestReviewers/secondModelPullRequestReviewer";
-import { SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID } from "@octant/plugin-host/first-party-plugins";
+import {
+  BUNDLED_PULL_REQUEST_GUIDE_WRITER_COMPONENT_ID,
+  SECOND_MODEL_PULL_REQUEST_REVIEWER_COMPONENT_ID,
+} from "@octant/plugin-host/first-party-plugins";
 import { isFirstPartyIntegrationEffective } from "../github/githubIntegrationEffective";
 import type { PullRequestWatchPort } from "../code/pullRequestWatchPort";
 import type { PullRequestCiPort } from "../code/pullRequestCiPort";
@@ -3781,6 +3789,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       service: pullRequestReviewService,
       windowAuthorityStore: deps.windowAuthorityStore,
     });
+    const pullRequestGuideWriters = new PullRequestGuideWriterRegistry();
+    pullRequestGuideWriters.register({
+      writerId: BUNDLED_PULL_REQUEST_GUIDE_WRITER_ID,
+      displayName: BUNDLED_PULL_REQUEST_GUIDE_WRITER_DISPLAY_NAME,
+      activation: () => {
+        const effective = isFirstPartyIntegrationEffective(
+          extensionApiService.snapshot(),
+          BUNDLED_PULL_REQUEST_GUIDE_WRITER_COMPONENT_ID,
+          { missingRow: "effective" },
+        );
+        return { installed: true, trusted: true, enabled: effective };
+      },
+      writer: createBundledPullRequestGuideWriter(),
+    });
     // Review guides run on the reviewer's host runtime: the same diff capture,
     // read-only turn, spend reservation and usage record, on the guide model.
     const guideService = new PullRequestGuideService({
@@ -3794,7 +3816,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       readThread: (threadId) => persistence.readCodeThread(threadId),
       guideRoute: (projectId) => pullRequestReviewService.guideRoute(projectId),
       runtime: pullRequestReviewHost.runtime,
-      writer: createBundledPullRequestGuideWriter(),
+      writers: pullRequestGuideWriters,
       uuid: randomUUID,
     });
     pullRequestGuideService = guideService;

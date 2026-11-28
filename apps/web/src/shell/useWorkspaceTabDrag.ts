@@ -150,20 +150,59 @@ export function useWorkspaceSurfaceDrag(options: {
     });
   }
 
-  const cancel = useCallback(() => {
-    releaseCapture(captured.current);
-    captured.current = null;
-    controller.current?.cancel();
+  const disarmReleaseSuppressionRef = useRef<(() => void) | null>(null);
+
+  const disarmReleaseSuppression = useCallback(() => {
+    disarmReleaseSuppressionRef.current?.();
+    disarmReleaseSuppressionRef.current = null;
   }, []);
+
+  const cancel = useCallback(
+    (cancelOptions?: { readonly suppressReleaseClick?: boolean }) => {
+      disarmReleaseSuppression();
+      releaseCapture(captured.current);
+      captured.current = null;
+      const wasDragging = controller.current?.getSnapshot().phase === "dragging";
+      const suppressReleaseClick = cancelOptions?.suppressReleaseClick === true && wasDragging;
+      controller.current?.cancel({ suppressReleaseClick });
+      if (!suppressReleaseClick) return;
+      // Escape or blur cancels our drag while the mouse button may still be
+      // held: suppress a click emitted by releasing that press, then disarm
+      // after the release tick (or immediately on a fresh press) so the next
+      // real click is never swallowed.
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const cleanup = () => {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        window.removeEventListener("pointerup", onRelease, true);
+        window.removeEventListener("pointerdown", onNextPress, true);
+        if (disarmReleaseSuppressionRef.current === cleanup) {
+          disarmReleaseSuppressionRef.current = null;
+        }
+        controller.current?.clearClickSuppression();
+      };
+      const onRelease = () => {
+        if (timer !== null) clearTimeout(timer);
+        timer = setTimeout(cleanup, 0);
+      };
+      const onNextPress = () => cleanup();
+      disarmReleaseSuppressionRef.current = cleanup;
+      window.addEventListener("pointerup", onRelease, true);
+      window.addEventListener("pointerdown", onNextPress, true);
+    },
+    [disarmReleaseSuppression],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || controller.current?.getSnapshot().phase === "idle") return;
       event.preventDefault();
       event.stopPropagation();
-      cancel();
+      cancel({ suppressReleaseClick: true });
     };
-    const onBlur = () => cancel();
+    const onBlur = () => cancel({ suppressReleaseClick: true });
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("blur", onBlur);
     return () => {
@@ -183,6 +222,7 @@ export function useWorkspaceSurfaceDrag(options: {
         controller.current?.consumeClickSuppression(dragKey) ?? false,
       onPointerDown(event, source) {
         if (event.button !== 0) return;
+        disarmReleaseSuppression();
         event.currentTarget.setPointerCapture?.(event.pointerId);
         captured.current = { element: event.currentTarget, pointerId: event.pointerId };
         controller.current?.start(event.pointerId, source, { x: event.clientX, y: event.clientY });
@@ -195,10 +235,10 @@ export function useWorkspaceSurfaceDrag(options: {
         releaseCapture(captured.current);
         captured.current = null;
       },
-      onPointerCancel: cancel,
+      onPointerCancel: () => cancel(),
       rootRef,
     }),
-    [active, cancel],
+    [active, cancel, disarmReleaseSuppression],
   );
 }
 

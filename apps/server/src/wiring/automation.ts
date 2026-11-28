@@ -4,7 +4,10 @@ import {
   lateIntegrationEventSources,
 } from "../integration/integrationEventSources";
 import { joinWorkPath } from "../work/workPathConfinement";
-import { revalidateAutomationAuthority } from "../automation/automationAuthorityRevalidation";
+import {
+  isPermanentAutomationAuthorityFailure,
+  revalidateAutomationAuthority,
+} from "../automation/automationAuthorityRevalidation";
 import { randomUUID } from "node:crypto";
 import { Schema } from "effect";
 import { AutomationFileSources } from "../automation/automationFileSources";
@@ -31,6 +34,7 @@ import { liveWorkFileWatchPort } from "../work/workFileWatchPort";
 import type { HarnessWiring } from "./harness";
 import {
   AutomationDefinitionSnapshot,
+  type AutomationDefinition,
   decodeAutomationCommand,
   decodeAutomationId,
   decodeAutomationRunId,
@@ -860,26 +864,29 @@ export function wireAutomation(deps: AutomationDependencies) {
     monotonic: () => performance.now(),
     wake: () => automationScheduler.poke(),
   });
+  const evaluateEventSourceAuthority = (definition: AutomationDefinition) => {
+    const snapshot = captureAutomationDefinitionSnapshot(definition);
+    const run = {
+      definitionSnapshot: snapshot,
+      authoritySnapshot: {
+        ...snapshot.authorityProfile,
+        capturedAt: new Date().toISOString() as UtcTimestamp,
+      },
+    };
+    const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, {
+      definition,
+      run,
+    });
+    return { facts, result: revalidateAutomationAuthority({ definition, run, facts }) };
+  };
   const automationEventSources = new AutomationEventSources({
     projection: persistence.automationProjection,
     scheduler: automationScheduler,
     sources: integrationEventSources,
     activity: routineEventActivity,
-    current: (definition) => {
-      const snapshot = captureAutomationDefinitionSnapshot(definition);
-      const run = {
-        definitionSnapshot: snapshot,
-        authoritySnapshot: {
-          ...snapshot.authorityProfile,
-          capturedAt: new Date().toISOString() as UtcTimestamp,
-        },
-      };
-      const facts = resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, {
-        definition,
-        run,
-      });
-      return revalidateAutomationAuthority({ definition, run, facts }).kind === "ok";
-    },
+    current: (definition) => evaluateEventSourceAuthority(definition).result.kind === "ok",
+    blocksSharedAcknowledgements: (definition) =>
+      !isPermanentAutomationAuthorityFailure(evaluateEventSourceAuthority(definition)),
     now: () => new Date().toISOString() as UtcTimestamp,
     monotonic: () => performance.now(),
     wake: () => automationScheduler.poke(),

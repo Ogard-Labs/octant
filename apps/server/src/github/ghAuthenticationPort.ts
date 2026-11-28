@@ -8,7 +8,10 @@ const MAX_OUTPUT_BYTES = 64 * 1024;
 const INTERACTIVE_AUTH_TIMEOUT_MS = 10 * 60 * 1_000;
 const STATUS_OBSERVATION_TIMEOUT_MS = 5_000;
 const SECURE_STORE_PROBE_TIMEOUT_MS = 5_000;
-const MINIMUM_SUPPORTED_GH_VERSION = [2, 45, 0] as const;
+// `gh pr checks --json` shipped in 2.50.0 (cli/cli#9079) and `gh auth status
+// --json hosts` shipped in 2.81.0, so 2.81.0 is the oldest GitHub CLI where
+// both GitHub status observation and CI check reads work.
+const MINIMUM_SUPPORTED_GH_VERSION = [2, 81, 0] as const;
 const TOKEN_ENVIRONMENT_NAMES = [
   "GH_TOKEN",
   "GITHUB_TOKEN",

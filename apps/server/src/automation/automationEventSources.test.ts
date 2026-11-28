@@ -1,17 +1,28 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
+  AUTOMATION_WEBHOOK_ENDPOINT_FILTER,
+  AUTOMATION_WEBHOOK_INTEGRATION_ID,
+  AUTOMATION_WEBHOOK_SOURCE_ID,
   EventActor,
   decodeAutomationCommand,
+  decodeProject,
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type AutomationId,
   type AutomationIntegrationEvent,
+  type AutomationIntegrationEventOccurrence,
   type AutomationEventSourceWindow,
   type UtcTimestamp,
+  type WebhookEndpointId,
 } from "@octant/contracts";
 import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
+import type { HubState, HubStatePort } from "../hub/hubStateStore";
+import { SpokeWebhookService } from "../hub/spokeWebhookService";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -20,7 +31,17 @@ import { AutomationEventStore } from "./automationEventStore";
 import { hydrateAutomationProjection } from "./automationProjection";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationCommandService } from "./automationCommandService";
+import {
+  buildAutomationAuthorityFactsFromHost,
+  isPermanentAutomationAuthorityFailure,
+  revalidateAutomationAuthority,
+} from "./automationAuthorityRevalidation";
+import {
+  buildAutomationRunForOccurrence,
+  captureAutomationDefinitionSnapshot,
+} from "./automationRunIdentity";
 import { AutomationEventSources, prepareAutomationEventDefinition } from "./automationEventSources";
+import { reconcileAutomationEventObservation } from "./automationEventSourceState";
 import {
   automationDefinitionDraftFixture,
   automationLocalWindowPrincipal,
@@ -307,5 +328,494 @@ describe("durable routine integration polling", () => {
     expect(f.projection.listRuns({ automationId: f.definition.id, limit: 10 }).runs).toHaveLength(
       0,
     );
+  });
+
+  async function webhookFixture() {
+    const directory = mkdtempSync(join(tmpdir(), "octant-routine-webhook-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "events.sqlite3"));
+    databases.push(connection);
+    const baseTime = Date.parse("2026-11-26T12:00:00.000Z");
+    let elapsed = 0;
+    const nowMs = () => baseTime + elapsed;
+    const now = () => new Date(nowMs()).toISOString() as UtcTimestamp;
+    applyMigrations(connection, MIGRATIONS, now);
+    const runtime = createPhase1RuntimeRegistries();
+    const projection = runtime.automationProjection;
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: now,
+    });
+    const store = new AutomationEventStore({
+      journal,
+      uuid: randomUUID,
+      actor: Schema.decodeUnknownSync(EventActor)({
+        kind: "system",
+        actorId: AUTOMATION_TEST_IDS.actor,
+      }),
+    });
+    const commands = new AutomationCommandService({
+      store,
+      projection,
+      hostId: "local",
+      clock: now,
+    });
+    const offers = vi.fn();
+    const scheduler = new AutomationSchedulerService({
+      store,
+      projection,
+      dispatch: { offer: offers },
+      now,
+    });
+
+    let hubState: HubState = {};
+    let failNextSave = false;
+    const statePort: HubStatePort = {
+      load: () => hubState,
+      save: (next) => {
+        if (failNextSave) {
+          failNextSave = false;
+          throw new Error("disk temporarily unavailable");
+        }
+        hubState = next;
+      },
+    };
+    const webhooks = new SpokeWebhookService({
+      state: statePort,
+      publicGranted: () => true,
+      remoteAccessPaused: () => false,
+      hub: undefined,
+      record: () => undefined,
+      now: nowMs,
+    });
+    const createdEndpoint = await webhooks.create({ scheme: "github", label: "Deploy hooks" });
+    if (createdEndpoint.status !== "created") throw new Error(createdEndpoint.status);
+    let activeEndpointId = createdEndpoint.endpointId;
+    let activeSecret = createdEndpoint.secret;
+    const deliver = (index: number) => {
+      const body = JSON.stringify({ n: index });
+      return webhooks.receive({
+        endpointId: activeEndpointId as WebhookEndpointId,
+        deliveryId: `delivery-${index}`,
+        receivedAt: nowMs() + index,
+        headers: {
+          "x-hub-signature-256": `sha256=${createHmac("sha256", activeSecret).update(body).digest("hex")}`,
+          "x-github-delivery": `delivery-${index}`,
+          "x-github-event": "push",
+        },
+        body: Buffer.from(body).toString("base64"),
+      });
+    };
+    const provider = webhooks.eventSources();
+    const createRoutine = async (options?: {
+      readonly id?: AutomationId;
+      readonly endpointId?: string;
+      readonly pollMinutes?: number;
+      readonly providerInstanceId?: string;
+    }) => {
+      const baseDraft = automationDefinitionDraftFixture({
+        missedRunPolicy: "run-once",
+        trigger: {
+          kind: "integration-event",
+          integrationId: AUTOMATION_WEBHOOK_INTEGRATION_ID,
+          sourceId: AUTOMATION_WEBHOOK_SOURCE_ID,
+          filters: {
+            [AUTOMATION_WEBHOOK_ENDPOINT_FILTER]: options?.endpointId ?? activeEndpointId,
+          },
+          pollMinutes: options?.pollMinutes ?? 60,
+          automaticStartLimit: 8,
+        },
+      });
+      const draft =
+        options?.providerInstanceId === undefined
+          ? baseDraft
+          : {
+              ...baseDraft,
+              executionProfile: {
+                ...baseDraft.executionProfile,
+                providerInstanceId: decodeProviderInstanceId(options.providerInstanceId),
+              },
+            };
+      const preparation = await prepareAutomationEventDefinition({
+        definition: draft,
+        sources: provider,
+        rearm: false,
+        current: () => true,
+        signal: new AbortController().signal,
+        now,
+      });
+      if (preparation === undefined) throw new Error("Expected webhook source preparation");
+      const created = commands.execute(
+        decodeAutomationCommand({
+          kind: "create-automation",
+          automationId: options?.id ?? AUTOMATION_TEST_IDS.automation,
+          expectedVersion: 0,
+          principal: automationLocalWindowPrincipal(),
+          origin: { kind: "interactive" },
+          definition: preparation.definition,
+        }),
+        undefined,
+        undefined,
+        preparation,
+      );
+      if (created.kind !== "automation-created") throw new Error("Expected automation-created");
+      return created.automation;
+    };
+    let wakes = 0;
+    const staleProjectRoutineIds = new Set<string>();
+    const disabledProviderInstanceIds = new Set<string>();
+    const evaluateAuthority = (
+      definition: (typeof projection)["listDefinitions"] extends () => ReadonlyArray<infer D>
+        ? D
+        : never,
+    ) => {
+      const snapshot = captureAutomationDefinitionSnapshot(definition);
+      const run = {
+        definitionSnapshot: snapshot,
+        authoritySnapshot: {
+          ...snapshot.authorityProfile,
+          capturedAt: now(),
+        },
+      };
+      const binding = { canonicalRoot: directory } as const;
+      const project = staleProjectRoutineIds.has(String(definition.id))
+        ? undefined
+        : decodeProject({
+            id: String(definition.projectId),
+            name: "Webhook Project",
+            type: "work",
+            lifecycle: "active",
+            pinned: false,
+            rank: "0/1",
+            version: definition.projectVersion,
+            createdAt: now(),
+            updatedAt: now(),
+            binding,
+            bindingHistory: [
+              {
+                revisionId: AUTOMATION_TEST_IDS.bindingRevision,
+                revision: 1,
+                currentBinding: binding,
+                actor: { kind: "local-user", actorId: AUTOMATION_TEST_IDS.actor },
+                changedAt: now(),
+              },
+            ],
+          });
+      const providerInstance = decodeProviderInstance({
+        id: String(definition.executionProfile.providerInstanceId),
+        displayName: "Routine Provider",
+        driverKind: "openai-compatible",
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://gateway.example/v1/",
+          authentication: "bearer",
+          protocol: "auto",
+          manualModelIds: [String(definition.executionProfile.modelId)],
+        },
+        enabled: !disabledProviderInstanceIds.has(
+          String(definition.executionProfile.providerInstanceId),
+        ),
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: now(),
+        updatedAt: now(),
+      });
+      const facts = buildAutomationAuthorityFactsFromHost({
+        hostId: String(definition.hostId),
+        project,
+        providerInstance,
+        providerSupportsModel: true,
+        executionProfileMatches: true,
+        authorityDigestMatches: true,
+        codeBindingMatches: true,
+        workBindingMatches: true,
+      });
+      return { facts, result: revalidateAutomationAuthority({ definition, run, facts }) };
+    };
+    const sources = new AutomationEventSources({
+      projection,
+      scheduler,
+      sources: provider,
+      current: (definition) => evaluateAuthority(definition).result.kind === "ok",
+      blocksSharedAcknowledgements: (definition) =>
+        !isPermanentAutomationAuthorityFailure(evaluateAuthority(definition)),
+      now,
+      monotonic: () => elapsed,
+      wake: () => {
+        wakes += 1;
+      },
+    });
+    const poll = async (automationId: AutomationId, stepMs = 60 * 60_000) => {
+      elapsed += stepMs;
+      const beforeRevision = projection.getEventSource(automationId)?.observationRevision ?? 0;
+      const beforeWakes = wakes;
+      sources.reconcile();
+      await vi.waitFor(() => {
+        expect(projection.getEventSource(automationId)?.observationRevision).toBeGreaterThan(
+          beforeRevision,
+        );
+        expect(wakes).toBeGreaterThan(beforeWakes);
+      });
+    };
+    return {
+      projection,
+      store,
+      scheduler,
+      offers,
+      webhooks,
+      provider,
+      sources,
+      createdEndpoint,
+      deliver,
+      createRoutine,
+      poll,
+      now,
+      failNextSaveOnce: () => {
+        failNextSave = true;
+      },
+      setActiveEndpoint: (endpointId: string, secret: string) => {
+        activeEndpointId = endpointId;
+        activeSecret = secret;
+      },
+      invalidateAuthority: (automationId: AutomationId) => {
+        staleProjectRoutineIds.add(String(automationId));
+      },
+      setProviderDisabled: (providerInstanceId: string, disabled: boolean) => {
+        if (disabled) disabledProviderInstanceIds.add(providerInstanceId);
+        else disabledProviderInstanceIds.delete(providerInstanceId);
+      },
+    };
+  }
+
+  it("acknowledges baselined and claimed webhook deliveries so a long busy routine never overflows its 32-event waiting list", async () => {
+    const f = await webhookFixture();
+    // 16 deliveries sit unread before the hourly routine is armed.
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    const routine = await f.createRoutine();
+
+    // First look baselines all 16 pre-existing deliveries and acknowledges every one of them
+    // immediately, so a full burst of 16 fresh deliveries is accepted without waiting 16 hours.
+    await f.poll(routine.id);
+    expect(f.offers).not.toHaveBeenCalled();
+    for (let i = 16; i < 32; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(32)).toEqual({ status: "refused", kind: "busy" });
+
+    // Second look claims delivery-16 (starting an active run), leaving 15 pending and freeing 1 slot.
+    await f.poll(routine.id);
+    expect(f.offers).toHaveBeenCalledOnce();
+    expect(f.projection.activeRun(routine.id)).toBeDefined();
+    expect(f.projection.getEventSource(routine.id)?.pending).toHaveLength(15);
+
+    // While the run remains active (busy), run 30 real scheduler looks while still watching:
+    // every look commits and advances observationRevision, acknowledges none of the 15 pending
+    // deliveries, and leaves only the 1 slot already freed by claiming delivery-16.
+    for (let look = 0; look < 30; look += 1) {
+      await f.poll(routine.id);
+      const checkpoint = f.projection.getEventSource(routine.id);
+      expect(checkpoint?.phase).toBe("watching");
+      expect(checkpoint?.pending).toHaveLength(15);
+    }
+
+    // Delivery-32 fills the single slot freed by delivery-16; delivery-33 is refused as busy.
+    expect(f.deliver(32)).toEqual({ status: "accepted" });
+    expect(f.deliver(33)).toEqual({ status: "refused", kind: "busy" });
+
+    // The next busy look observes delivery-32 and holds the routine on busy-input without
+    // acknowledging any of the 16 unread deliveries; streaming deliveries stay refused as busy
+    // and the waiting list never reaches 32 or needs-rearm.
+    await f.poll(routine.id);
+    for (let look = 0; look < 30; look += 1) {
+      expect(f.deliver(33 + look)).toEqual({ status: "refused", kind: "busy" });
+    }
+
+    const checkpoint = f.projection.getEventSource(routine.id);
+    expect(checkpoint?.phase).toBe("held");
+    expect(checkpoint?.reason).toBe("busy-input");
+    expect(checkpoint?.pending).toHaveLength(16);
+    f.sources.stop();
+  });
+
+  it("retries stranded webhook baseline acknowledgements on the next healthy poll", async () => {
+    const f = await webhookFixture();
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    const routine = await f.createRoutine();
+
+    // Baseline commits to the journal, but the webhook state save throws during acknowledge.
+    f.failNextSaveOnce();
+    await f.poll(routine.id);
+    expect(f.projection.getEventSource(routine.id)?.baselineReady).toBe(true);
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // The next healthy poll reconciles the baselined ids from the durable checkpoint and frees all 16 slots.
+    await f.poll(routine.id);
+    for (let i = 16; i < 32; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    f.sources.stop();
+  });
+
+  it("reconciles a webhook delivery slot after run-first crash recovery", async () => {
+    const f = await webhookFixture();
+    const routine = await f.createRoutine();
+    if (routine.trigger.kind !== "integration-event") {
+      throw new Error("Expected integration-event trigger");
+    }
+
+    // Baseline empty endpoint, then fill all 16 unread slots.
+    await f.poll(routine.id);
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Simulate a crash right after run-first appendRunCreated, before the ledger or acknowledge ran.
+    const bound = await f.provider.bind(routine.trigger, new AbortController().signal);
+    if (bound === undefined) throw new Error("Expected bound source");
+    const read = await bound.read(new AbortController().signal);
+    if (read.kind !== "complete") throw new Error("Expected complete read");
+    const previous = f.projection.getEventSource(routine.id);
+    if (previous === undefined) throw new Error("Expected checkpoint");
+    const claimDecision = reconcileAutomationEventObservation({
+      previous,
+      trigger: routine.trigger,
+      events: read.events,
+      semantics: bound.semantics,
+      observedAt: f.now(),
+      coverageGap: false,
+      missedRunPolicy: routine.missedRunPolicy,
+      busy: false,
+    });
+    if (claimDecision.kind !== "claim") throw new Error("Expected claim decision");
+    const occurrence: AutomationIntegrationEventOccurrence = {
+      kind: "integration-event",
+      automationId: routine.id,
+      definitionRevision: routine.definitionRevision,
+      source: claimDecision.receipt,
+    };
+    const crashedRun = buildAutomationRunForOccurrence({
+      definition: routine,
+      occurrence,
+      now: f.now(),
+    });
+    f.store.appendRunCreated({ run: crashedRun });
+
+    // Scheduler recovery restores the durable checkpoint, but the webhook slot is still unread.
+    const repaired = f.scheduler.runPass();
+    expect(repaired.repairedRunIds).toContain(crashedRun.id);
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Next poll reconciles the claimed delivery from the recovered checkpoint and frees only its 1 slot.
+    await f.poll(routine.id);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
+  });
+
+  it("holds shared webhook endpoint capacity across rotated ids until every enabled routine finishes", async () => {
+    const f = await webhookFixture();
+    const hourly = await f.createRoutine({ pollMinutes: 60 });
+
+    // Rotate the endpoint after creating hourly (hourly still references the former endpoint id).
+    const rotated = await f.webhooks.rotate(f.createdEndpoint.endpointId as WebhookEndpointId);
+    if (rotated.status !== "created") throw new Error(rotated.status);
+    f.setActiveEndpoint(rotated.endpointId, rotated.secret);
+
+    // Hourly routine baselines on the rotated endpoint, accepts 16 deliveries, and claims delivery-0 (leaving 15 pending).
+    await f.poll(hourly.id);
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    await f.poll(hourly.id);
+    expect(f.projection.getEventSource(hourly.id)?.pending).toHaveLength(15);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+
+    // Attach a faster 1-minute routine on the rotated endpoint id (different sourceIdentity, same capacityKey).
+    const fast = await f.createRoutine({
+      id: "22222222-2222-4222-8222-222222222222" as AutomationId,
+      endpointId: rotated.endpointId,
+      pollMinutes: 1,
+    });
+
+    // Fast routine baselines all 16 unread deliveries, but releases zero slots because hourly
+    // still holds 1..15 pending and has not seen 16 yet.
+    await f.poll(fast.id, 60_000);
+    expect(f.projection.getEventSource(fast.id)?.baselineReady).toBe(true);
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+
+    // Once hourly's first run finishes and hourly claims delivery-1, both routines are finished
+    // with delivery-1, releasing exactly 1 slot.
+    const firstRun = f.projection.activeRun(hourly.id);
+    if (firstRun === undefined) throw new Error("Expected active hourly run");
+    f.store.appendRunStatusChanged({
+      automationId: hourly.id,
+      runId: firstRun.id,
+      previousLifecycle: firstRun.lifecycle,
+      lifecycle: "completed",
+      version: firstRun.version + 1,
+      expectedVersion: firstRun.version,
+      updatedAt: f.now(),
+    });
+    await f.poll(hourly.id);
+    expect(f.deliver(17)).toEqual({ status: "accepted" });
+    expect(f.deliver(18)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
+  });
+
+  it("does not let an authority-invalidated sibling routine stall shared webhook capacity", async () => {
+    const f = await webhookFixture();
+    const stale = await f.createRoutine({ pollMinutes: 60 });
+    const healthy = await f.createRoutine({
+      id: "33333333-3333-4333-8333-333333333333" as AutomationId,
+      pollMinutes: 1,
+    });
+
+    await f.poll(stale.id);
+    await f.poll(healthy.id, 60_000);
+    // Invalidate the first routine's captured authority (e.g. its Project version moved).
+    f.invalidateAuthority(stale.id);
+
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Healthy routine claims delivery-0 and frees its slot even though stale can no longer poll.
+    await f.poll(healthy.id, 60_000);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
+  });
+
+  it("keeps the shared webhook acknowledgement barrier while one sibling's provider is temporarily disabled so re-enabling never overflows its pending list", async () => {
+    const f = await webhookFixture();
+    const pausedProviderId = AUTOMATION_TEST_IDS.providerInstance;
+    const healthyProviderId = "aa000000-0000-4000-8000-000000000071";
+    const paused = await f.createRoutine({ pollMinutes: 60, providerInstanceId: pausedProviderId });
+    const healthy = await f.createRoutine({
+      id: "44444444-4444-4444-8444-444444444444" as AutomationId,
+      pollMinutes: 1,
+      providerInstanceId: healthyProviderId,
+    });
+
+    // First routine baselines an empty endpoint, then its provider instance is temporarily turned off.
+    await f.poll(paused.id);
+    f.setProviderDisabled(pausedProviderId, true);
+
+    // 16 deliveries fill the endpoint; the second routine baselines all 16, but frees zero slots
+    // because the first routine's disabled provider is recoverable and still holds the barrier.
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+    await f.poll(healthy.id, 60_000);
+    expect(f.projection.getEventSource(healthy.id)?.baselineReady).toBe(true);
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Re-enabling the first routine's provider leaves it with at most 16 fresh deliveries (never >32
+    // or needs-rearm). Claiming delivery-0 frees exactly that 1 slot because both routines have now
+    // finished with delivery-0.
+    f.setProviderDisabled(pausedProviderId, false);
+    await f.poll(paused.id);
+    const checkpoint = f.projection.getEventSource(paused.id);
+    expect(checkpoint?.phase).toBe("watching");
+    expect(checkpoint?.pending).toHaveLength(15);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
   });
 });

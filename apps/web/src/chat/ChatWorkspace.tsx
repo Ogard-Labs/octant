@@ -622,9 +622,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // A failed load says nothing here: a drop loads the same module first and
   // says so itself when it cannot, so a failure here, with nothing dropped,
   // would only warn on every Chat thread opened.
-  const takeOfferedFile = useRef<(file: File) => Promise<string | undefined>>(
-    async () => undefined,
-  );
+  const takeOfferedFile = useRef<
+    (
+      file: File,
+    ) => Promise<
+      { readonly status: "accepted" } | { readonly status: "refused"; readonly reason: string }
+    >
+  >(async () => ({ status: "refused", reason: "The conversation is not ready." }));
   // Offers also wait while the host is asked whether Sees images can describe
   // a picture, so one is not refused on the picker's word alone.
   const offeredThreadId =
@@ -668,14 +672,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     );
   }
   const thread = view.thread;
-  // Resolves with the reason a file was not attached, at once or while it
-  // uploaded, so a row drop can name it after a later file clears the
+  // Resolves with an explicit accepted/refused outcome, at once or while it
+  // uploaded, so a row drop can name refusals after a later file clears the
   // composer's warning and a large paste only names a file that Chat took.
   // A discard of a file not kept is never awaited: a row drop hands over its
   // next file only once this one has a verdict, and Send is enabled again as
   // soon as no upload is in flight, so waiting on the host's discard left a
   // gap in which a message went out without the rest of the drop.
-  const attachChatFile = (file: File): Promise<string | undefined> => {
+  const attachChatFile = (
+    file: File,
+  ): Promise<
+    { readonly status: "accepted" } | { readonly status: "refused"; readonly reason: string }
+  > => {
     // A pasted image usually has no file name; name it once so the chip,
     // its remove control, and any failure message all agree.
     const displayName = pastedImageName(file);
@@ -690,7 +698,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ) {
       const message = `${displayName} is unavailable to the selected provider and model.`;
       setAttachmentStatus({ kind: "failed", message });
-      return Promise.resolve(message);
+      return Promise.resolve({ status: "refused", reason: message });
     }
     // A turn takes at most MAX_CHAT_TURN_ATTACHMENTS files and the host
     // refuses a send with more, so a draft past it could not go out until the
@@ -703,7 +711,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ) {
       const message = `A message can hold ${MAX_CHAT_TURN_ATTACHMENTS} attachments.`;
       setAttachmentStatus({ kind: "failed", message });
-      return Promise.resolve(message);
+      return Promise.resolve({ status: "refused", reason: message });
     }
     const attachmentId = decodeChatAttachmentId(crypto.randomUUID());
     // A new attempt supersedes whatever an earlier one reported; a
@@ -717,7 +725,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     setUploadingAttachments((current) => [...current, { id: attachmentId, displayName, file }]);
     const settleUpload = () =>
       setUploadingAttachments((current) => current.filter((upload) => upload.id !== attachmentId));
-    return (async (): Promise<string | undefined> => {
+    return (async (): Promise<
+      { readonly status: "accepted" } | { readonly status: "refused"; readonly reason: string }
+    > => {
       try {
         const buffer = await file.arrayBuffer();
         // A file that is not an image goes to the model natively or
@@ -736,7 +746,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           settleUpload();
           if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id))
             setAttachmentStatus({ kind: "failed", message: refusal });
-          return refusal;
+          return { status: "refused", reason: refusal };
         }
         if (
           !mountedRef.current ||
@@ -748,7 +758,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void discardAttachmentRef
             .current({ threadId: view.thread.id, attachmentId })
             .catch(() => undefined);
-          return "The attachment was cancelled.";
+          return { status: "refused", reason: "The attachment was cancelled." };
         }
         await props.controller.upload({
           threadId: view.thread.id,
@@ -767,11 +777,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void discardAttachmentRef
             .current({ threadId: view.thread.id, attachmentId })
             .catch(() => undefined);
-          return "The attachment was cancelled.";
+          return { status: "refused", reason: "The attachment was cancelled." };
         }
         appendPendingAttachment({ id: attachmentId, displayName, file });
         settleUpload();
-        return undefined;
+        return { status: "accepted" };
       } catch {
         settleUpload();
         void discardAttachmentRef
@@ -781,7 +791,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         if (mountedRef.current && activeThreadIdRef.current === String(view.thread.id)) {
           setAttachmentStatus({ kind: "failed", message });
         }
-        return message;
+        return { status: "refused", reason: message };
       }
     })();
   };

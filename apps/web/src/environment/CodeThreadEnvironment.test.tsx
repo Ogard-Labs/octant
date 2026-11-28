@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { decodeProjectExtraFolder } from "@octant/contracts/projects";
 import { describe, expect, it, vi } from "vitest";
 import { CodeCheckoutBar } from "../code/CodeCheckoutBar";
+import { worktreeMoveRefusalMessage } from "../shell/WorkspaceView";
 import { CodeThreadEnvironment } from "./CodeThreadEnvironment";
 import { ThreadActivityPreviewContext } from "../threadActivity/ThreadActivityEnvironment";
 
@@ -1202,6 +1203,27 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     expect(screen.getByRole("dialog", { name: "Move to a new worktree" })).toHaveTextContent(
       "still has them",
     );
+  });
+
+  it("names the right remedy in the move dialog for dirty submodules, untracked nested repositories, and both", () => {
+    const subOnly = worktreeMoveRefusalMessage("nested-changes", ["vendor/lib"], ["vendor/lib"]);
+    expect(subOnly).toMatch(/vendor\/lib.*Commit them there first/);
+    expect(subOnly).not.toContain(".gitignore");
+
+    const repoOnly = worktreeMoveRefusalMessage("nested-changes", ["scratch"], undefined, [
+      "scratch",
+    ]);
+    expect(repoOnly).toMatch(/scratch.*Move it out.*\.gitignore.*submodule/i);
+    expect(repoOnly).not.toContain("Commit them there first");
+
+    const mixed = worktreeMoveRefusalMessage(
+      "nested-changes",
+      ["scratch", "vendor/lib"],
+      ["vendor/lib"],
+      ["scratch"],
+    );
+    expect(mixed).toMatch(/vendor\/lib.*commit them there first/i);
+    expect(mixed).toMatch(/scratch.*move it out.*\.gitignore.*submodule/i);
   });
 
   it("shows a refused move's reason, naming what could not be copied, and claims nothing was copied", async () => {

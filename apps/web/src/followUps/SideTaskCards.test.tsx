@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { SideTask } from "@octant/contracts";
@@ -393,7 +393,8 @@ describe("SideTaskInline", () => {
     expect(sideTasks).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the started thread's card from its name on the receipt", async () => {
+  function renderReceipt(listed = true) {
+    const onOpen = vi.fn();
     const full = {
       sideTasks: vi.fn(async () => ({
         threadId,
@@ -406,24 +407,25 @@ describe("SideTaskInline", () => {
         ],
       })),
     };
+    const row = {
+      threadId: started.threadId,
+      title: "Fix stale install docs",
+      projectId: "project-1",
+      checkoutChip: { checkoutKind: "managed-worktree" as const, label: "fix/install-docs" },
+    };
     render(
-      <ThreadReferencesContext.Provider
-        value={listsOf({
-          code: [
-            {
-              threadId: started.threadId,
-              title: "Fix stale install docs",
-              projectId: "project-1",
-              checkoutChip: { checkoutKind: "managed-worktree", label: "fix/install-docs" },
-            },
-          ],
-        })}
-      >
+      <ThreadReferencesContext.Provider value={listsOf({ code: listed ? [row] : [] }, onOpen)}>
+        <textarea aria-label="Prompt" />
         <SideTaskProvider client={full as never} onStarted={vi.fn()} threadId={threadId}>
           <SideTaskInline last loadedTurnIds={new Set([turnId])} running={false} turnId={turnId} />
         </SideTaskProvider>
       </ThreadReferencesContext.Provider>,
     );
+    return onOpen;
+  }
+
+  it("shows the started thread's card from its name on the receipt", async () => {
+    const onOpen = renderReceipt();
 
     await userEvent.click(
       await screen.findByRole("button", { name: /^Thread: Fix stale install docs/ }),
@@ -432,5 +434,31 @@ describe("SideTaskInline", () => {
     const card = await screen.findByRole("dialog", { name: "Thread details" });
     expect(card).toHaveTextContent("fix/install-docs");
     expect(screen.getByRole("button", { name: "Open", hidden: true })).toBeInTheDocument();
+
+    await userEvent.click(within(card).getByRole("button", { name: "Open thread" }));
+    expect(onOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: started.threadId, mode: "code" }),
+    );
+  });
+
+  it("shows the receipt's card on hover without taking focus from the prompt", async () => {
+    const user = userEvent.setup();
+    renderReceipt();
+    const prompt = screen.getByRole("textbox", { name: "Prompt" });
+    await user.click(prompt);
+
+    await user.hover(await screen.findByRole("button", { name: /^Thread:/ }));
+
+    expect(await screen.findByRole("dialog", { name: "Thread details" })).toBeVisible();
+    expect(prompt).toHaveFocus();
+  });
+
+  it("keeps the receipt's title as text for a thread the window does not list", async () => {
+    renderReceipt(false);
+
+    expect(await screen.findByText(/Started in a new thread/)).toHaveTextContent(
+      "Fix stale install docs",
+    );
+    expect(screen.queryByRole("button", { name: /^Thread:/ })).not.toBeInTheDocument();
   });
 });

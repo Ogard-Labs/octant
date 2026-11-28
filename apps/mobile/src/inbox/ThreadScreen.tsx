@@ -84,6 +84,7 @@ import { useMobileThreads } from "./MobileThreadsContext";
 import { useOutbox } from "../outbox/OutboxContext";
 import { WaitingMessages } from "../outbox/WaitingMessages";
 import { QueuedMessages } from "./thread/QueuedMessages";
+import { threadQueueActions } from "./thread/queuedMessageRows";
 import { threadPullRequestStatus } from "./threadRowState";
 import { isLiveWorkTurn, turnSubagents } from "./thread/turnActivity";
 import { useTurnControl } from "./thread/useTurnControl";
@@ -1130,15 +1131,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
       ) : null}
       {turnControl.queue === undefined ? null : (
         <QueuedMessages
-          actions={
-            mayAct
-              ? {
-                  onEdit: turnControl.editQueued,
-                  onRemove: (messageId) => void turnControl.removeQueued(messageId),
-                  onSendNow: (messageId) => void turnControl.sendQueuedNow(messageId),
-                }
-              : undefined
-          }
+          actions={threadQueueActions(
+            {
+              offlineDemo,
+              composerEditable: composerAccess.editable,
+              allowProductMutations: staleGate.allowProductMutations,
+            },
+            {
+              onEdit: turnControl.editQueued,
+              onRemove: (messageId) => void turnControl.removeQueued(messageId),
+              onSendNow: (messageId) => void turnControl.sendQueuedNow(messageId),
+            },
+          )}
           changing={turnControl.pending}
           queue={turnControl.queue}
         />

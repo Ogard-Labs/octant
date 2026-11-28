@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -65,6 +65,48 @@ function storeHolding(state: unknown) {
   return store;
 }
 
+function spokeStateWithGrantItems(items: ReadonlyArray<unknown>) {
+  const selfMemberId = "11111111-1111-4111-8111-111111111111";
+  const hubMemberId = "22222222-2222-4222-8222-222222222222";
+  return {
+    link: {
+      selfMemberId,
+      hubMemberId,
+      hubName: "Home hub",
+      hubOrigin: "https://hub.example.test:13773",
+      hubListenerPin: "a".repeat(64),
+      hubIdentityPublicKey: "A".repeat(44),
+      rosterSigningPublicKey: "B".repeat(44),
+      grant: {
+        items,
+        actProjects: [],
+      },
+      roster: {
+        roster: {
+          sequence: 1,
+          members: [
+            {
+              memberId: hubMemberId,
+              name: "Home hub",
+              role: "hub",
+              identityKeyFingerprint: "c".repeat(64),
+              listenerPin: "a".repeat(64),
+              privateNames: ["hub.example.test"],
+              addresses: ["100.64.0.1"],
+              owner: false,
+            },
+          ],
+          standbyOrder: [],
+          failoverAfterSeconds: 60,
+        },
+        signedBy: { kind: "hub", memberId: hubMemberId },
+        signature: "C".repeat(86),
+      },
+      peerGrants: [],
+    },
+  };
+}
+
 describe("the stored hub state", () => {
   it("keeps the hub when a mirrored feed saved before releases named their app no longer reads", () => {
     const loaded = storeHolding(stateWith(feed(false))).load();
@@ -78,6 +120,56 @@ describe("the stored hub state", () => {
     const loaded = storeHolding(stateWith(feed(true))).load();
 
     expect(loaded.hub?.provision?.offers[0]?.mirrorFeed?.release.product).toBe("octant");
+  });
+
+  it("keeps a spoke's hub link and known grant items on the file store when a newer build saved an unknown grant item", () => {
+    const raw = spokeStateWithGrantItems(["roster", "future-capability", "status"]);
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-hub-state-"));
+    directories.push(dataDirectory);
+    const fileStore = createHubStateStore(dataDirectory);
+    fileStore.save({});
+    const file = readdirSync(dataDirectory, { recursive: true, withFileTypes: true }).find(
+      (entry) => entry.isFile(),
+    );
+    if (file === undefined) throw new Error("The hub state store wrote no file.");
+    const filePath = join(file.parentPath, file.name);
+    writeFileSync(filePath, JSON.stringify(raw));
+
+    const loadedFile = fileStore.load();
+    expect(loadedFile.link?.hubName).toBe("Home hub");
+    expect(loadedFile.link?.roster.roster.sequence).toBe(1);
+    expect(loadedFile.link?.grant.items).toEqual(["roster", "status"]);
+    fileStore.save(loadedFile);
+    const persistedFile = JSON.parse(readFileSync(filePath, "utf8")) as {
+      link?: { grant?: { items?: ReadonlyArray<string> } };
+    };
+    expect(persistedFile.link?.grant?.items).toEqual(["roster", "status"]);
+  });
+
+  it("keeps a spoke's hub link and known grant items on the native authority store when a newer build saved an unknown grant item", () => {
+    const raw = spokeStateWithGrantItems(["roster", "future-capability", "status"]);
+    let savedBytes: Buffer | undefined = Buffer.from(JSON.stringify(raw), "utf8");
+    const nativeStore = createHubStateStore("native-only", {
+      dataDirectory: "native-only",
+      read: () =>
+        savedBytes === undefined
+          ? { status: "missing" }
+          : { status: "ready", bytes: Buffer.from(savedBytes) },
+      replace: (bytes) => {
+        savedBytes = Buffer.from(bytes);
+        return { status: "committed" };
+      },
+    });
+
+    const loadedNative = nativeStore.load();
+    expect(loadedNative.link?.hubName).toBe("Home hub");
+    expect(loadedNative.link?.roster.roster.sequence).toBe(1);
+    expect(loadedNative.link?.grant.items).toEqual(["roster", "status"]);
+    nativeStore.save(loadedNative);
+    const persisted = JSON.parse(savedBytes.toString("utf8")) as {
+      link?: { grant?: { items?: ReadonlyArray<string> } };
+    };
+    expect(persisted.link?.grant?.items).toEqual(["roster", "status"]);
   });
 });
 

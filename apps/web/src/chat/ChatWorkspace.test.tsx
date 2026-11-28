@@ -2903,6 +2903,49 @@ describe("ChatWorkspace", () => {
     expect(message).toHaveValue("");
   });
 
+  it("fills the prompt with a pointer line after a whole-prompt large paste uploads in Chat", async () => {
+    const upload = vi.fn<ChatController["upload"]>(async (input) =>
+      decodeChatAttachment({
+        id: input.attachmentId,
+        threadId: input.threadId,
+        displayName: input.displayName,
+        mediaType: input.mediaType,
+        byteLength: input.bytes.byteLength,
+        digest: "a".repeat(64),
+        status: "finalized",
+        createdAt: now,
+      }),
+    );
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithQuotableReplies(),
+            pendingDraft: draft,
+            setPendingDraft: setDraft,
+            upload,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      );
+    }
+    render(<Harness />);
+    const message = screen.getByLabelText("Message");
+    message.focus();
+    fireEvent.paste(message, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "x".repeat(40 * 1024) : ""),
+        files: [],
+        items: [],
+        types: ["text/plain"],
+      },
+    });
+    await waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    await waitFor(() => expect(message).toHaveValue("See the attached pasted-text-1.txt."));
+    expect(await screen.findByText("pasted-text-1.txt")).toBeVisible();
+  });
+
   it("skips a routine's scheduled follow-up when ArrowUp recalls the person's last prompt", async () => {
     const user = userEvent.setup();
     const view = viewWithQuotableReplies();

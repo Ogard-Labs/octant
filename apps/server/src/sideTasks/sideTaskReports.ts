@@ -36,7 +36,7 @@ export interface SideTaskReportAdmission extends Pick<SideTaskReportStore, "repo
 export const SIDE_TASK_REPORT_MARK_REFUSAL =
   "Could not record that a side task's report is outside content. Nothing was sent.";
 
-export type SideTaskReportDraft = Omit<SideTaskReportOwed, "reportId" | "owedAt">;
+export type SideTaskReportDraft = Omit<SideTaskReportOwed, "reportId" | "owedAt" | "childThreadId">;
 
 /**
  * Cuts a reply to the report's bound without leaving a dangling half of a
