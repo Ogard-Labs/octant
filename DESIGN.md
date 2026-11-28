@@ -2120,7 +2120,8 @@ dark at 1280 by 800, and the tables, the side panel and the subagent progress
 again at 760 wide, from fixed data, a fixed clock, a fixed sequence of random
 numbers for the character field, bundled fonts and no motion, with no host
 behind them. A picture fails when more than 50 of
-its pixels differ by more than 24 in any channel, or its size changes. The run
+its pixels differ by more than 24 in any channel (6 for the ground scenes,
+whose faint ASCII field would vanish inside 24), or its size changes. The run
 then uploads the `visual-check` artifact with the actual, baseline and diff
 pictures (differences in red). It does not cover the packaged app, the native
 material itself, the transcript, other screens, or anything that moves.

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { GROUND_TOLERANCE, SCENE_LIST, updateMode } from "./sceneList";
+import { CHANNEL_TOLERANCE, GROUND_TOLERANCE, updateMode, visualShots } from "./sceneList";
 
 it("compares, and never writes baselines, unless asked for exactly", () => {
   expect(updateMode(undefined)).toBe("off");
@@ -10,8 +10,11 @@ it("compares, and never writes baselines, unless asked for exactly", () => {
   expect(updateMode("all")).toBe("all");
 });
 
-it("checks every ground scene with the finer tolerance, so a faint field that vanishes fails", () => {
-  const grounds = SCENE_LIST.filter((scene) => scene.id.startsWith("ground-"));
+it("compares every ground picture at the finer tolerance and every other at the default", () => {
+  const shots = visualShots();
+  const grounds = shots.filter((shot) => shot.scene.startsWith("ground-"));
   expect(grounds.length).toBeGreaterThan(0);
-  for (const scene of grounds) expect(scene.tolerance).toBe(GROUND_TOLERANCE);
+  for (const shot of grounds) expect(shot.tolerance).toBe(GROUND_TOLERANCE);
+  for (const shot of shots.filter((each) => !each.scene.startsWith("ground-")))
+    expect(shot.tolerance).toBe(CHANNEL_TOLERANCE);
 });

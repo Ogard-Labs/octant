@@ -6,7 +6,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { createServer } from "vite";
 import { expect, it } from "vitest";
 import { verifyPairedDraftPurge } from "./pairedDraftPurge.test-support";
-import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
+import { updateMode, visualShots, WIDE } from "./sceneList";
 
 /**
  * Draws the key screens in a pinned Chromium and compares each picture with
@@ -22,8 +22,6 @@ import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
  *   OCTANT_BROWSER_EXECUTABLE    a browser to use instead of playwright's own Chromium
  */
 
-/** A pixel differs when any colour channel is off by more than this. */
-const CHANNEL_TOLERANCE = 24;
 /**
  * How many pixels may differ before the picture counts as changed. A one-word
  * or one-icon change moves far more; the logged noise of an unchanged screen
@@ -37,28 +35,6 @@ const VISUAL_CONCURRENCY = 4;
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const baselineDir = resolve(webRoot, "visual-baselines");
-
-interface Shot {
-  readonly name: string;
-  readonly scene: string;
-  readonly scheme: "light" | "dark";
-  readonly size: { readonly width: number; readonly height: number };
-  readonly tolerance: number;
-}
-
-function shots(): ReadonlyArray<Shot> {
-  return SCENE_LIST.flatMap((scene) =>
-    (["light", "dark"] as const).flatMap((scheme) =>
-      [WIDE, ...(scene.narrow === true ? [NARROW] : [])].map((size) => ({
-        name: `${scene.id}-${scheme}-${String(size.width)}`,
-        scene: scene.id,
-        scheme,
-        size,
-        tolerance: scene.tolerance ?? CHANNEL_TOLERANCE,
-      })),
-    ),
-  );
-}
 
 interface Comparison {
   readonly sizesMatch: boolean;
@@ -238,7 +214,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         readonly noise?: string;
         readonly failures: ReadonlyArray<string>;
       }
-      const allShots = shots();
+      const allShots = visualShots();
       const outcomes: Array<ShotOutcome | undefined> = Array.from({ length: allShots.length });
       let nextIndex = 0;
       const ownedBrowser = browser;

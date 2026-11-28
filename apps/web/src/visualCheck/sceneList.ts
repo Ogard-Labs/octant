@@ -20,6 +20,9 @@ export interface SceneMeta {
   readonly tolerance?: number;
 }
 
+/** A pixel differs when any colour channel is off by more than this. */
+export const CHANNEL_TOLERANCE = 24;
+
 /**
  * The ground scenes' tolerance. Their baselines are drawn on the same CI
  * runner that checks them, and two runs of the same ground differ by at most
@@ -111,4 +114,29 @@ export function updateMode(value: string | undefined): UpdateMode {
   if (value === "1") return "changed";
   if (value === "all") return "all";
   return "off";
+}
+
+/** One picture the check takes: a scene, in one scheme, at one window size. */
+export interface VisualShot {
+  readonly name: string;
+  readonly scene: string;
+  readonly scheme: "light" | "dark";
+  readonly size: { readonly width: number; readonly height: number };
+  /** How far a colour channel may move before a pixel counts as changed. */
+  readonly tolerance: number;
+}
+
+/** Every picture the check takes, each with the tolerance it is compared at. */
+export function visualShots(): ReadonlyArray<VisualShot> {
+  return SCENE_LIST.flatMap((scene) =>
+    (["light", "dark"] as const).flatMap((scheme) =>
+      [WIDE, ...(scene.narrow === true ? [NARROW] : [])].map((size) => ({
+        name: `${scene.id}-${scheme}-${String(size.width)}`,
+        scene: scene.id,
+        scheme,
+        size,
+        tolerance: scene.tolerance ?? CHANNEL_TOLERANCE,
+      })),
+    ),
+  );
 }
