@@ -10224,7 +10224,7 @@ html[data-octant-reduced-motion="true"] .skeleton::after {
   align-items: start;
   gap: var(--oct-space-2);
   padding: var(--oct-space-2) var(--oct-space-3);
-  cursor: pointer;
+  cursor: default;
 }
 .questionnaire__checkbox > span {
   display: grid;
@@ -10251,7 +10251,7 @@ html[data-octant-reduced-motion="true"] .skeleton::after {
   overflow-wrap: anywhere;
 }
 .questionnaire-summary summary {
-  cursor: pointer;
+  cursor: default;
   color: var(--oct-muted);
 }
 .questionnaire-summary dl {
