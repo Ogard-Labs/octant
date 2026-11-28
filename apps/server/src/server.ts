@@ -523,6 +523,7 @@ export function startOctantServer(
       desktopLeases,
       installDesktopPreviewRequest,
       installRememberComputerUseApp,
+      installThreadSecrets,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -776,6 +777,7 @@ export function startOctantServer(
       browse: commandBroker?.browse,
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
+    installThreadSecrets(threadSecrets);
     const {
       threadKeepsSandbox,
       isHarnessProvider,

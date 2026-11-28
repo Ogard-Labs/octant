@@ -1,6 +1,7 @@
 import type {
   ComputerControlCommand,
   ComputerControlResult,
+  ComputerTypeSecretCommand,
 } from "@octant/contracts/computer-use-plugin";
 import type { ProviderToolDefinition } from "@octant/contracts/providers";
 
@@ -13,6 +14,15 @@ export interface ComputerUseHostPort {
    */
   readonly execute: (
     command: ComputerControlCommand,
+    signal?: AbortSignal,
+    request?: { readonly reason?: string },
+  ) => Promise<ComputerControlResult>;
+  /**
+   * Redeems a one-use thread-secret handle inside the host and types its value
+   * into the verified secure text field. The plugin never sees the secret value.
+   */
+  readonly typeSecret?: (
+    command: ComputerTypeSecretCommand,
     signal?: AbortSignal,
     request?: { readonly reason?: string },
   ) => Promise<ComputerControlResult>;

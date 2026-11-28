@@ -33,7 +33,9 @@ export type ComputerUseApprovalRequirement =
  * access (and under Strict at Full access), the first action on each app asks
  * unless covered by the thread's grant or a remembered Project grant. Under
  * Strict below Full access, outside content makes every action ask once and
- * withholds Project remembering.
+ * withholds Project remembering. Typing a thread secret asks once per use
+ * below Full access and under Strict, never reuses an app grant, and never
+ * remembers for the Project.
  */
 export function decideComputerUseApproval(input: {
   readonly plan: boolean;
@@ -43,12 +45,16 @@ export function decideComputerUseApproval(input: {
   readonly hasThreadGrant: boolean;
   readonly hasProjectGrant: boolean;
   readonly hasProjectScope: boolean;
+  readonly secretInput?: boolean;
 }): ComputerUseApprovalRequirement {
   if (input.plan) {
     return { kind: "refused", reason: "plan-read-only" };
   }
   if (input.fullAccess && !input.strict) {
     return { kind: "not-required", reason: "full-access" };
+  }
+  if (input.secretInput === true) {
+    return { kind: "required", scope: "one-time", canRememberForProject: false };
   }
   if (input.externalContentIngested && input.strict && !input.fullAccess) {
     return { kind: "required", scope: "one-time", canRememberForProject: false };

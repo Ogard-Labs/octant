@@ -2002,6 +2002,7 @@ Core capabilities (browser and computer use, tests, Apple validation, approvals,
 - A file sent into the thread's desktop on this machine does not ask at Full access; below it asks once per thread, and a Project remember never covers a cloud desktop (maintainer decision, 2026-11-13).
 - Under Strict an answer from before the thread read outside content does not cover it afterwards; outside Strict it keeps covering (maintainer decision, 2026-11-22).
 - Computer use treats application content as untrusted, fails closed if evidence recording fails, is refused in Plan, and never controls Octant itself.
+- On this Mac, Computer use's `type-secret` redeems a one-use [thread-secret](#thread-secrets) handle through `ComputerUseHostPort.typeSecret` in host memory (loopback broker and private driver Unix socket only) into a fresh verified `AXTextField` with `subrole === "AXSecureTextField"`, refusing any other element with `not-a-password-field` and returning only `typed`, `refused`, or `cancelled` without the value or a screenshot; below Full access and under Strict, each typing asks once naming the app, window title, and secret label, while Full access outside Strict skips approval (maintainer decisions, 2026-11-24 and 2026-11-28; disposable desktops deferred and fail closed; `reservedApps` stay blocked).
 - A device the host's own person paired lists and stops every Computer use session; a hub-introduced device is refused (maintainer decision, 2026-11-16; [Paired devices act as the person](#paired-devices-act-as-the-person)).
 - The driver is a bundled, pinned, publisher-verified copy that updates itself daily unless the person turned that off (maintainer decision, 2026-11-26).
 - Managed device tools run pinned, verified releases in a device-scoped native sandbox that never grants a Project or provider account; a missing sandbox keeps the native fallback rather than running the tool unconfined ([Managed device tools](device-workbench.md#managed-device-tools)).
@@ -2687,7 +2688,7 @@ An agent in a Code or Work thread can ask the person for a secret in a private c
 
 - A value is entered only in the card: an agent cannot pass one, and one pasted in chat is ignored. Chat is refused.
 - Strict offers neither 24 hours nor Remember, and an account password never offers Remember.
-- A handle is used once by a registered consumer, never by a command. `run-with-secret` runs under the thread's level, Shield and sandbox; Plan refuses it.
+- A handle is used once by a registered consumer (Computer use on this Mac for `type-secret` into verified password fields; maintainer decisions, 2026-11-24 and 2026-11-28), never by a command. `run-with-secret` runs under the thread's level, Shield and sandbox; Plan refuses it.
 - Every confined launch is denied the secrets folder by a rule the person cannot remove. Nothing is usable before its journal record, which holds no value.
 
 Status: Built. Since: 2026-11-24. Detail: [Architecture: Thread secrets](../architecture.md#thread-secrets), [Thread view: Secret cards](thread-view.md#secret-cards) and [Settings: Secret stores](settings.md#secret-stores).

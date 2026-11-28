@@ -4,6 +4,8 @@ import { decodeHostDisplayRequest, decodeHostDisplayScope } from "@octant/contra
 import { ParseResult } from "effect";
 import {
   decodeComputerControlCommand,
+  decodeComputerHostTypeSecretRequest,
+  decodeComputerSecretTargetRequest,
   decodeComputerUseOwner,
   decodeComputerUseSettings,
 } from "@octant/contracts/computer-use-plugin";
@@ -14,11 +16,13 @@ const MAX_BODY_BYTES = 128 * 1024;
 const failure = (status: number) =>
   Response.json({ error: "computer-use-broker-refused" }, { status });
 
-export function computerUseBrokerHandler(
-  service: Omit<ComputerUseDesktopService, "test" | "hostDisplay" | "closeHostDisplay"> &
-    Partial<Pick<ComputerUseDesktopService, "hostDisplay">>,
-  token: string,
-) {
+type ComputerUseBrokerService = Omit<
+  ComputerUseDesktopService,
+  "test" | "hostDisplay" | "closeHostDisplay" | "inspectSecretTarget" | "typeSecret"
+> &
+  Partial<Pick<ComputerUseDesktopService, "hostDisplay" | "inspectSecretTarget" | "typeSecret">>;
+
+export function computerUseBrokerHandler(service: ComputerUseBrokerService, token: string) {
   return async (request: Request, peer = "127.0.0.1"): Promise<Response> => {
     const supplied = Buffer.from(request.headers.get(HEADER) ?? "");
     const expected = Buffer.from(token);
@@ -67,6 +71,26 @@ export function computerUseBrokerHandler(
         return Response.json(
           await service.execute(owner, decodeComputerControlCommand(body.command), request.signal),
         );
+      if (
+        body.operation === "inspect-secret-target" &&
+        service.inspectSecretTarget !== undefined &&
+        "target" in body
+      )
+        return Response.json(
+          await service.inspectSecretTarget(
+            owner,
+            decodeComputerSecretTargetRequest(body.target),
+            request.signal,
+          ),
+        );
+      if (body.operation === "type-secret" && service.typeSecret !== undefined && "input" in body)
+        return Response.json(
+          await service.typeSecret(
+            owner,
+            decodeComputerHostTypeSecretRequest(body.input),
+            request.signal,
+          ),
+        );
       return failure(400);
     } catch (error) {
       return failure(ParseResult.isParseError(error) || error instanceof SyntaxError ? 400 : 503);
@@ -86,10 +110,7 @@ async function readBody(request: IncomingMessage): Promise<Uint8Array | undefine
   return Buffer.concat(chunks, length);
 }
 
-export async function startComputerUseBroker(
-  service: Omit<ComputerUseDesktopService, "test" | "hostDisplay" | "closeHostDisplay"> &
-    Partial<Pick<ComputerUseDesktopService, "hostDisplay">>,
-) {
+export async function startComputerUseBroker(service: ComputerUseBrokerService) {
   const token = randomBytes(32).toString("base64url");
   const handle = computerUseBrokerHandler(service, token);
   const server = createServer((incoming, outgoing) => {
