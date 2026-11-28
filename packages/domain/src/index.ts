@@ -133,6 +133,7 @@ export * from "./debugLaunchFileImport";
 export * from "./debugSessionStartPolicy";
 export * from "./languageServerLaunchPolicy";
 export * from "./remoteAccessPolicy";
+export * from "./machineConnectionMap";
 export * from "./remotePairingCode";
 export * from "./remoteClockRecoveryPolicy";
 export * from "./remoteCredentialPolicy";
