@@ -926,8 +926,8 @@ one accessible name ("title, Project, branch, pull request, status or time"):
   quiet line. The Project tree names the Project in its heading, so its quiet
   line has no Project. In a narrow sidebar the issue key truncates first.
 - **Third line** (12px, muted ink), only when there is something for it: who
-  started the thread, a worker's coordinator, and on every Working row what the
-  turn is doing in plain words (Running bun bench.ts, Editing
+  started the thread, a worker's coordinator, and on every Working row (while the view
+  shows Status) what the turn is doing in plain words (Running bun bench.ts, Editing
   composerThreadDraft.ts), followed for a server Project by the server's glyph
   and name in a hairline. The activity truncates first. A Needs-you row of a
   thread the window does not show says here what the thread asks, and carries

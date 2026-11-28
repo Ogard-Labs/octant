@@ -676,6 +676,7 @@ import type {
   DecisionPendingRequest,
 } from "./palette/needsYouCommands";
 import { answerPendingRequest, type ChildPendingRequest } from "./pendingRequests/pendingRequests";
+import { SidebarPendingRequestsProvider } from "./projects/sidebarPendingRequests";
 import { usePendingRequests } from "./palette/usePendingRequests";
 import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
@@ -9658,81 +9659,80 @@ function LaunchedShell(
           transcriptWidth={controller.settings.transcriptWidth}
           sidebar={
             <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
-              <SidebarContainer
-                zenEnabled={zen.enabled}
-                windowHistory={windowHistory}
-                actions={actions}
-                {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
-                {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
-                activeMode={activeMode}
-                {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
-                homeActive={homeActive}
-                {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
-                allProjects={projectController.allProjects}
-                archivedProjects={projectController.archivedProjects}
-                availabilityByProject={projectController.availabilityByProject}
-                {...(chatController.errorMessage === undefined
-                  ? {}
-                  : { chatErrorMessage: chatController.errorMessage })}
-                {...(chatProjectThreadListRequest === undefined
-                  ? {}
-                  : { chatProjectThreadListRequest })}
-                chatReadCursorStore={chatReadCursorStore}
-                chatStatus={chatController.status}
-                codeReadCursorStore={codeReadCursorStore}
-                codeStatus={codeController.status}
-                contextHealthByProject={contextHealthByProject}
-                environmentSelection={environmentSelection}
-                {...(hostFederationTransports === undefined
-                  ? {}
-                  : {
-                      pairedComputerThreads,
-                      onOpenPairedComputerThread: openPairedComputerThreadLatest,
-                    })}
-                federatedHostStates={federatedHostStates}
-                githubIssuesReadAvailable={githubIssuesReadAvailable}
-                {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                hostReservesTitlebarInset={hostReservesTitlebarInset}
-                hosts={hosts}
-                imageLibraryAvailable={imageGenerationClient !== undefined}
-                inboxCount={inboxCount}
-                todosCount={todosCount}
-                linearIssuesRead={linearIssuesRead}
-                navigation={navigationModel}
-                navigatorAvailable={navigatorAssistant.state.kind === "ready"}
-                {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
-                {...(sidebarPendingRequests === undefined
-                  ? {}
-                  : { pendingRequests: sidebarPendingRequests })}
-                {...(projectController.errorMessage === undefined
-                  ? {}
-                  : { projectErrorMessage: projectController.errorMessage })}
-                projectStatus={projectController.status}
-                projects={projectController.projects}
-                resolvedSidebarBackground={resolvedSidebarBackground}
-                setEnvironmentSelection={setEnvironmentSelection}
-                setSidebarCollapsed={setSidebarCollapsedPersistent}
-                setSidebarFilterQuery={setSidebarFilterQuery}
-                settings={presentedShellSettings ?? controller.settings}
-                shellBackdropCoversSidebar={shellBackdropCoversSidebar}
-                sidebarBackgroundFetcher={sidebarBackgroundFetcher}
-                sidebarFilterQuery={sidebarFilterQuery}
-                {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
-                sidebarRail={sidebarRail}
-                sidebarRailBeside={sidebarRailBeside}
-                whatsNew={whatsNew}
-                sidebarTileCounts={sidebarTileCounts}
-                {...(projectThreadsAccess.errorMessage === undefined
-                  ? {}
-                  : { threadErrorMessage: projectThreadsAccess.errorMessage })}
-                threadExportClient={threadExportClient}
-                threadHandOffClient={threadHandOffClient}
-                personMemoryClient={launchedClients.personMemoryClient}
-                threadStatus={projectThreadsAccess.status}
-                workStatus={workNavigation.status}
-                workspace={controller.workspace}
-              />
+              <SidebarPendingRequestsProvider source={sidebarPendingRequests}>
+                <SidebarContainer
+                  zenEnabled={zen.enabled}
+                  windowHistory={windowHistory}
+                  actions={actions}
+                  {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
+                  {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
+                  activeMode={activeMode}
+                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                  {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
+                  homeActive={homeActive}
+                  {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
+                  allProjects={projectController.allProjects}
+                  archivedProjects={projectController.archivedProjects}
+                  availabilityByProject={projectController.availabilityByProject}
+                  {...(chatController.errorMessage === undefined
+                    ? {}
+                    : { chatErrorMessage: chatController.errorMessage })}
+                  {...(chatProjectThreadListRequest === undefined
+                    ? {}
+                    : { chatProjectThreadListRequest })}
+                  chatReadCursorStore={chatReadCursorStore}
+                  chatStatus={chatController.status}
+                  codeReadCursorStore={codeReadCursorStore}
+                  codeStatus={codeController.status}
+                  contextHealthByProject={contextHealthByProject}
+                  environmentSelection={environmentSelection}
+                  {...(hostFederationTransports === undefined
+                    ? {}
+                    : {
+                        pairedComputerThreads,
+                        onOpenPairedComputerThread: openPairedComputerThreadLatest,
+                      })}
+                  federatedHostStates={federatedHostStates}
+                  githubIssuesReadAvailable={githubIssuesReadAvailable}
+                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  hostReservesTitlebarInset={hostReservesTitlebarInset}
+                  hosts={hosts}
+                  imageLibraryAvailable={imageGenerationClient !== undefined}
+                  inboxCount={inboxCount}
+                  todosCount={todosCount}
+                  linearIssuesRead={linearIssuesRead}
+                  navigation={navigationModel}
+                  navigatorAvailable={navigatorAssistant.state.kind === "ready"}
+                  {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
+                  {...(projectController.errorMessage === undefined
+                    ? {}
+                    : { projectErrorMessage: projectController.errorMessage })}
+                  projectStatus={projectController.status}
+                  projects={projectController.projects}
+                  resolvedSidebarBackground={resolvedSidebarBackground}
+                  setEnvironmentSelection={setEnvironmentSelection}
+                  setSidebarCollapsed={setSidebarCollapsedPersistent}
+                  setSidebarFilterQuery={setSidebarFilterQuery}
+                  settings={presentedShellSettings ?? controller.settings}
+                  shellBackdropCoversSidebar={shellBackdropCoversSidebar}
+                  sidebarBackgroundFetcher={sidebarBackgroundFetcher}
+                  sidebarFilterQuery={sidebarFilterQuery}
+                  {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
+                  sidebarRail={sidebarRail}
+                  sidebarRailBeside={sidebarRailBeside}
+                  whatsNew={whatsNew}
+                  sidebarTileCounts={sidebarTileCounts}
+                  {...(projectThreadsAccess.errorMessage === undefined
+                    ? {}
+                    : { threadErrorMessage: projectThreadsAccess.errorMessage })}
+                  threadExportClient={threadExportClient}
+                  threadHandOffClient={threadHandOffClient}
+                  personMemoryClient={launchedClients.personMemoryClient}
+                  threadStatus={projectThreadsAccess.status}
+                  workStatus={workNavigation.status}
+                  workspace={controller.workspace}
+                />
+              </SidebarPendingRequestsProvider>
             </FollowUpLineageProvider>
           }
           sidebarResizable={!isNarrow}

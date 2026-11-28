@@ -327,7 +327,7 @@ describe("sidebarThreadRowLabel", () => {
     );
   });
 
-  it("reads a working row's activity after its state, and a server Project's host after the Project", () => {
+  it("reads a working row's activity and then its server after the state", () => {
     expect(
       sidebarThreadRowLabel({
         title: "Journal replay benchmark",
@@ -336,7 +336,7 @@ describe("sidebarThreadRowLabel", () => {
         state: "Working",
         activity: "Running bench.ts",
       }),
-    ).toBe("Journal replay benchmark, octant, on studio-linux, Working, Running bench.ts");
+    ).toBe("Journal replay benchmark, octant, Working, Running bench.ts, on studio-linux");
   });
 
   it("falls back to the time when the thread has no state, and leaves out what a view hides", () => {

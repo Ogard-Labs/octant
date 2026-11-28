@@ -1472,7 +1472,7 @@ html[data-octant-native-host="true"] .sidebar__chrome {
 }
 
 /* On touch and in a narrow window the row's action is always shown, 40px in
-   from the right, so the top line still stops before it there. */
+   from the right, so the quiet line still stops before it there. */
 @media (pointer: coarse), (max-width: 560px) {
   .sidebar-navigation__thread-context {
     padding-inline-end: 28px;

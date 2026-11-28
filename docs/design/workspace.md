@@ -413,26 +413,7 @@ narrow drawer scrolls as one column, so there the foot sticks and paints the
 drawer's opaque ground). Both headings have one form: the label, a trailing
 chevron and the count at the right edge. A running thread is listed only there, with its spinner
 and live time; one waiting on an approval or an answer is not working and stays
-at the top under Needs you, with its pause mark and how long it has waited.
-
-**Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
-Needs-you row in Status or the Activity feed whose thread the window does not
-show (neither the focused thread nor one open in another pane) says on its
-third line what the thread asks, and carries its answers under it: **Allow
-once** and **Deny**, the approval card's own words, then **Open**, after the
-row's button in keyboard order. The answers appear only when the host lists
-exactly one request for that thread and it is a plain approval: not a question,
-a decision or a secret, not a subagent's or the agent's own approval (which the
-thread finds rather than answers elsewhere), and not a Browser site ask, whose
-site the row has no room to name. Otherwise, and in a window with no
-pending-request reader, the row offers Open alone. Allow once and Deny send the
-same answer command the thread's approval card and Home's Needs you card send,
-through the clients the thread view already holds; Allow once never remembers
-the answer for the Project, which stays on the card. The host re-checks the
-answer, and a refusal is one quiet line under the buttons until the host stops
-listing the request. The window reads pending requests for this only while
-such a row is listed, on the same signals the Needs you card reads, never on a
-timer. The open thread's row offers nothing: its card is in the thread. A pinned thread and a
+at the top under Needs you, with its pause mark and how long it has waited. A pinned thread and a
 coordinator keep their place among the pins, and in the Activity feed a thread
 waiting on an approval or an answer sits under Priority whatever its read
 state. Settled rows are the compact
@@ -449,6 +430,25 @@ A mode with no threads at all shows a short first-run note in Status and the
 Activity feed instead of an empty list: "No threads yet" in the secondary ink, then
 "Start one from the composer. Your threads gather here." A search or filter
 that matched nothing keeps its own message, which says nothing was deleted.
+
+**Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
+Needs-you row in Status or the Activity feed whose thread the window does not
+show (neither the focused thread nor one open in another pane) says on its
+third line what the thread asks, and carries its answers under it: **Allow
+once** and **Deny**, the approval card's own words, then **Open**, after the
+row and its own hover actions in keyboard order. The answers appear only when the host lists
+exactly one request for that thread and it is a plain approval: not a question,
+a decision or a secret, not a subagent's or the agent's own approval (which the
+thread finds rather than answers elsewhere), and not a Browser site ask, whose
+site the row has no room to name. Otherwise, and in a window with no
+pending-request reader, the row offers Open alone. Allow once and Deny send the
+same answer command the thread's approval card and Home's Needs you card send,
+through the clients the thread view already holds; Allow once never remembers
+the answer for the Project, which stays on the card. The host re-checks the
+answer, and a refusal is one quiet line under the buttons until the host stops
+listing the request. The window reads pending requests for this only while
+a row offering answers is listed, on the same signals the Needs you card reads, never on a
+timer. The open thread's row offers nothing: its card is in the thread.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -3262,7 +3262,7 @@ ink names where the thread lives and what it carries, in a fixed order: the
 Project's 12px mark and name, the branch in the mono face, the counted marks,
 and the provider's mark at its end. A third line appears only for who started
 the thread, a worker's coordinator, or a running turn's activity. Every Working
-row says on it what the turn is doing, in plain words made from the live step
+row, while the view shows Status, says on it what the turn is doing, in plain words made from the live step
 the host already sends ("Running bun bench.ts", "Editing
 composerThreadDraft.ts", "Reading notes.md", "Searching for useDraft"), and
 "Thinking" before the turn's first tool or from a host that reports no step;

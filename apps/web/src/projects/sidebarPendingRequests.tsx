@@ -1,8 +1,9 @@
 import type { OctantMode } from "@octant/contracts";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
-import { createContext, useCallback, useMemo } from "react";
+import { createContext, useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   isFindOnlyPendingRequest,
+  pendingRequestKey,
   type PendingRequestAnswerResult,
 } from "../pendingRequests/pendingRequests";
 import {
@@ -20,6 +21,8 @@ export type SidebarPendingRequestSource = Omit<PendingRequestRowsSource, "modes"
 
 /** What one Needs-you row can say and do about the request its thread waits on. */
 export interface SidebarThreadAsk {
+  /** Names the request, so a row's answers start over when a new one arrives. */
+  readonly key: string;
   /** What the thread asks, for the row's last line. */
   readonly text: string;
   /**
@@ -30,10 +33,17 @@ export interface SidebarThreadAsk {
 }
 
 export interface SidebarPendingRequests {
+  /** The request a thread waits on, as the host last listed it; undefined before a read. */
   readonly forThread: (threadId: string) => SidebarThreadAsk | undefined;
+  /**
+   * A row that offers answers says so while it is listed, and calls the
+   * returned function when it no longer does. The reader runs only while one
+   * does, so a sidebar with nothing to answer reads nothing.
+   */
+  readonly listAsking: () => () => void;
 }
 
-/** Read by every Needs-you row; provided once by the sidebar. */
+/** Read by every Needs-you row in Status and the Activity feed. */
 export const SidebarPendingRequestsContext = createContext<SidebarPendingRequests | undefined>(
   undefined,
 );
@@ -56,28 +66,26 @@ function answerableInPlace(request: PendingRequest): boolean {
 
 /**
  * The sidebar's one pending-request reader, matched to rows by thread. It reads
- * on the same signals the Needs you card uses and only while `enabled`: the
- * sidebar turns it on while a Needs-you row of a thread the window does not
- * show is listed, so a sidebar with nothing to answer reads nothing. The host
- * re-checks every answer; a row only offers what the host listed.
+ * on the same signals the Needs you card uses, and only while `enabled`. The
+ * host re-checks every answer; a row only offers what the host listed.
  */
 export function useSidebarPendingRequests(
   source: SidebarPendingRequestSource | undefined,
   enabled: boolean,
-): SidebarPendingRequests | undefined {
+): SidebarPendingRequests["forThread"] {
   const reading = enabled && source?.pendingRequestClient !== undefined;
   const { rows, answer } = usePendingRequestRows(
     reading && source !== undefined ? { ...source, modes: EVERY_MODE } : undefined,
   );
   const byThread = useMemo(() => {
     const grouped = new Map<string, PendingRequestRowEntry[]>();
-    for (const entry of rows ?? []) {
+    for (const entry of reading ? (rows ?? []) : []) {
       const key = String(entry.request.threadId);
       grouped.set(key, [...(grouped.get(key) ?? []), entry]);
     }
     return grouped;
-  }, [rows]);
-  const forThread = useCallback(
+  }, [reading, rows]);
+  return useCallback(
     (threadId: string): SidebarThreadAsk | undefined => {
       const entries = byThread.get(threadId);
       const listed = entries?.filter((entry) => !entry.unlisted) ?? [];
@@ -86,14 +94,37 @@ export function useSidebarPendingRequests(
       // One listed approval and nothing else: with two waiting, an answer on
       // the row could not say which one it answers.
       const only = listed.length === 1 ? listed[0] : undefined;
-      if (only === undefined || !answerableInPlace(only.request))
-        return { text: shown.request.text };
+      if (only === undefined || !answerableInPlace(only.request)) {
+        return { key: pendingRequestKey(shown.request), text: shown.request.text };
+      }
       return {
+        key: pendingRequestKey(only.request),
         text: only.request.text,
         answer: (approved) => answer(only.request, { kind: approved ? "approve" : "deny" }),
       };
     },
     [answer, byThread],
   );
-  return useMemo(() => (reading ? { forThread } : undefined), [forThread, reading]);
+}
+
+/**
+ * Provides the reader to the sidebar's rows. It sits outside the sidebar so a
+ * new read re-renders the rows that ask, not the whole sidebar.
+ */
+export function SidebarPendingRequestsProvider(props: {
+  readonly source: SidebarPendingRequestSource | undefined;
+  readonly children: ReactNode;
+}) {
+  const [asking, setAsking] = useState(0);
+  const listAsking = useCallback(() => {
+    setAsking((count) => count + 1);
+    return () => setAsking((count) => count - 1);
+  }, []);
+  const forThread = useSidebarPendingRequests(props.source, asking > 0);
+  const value = useMemo(() => ({ forThread, listAsking }), [forThread, listAsking]);
+  return (
+    <SidebarPendingRequestsContext.Provider value={value}>
+      {props.children}
+    </SidebarPendingRequestsContext.Provider>
+  );
 }

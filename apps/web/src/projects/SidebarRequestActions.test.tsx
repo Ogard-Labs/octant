@@ -11,10 +11,9 @@ import {
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
 import {
-  SidebarPendingRequestsContext,
-  useSidebarPendingRequests,
+  SidebarPendingRequestsProvider,
   type SidebarPendingRequestSource,
-} from "./useSidebarPendingRequests";
+} from "./sidebarPendingRequests";
 
 const waiting: ChatThreadNavigationItem = {
   threadId: "thread-waiting",
@@ -51,9 +50,8 @@ function Sidebar(props: {
   readonly openThreadIds?: ReadonlyArray<string>;
   readonly onSelectThread?: (threadId: string) => void;
 }) {
-  const requests = useSidebarPendingRequests(props.source, true);
   return (
-    <SidebarPendingRequestsContext.Provider value={requests}>
+    <SidebarPendingRequestsProvider source={props.source}>
       <ProjectSidebarSection
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
         {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
@@ -67,13 +65,20 @@ function Sidebar(props: {
         onRestore={vi.fn()}
         onSelectThread={props.onSelectThread ?? vi.fn()}
         projects={[]}
+        threadActions={{ onPinThread: vi.fn(), onArchiveThread: vi.fn() }}
         threads={[waiting]}
       />
-    </SidebarPendingRequestsContext.Provider>
+    </SidebarPendingRequestsProvider>
   );
 }
 
 const answers = () => screen.queryByRole("group", { name: "Answer Rotate the dev API keys" });
+
+/** The row's answers once the first read has listed the approval. */
+async function answersOnceRead(): Promise<HTMLElement> {
+  await screen.findByRole("button", { name: "Allow once" });
+  return screen.getByRole("group", { name: "Answer Rotate the dev API keys" });
+}
 
 describe("answering a Needs-you row from the sidebar", () => {
   beforeEach(() => {
@@ -84,13 +89,19 @@ describe("answering a Needs-you row from the sidebar", () => {
     vi.useRealTimers();
   });
 
-  it("offers Allow once, Deny and Open after the row, in that keyboard order, with what it asks on the row", async () => {
+  it("offers Allow once, Deny and Open after the row and its own actions, in that keyboard order, with what it asks on the row", async () => {
     const user = userEvent.setup();
     render(<Sidebar source={source([approval])} />);
-    const group = await screen.findByRole("group", { name: "Answer Rotate the dev API keys" });
+    const group = await answersOnceRead();
     const row = screen.getByRole("button", { name: /^Rotate the dev API keys/ });
     expect(row).toHaveTextContent("Wants to set a repository secret");
     row.focus();
+    // The row's own hover actions (pin, archive) come first, as on every row.
+    const rowActions = row
+      .closest(".sidebar-navigation__thread-row")
+      ?.querySelectorAll(".sidebar-navigation__thread-actions button");
+    expect(rowActions?.length).toBeGreaterThan(0);
+    for (const _ of rowActions ?? []) await user.tab();
     await user.tab();
     expect(within(group).getByRole("button", { name: "Allow once" })).toHaveFocus();
     await user.tab();
@@ -103,7 +114,7 @@ describe("answering a Needs-you row from the sidebar", () => {
     const user = userEvent.setup();
     const clients = answerClients();
     render(<Sidebar source={source([approval], clients)} />);
-    const group = await screen.findByRole("group", { name: "Answer Rotate the dev API keys" });
+    const group = await answersOnceRead();
     await user.click(within(group).getByRole("button", { name: "Allow once" }));
     expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -122,7 +133,7 @@ describe("answering a Needs-you row from the sidebar", () => {
       failure: { message: "The approval was already answered." },
     } as never);
     render(<Sidebar source={source([approval], clients)} />);
-    const group = await screen.findByRole("group", { name: "Answer Rotate the dev API keys" });
+    const group = await answersOnceRead();
     await user.click(within(group).getByRole("button", { name: "Deny" }));
     expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "answer-provider-approval", decision: "denied" }),
@@ -136,19 +147,19 @@ describe("answering a Needs-you row from the sidebar", () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
     render(<Sidebar onSelectThread={onSelectThread} source={source([approval])} />);
-    const group = await screen.findByRole("group", { name: "Answer Rotate the dev API keys" });
+    const group = await answersOnceRead();
     await user.click(within(group).getByRole("button", { name: "Open" }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-waiting");
   });
 
-  it("offers nothing on the row of a thread the window already shows", async () => {
-    const { rerender } = render(
-      <Sidebar activeThreadId="thread-waiting" source={source([approval])} />,
-    );
+  it("offers nothing on the row of a thread the window already shows, and reads nothing for it", async () => {
+    const shown = source([approval]);
+    const { rerender } = render(<Sidebar activeThreadId="thread-waiting" source={shown} />);
     await waitFor(() => expect(screen.getByTitle("Needs you")).toBeInTheDocument());
     expect(answers()).toBeNull();
-    rerender(<Sidebar openThreadIds={["thread-waiting"]} source={source([approval])} />);
+    rerender(<Sidebar openThreadIds={["thread-waiting"]} source={shown} />);
     expect(answers()).toBeNull();
+    expect(shown.pendingRequestClient?.list).not.toHaveBeenCalled();
   });
 
   it("offers only Open without a reader, and when the thread waits on a question or on two requests", async () => {

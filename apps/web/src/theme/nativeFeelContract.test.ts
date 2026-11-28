@@ -136,8 +136,10 @@ describe("native feel", () => {
           const selector = before.slice(before.lastIndexOf("}", open) + 1, open).trim();
           hands.push([name, selector]);
         }
-      } else if (/\bcursor-pointer\b/.test(readFileSync(file, "utf8"))) {
-        hands.push([name, "cursor-pointer"]);
+      } else {
+        const source = readFileSync(file, "utf8");
+        if (/\bcursor-pointer\b/.test(source)) hands.push([name, "cursor-pointer"]);
+        if (/cursor:\s*["'`]pointer["'`]/.test(source)) hands.push([name, "style cursor"]);
       }
     }
     const allowed = new Set(handAllowed.map(([file, selector]) => `${file} ${selector}`));

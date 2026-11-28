@@ -2,7 +2,7 @@ import { CoordinatorWorkerCounts } from "./ProjectThreadList";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
 import { useWorkingRowLine } from "./useWorkingRowLine";
 import { SidebarRequestActions } from "./SidebarRequestActions";
-import { SidebarPendingRequestsContext } from "./useSidebarPendingRequests";
+import { SidebarPendingRequestsContext } from "./sidebarPendingRequests";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -1741,6 +1741,11 @@ function ActivityThreadButton(props: {
     rowState.state?.status === "attention" &&
     !selected &&
     props.openThreadIds?.some((candidate) => candidate === rowId) !== true;
+  const listAsking = pendingRequests?.listAsking;
+  useEffect(
+    () => (answersHere && listAsking !== undefined ? listAsking() : undefined),
+    [answersHere, listAsking],
+  );
   const ask = answersHere ? pendingRequests?.forThread(props.thread.threadId) : undefined;
   const lastLine = ask === undefined ? workingLine : { ...workingLine, activity: ask.text };
   const openThread = () => {
@@ -1864,7 +1869,12 @@ function ActivityThreadButton(props: {
   return (
     <div className="activity-nav__asking">
       {listed}
-      <SidebarRequestActions ask={ask} onOpen={openThread} title={props.thread.title} />
+      <SidebarRequestActions
+        ask={ask}
+        key={ask?.key ?? "none"}
+        onOpen={openThread}
+        title={props.thread.title}
+      />
     </div>
   );
 }

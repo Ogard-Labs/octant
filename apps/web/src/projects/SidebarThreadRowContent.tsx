@@ -102,7 +102,6 @@ export function sidebarThreadRowLabel(input: {
   return [
     input.title,
     input.projectName,
-    input.host === undefined ? undefined : `on ${input.host}`,
     input.branch,
     input.pullRequest === undefined
       ? undefined
@@ -114,6 +113,7 @@ export function sidebarThreadRowLabel(input: {
       : `${input.issueKey === undefined ? "" : "and "}${issueCountWords(input.issueCount)}`,
     input.state ?? input.age,
     input.activity,
+    input.host === undefined ? undefined : `on ${input.host}`,
   ]
     .filter((part): part is string => part !== undefined && part !== "")
     .join(", ");

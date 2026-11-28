@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import type { SidebarThreadAsk } from "./useSidebarPendingRequests";
+import type { SidebarThreadAsk } from "./sidebarPendingRequests";
 
 /**
  * The answers a Needs-you row offers for a thread the window does not show: the
  * approval card's own Allow once and Deny when the thread waits on exactly one
  * plain approval, and Open always. They sit after the row's button, because a
- * button cannot hold another, so the keyboard reaches the row, then Allow once,
- * Deny and Open. Allow once never remembers the answer for the Project; that
+ * button cannot hold another, so the keyboard reaches the row and its own hover
+ * actions, then Allow once, Deny and Open. Allow once never remembers the answer for the Project; that
  * choice stays on the card in the thread. A refusal the host returns is one
- * quiet line, and the row stays until the host stops listing the request.
+ * quiet line, kept until the host stops listing that request.
  */
 export function SidebarRequestActions(props: {
   readonly title: string;
