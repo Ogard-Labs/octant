@@ -3,8 +3,10 @@ import {
   decodeComputerUseOwner,
   type ComputerControlCommand,
   type ComputerControlResult,
+  type ComputerTypeSecretCommand,
   type ComputerUseOwner,
   type ComputerUseSettings,
+  type ComputerWindowId,
 } from "@octant/contracts/computer-use-plugin";
 import {
   decodeComputerUseActionRequest,
@@ -16,6 +18,7 @@ import {
   type ProjectId,
   type ToolActionAuthority,
 } from "@octant/contracts";
+import type { ThreadSecretFailure } from "@octant/contracts/thread-secrets";
 import {
   decideComputerUseApproval,
   decideDesktopArtifactPath,
@@ -23,6 +26,7 @@ import {
 } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { createComputerUsePlugin } from "../plugins/computerUse/computerUsePlugin";
+import type { ThreadSecretCaller, ThreadSecretService } from "../threadSecrets/threadSecretService";
 import {
   ComputerUseRuntimeError,
   createComputerUseRuntime,
@@ -36,6 +40,30 @@ import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
 /** `ComputerUsePendingApproval.summary` rejects anything longer. */
 const APPROVAL_SUMMARY_LIMIT = 512;
+
+/** Consumer registration for redeeming one-use thread-secret handles on this Mac. */
+export const COMPUTER_USE_SECRET_CONSUMER = {
+  id: "octant.computer-use",
+  label: "Computer use",
+} as const;
+
+const SECRET_FAILURE_MESSAGES: Readonly<Record<ThreadSecretFailure, string>> = {
+  declined: "The person declined this secret.",
+  expired: "That secret handle is no longer valid or was already used.",
+  revoked: "The person ended that secret. Do not ask again unless they say so.",
+  locked: "The person's secret store is locked.",
+  missing: "The person's secret store has no such item.",
+  unavailable: "That thread secret cannot be used here right now.",
+  "not-linked": "No secret store is linked on this computer.",
+  "invalid-reference": "That secret reference is invalid.",
+  "refused-by-strict": "Strict does not allow that secret's lifetime here.",
+  "lifetime-not-offered": "That secret's lifetime is not allowed here.",
+  "unsupported-mode": "Chat threads do not hold thread secrets.",
+};
+
+function sanitizeOneLine(value: string): string {
+  return value.replace(/[\p{C}\p{Zl}\p{Zp}]+/gu, " ").trim();
+}
 
 const refused = (reason: string, message: string): ComputerControlResult => ({
   kind: "refused",
@@ -92,6 +120,10 @@ export function createComputerUseToolService(options: {
    * a host whose only option is a lease still reports itself leasable.
    */
   readonly destination?: () => ComputerUseDestinationReport;
+  /** Thread secrets service for redeeming one-use handles on this Mac; absent where unsupported. */
+  readonly threadSecrets?: () =>
+    | Pick<ThreadSecretService, "inspectHandle" | "redeem" | "registerConsumer">
+    | undefined;
   readonly settings: () => ComputerUseSettings;
   readonly authority: (owner: ComputerUseOwner) => ToolActionAuthority | undefined;
   readonly ownerIsCurrent: (owner: ComputerUseOwner) => boolean;
@@ -142,7 +174,16 @@ export function createComputerUseToolService(options: {
     string,
     {
       readonly owner: ComputerUseOwner;
-      readonly command: ComputerControlCommand;
+      readonly command?: ComputerControlCommand;
+      readonly secret?: {
+        readonly command: ComputerTypeSecretCommand;
+        readonly caller: ThreadSecretCaller;
+        readonly label: string;
+        readonly windowId: ComputerWindowId;
+        readonly windowTitle: string;
+        readonly signal: AbortSignal;
+        readonly requiresApproval: boolean;
+      };
       readonly appId: string;
       readonly sessionId: string;
       readonly authority: ToolActionAuthority;
@@ -153,6 +194,32 @@ export function createComputerUseToolService(options: {
       result?: ComputerControlResult;
     }
   >();
+  let closed = false;
+  let unregisterSecretConsumer: (() => void) | undefined;
+  let registeredSecrets:
+    | Pick<ThreadSecretService, "inspectHandle" | "redeem" | "registerConsumer">
+    | undefined;
+  function syncSecretConsumer(): void {
+    const secrets = options.threadSecrets?.();
+    const shouldRegister =
+      !closed &&
+      secrets !== undefined &&
+      options.desktop?.typeSecret !== undefined &&
+      options.desktop?.inspectSecretTarget !== undefined &&
+      options.settings().enabled &&
+      (options.destination === undefined || options.destination().status === "available");
+    if (!shouldRegister) {
+      unregisterSecretConsumer?.();
+      unregisterSecretConsumer = undefined;
+      registeredSecrets = undefined;
+      return;
+    }
+    if (registeredSecrets === secrets && unregisterSecretConsumer !== undefined) return;
+    unregisterSecretConsumer?.();
+    unregisterSecretConsumer = secrets.registerConsumer(COMPUTER_USE_SECRET_CONSUMER);
+    registeredSecrets = secrets;
+  }
+  syncSecretConsumer();
   const owners = new Map<
     string,
     { readonly owner: ComputerUseOwner; readonly authority: ToolActionAuthority }
@@ -267,6 +334,7 @@ export function createComputerUseToolService(options: {
       const currentAuthority = action === undefined ? undefined : options.authority(action.owner);
       if (
         action === undefined ||
+        action.secret !== undefined ||
         action.owner.leaseId !== undefined ||
         action.owner.executionPolicy === "plan" ||
         !options.settings().enabled ||
@@ -324,9 +392,16 @@ export function createComputerUseToolService(options: {
       const title =
         action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100);
       const head =
-        action !== undefined && action.oneTimeOnly
-          ? `Allow this one action in ${action.appId}${where} for "${title}".`
-          : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for this thread.`;
+        action?.secret !== undefined
+          ? (() => {
+              const windowTitle = sanitizeOneLine(action.secret.windowTitle).slice(0, 120);
+              const windowLabel =
+                windowTitle === "" ? `window ${action.secret.windowId}` : `window "${windowTitle}"`;
+              return `Type secret "${action.secret.label}" into ${action.appId} (${windowLabel}) for "${title}".`;
+            })()
+          : action !== undefined && action.oneTimeOnly
+            ? `Allow this one action in ${action.appId}${where} for "${title}".`
+            : `Allow control of ${action?.appId ?? "this application"}${where} for "${title}" for this thread.`;
       const prefix = ' The agent says: "';
       const room = APPROVAL_SUMMARY_LIMIT - head.length - prefix.length - 2;
       if (action?.reason === undefined || room < 1) return head.slice(0, APPROVAL_SUMMARY_LIMIT);
@@ -373,8 +448,133 @@ export function createComputerUseToolService(options: {
           return { refused: "owner-changed" };
         // A policy refusal is not an owner change. Reporting it as one sent a
         // person to look for a task-authority problem that did not exist.
-        const refusal = admissionRefusal(action.owner, true);
+        const approvalGranted = action.secret === undefined ? true : action.secret.requiresApproval;
+        const refusal = admissionRefusal(action.owner, approvalGranted);
         if (refusal !== undefined) return { refused: refusal };
+        if (action.secret !== undefined) {
+          const secretSignal = AbortSignal.any([signal, action.secret.signal]);
+          if (secretSignal.aborted) {
+            action.result = { kind: "cancelled" };
+            return { refused: "cancelled" };
+          }
+          // If this action skipped one-time approval at admission (Full access
+          // outside Strict), re-check live approval policy right before
+          // dispatch so leaving Full access or turning Strict on cannot bypass
+          // the one-time approval rule.
+          if (!action.secret.requiresApproval) {
+            const liveApproval = decideComputerUseApproval({
+              plan: false,
+              fullAccess: options.fullAccess(action.owner),
+              strict: options.strict?.(action.owner) ?? true,
+              externalContentIngested: options.externalContentIngested(action.owner),
+              hasThreadGrant: false,
+              hasProjectGrant: false,
+              hasProjectScope: false,
+              secretInput: true,
+            });
+            if (liveApproval.kind !== "not-required") {
+              action.result = refused(
+                "not-approved",
+                "Computer use approval rules changed before typing the secret.",
+              );
+              return { refused: "not-approved" };
+            }
+          }
+          const secrets = options.threadSecrets?.();
+          const desktop = options.desktop;
+          if (
+            secrets === undefined ||
+            desktop?.inspectSecretTarget === undefined ||
+            desktop.typeSecret === undefined
+          ) {
+            action.result = refused(
+              "unavailable",
+              "Typing a thread secret is unavailable right now.",
+            );
+            return { refused: "unavailable" };
+          }
+          // Re-verify the password field and prompt identity before spending
+          // the handle so a UI or title change while approval waited never
+          // consumes or types the secret into an unapproved prompt.
+          const verified = await desktop.inspectSecretTarget(
+            action.owner,
+            {
+              observationId: action.secret.command.observationId,
+              elementIndex: action.secret.command.elementIndex,
+            },
+            secretSignal,
+          );
+          if (secretSignal.aborted) {
+            action.result = { kind: "cancelled" };
+            return { refused: "cancelled" };
+          }
+          if (verified.kind !== "secure-target") {
+            action.result =
+              verified.reason === "cancelled"
+                ? { kind: "cancelled" }
+                : refused(verified.reason, verified.message);
+            return { refused: verified.reason };
+          }
+          if (
+            verified.appId !== action.appId ||
+            verified.windowId !== action.secret.windowId ||
+            verified.windowTitle !== action.secret.windowTitle
+          ) {
+            action.result = refused(
+              "stale-observation",
+              "The password prompt changed before typing. Observe the window again.",
+            );
+            return { refused: "stale-observation" };
+          }
+          const redeemed = await secrets.redeem({
+            consumerId: COMPUTER_USE_SECRET_CONSUMER.id,
+            caller: action.secret.caller,
+            handle: action.secret.command.handle,
+            signal: secretSignal,
+          });
+          if (redeemed.status === "refused") {
+            action.result = refused(redeemed.failure, SECRET_FAILURE_MESSAGES[redeemed.failure]);
+            return { refused: redeemed.failure };
+          }
+          try {
+            if (secretSignal.aborted) {
+              action.result = { kind: "cancelled" };
+              return { refused: "cancelled" };
+            }
+            const typed = await desktop.typeSecret(
+              action.owner,
+              {
+                observationId: action.secret.command.observationId,
+                elementIndex: action.secret.command.elementIndex,
+                text: redeemed.value,
+              },
+              secretSignal,
+            );
+            if (typed.kind === "typed") {
+              action.result = { kind: "typed" };
+              return { reference: `computer-action-${request.actionId}` };
+            }
+            if (
+              typed.kind === "cancelled" ||
+              (typed.kind === "refused" && typed.reason === "cancelled")
+            ) {
+              action.result = { kind: "cancelled" };
+              return { refused: "cancelled" };
+            }
+            if (typed.kind === "refused" || typed.kind === "failed") {
+              action.result = refused(typed.reason, typed.message);
+              return { refused: typed.reason };
+            }
+            action.result = refused(
+              "driver-unavailable",
+              "Computer use could not verify typing the secret.",
+            );
+            return { refused: "driver-unavailable" };
+          } finally {
+            redeemed.done();
+          }
+        }
+        if (action.command === undefined) return { refused: "invalid-command" };
         action.result = await dispatch(action.owner, action.command, signal);
         if (action.result.kind === "failed" || action.result.kind === "refused")
           return { refused: action.result.reason };
@@ -633,7 +833,7 @@ export function createComputerUseToolService(options: {
           )
         );
       }
-      if (requiresApproval) {
+      if (requiresApproval && !action.oneTimeOnly) {
         if (view.events.some((event) => event.kind === "approval-approved"))
           grants.set(grantKey, { appId, leaseId: owner.leaseId });
       }
@@ -642,6 +842,254 @@ export function createComputerUseToolService(options: {
         observations.set(String(result.observationId), { owner, appId });
       }
       return result;
+    } finally {
+      askingInThread?.abort();
+      pending.delete(actionId);
+    }
+  }
+
+  /**
+   * Redeems a one-use thread-secret handle in host memory and types its value
+   * into an observed, verified password field. Never returns the value or a
+   * screenshot, and asks once per use below Full access or under Strict.
+   */
+  async function typeSecret(
+    owner: ComputerUseOwner,
+    command: ComputerTypeSecretCommand,
+    caller: ThreadSecretCaller,
+    signal?: AbortSignal,
+    ask?: ComputerUseThreadAsk,
+    reason?: string,
+  ): Promise<ComputerControlResult> {
+    if (signal?.aborted || caller.signal.aborted) return { kind: "cancelled" };
+    if (owner.leaseId !== undefined)
+      return refused(
+        "unsupported",
+        "Typing a thread secret is not supported on disposable desktops.",
+      );
+    if (owner.mode === "chat")
+      return refused("unsupported", "Chat threads do not hold thread secrets.");
+    const authority = options.authority(owner);
+    if (
+      !options.settings().enabled ||
+      !options.ownerIsCurrent(owner) ||
+      owner.executionPolicy === "plan" ||
+      authority === undefined ||
+      !admitted(owner, false)
+    )
+      return refused(
+        "unavailable",
+        "Computer use is unavailable for this task's current authority.",
+      );
+    const secrets = options.threadSecrets?.();
+    const desktop = options.desktop;
+    if (
+      secrets === undefined ||
+      desktop?.inspectSecretTarget === undefined ||
+      desktop.typeSecret === undefined
+    )
+      return refused("unavailable", "Typing a thread secret is unavailable on this host.");
+    if (options.destination?.().status === "leasable") return NO_LIVE_DESKTOP;
+    syncSecretConsumer();
+    const previous = owners.get(ownerKey(owner));
+    if (previous !== undefined && !sameToolActionAuthority(previous.authority, authority))
+      await execute(owner, { operation: "stop" });
+    await desktop.configure(options.settings());
+    if (!(await desktop.reserve(owner))) {
+      const status = await desktop.status();
+      if (
+        !status.permissions.accessibility ||
+        !status.permissions.screenRecording ||
+        status.driver === "unavailable" ||
+        status.driver === "failed"
+      )
+        return refused(
+          "setup-required",
+          status.message ?? "Check the driver and macOS permissions in Computer use settings.",
+        );
+      return refused(
+        "not-permitted",
+        options.asksFromPairedWindow?.(owner)
+          ? "Keep the Mac desktop open in this thread and hand control back to the agent."
+          : "Computer use could not reserve this window. Check whether a person has control of the desktop.",
+      );
+    }
+    if (signal?.aborted || caller.signal.aborted) {
+      await releaseReservation(owner);
+      return { kind: "cancelled" };
+    }
+    owners.set(ownerKey(owner), { owner, authority });
+    const observed = observations.get(String(command.observationId));
+    if (observed === undefined || ownerKey(observed.owner) !== ownerKey(owner))
+      return refused(
+        "stale-observation",
+        "Observe this task's application window again before typing a secret.",
+      );
+    const checkSignal =
+      signal === undefined ? caller.signal : AbortSignal.any([signal, caller.signal]);
+    // Verify the handle and password field before asking the person or spending
+    // the handle, so a spent handle or visible text box never prompts or reads
+    // the secret value.
+    const inspectedHandle = secrets.inspectHandle({
+      consumerId: COMPUTER_USE_SECRET_CONSUMER.id,
+      caller,
+      handle: command.handle,
+      signal: checkSignal,
+    });
+    if (inspectedHandle.status === "refused")
+      return refused(inspectedHandle.failure, SECRET_FAILURE_MESSAGES[inspectedHandle.failure]);
+    const target = await desktop.inspectSecretTarget(
+      owner,
+      { observationId: command.observationId, elementIndex: command.elementIndex },
+      checkSignal,
+    );
+    if (target.kind !== "secure-target")
+      return target.reason === "cancelled"
+        ? { kind: "cancelled" }
+        : refused(target.reason, target.message);
+    if (target.appId !== observed.appId)
+      return refused(
+        "stale-observation",
+        "The observed application changed. Observe the window again.",
+      );
+    const approval = decideComputerUseApproval({
+      plan: false,
+      fullAccess: options.fullAccess(owner),
+      strict: options.strict?.(owner) ?? true,
+      externalContentIngested: options.externalContentIngested(owner),
+      hasThreadGrant: false,
+      hasProjectGrant: false,
+      hasProjectScope: false,
+      secretInput: true,
+    });
+    if (approval.kind === "refused")
+      return refused(
+        "unavailable",
+        "Computer use is unavailable for this task's current authority.",
+      );
+    const requiresApproval = approval.kind === "required";
+    const actionId = randomUUID();
+    const sessionId = randomUUID();
+    pending.set(actionId, {
+      owner,
+      secret: {
+        command,
+        caller,
+        label: inspectedHandle.label,
+        windowId: target.windowId,
+        windowTitle: target.windowTitle,
+        signal: checkSignal,
+        requiresApproval,
+      },
+      appId: target.appId,
+      sessionId,
+      authority,
+      oneTimeOnly: true,
+      canRememberForProject: false,
+      ...(reason === undefined ? {} : { reason }),
+    });
+    let askingInThread: AbortController | undefined;
+    try {
+      let view = await runtime.start({
+        ownerWindowId: owner.windowId,
+        threadId: owner.threadId,
+        requestedBy: decodeEventActor({
+          kind: "agent",
+          actorId: owner.providerInstanceId,
+          providerInstanceId: owner.providerInstanceId,
+          threadId: owner.threadId,
+        }),
+        request: decodeComputerUseActionRequest({
+          actionId,
+          sessionId,
+          correlationId: randomUUID(),
+          authority,
+          kind: "type-secret",
+          visibility: "visible",
+          target: target.appId,
+        }),
+        policy: {
+          allowlist: [{ actionKind: "type-secret", targetApp: target.appId, requiresApproval }],
+          sensitiveFieldProtection: true,
+          visibleStopControl: true,
+          maxSessionDurationMs: 5 * 60_000,
+          processOwnershipRequired: true,
+        },
+      });
+      if (!("state" in view))
+        return refused("unavailable", "No computer-use destination is available.");
+      while (view.state === "waiting-for-approval" || view.state === "running") {
+        if (checkSignal.aborted || !options.ownerIsCurrent(owner) || !options.settings().enabled) {
+          await runtime.stop({
+            ownerWindowId: owner.windowId,
+            threadId: owner.threadId,
+            authority,
+            sessionId,
+          });
+          await releaseReservation(owner);
+          return { kind: "cancelled" };
+        }
+        const pendingApproval = view.pendingApproval;
+        if (
+          ask !== undefined &&
+          askingInThread === undefined &&
+          view.state === "waiting-for-approval" &&
+          pendingApproval !== undefined
+        ) {
+          const asking = new AbortController();
+          askingInThread = asking;
+          void ask(pendingApproval.summary, asking.signal).then(async (answer) => {
+            if (asking.signal.aborted) return;
+            const scope = {
+              ownerWindowId: owner.windowId,
+              threadId: owner.threadId,
+              authority,
+              sessionId,
+            };
+            await (
+              answer === "approved" || answer === "denied"
+                ? runtime.decide({
+                    ...scope,
+                    actionId: pendingApproval.actionId,
+                    approvalId: pendingApproval.approvalId,
+                    decision: answer,
+                  })
+                : runtime.stop(scope)
+            ).catch(() => undefined);
+          });
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        const current = runtime.inspect({
+          ownerWindowId: owner.windowId,
+          threadId: owner.threadId,
+          authority,
+          sessionId,
+        });
+        if (current === undefined) return refused("expired", "Computer-use approval expired.");
+        view = current;
+      }
+      const result = pending.get(actionId)?.result;
+      if (view.state !== "completed" || result === undefined) {
+        await releaseReservation(owner);
+        if (result?.kind === "cancelled") return { kind: "cancelled" };
+        const failure = view.events.findLast(
+          (event) =>
+            event.kind === "session-failed" ||
+            event.kind === "approval-denied" ||
+            event.kind === "session-interrupted",
+        );
+        if (failure?.kind === "session-interrupted") return { kind: "cancelled" };
+        if (result?.kind === "refused" || result?.kind === "failed")
+          return refused(result.reason, result.message);
+        return refused(
+          "not-approved",
+          failure?.detail ?? "Computer use was denied, expired, or interrupted.",
+        );
+      }
+      observations.delete(String(command.observationId));
+      return result.kind === "typed"
+        ? result
+        : refused("driver-unavailable", "Computer use could not verify typing the secret.");
     } finally {
       askingInThread?.abort();
       pending.delete(actionId);
@@ -806,7 +1254,9 @@ export function createComputerUseToolService(options: {
       options.destination === undefined
         ? runtime
         : { ...runtime, destination: options.destination },
+    syncSecretConsumer,
     sweep: async () => {
+      syncSecretConsumer();
       for (const action of pending.values()) {
         const current = options.authority(action.owner);
         if (
@@ -858,6 +1308,7 @@ export function createComputerUseToolService(options: {
       rawOwner: ComputerUseOwner,
       imagesSupported: boolean = true,
       ask?: ComputerUseThreadAsk,
+      turnId?: string,
     ): AppManagedToolSet | undefined => {
       const owner = decodeComputerUseOwner(rawOwner);
       if (
@@ -874,6 +1325,7 @@ export function createComputerUseToolService(options: {
           : options.desktop === undefined
       )
         return undefined;
+      syncSecretConsumer();
       const boundAuthority = options.authority(owner);
       const authorityChanged = (): boolean => {
         const current = options.authority(owner);
@@ -894,6 +1346,33 @@ export function createComputerUseToolService(options: {
         "owner-changed",
         "The task's computer-use authority changed.",
       );
+      const lifetime = new AbortController();
+      const secretTurnId = turnId ?? randomUUID();
+      const secretCaller: ThreadSecretCaller = {
+        windowId: String(owner.windowId),
+        threadId: owner.threadId,
+        turnId: secretTurnId,
+        authority: () => {
+          if (
+            authorityChanged() ||
+            !options.ownerIsCurrent(owner) ||
+            owner.executionPolicy === "plan"
+          )
+            return undefined;
+          return {
+            mode: owner.mode,
+            strict: options.strict?.(owner) ?? true,
+            commandsConfined: false,
+          };
+        },
+        signal: lifetime.signal,
+      };
+      const supportsSecretTyping =
+        !onDesktop &&
+        (owner.mode === "code" || owner.mode === "work") &&
+        options.threadSecrets?.() !== undefined &&
+        options.desktop?.inspectSecretTarget !== undefined &&
+        options.desktop?.typeSecret !== undefined;
       const plugin = createComputerUsePlugin({
         execute: (command, signal, request) => {
           if (needsImageModel && command.operation !== "stop")
@@ -916,6 +1395,21 @@ export function createComputerUseToolService(options: {
                 request?.reason,
               );
         },
+        ...(supportsSecretTyping
+          ? {
+              typeSecret: (command, signal, request) =>
+                authorityChanged()
+                  ? Promise.resolve(ownerChangedRefusal)
+                  : typeSecret(
+                      owner,
+                      command,
+                      secretCaller,
+                      signal,
+                      options.asksFromPairedWindow?.(owner) ? ask : undefined,
+                      request?.reason,
+                    ),
+            }
+          : {}),
         ...(onDesktop && ask !== undefined
           ? {
               disposableDesktop: {
@@ -935,7 +1429,6 @@ export function createComputerUseToolService(options: {
             }
           : {}),
       });
-      const lifetime = new AbortController();
       const inFlight = new Set<Promise<ComputerControlResult>>();
       let closing: Promise<void> | undefined;
       return {
@@ -970,11 +1463,17 @@ export function createComputerUseToolService(options: {
             const { image, ...observation } = result;
             return { result: observation, ...(imagesSupported ? { images: [image] } : {}) };
           }
-          return { result, isError: result.kind === "refused" || result.kind === "failed" };
+          return {
+            result,
+            isError:
+              result.kind === "refused" || result.kind === "failed" || result.kind === "cancelled",
+          };
         },
       };
     },
     close: async () => {
+      closed = true;
+      syncSecretConsumer();
       grants.clear();
       observations.clear();
       await runtime.close();

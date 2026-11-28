@@ -16013,7 +16013,24 @@ application asks once and the grant lasts the thread, and the card offers
 forgettable in Settings › Computer use; maintainer decisions, 2026-11-12 and
 2026-11-19; built). Outside Strict, and at Full access, outside content does
 not make later actions ask again; below Full access under Strict that one-time
-re-ask stays and withholds Project remembering. Stop, cancellation, changed
+re-ask stays and withholds Project remembering. Computer use registers on this
+Mac as a [thread-secret](#thread-secrets) handle consumer and exposes
+`type-secret` (`{ handle, elementIndex, observationId }`) through
+`ComputerUseHostPort.typeSecret` (maintainer decisions, 2026-11-24 and
+2026-11-28). The plugin never sees the secret value: the host verifies in a
+fresh accessibility snapshot that the exact observed element is an `AXTextField`
+with `subrole === "AXSecureTextField"` (refusing any other field, including a
+visible text box labeled "Password", with `not-a-password-field` and no
+override), redeems the one-use handle in host memory, delivers the value only
+over the authenticated loopback broker and the driver's private Unix socket
+(never a CLI argument, environment variable, or file), and returns only `typed`,
+`refused`, or `cancelled` with no screenshot or value. Below Full access, and
+under Strict at Full access, each `type-secret` call waits for a one-time
+approval naming the app, the window title, and the secret's label, without
+reusing app grants or offering **Remember for this Project**; at Full access
+outside Strict, no approval is asked. Disposable desktops do not yet support
+`type-secret` and refuse it cleanly (deferred to a separate follow-up), and
+`reservedApps` remain blocked. Stop, cancellation, changed
 authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
@@ -21327,8 +21344,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
-  (maintainer decision, 2026-11-24). Built. Computer use filling a password
-  prompt from a handle is not part of this; it is a separate, later decision.
+  (maintainer decision, 2026-11-24). Built. On this Mac, Computer use registers
+  as a handle consumer for `type-secret` into verified password fields
+  ([Computer use plugin](#extensions-and-skills); maintainer decisions,
+  2026-11-24 and 2026-11-28); disposable desktops are deferred.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
     a delivery. It can never pass a value: the person enters it in the card every

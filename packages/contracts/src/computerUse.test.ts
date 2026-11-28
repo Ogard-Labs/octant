@@ -18,6 +18,7 @@ describe("ComputerUseActionKind", () => {
     for (const kind of [
       "click",
       "type-text",
+      "type-secret",
       "key-press",
       "scroll",
       "screenshot",

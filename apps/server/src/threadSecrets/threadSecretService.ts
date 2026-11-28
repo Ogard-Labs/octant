@@ -585,6 +585,30 @@ export class ThreadSecretService {
     };
   }
 
+  /**
+   * Checks whether a handle can be redeemed now and returns its label,
+   * without spending the handle or reading its value.
+   */
+  inspectHandle(input: {
+    readonly consumerId: string;
+    readonly caller: ThreadSecretCaller;
+    readonly handle: string;
+    readonly signal: AbortSignal;
+  }):
+    | { readonly status: "available"; readonly label: string }
+    | { readonly status: "refused"; readonly failure: ThreadSecretFailure } {
+    this.sweep();
+    if (!this.#consumers.has(input.consumerId))
+      return { status: "refused", failure: "unavailable" };
+    const secretId = this.#handles.get(input.handle);
+    const secret = secretId === undefined ? undefined : this.#active.get(secretId);
+    if (secret === undefined || secret.threadId !== input.caller.threadId)
+      return { status: "refused", failure: "expired" };
+    const refused = this.#refusesUse(input.caller, secret, input.signal);
+    if (refused !== undefined) return { status: "refused", failure: refused };
+    return { status: "available", label: secret.label };
+  }
+
   /** Hands a handle's value to its consumer, once. */
   async redeem(input: {
     readonly consumerId: string;
