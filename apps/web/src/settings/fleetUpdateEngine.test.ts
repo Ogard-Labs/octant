@@ -620,4 +620,165 @@ describe("fleetUpdateEngine", () => {
     expect(peer?.disposition).toBe("skipped");
     expect(peer?.skipReason).toBe("pair-to-update");
   });
+
+  it("waits for the native updater subscription to finish staging when downloadAppUpdate returns downloading", async () => {
+    let listener: ((state: AppUpdateState) => void) | undefined;
+    const subscribeAppUpdateState = vi.fn((cb: (state: AppUpdateState) => void) => {
+      listener = cb;
+      return () => {
+        listener = undefined;
+      };
+    });
+    const downloadAppUpdate = vi.fn(async () => {
+      setTimeout(() => {
+        listener?.(localAppState({ status: "ready" }));
+      }, 0);
+      return localAppState({ status: "downloading" });
+    });
+    const installAppUpdate = vi.fn(async () => ({ kind: "installing" as const }));
+
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "available" }),
+        downloadAppUpdate,
+        subscribeAppUpdateState,
+        installAppUpdate,
+        localDownloadTimeoutMs: 5_000,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const inventory = await collectFleetUpdateInventory(sources);
+    const plan = planFleetUpdate(inventory.hosts);
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory,
+      sources,
+      drain: { kind: "stop-now" },
+      onStepStatesChange: () => undefined,
+    });
+
+    expect(subscribeAppUpdateState).toHaveBeenCalledTimes(1);
+    expect(downloadAppUpdate).toHaveBeenCalledTimes(1);
+    expect(installAppUpdate).toHaveBeenCalledTimes(1);
+    expect(states.find((entry) => entry.step.phase === "local-app")?.status).toBe("succeeded");
+  });
+
+  it("treats not-ready from installAppUpdate as a retryable failure instead of success", async () => {
+    const downloadAppUpdate = vi.fn(async () => localAppState({ status: "ready" }));
+    const installAppUpdate = vi.fn(async () => ({ kind: "not-ready" as const }));
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "ready" }),
+        downloadAppUpdate,
+        installAppUpdate,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const inventory = await collectFleetUpdateInventory(sources);
+    const plan = planFleetUpdate(inventory.hosts);
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory,
+      sources,
+      drain: { kind: "stop-now" },
+      onStepStatesChange: () => undefined,
+    });
+
+    const localStep = states.find((entry) => entry.step.phase === "local-app");
+    expect(localStep?.status).toBe("failed");
+    expect(localStep?.retryable).toBe(true);
+  });
+
+  it("marks an SSH step failed and holds the local app when refreshing an expired plan throws", async () => {
+    const installAppUpdate = vi.fn(async () => ({ kind: "installing" as const }));
+    let prepareCount = 0;
+    const memberInstall: ShieldServersClient["memberInstall"] = vi.fn(
+      async (command: MemberInstallCommand): Promise<MemberInstallResult> => {
+        if (command.kind === "list-member-computers") {
+          return {
+            kind: "member-computers",
+            members: [
+              {
+                serverId: SERVER_A_ID,
+                target: "linux-x64",
+                artifactVersion: "0.1.0",
+                listenAddress: "100.64.0.10",
+                listenPort: 8443,
+                memberId: MEMBER_A_ID,
+              },
+            ],
+          };
+        }
+        if (command.kind === "prepare-member-update") {
+          prepareCount += 1;
+          if (prepareCount === 1) {
+            return {
+              kind: "member-update-plan",
+              plan: {
+                planId: PLAN_A_ID,
+                serverId: SERVER_A_ID,
+                alias: "devbox01",
+                user: "deploy",
+                target: "linux-x64",
+                fromVersion: "0.1.0",
+                toVersion: "0.2.0",
+                ring: "stable",
+                signature: "verified",
+                installRoot: "/home/deploy/.local/state/octant/install",
+                storeMigration: false,
+                drains: ["wait", "stop-now"],
+              },
+            };
+          }
+          throw new Error("transport disconnected");
+        }
+        return {
+          kind: "member-install-refused",
+          reason: "plan-expired",
+          message: "Plan expired",
+        };
+      },
+    );
+
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "ready" }),
+        downloadAppUpdate: vi.fn(async () => localAppState({ status: "ready" })),
+        installAppUpdate,
+      },
+      shieldServersClient: {
+        read: vi.fn(async () => ({
+          servers: [shieldServer(SERVER_A_ID, "devbox01")],
+          sshAgent: "available" as const,
+        })),
+        memberInstall,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const inventory = await collectFleetUpdateInventory(sources);
+    const plan = planFleetUpdate(inventory.hosts);
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory,
+      sources,
+      drain: { kind: "stop-now" },
+      onStepStatesChange: () => undefined,
+    });
+
+    const sshStep = states.find((entry) => entry.step.phase === "remote-octant-ssh");
+    const localStep = states.find((entry) => entry.step.phase === "local-app");
+    expect(sshStep?.status).toBe("failed");
+    expect(sshStep?.retryable).toBe(true);
+    expect(localStep?.status).toBe("held");
+    expect(installAppUpdate).not.toHaveBeenCalled();
+  });
 });

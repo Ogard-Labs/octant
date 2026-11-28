@@ -96,6 +96,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   // does not update.
   const check = bridge?.checkForAppUpdate;
   const download = bridge?.downloadAppUpdate;
+  const subscribeAppUpdateState = bridge?.subscribeAppUpdateState;
   const install = bridge?.installAppUpdate;
   const setAutomatic = bridge?.setAutomaticAppUpdateChecks;
   const setRing = bridge?.setAppUpdateRing;
@@ -112,6 +113,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
               state,
               checkForAppUpdate: check,
               downloadAppUpdate: download,
+              subscribeAppUpdateState,
               installAppUpdate: install,
             },
             localProviderClient: fleet.localProviderClient,
@@ -121,7 +123,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
             hostFederationTransports: fleet.hostFederationTransports,
             shieldServersClient: fleet.shieldServersClient,
           },
-    [fleet, state, check, download, install],
+    [fleet, state, check, download, subscribeAppUpdateState, install],
   );
   if (check === undefined || download === undefined || install === undefined) {
     return (
@@ -144,8 +146,12 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
             </OctantButton>
           )}
         </SettingRow>
-        {fleetSources === undefined || !fleetOpen ? null : (
-          <FleetUpdateDialog onClose={() => setFleetOpen(false)} open sources={fleetSources} />
+        {fleetSources === undefined ? null : (
+          <FleetUpdateDialog
+            onClose={() => setFleetOpen(false)}
+            open={fleetOpen}
+            sources={fleetSources}
+          />
         )}
       </>
     );
@@ -396,8 +402,12 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         onClose={() => setWhatsNewOpen(false)}
         open={whatsNewOpen}
       />
-      {fleetSources === undefined || !fleetOpen ? null : (
-        <FleetUpdateDialog onClose={() => setFleetOpen(false)} open sources={fleetSources} />
+      {fleetSources === undefined ? null : (
+        <FleetUpdateDialog
+          onClose={() => setFleetOpen(false)}
+          open={fleetOpen}
+          sources={fleetSources}
+        />
       )}
     </>
   );

@@ -102,9 +102,24 @@ export function FleetUpdateDialog(props: FleetUpdateDialogProps) {
   const [deferredLocalApp, setDeferredLocalApp] = useState(false);
   const [stepStates, setStepStates] = useState<ReadonlyArray<FleetUpdateStepState>>();
   const [retryingStepIds, setRetryingStepIds] = useState<ReadonlySet<string>>(() => new Set());
+  const runningRef = useRef(false);
+  runningRef.current = running || retryingStepIds.size > 0;
+  // Set when the dialog is closed ("Hide") while a run or retry is in flight so
+  // reopening restores that run's live progress or finished retry controls
+  // instead of discarding it and starting a second inventory.
+  const preserveHiddenRunRef = useRef(false);
+
+  const handleClose = (): void => {
+    preserveHiddenRunRef.current = runningRef.current;
+    props.onClose();
+  };
 
   useEffect(() => {
     if (!props.open) return;
+    if (runningRef.current || preserveHiddenRunRef.current) {
+      preserveHiddenRunRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     setLoadError(undefined);
@@ -215,7 +230,7 @@ export function FleetUpdateDialog(props: FleetUpdateDialogProps) {
       className="fleet-update__dialog"
       label="Update all computers"
       labelledBy={titleId}
-      onClose={props.onClose}
+      onClose={handleClose}
       open={props.open}
     >
       <h2 className="octant-dialog__title" id={titleId}>
@@ -415,7 +430,7 @@ export function FleetUpdateDialog(props: FleetUpdateDialogProps) {
           </div>
 
           <div className="member-install__actions">
-            <OctantButton onClick={props.onClose} type="button" variant="ghost">
+            <OctantButton onClick={handleClose} type="button" variant="ghost">
               {running ? "Hide" : "Close"}
             </OctantButton>
           </div>

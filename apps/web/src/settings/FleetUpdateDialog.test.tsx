@@ -240,4 +240,50 @@ describe("FleetUpdateDialog", () => {
     });
     expect(installAppUpdate).not.toHaveBeenCalled();
   });
+
+  it("preserves an active fleet run and its retry controls when hidden and reopened", async () => {
+    let releaseConfirm: ((result: MemberInstallResult) => void) | undefined;
+    const base = makeSources();
+    const baseShield = base.sources.shieldServersClient;
+    if (baseShield === undefined) throw new Error("Expected shieldServersClient fixture");
+    const read = vi.fn(() => baseShield.read());
+    const memberInstall = vi.fn(
+      async (command: MemberInstallCommand): Promise<MemberInstallResult> => {
+        if (command.kind === "confirm-member-update") {
+          return new Promise<MemberInstallResult>((resolve) => {
+            releaseConfirm = resolve;
+          });
+        }
+        return baseShield.memberInstall(command);
+      },
+    );
+    const sources: FleetUpdateSources = {
+      ...base.sources,
+      shieldServersClient: { read, memberInstall },
+    };
+
+    const view = render(<FleetUpdateDialog onClose={vi.fn()} open sources={sources} />);
+    await screen.findByRole("list", { name: "Connected computers" });
+    expect(read).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Update \d+ computers/ }));
+    await screen.findByRole("button", { name: "Hide" });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+
+    // Hide the dialog while the SSH update is still running, then let it fail.
+    view.rerender(<FleetUpdateDialog onClose={vi.fn()} open={false} sources={sources} />);
+    await waitFor(() => expect(releaseConfirm).toBeDefined());
+    releaseConfirm?.({
+      kind: "member-install-refused",
+      reason: "server-unreachable",
+      message: "devbox01 could not be reached",
+    });
+
+    // Reopening restores the completed hidden run with its Retry button and does
+    // not start a second inventory collection.
+    view.rerender(<FleetUpdateDialog onClose={vi.fn()} open sources={sources} />);
+    expect(await screen.findByText("devbox01 could not be reached")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
 });

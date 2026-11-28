@@ -36,6 +36,7 @@ import type { AppUpdateInstallOutcome } from "../shell/hostBridge";
 
 const REMOTE_CLIENT_BASE_URL = "http://127.0.0.1";
 const DEFAULT_POLL_MS = 1_000;
+const DEFAULT_LOCAL_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_DOWNLOAD_POLLS = 900;
 const MAX_UPDATE_POLLS = 1_200;
 
@@ -44,7 +45,12 @@ export interface FleetUpdateLocalAppSource {
   readonly state: AppUpdateState | undefined;
   readonly checkForAppUpdate?: (() => Promise<AppUpdateState>) | undefined;
   readonly downloadAppUpdate?: (() => Promise<AppUpdateState>) | undefined;
+  readonly subscribeAppUpdateState?:
+    | ((listener: (state: AppUpdateState) => void) => () => void)
+    | undefined;
   readonly installAppUpdate?: (() => Promise<AppUpdateInstallOutcome>) | undefined;
+  /** Test seam for waiting on native updater staging. Defaults to 10 minutes. */
+  readonly localDownloadTimeoutMs?: number | undefined;
 }
 
 export interface FleetUpdateSources {
@@ -709,10 +715,15 @@ async function runSshMemberStep(input: {
     });
 
   if (input.reprepareFirst) {
-    const refreshed = await client.memberInstall({
-      kind: "prepare-member-update",
-      serverId: step.serverId as MemberUpdatePlan["serverId"],
-    });
+    let refreshed;
+    try {
+      refreshed = await client.memberInstall({
+        kind: "prepare-member-update",
+        serverId: step.serverId as MemberUpdatePlan["serverId"],
+      });
+    } catch {
+      return { status: "failed", message: `Octant could not prepare an update for ${step.alias}.` };
+    }
     if (refreshed.kind === "member-update-plan") {
       planId = String(refreshed.plan.planId);
     } else if (refreshed.kind === "member-install-refused") {
@@ -733,16 +744,28 @@ async function runSshMemberStep(input: {
   }
 
   if (confirmed.kind === "member-install-refused" && confirmed.reason === "plan-expired") {
-    const refreshed = await client.memberInstall({
-      kind: "prepare-member-update",
-      serverId: step.serverId as MemberUpdatePlan["serverId"],
-    });
+    let refreshed;
+    try {
+      refreshed = await client.memberInstall({
+        kind: "prepare-member-update",
+        serverId: step.serverId as MemberUpdatePlan["serverId"],
+      });
+    } catch {
+      return {
+        status: "failed",
+        message: `Octant could not refresh the expired update plan for ${step.alias}.`,
+      };
+    }
     if (
       refreshed.kind === "member-update-plan" &&
       refreshed.plan.fromVersion === step.fromVersion &&
       refreshed.plan.toVersion === step.toVersion
     ) {
-      confirmed = await confirm(String(refreshed.plan.planId));
+      try {
+        confirmed = await confirm(String(refreshed.plan.planId));
+      } catch {
+        return { status: "failed", message: `Octant could not start updating ${step.alias}.` };
+      }
     } else if (refreshed.kind === "member-install-refused") {
       return { status: "failed", message: refreshed.message };
     } else {
@@ -770,6 +793,99 @@ async function runSshMemberStep(input: {
   });
 }
 
+async function waitForStagedLocalAppUpdate(
+  localApp: FleetUpdateLocalAppSource,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
+  if (localApp.downloadAppUpdate === undefined) {
+    return { ok: false, message: "Octant could not download the app update." };
+  }
+  // Subscribe before kicking off the native download so a fast transition from
+  // "downloading" to "ready" or "failed" cannot land in the gap between calls.
+  let observedAfterStart: AppUpdateState | undefined;
+  let sawDownloading = false;
+  let resolveWait: ((state: AppUpdateState) => void) | undefined;
+  let downloadStarted = false;
+  const unsubscribe = localApp.subscribeAppUpdateState?.((next) => {
+    if (!downloadStarted) return;
+    if (next.status === "downloading") {
+      sawDownloading = true;
+      return;
+    }
+    if (
+      sawDownloading ||
+      next.status === "ready" ||
+      next.status === "failed" ||
+      next.status === "refused"
+    ) {
+      observedAfterStart = next;
+      resolveWait?.(next);
+    }
+  });
+
+  try {
+    downloadStarted = true;
+    const downloaded = await localApp.downloadAppUpdate();
+    if (downloaded.status === "ready") {
+      return { ok: true };
+    }
+    if (downloaded.status !== "downloading") {
+      return {
+        ok: false,
+        message: downloaded.message ?? "Octant could not stage the app update.",
+      };
+    }
+    sawDownloading = true;
+    if (observedAfterStart !== undefined) {
+      if (observedAfterStart.status === "ready") {
+        return { ok: true };
+      }
+      return {
+        ok: false,
+        message: observedAfterStart.message ?? "Octant could not stage the app update.",
+      };
+    }
+    if (unsubscribe === undefined) {
+      return {
+        ok: false,
+        message: downloaded.message ?? "Octant could not stage the app update.",
+      };
+    }
+    const timeoutMs = localApp.localDownloadTimeoutMs ?? DEFAULT_LOCAL_DOWNLOAD_TIMEOUT_MS;
+    const settled = await new Promise<AppUpdateState | "timed-out">((resolve) => {
+      const timer = setTimeout(() => {
+        resolveWait = undefined;
+        resolve("timed-out");
+      }, timeoutMs);
+      resolveWait = (next) => {
+        clearTimeout(timer);
+        resolveWait = undefined;
+        resolve(next);
+      };
+    });
+    if (settled === "timed-out") {
+      return {
+        ok: false,
+        message: "The app update did not finish staging in time. Try again.",
+      };
+    }
+    if (settled.status === "ready") {
+      return { ok: true };
+    }
+    return {
+      ok: false,
+      message: settled.message ?? "Octant could not stage the app update.",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Octant could not download the app update.",
+    };
+  } finally {
+    resolveWait = undefined;
+    unsubscribe?.();
+  }
+}
+
 async function runLocalAppStep(input: {
   readonly step: Extract<FleetUpdateStep, { readonly phase: "local-app" }>;
   readonly localApp: FleetUpdateLocalAppSource;
@@ -785,43 +901,36 @@ async function runLocalAppStep(input: {
     };
   }
   if (!step.readyToInstall) {
-    if (localApp.downloadAppUpdate === undefined) {
-      return { status: "failed", message: "Octant could not download the app update." };
-    }
-    try {
-      const downloaded = await localApp.downloadAppUpdate();
-      if (downloaded.status !== "ready") {
-        return {
-          status: "failed",
-          message: downloaded.message ?? "Octant could not stage the app update.",
-        };
-      }
-    } catch (error) {
-      return {
-        status: "failed",
-        message:
-          error instanceof Error ? error.message : "Octant could not download the app update.",
-      };
+    const staged = await waitForStagedLocalAppUpdate(localApp);
+    if (!staged.ok) {
+      return { status: "failed", message: staged.message };
     }
   }
   try {
     const outcome = await localApp.installAppUpdate();
-    if (outcome.kind === "wait") {
-      return {
-        status: "waiting-for-work",
-        message:
-          outcome.activeAgentCount > 0
-            ? `Octant will not relaunch while ${outcome.activeAgentCount} ${outcome.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`
-            : "Octant could not check what is running, so it did not relaunch. Try again in a moment.",
-      };
+    switch (outcome.kind) {
+      case "wait":
+        return {
+          status: "waiting-for-work",
+          message:
+            outcome.activeAgentCount > 0
+              ? `Octant will not relaunch while ${outcome.activeAgentCount} ${outcome.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`
+              : "Octant could not check what is running, so it did not relaunch. Try again in a moment.",
+        };
+      case "installing":
+        return {
+          status: "succeeded",
+          message:
+            step.toVersion === undefined
+              ? "Relaunching this app…"
+              : `Relaunching this app to ${step.toVersion}…`,
+        };
+      case "not-ready":
+        return {
+          status: "failed",
+          message: "The app update is not ready to install. Try again to stage and relaunch.",
+        };
     }
-    return {
-      status: "succeeded",
-      message:
-        step.toVersion === undefined
-          ? "Relaunching this app…"
-          : `Relaunching this app to ${step.toVersion}…`,
-    };
   } catch (error) {
     return {
       status: "failed",
@@ -892,7 +1001,18 @@ export async function runFleetUpdatePlan(
           step.hostKind === "local"
             ? input.sources.localProviderClient
             : input.inventory.remoteProviderClients.get(hostId);
-        const outcome = await runProviderCliStep({ step, client });
+        let outcome: { readonly status: "succeeded" | "failed"; readonly message: string };
+        try {
+          outcome = await runProviderCliStep({ step, client });
+        } catch (error) {
+          outcome = {
+            status: "failed",
+            message:
+              error instanceof Error
+                ? error.message
+                : `Octant could not update ${step.providerDisplayName} on ${step.hostDisplayName}.`,
+          };
+        }
         updateState(step.stepId, {
           status: outcome.status,
           message: outcome.message,
@@ -912,14 +1032,25 @@ export async function runFleetUpdatePlan(
   await Promise.allSettled(
     sshSteps.map(async (step) => {
       updateState(step.stepId, { status: "running" });
-      const outcome = await runSshMemberStep({
-        step,
-        client: input.sources.shieldServersClient,
-        drain: input.drain,
-        reprepareFirst: false,
-        sleep,
-        pollMs,
-      });
+      let outcome: { readonly status: "succeeded" | "failed"; readonly message: string };
+      try {
+        outcome = await runSshMemberStep({
+          step,
+          client: input.sources.shieldServersClient,
+          drain: input.drain,
+          reprepareFirst: false,
+          sleep,
+          pollMs,
+        });
+      } catch (error) {
+        outcome = {
+          status: "failed",
+          message:
+            error instanceof Error
+              ? error.message
+              : `Octant could not finish updating ${step.alias}.`,
+        };
+      }
       if (outcome.status === "failed") anyRemoteServerFailed = true;
       updateState(step.stepId, {
         status: outcome.status,
