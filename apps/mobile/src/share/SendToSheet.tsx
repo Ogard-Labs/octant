@@ -28,6 +28,7 @@ import {
   evaluateShareHosts,
   listShareDestinations,
   mapShareForDestination,
+  reconcileSelectedShareHost,
   type ShareBotRow,
   type ShareDestination,
 } from "./shareDestinations";
@@ -105,14 +106,29 @@ export function SendToSheet(props: SendToSheetProps) {
   const [error, setError] = useState<string | undefined>();
 
   const shareId = props.share?.id;
+  // Reset share-specific state only when a different staged share arrives.
+  // Host availability changes reconcile separately so a momentary reconnect
+  // never wipes an edited New chat draft or clears an in-flight send.
   useEffect(() => {
     setStep("pick");
     setQuery("");
     setDraft("");
     setBusy(false);
     setError(undefined);
-    setSelectedHostId(defaultHostId);
-  }, [shareId, defaultHostId]);
+    setSelectedHostId(undefined);
+  }, [shareId]);
+
+  useEffect(() => {
+    setSelectedHostId((currentHostId) =>
+      reconcileSelectedShareHost({
+        currentHostId,
+        defaultHostId,
+        hostOptions,
+        step,
+        busy,
+      }),
+    );
+  }, [busy, defaultHostId, hostOptions, shareId, step]);
 
   useEffect(() => {
     if (step === "new-chat") {

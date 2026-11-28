@@ -250,3 +250,22 @@ export function combineComposerWithSharedText(existingDraft: string, sharedText:
   if (existingDraft.trim().length === 0) return shared;
   return `${existingDraft.trimEnd()}\n\n${shared}`;
 }
+
+/**
+ * Reconciles the chosen computer when host availability changes without
+ * dropping an edited New chat draft or unlocking an in-flight send.
+ */
+export function reconcileSelectedShareHost(input: {
+  readonly currentHostId: string | undefined;
+  readonly defaultHostId: string | undefined;
+  readonly hostOptions: ReadonlyArray<{ readonly hostId: string; readonly enabled: boolean }>;
+  readonly step: "pick" | "new-chat";
+  readonly busy: boolean;
+}): string | undefined {
+  if (input.currentHostId === undefined) return input.defaultHostId;
+  const existing = input.hostOptions.find((host) => host.hostId === input.currentHostId);
+  if (existing !== undefined && (existing.enabled || input.step === "new-chat" || input.busy)) {
+    return input.currentHostId;
+  }
+  return input.defaultHostId;
+}

@@ -23,6 +23,7 @@ import {
   evaluateShareHosts,
   listShareDestinations,
   mapShareForDestination,
+  reconcileSelectedShareHost,
 } from "./shareDestinations";
 import { prepareShareForThread, sendSharedNewChat } from "./sendSharedNewChat";
 import { SHARE_REFUSAL_MESSAGES, type ValidatedStagedShare } from "./shareValidation";
@@ -533,6 +534,49 @@ describe("Send to… execution, composer handoff, and stale computer refusal", (
       expect(result.row.title).toBe("Shared note");
     }
     expect(cleanupSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the chosen computer while editing a New chat draft or sending if its availability flaps", () => {
+    const hostsAfterDisconnect = [
+      { hostId: "host-placement", enabled: false },
+      { hostId: "host-backup", enabled: true },
+    ];
+    expect(
+      reconcileSelectedShareHost({
+        currentHostId: "host-placement",
+        defaultHostId: "host-backup",
+        hostOptions: hostsAfterDisconnect,
+        step: "new-chat",
+        busy: false,
+      }),
+    ).toBe("host-placement");
+    expect(
+      reconcileSelectedShareHost({
+        currentHostId: "host-placement",
+        defaultHostId: "host-backup",
+        hostOptions: hostsAfterDisconnect,
+        step: "pick",
+        busy: true,
+      }),
+    ).toBe("host-placement");
+    expect(
+      reconcileSelectedShareHost({
+        currentHostId: "host-placement",
+        defaultHostId: "host-backup",
+        hostOptions: hostsAfterDisconnect,
+        step: "pick",
+        busy: false,
+      }),
+    ).toBe("host-backup");
+    expect(
+      reconcileSelectedShareHost({
+        currentHostId: undefined,
+        defaultHostId: "host-backup",
+        hostOptions: hostsAfterDisconnect,
+        step: "pick",
+        busy: false,
+      }),
+    ).toBe("host-backup");
   });
 
   it("keeps the host remote route policy free of any new share route", () => {

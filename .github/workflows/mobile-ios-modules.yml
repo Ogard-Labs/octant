@@ -101,7 +101,7 @@ jobs:
         run: |
           xcodebuild build \
             -project Octant.xcodeproj \
-            -target OctantShare \
+            -target OctantShareExtension \
             -sdk iphonesimulator \
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO

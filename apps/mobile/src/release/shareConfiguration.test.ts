@@ -30,8 +30,13 @@ describe("mobile share extension and Android share target configuration", () => 
     expect(appConfig.plugins).toContain("./plugins/withOctantShare");
   });
 
-  it("keeps the iOS share extension target name distinct from the OctantShare pod module", () => {
+  it("keeps the iOS share extension target name distinct from the OctantShare pod module and aligned with CI", () => {
     expect(SHARE_EXTENSION_TARGET).not.toBe("OctantShare");
+    const iosModulesWorkflow = readFileSync(
+      join(mobileRoot, "..", "..", ".github", "workflows", "mobile-ios-modules.yml"),
+      "utf8",
+    );
+    expect(iosModulesWorkflow).toContain(`-target ${SHARE_EXTENSION_TARGET}`);
   });
 
   it("adds a dedicated share App Group to the iOS app and EAS appExtensions without any Keychain group", async () => {
@@ -189,8 +194,16 @@ describe("mobile share extension and Android share target configuration", () => 
     expect(iosExtensionPlist).toContain("com.apple.share-services");
     expect(iosExtensionPlist).toContain("__APP_GROUP__");
 
-    // Android hands off strictly via bare `octant://share` scoped to this package.
+    // Android hands off strictly via bare `octant://share` scoped to this package
+    // and displays specific refusal notices when staging rejects an incoming share.
     expect(androidReceiverSource).toContain('Uri.parse("octant://share")');
     expect(androidReceiverSource).toContain("setPackage(packageName)");
+    expect(androidReceiverSource).toContain("Toast.makeText");
+    expect(androidReceiverSource).toContain(
+      "Octant already has 5 shares waiting. Open Octant to send or discard them first.",
+    );
+    expect(androidReceiverSource).toContain("You can share at most 16 items to Octant at once.");
+    expect(androidReceiverSource).toContain("A shared item is larger than 10 MB.");
+    expect(androidReceiverSource).toContain("Shared items together are larger than 40 MB.");
   });
 });
