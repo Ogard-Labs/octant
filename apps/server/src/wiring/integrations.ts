@@ -46,6 +46,7 @@ import {
   createUnavailableSecretVault,
 } from "../integration/integrationCredentialVault";
 import { createFileConnectionStore } from "../integration/integrationConnectionStore";
+import { createFileLinearAccountIndexStore } from "../integration/linearAccountIndexStore";
 import { createAzureIntegration } from "../plugins/azure/azureIntegration";
 import { contributeGithubActivity } from "../plugins/github/githubActivityIntegration";
 import { IntegrationCredentialOperations } from "../integration/integrationCredentialOperations";
@@ -454,14 +455,13 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     const linearConnectionStore = createFileConnectionStore(
       join(persistence.dataDirectory, "integrations", "linear-connection.json"),
     );
-    // Whether Linear is switched on and a connection is stored, read from
-    // memory: a navigation read asks it for every row and must never reach
-    // Linear to answer.
-    const linearConnected = () =>
-      linearIntegrationIsEffective() && linearConnectionStore.read() !== undefined;
+    const linearAccountIndexStore = createFileLinearAccountIndexStore(
+      join(persistence.dataDirectory, "integrations", "linear-accounts.json"),
+    );
     const integrationService = createLinearIntegrationService({
       vault: integrationVault,
       connectionStore: linearConnectionStore,
+      accountIndexStore: linearAccountIndexStore,
       config: {
         redirectUri: linearRedirectUri,
         ...(options.linearOAuthClientId === undefined
@@ -470,6 +470,10 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       },
       isEffective: linearIntegrationIsEffective,
     });
+    // Whether Linear is switched on and at least one connection is stored,
+    // read from memory: a navigation read asks it for every row and must never
+    // reach Linear to answer.
+    const linearConnected = () => integrationService.hasConnectedAccount?.("linear") === true;
     const linearIssueContextService = new LinearIssueContextService({
       reader: {
         snapshot: (signal) => integrationService.snapshot("linear", signal),
