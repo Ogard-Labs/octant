@@ -2341,6 +2341,8 @@ export function startOctantServer(
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
+      hostUpdateService,
+      desktopHostUpdateRoutes,
       personQuitRoutes,
       supportBundleRoutes,
       threadMoveAdministrationRoutes,
@@ -2604,6 +2606,7 @@ export function startOctantServer(
                 (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
                 (await desktopAgentWorkRoutes(request)) ??
+                (await desktopHostUpdateRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
                 (await externalContentRoutes(request)) ??
@@ -2720,6 +2723,7 @@ export function startOctantServer(
       (server) =>
         Effect.promise(async () => {
           hostResourceBudget.dispose();
+          hostUpdateService.dispose();
           let shutdownFailure: unknown;
           try {
             windowAuthorityStore.revokeNativeLeases();

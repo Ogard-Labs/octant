@@ -185,7 +185,7 @@ describe("composeHostDataMap", () => {
     expect(decoded.host.caches.every((entry) => entry.location.kind === "unknown")).toBe(true);
   });
 
-  it("reports that a headless host does not run desktop update checks", () => {
+  it("reports that a headless host checks the signed release feed only when asked to update", () => {
     const report = composeHostDataMap({
       hostId: "host-under-test",
       serviceMode: "web",
@@ -198,8 +198,9 @@ describe("composeHostDataMap", () => {
     expect(updates).toEqual({
       kind: "known",
       category: "update-checks",
-      leavesMachine: false,
-      purpose: "This headless host does not check for desktop app updates.",
+      leavesMachine: true,
+      purpose:
+        "Only when you ask to update this headless host, it checks the signed release feed for its ring and system. No automatic check runs.",
     });
   });
 

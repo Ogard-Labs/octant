@@ -322,6 +322,10 @@ import {
   BrowserStep,
   HOST_MEMORY_LIMITS_EVENT_NAME,
   HostMemoryLimitsChanged,
+  HOST_UPDATE_REQUESTED_EVENT_NAME,
+  HOST_UPDATE_STEP_EVENT_NAME,
+  HostUpdateRequested,
+  HostUpdateStepRecorded,
   WEB_SEARCH_SETTINGS_EVENT_NAME,
   WebSearchSettingsChanged,
   WEB_SEARCH_CALL_ROUTED_EVENT_NAME,
@@ -1081,6 +1085,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
     .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
+    .register(HOST_UPDATE_REQUESTED_EVENT_NAME, 1, HostUpdateRequested)
+    .register(HOST_UPDATE_STEP_EVENT_NAME, 1, HostUpdateStepRecorded)
     .register(WEB_SEARCH_SETTINGS_EVENT_NAME, 1, WebSearchSettingsChanged)
     .register(WEB_SEARCH_CALL_ROUTED_EVENT_NAME, 1, WebSearchCallRouted)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)

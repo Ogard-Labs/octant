@@ -4,6 +4,7 @@ import {
   decodeHostBackupRequest,
   decodeHostDrainRequest,
   decodeHostLifecycleRequest,
+  decodeHostUpdateRequest,
   decodeSetHostMemoryLimitsRequest,
   type HostBackupOutcome,
   type HostControlPolicy,
@@ -14,6 +15,8 @@ import {
   type HostRestartRecovery,
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
+  type HostUpdateRequest,
+  type HostUpdateStatus,
   type SetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
@@ -93,6 +96,7 @@ const ROUTES = {
   dataMap: "/api/host-control/data-map",
   lifecycle: "/api/host-control/lifecycle",
   drain: "/api/host-control/drain",
+  update: "/api/host-control/update",
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
   memoryLimits: "/api/host-control/memory-limits",
@@ -149,6 +153,10 @@ export interface HostControlRouteDependencies {
    * answers that draining is unavailable on this host.
    */
   readonly drain?: Pick<HostDrain, "enter" | "lift" | "status">;
+  /** Host-owned signed update coordinator (`/api/host-control/update`). */
+  readonly hostUpdate?: {
+    readonly handle: (request: HostUpdateRequest, actor?: EventActor) => Promise<HostUpdateStatus>;
+  };
   readonly backup?: (label: string) => HostControlBackupReceipt;
   /** The memory guard's report; omitting it leaves `memory` off the status. */
   readonly memory?: () => HostMemoryStatus;
@@ -307,6 +315,15 @@ export function createHostControlRouteHandler(
       }
       return authorized("drain", () => handleDrain(dependencies, body, origin));
     }
+    if (route === ROUTES.update) {
+      let body;
+      try {
+        body = decodeHostUpdateRequest(decoded.value);
+      } catch {
+        return failure("Host update request is invalid.", 400, origin);
+      }
+      return authorized("update", () => handleUpdate(dependencies, caller, body, origin));
+    }
     if (route === ROUTES.backup) {
       let body;
       try {
@@ -410,6 +427,20 @@ function handleDrain(
   if (body.action === "drain") return json(drain.enter(body.minutes), 200, origin);
   if (body.action === "lift") drain.lift();
   return json(drain.status(), 200, origin);
+}
+
+async function handleUpdate(
+  dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
+  body: HostUpdateRequest,
+  origin: string | null,
+): Promise<Response> {
+  const hostUpdate = dependencies.hostUpdate;
+  if (hostUpdate === undefined) {
+    return failure("Host updates are unavailable on this host.", 503, origin);
+  }
+  const status = await hostUpdate.handle(body, caller.actor);
+  return json(status, 200, origin);
 }
 
 async function handleExport(

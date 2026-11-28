@@ -113,6 +113,8 @@ import {
   type LocalDeviceAdministrationPort,
 } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
+import { createDesktopHostUpdateRouteHandler } from "../desktopHostUpdateRoutes";
+import { HostUpdateService } from "../hostUpdateService";
 import { createPersonQuitRouteHandler } from "../personQuit";
 import {
   createLoopbackSupportBundleRouteHandler,
@@ -3483,9 +3485,48 @@ export function wireRemote(deps: RemoteDependencies) {
     desktopBridgeSecret: options.desktopBridgeSecret,
     dataDirectory: persistence.dataDirectory,
   });
+  const hostUpdateStateDirectory =
+    options.hostControl?.stateDirectory ?? join(persistence.dataDirectory, "state");
+  const hostUpdateInstallRoot =
+    options.hostControl?.installRoot ??
+    process.env.OCTANT_INSTALL_ROOT ??
+    join(hostUpdateStateDirectory, "install");
+  const hostUpdateService = new HostUpdateService({
+    hostKind: options.serviceMode === "desktop" ? "desktop" : "headless",
+    currentVersion: () => version,
+    currentRing: () =>
+      headlessFeed?.ring() ?? persistence.readShellSettings()?.settings.releaseRing ?? "stable",
+    platform: process.platform,
+    arch: process.arch,
+    uid: process.getuid?.() ?? 0,
+    stateDirectory: hostUpdateStateDirectory,
+    installRoot: hostUpdateInstallRoot,
+    resultPath: join(hostUpdateStateDirectory, "host-update-result.json"),
+    pendingPath: join(hostUpdateStateDirectory, "host-update-pending.json"),
+    environment: {
+      OCTANT_DATA_DIR: persistence.dataDirectory,
+      OCTANT_INSTALL_ROOT: hostUpdateInstallRoot,
+      ...(process.env.OCTANT_SERVER_PORT === undefined
+        ? {}
+        : { OCTANT_SERVER_PORT: process.env.OCTANT_SERVER_PORT }),
+    },
+    builds: headlessBuilds,
+    drain: deps.hostDrain,
+    connection: persistence.connection,
+    journal: persistence.journal,
+    clock: () => new Date().toISOString(),
+    uuid: randomUUID,
+  });
+  void hostUpdateService.reconcileStartupResult().catch(() => undefined);
+  const desktopHostUpdateRoutes = createDesktopHostUpdateRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    readPending: () => hostUpdateService.readDesktopPending(),
+    reportUpdate: (report) => hostUpdateService.reportDesktopUpdate(report),
+  });
   const hostControlRoutes = createHostControlRouteHandler({
     windowAuthorityStore,
     drain: deps.hostDrain,
+    hostUpdate: hostUpdateService,
     diagnostics: composeHostDiagnostics,
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,
@@ -3617,6 +3658,8 @@ export function wireRemote(deps: RemoteDependencies) {
     threadMoveAdministrationRoutes,
     externalContentRoutes,
     hostControlRoutes,
+    hostUpdateService,
+    desktopHostUpdateRoutes,
     personQuitRoutes,
     supportBundleRoutes,
     hubAdministrationRoutes,
