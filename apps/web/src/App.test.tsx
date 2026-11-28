@@ -4606,9 +4606,9 @@ describe("App", () => {
         if (olderChat === undefined) throw new Error("Expected Chat navigation");
         await user.click(olderChat);
       }
-      let tray = await screen.findByRole("group", { name: "Subagents" });
+      let tray = await screen.findByRole("group", { name: "Agents" });
       if (openedFrom === "composer tray") {
-        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Agents,.*Show them/ }));
         await user.click(within(tray).getByRole("button", { name: /Inspect parser.*Opens it/ }));
       } else {
         await showRightUtilityDock(user);
@@ -4620,28 +4620,24 @@ describe("App", () => {
       if (openedFrom === "composer tray") {
         // A row in the composer's card opens the subagent as a thread of its
         // own, beside its parent; View all still opens the Agents list.
-        expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await screen.findByRole("region", { name: "Agent" })).toBeVisible();
         // Opening beside the thread splits its pane, which draws the thread's
         // composer again.
-        tray = await screen.findByRole("group", { name: "Subagents" });
+        tray = await screen.findByRole("group", { name: "Agents" });
       } else {
         const opened = screen.getByRole("complementary", { name: "Right Utility Dock" });
-        expect(await within(opened).findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await within(opened).findByRole("region", { name: "Agent" })).toBeVisible();
       }
       for (let request = 0; request < 2; request += 1) {
-        await user.click(
-          within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
-        );
+        await user.click(within(tray).getByRole("button", { name: "View all 2 agents in Agents" }));
         const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-        expect(await within(dock).findByRole("region", { name: "Subagents" })).toBeVisible();
-        expect(within(dock).queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
-        expect(within(dock).getByRole("button", { name: /Earlier review/ })).toBeVisible();
+        expect(await within(dock).findByRole("button", { name: /Earlier review/ })).toBeVisible();
+        expect(within(dock).getByRole("region", { name: "Agents" })).toBeVisible();
+        expect(within(dock).queryByRole("region", { name: "Agent" })).not.toBeInTheDocument();
         await user.click(within(dock).getByRole("button", { name: /Inspect parser/ }));
-        expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await within(dock).findByRole("region", { name: "Agent" })).toBeVisible();
       }
-      await user.click(
-        within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
-      );
+      await user.click(within(tray).getByRole("button", { name: "View all 2 agents in Agents" }));
       const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
       await user.click(await within(dock).findByRole("button", { name: /Earlier review/ }));
       expect(await within(dock).findByText("Retained completed reply")).toBeVisible();
@@ -4789,13 +4785,13 @@ describe("App", () => {
         name: "Workspace pane: Controller foundation",
       });
       await user.click(originalPane);
-      const tray = await within(originalPane).findByRole("group", { name: "Subagents" });
+      const tray = await within(originalPane).findByRole("group", { name: "Agents" });
       if (returnThrough === "its subagent tab") {
         // Opened from the subagent's own tab, the saved review's Back leaves
         // that tab in view, and on a wide window the dock stays as it was.
-        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Agents,.*Show them/ }));
         await user.click(within(tray).getByRole("button", { name: /Review parser.*Opens it/ }));
-        const subagent = await screen.findByRole("region", { name: "Subagent" });
+        const subagent = await screen.findByRole("region", { name: "Agent" });
         const latestInTab = await within(subagent).findByRole("region", {
           name: "Generation 2 result",
         });
@@ -4804,13 +4800,13 @@ describe("App", () => {
         expect(
           await within(reviewDock).findByRole("table", { name: "Diff for src/parser.ts" }),
         ).toHaveTextContent("captured generation 2");
-        await user.click(within(reviewDock).getByRole("button", { name: "Back to subagent" }));
+        await user.click(within(reviewDock).getByRole("button", { name: "Back to agent" }));
         expect(
           screen.queryByRole("region", { name: "Saved child review" }),
         ).not.toBeInTheDocument();
-        expect(screen.getByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(screen.getByRole("region", { name: "Agent" })).toBeVisible();
         expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-        expect(within(reviewDock).queryByRole("region", { name: "Subagent" })).toBeNull();
+        expect(within(reviewDock).queryByRole("region", { name: "Agent" })).toBeNull();
         // Ordinary Review afterwards is the working tree, not the saved diff.
         await user.click(bandTool("Review"));
         await user.click(bandTool("Review"));
@@ -4836,7 +4832,7 @@ describe("App", () => {
         await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
       ).toHaveTextContent("captured generation 1");
       expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
-      await user.click(within(dock).getByRole("button", { name: "Back to subagent" }));
+      await user.click(within(dock).getByRole("button", { name: "Back to agent" }));
       const latest = await within(dock).findByRole("region", { name: "Generation 2 result" });
       await user.click(within(latest).getByRole("button", { name: "Review changes" }));
       expect(

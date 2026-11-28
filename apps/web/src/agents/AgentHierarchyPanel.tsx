@@ -169,7 +169,7 @@ export function AgentHierarchyPanel(props: {
   );
   return (
     <section
-      aria-label="Agents"
+      aria-label={hosted === undefined ? "Agents" : undefined}
       className={`agent-hierarchy ${props.reconnecting ? "agent-hierarchy--reconnecting" : ""}`}
     >
       {hosted !== undefined ? (
