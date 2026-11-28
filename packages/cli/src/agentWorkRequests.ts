@@ -10,7 +10,7 @@ import {
   type WorkLevelChangeRequest,
 } from "@octant/contracts";
 import { PendingRequest } from "@octant/contracts/pending-requests";
-import { questionAnswerIsAllowed } from "@octant/domain";
+import { questionAnswerIsAllowed, validateQuestionnaireAnswer } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
 import { refusalMessage } from "./agentHost";
 
@@ -133,21 +133,29 @@ export type QuestionnaireStep =
   | { readonly kind: "complete"; readonly response: QuestionnaireResponse };
 
 /**
+ * Which host takes the answer: Work refuses paths and links in what is
+ * written, while Chat checks the whole response against the questionnaire.
+ */
+export type QuestionnaireHost = "work" | "chat";
+
+/**
  * One answer typed at the terminal for the questionnaire's next unanswered
- * question: option numbers (comma or space separated), `0` for no choice
- * where the question allows none, or a written alternative where it allows
- * one. A refused line keeps the earlier answers and asks the same question
- * again. After the last question comes the optional comment, unless the ask
- * refuses one; then the response is complete and the host validates it whole.
+ * question: option numbers (comma or space separated), an option's label,
+ * `0` for no choice where the question allows none, or a written alternative
+ * where it allows one. A refused line keeps the earlier answers and asks the
+ * same question again. After the last question comes the optional comment,
+ * unless the ask refuses one; then the response is complete and the host
+ * validates it whole.
  */
 export function stepWorkQuestionnaire(
   questionnaire: Questionnaire,
   answers: ReadonlyArray<AgentQuestionnaireAnswer>,
   text: string,
+  host: QuestionnaireHost = "work",
 ): QuestionnaireStep {
   const question = questionnaire.questions[answers.length];
-  if (question === undefined) return completeWithComment(answers, text.trim());
-  const answer = readQuestionAnswer(question, text.trim());
+  if (question === undefined) return completeWithComment(questionnaire, answers, text.trim(), host);
+  const answer = readQuestionAnswer(question, text.trim(), host);
   if (typeof answer === "string") return { kind: "asking", answers, note: answer };
   const next = [...answers, answer];
   if (next.length < questionnaire.questions.length) return { kind: "asking", answers: next };
@@ -167,14 +175,24 @@ export function workQuestionnaireAwaitsComment(
 }
 
 function completeWithComment(
+  questionnaire: Questionnaire,
   answers: ReadonlyArray<AgentQuestionnaireAnswer>,
   comment: string,
+  host: QuestionnaireHost,
 ): QuestionnaireStep {
   const response = {
     version: 1 as const,
     answers: [...answers],
     ...(comment.length === 0 ? {} : { comment }),
   };
+  if (host === "chat")
+    return validateQuestionnaireAnswer(questionnaire, JSON.stringify(response)).status === "valid"
+      ? { kind: "complete", response }
+      : {
+          kind: "asking",
+          answers,
+          note: "Chat cannot deliver that comment. Keep it under 2,000 characters, or press Enter to send without one.",
+        };
   try {
     decodeWorkQuestionnaireResponse(response);
   } catch {
@@ -190,6 +208,7 @@ function completeWithComment(
 function readQuestionAnswer(
   question: QuestionnaireQuestion,
   text: string,
+  host: QuestionnaireHost,
 ): AgentQuestionnaireAnswer | string {
   const min = question.minSelections ?? 1;
   const max =
@@ -226,12 +245,26 @@ function readQuestionAnswer(
       ? answer
       : refusal;
   }
+  // An option's own label chooses it, as picking it in line mode or naming it
+  // from an outside agent sends the label rather than its number.
+  const named =
+    written === undefined
+      ? question.options.find((option) => option.label.toLowerCase() === text.toLowerCase())
+      : undefined;
+  if (named !== undefined) {
+    const answer = { questionId: question.id, selectedOptionIds: [named.id] };
+    return questionAnswerIsAllowed(question, answer) ? answer : refusal;
+  }
   if (!writes) return refusal;
   const answer = {
     questionId: question.id,
     selectedOptionIds: [],
     customAnswer: written ?? text,
   };
+  if (host === "chat")
+    return answer.customAnswer.length > 0 && answer.customAnswer.length <= 2_000
+      ? answer
+      : "Write an answer of at most 2,000 characters.";
   try {
     // Work answers carry no path or link; refuse here rather than after the last question.
     decodeWorkQuestionnaireResponse({ version: 1, answers: [answer] });

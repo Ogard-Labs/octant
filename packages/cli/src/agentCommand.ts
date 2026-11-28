@@ -13,6 +13,7 @@ import {
   NativeHarnessFollowUpActivationResult,
   NativeHarnessFollowUpPreview,
   ProjectBootstrap,
+  type Questionnaire,
   decodeHostAnswer,
 } from "@octant/contracts";
 import {
@@ -57,6 +58,11 @@ import {
   isAgentSnapshotRunning,
   projectHolding,
 } from "./agentThread";
+import {
+  stepWorkQuestionnaire,
+  workQuestionnaireText,
+  type AgentQuestionnaireAnswer,
+} from "./agentWorkRequests";
 import { openAndReadAgentThread, readActiveProjects, startAgentTurn } from "./agentStart";
 import { runAgentTui } from "./agentTui";
 import {
@@ -1110,6 +1116,32 @@ async function readQuestionAnswer(
   return answer.length === 0 ? { kind: "empty" } : { kind: "answer", text: answer };
 }
 
+async function readQuestionnaireAnswer(
+  input: Pick<RunAgentCliCommandInput, "stdout">,
+  title: string,
+  questionnaire: Questionnaire,
+  lines: Pick<LineSource, "next">,
+  settled: AbortSignal,
+): Promise<QuestionReading> {
+  input.stdout.write(`\n? ${title}\n`);
+  let answers: ReadonlyArray<AgentQuestionnaireAnswer> = [];
+  for (;;) {
+    input.stdout.write(`${workQuestionnaireText(questionnaire, answers)}\n> `);
+    const line = await lines.next(settled);
+    if (line === undefined) {
+      if (!settled.aborted) return { kind: "eof" };
+      input.stdout.write("\n(answered elsewhere)\n");
+      return { kind: "elsewhere" };
+    }
+    // A blank line answers only the optional comment that closes the set.
+    if (line.trim().length === 0 && answers.length < questionnaire.questions.length) continue;
+    const step = stepWorkQuestionnaire(questionnaire, answers, line, "chat");
+    if (step.kind === "complete") return { kind: "answer", text: JSON.stringify(step.response) };
+    if (step.note !== undefined) input.stdout.write(`${step.note}\n`);
+    answers = step.answers;
+  }
+}
+
 async function answerPendingQuestion(
   input: RunAgentCliCommandInput,
   threadId: string,
@@ -1155,19 +1187,34 @@ async function answerThreadQuestion(
     timer = setTimeout(() => void check(), interval);
   };
   timer = setTimeout(() => void check(), interval);
-  const answer = await readQuestionAnswer(
-    input,
-    question,
-    {
-      id: question.id,
-      prompt: question.prompt,
-      options: question.options,
-      ...(question.descriptions === undefined ? {} : { descriptions: question.descriptions }),
-      status: "pending",
-    },
-    lines,
-    answeredElsewhere.signal,
-  );
+  // A question set is asked one question at a time and sent as the one
+  // response the host checks; --json prints the set and takes that response
+  // (or, for one question, a typed answer) on one line.
+  const answer =
+    question.questionnaire !== undefined && !input.command.json
+      ? await readQuestionnaireAnswer(
+          input,
+          question.prompt,
+          question.questionnaire,
+          lines,
+          answeredElsewhere.signal,
+        )
+      : await readQuestionAnswer(
+          input,
+          question,
+          {
+            id: question.id,
+            prompt: question.prompt,
+            options: question.options,
+            ...(question.descriptions === undefined ? {} : { descriptions: question.descriptions }),
+            ...(question.questionnaire === undefined
+              ? {}
+              : { questionnaire: question.questionnaire }),
+            status: "pending",
+          },
+          lines,
+          answeredElsewhere.signal,
+        );
   stopped = true;
   if (timer !== undefined) clearTimeout(timer);
   if (answer.kind !== "answer") {

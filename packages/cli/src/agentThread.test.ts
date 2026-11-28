@@ -1050,6 +1050,90 @@ describe("a Chat lead's question in the terminal", () => {
     });
     expect(host.sent.some((request) => request.path === "/api/chat/commands")).toBe(false);
   });
+
+  /** A Chat turn parked on a provider's question set, which carries no plain options. */
+  function parkedOnQuestionnaire(questions: ReadonlyArray<Record<string, unknown>>) {
+    const parked = chatViewParkedOnQuestion(9);
+    const attempt = parked.turns[0]!.attempts[0] as unknown as {
+      pendingQuestion: Record<string, unknown>;
+    };
+    attempt.pendingQuestion = {
+      requestId: "call_1",
+      prompt: "Layout",
+      options: [],
+      questionnaire: { questions },
+    };
+    return parked;
+  }
+  const layout = {
+    id: "layout",
+    header: "Layout",
+    prompt: "Grid or list?",
+    selection: "single",
+    options: [
+      { id: "grid", label: "Grid", description: "cards in rows" },
+      { id: "list", label: "List" },
+    ],
+  };
+  const density = {
+    id: "density",
+    prompt: "How dense?",
+    selection: "single",
+    options: [
+      { id: "roomy", label: "Roomy" },
+      { id: "compact", label: "Compact" },
+    ],
+  };
+  const answerSent = (host: ReturnType<typeof questionHost>) =>
+    host.sent.find((request) => request.path === "/api/chat/commands")?.body as
+      | { readonly answer?: string }
+      | undefined;
+
+  it("shows a provider question's choices and answers a typed choice as the one response the host checks", async () => {
+    const host = questionHost(() => parkedOnQuestionnaire([layout]));
+    const port = agentThreadPort(host.session, "chat", chatThread.id);
+    const question = (await port.read())!.pendingQuestion!;
+    expect(question).toMatchObject({
+      options: ["Grid", "List"],
+      descriptions: ["cards in rows", undefined],
+    });
+    expect(await port.answerQuestion?.(question, "grid")).toEqual({ kind: "answered" });
+    expect(JSON.parse(answerSent(host)!.answer!)).toEqual({
+      version: 1,
+      answers: [{ questionId: "layout", selectedOptionIds: ["grid"] }],
+    });
+  });
+
+  it("sends a written answer to a provider question that takes one", async () => {
+    const host = questionHost(() => parkedOnQuestionnaire([layout]));
+    const port = agentThreadPort(host.session, "chat", chatThread.id);
+    const question = (await port.read())!.pendingQuestion!;
+    expect(await port.answerQuestion?.(question, "a masonry wall")).toEqual({ kind: "answered" });
+    expect(JSON.parse(answerSent(host)!.answer!)).toEqual({
+      version: 1,
+      answers: [{ questionId: "layout", selectedOptionIds: [], customAnswer: "a masonry wall" }],
+    });
+  });
+
+  it("refuses one typed line for a set of several questions, sending nothing, and passes a whole response", async () => {
+    const host = questionHost(() => parkedOnQuestionnaire([layout, density]));
+    const port = agentThreadPort(host.session, "chat", chatThread.id);
+    const question = (await port.read())!.pendingQuestion!;
+    expect(await port.answerQuestion?.(question, "Grid")).toMatchObject({
+      kind: "refused",
+      message: expect.stringContaining("This asks 2 questions at once"),
+    });
+    expect(answerSent(host)).toBeUndefined();
+    const whole = JSON.stringify({
+      version: 1,
+      answers: [
+        { questionId: "layout", selectedOptionIds: ["list"] },
+        { questionId: "density", selectedOptionIds: ["compact"] },
+      ],
+    });
+    expect(await port.answerQuestion?.(question, whole)).toEqual({ kind: "answered" });
+    expect(answerSent(host)?.answer).toBe(whole);
+  });
 });
 
 describe("Code threads in the terminal", () => {

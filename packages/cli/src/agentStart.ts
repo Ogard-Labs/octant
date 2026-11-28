@@ -4,6 +4,7 @@ import {
   ProjectBootstrap,
   type OctantMode,
   type ProjectSummary,
+  type Questionnaire,
   WorkThreadBootstrap,
   decodeHostAnswer,
 } from "@octant/contracts";
@@ -91,6 +92,11 @@ export interface AgentOpenQuestion {
   readonly questionId: string;
   readonly prompt: string;
   readonly options: ReadonlyArray<string>;
+  /**
+   * The agent's question set, when it asked one: a one-question set takes a
+   * listed option or free text, and a set of several takes one JSON response.
+   */
+  readonly questionnaire?: Questionnaire;
 }
 
 /** A request only the person answers, in Octant: approvals, decisions, and the like. */
@@ -148,6 +154,9 @@ export async function readAgentThreadState(
             questionId: snapshot.pendingQuestion.id,
             prompt: snapshot.pendingQuestion.prompt,
             options: snapshot.pendingQuestion.options,
+            ...(snapshot.pendingQuestion.questionnaire === undefined
+              ? {}
+              : { questionnaire: snapshot.pendingQuestion.questionnaire }),
           },
         ]),
   ];

@@ -221,7 +221,11 @@ export const AGENT_MCP_TOOLS: ReadonlyArray<JsonObject> = [
       properties: {
         threadId: { type: "string" },
         questionId: { type: "string" },
-        answer: { type: "string", description: "One of the listed options, or free text." },
+        answer: {
+          type: "string",
+          description:
+            'One of the listed options, or free text. A question listed with a questionnaire of several questions takes one JSON response: {"version":1,"answers":[{"questionId","selectedOptionIds":[…]} or {"questionId","selectedOptionIds":[],"customAnswer"}]}.',
+        },
       },
       required: ["threadId", "questionId", "answer"],
       additionalProperties: false,
