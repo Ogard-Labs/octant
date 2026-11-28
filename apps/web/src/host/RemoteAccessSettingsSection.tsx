@@ -54,6 +54,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { HubSettingsSection } from "./HubSettingsSection";
+import { MachineConnectionsMap } from "./MachineConnectionsMap";
 import { PairedComputersSettingsSection } from "./PairedComputersSettingsSection";
 import { PairingCodeQr } from "./PairingCodeQr";
 
@@ -247,6 +248,11 @@ export function RemoteAccessSettingsSection({
     new Map(),
   );
   const [paused, setPaused] = useState<boolean>();
+  const [pairingPromptName, setPairingPromptName] = useState<string>();
+  const [hubRevision, setHubRevision] = useState(0);
+  const bumpHubRevision = useCallback(() => {
+    setHubRevision((current) => current + 1);
+  }, []);
   const listenerOpener = useRef<HTMLButtonElement>(null);
   const revokeAllOpener = useRef<HTMLButtonElement>(null);
   const hostnameId = useId();
@@ -1130,16 +1136,34 @@ export function RemoteAccessSettingsSection({
           )}
         </div>
       </SettingsPanel>
+      {hub === undefined && pairedComputers === undefined ? null : (
+        <MachineConnectionsMap
+          hub={hub}
+          hubRevision={hubRevision}
+          listenerStatus={status}
+          onStartDirectPairing={(node) => {
+            setPairingPromptName(node.displayName);
+            const target = document.querySelector<HTMLElement>(
+              '[data-setting-id="paired-computers-code"] textarea',
+            );
+            target?.focus();
+          }}
+        />
+      )}
       {hub === undefined ? null : (
         <HubSettingsSection
           hub={hub}
           pairing={bridge}
+          onHubStatusChanged={bumpHubRevision}
           {...(ownerUnlock === undefined ? {} : { ownerUnlock })}
           {...(projectNames === undefined ? {} : { projectNames })}
         />
       )}
       {pairedComputers === undefined ? null : (
-        <PairedComputersSettingsSection bridge={pairedComputers} />
+        <PairedComputersSettingsSection
+          bridge={pairedComputers}
+          {...(pairingPromptName === undefined ? {} : { pairingTargetName: pairingPromptName })}
+        />
       )}
     </section>
   );

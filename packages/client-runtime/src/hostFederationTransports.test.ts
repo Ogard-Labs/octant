@@ -543,6 +543,62 @@ describe("HostFederationTransports (Post-preview B2)", () => {
     transports.disconnectAll();
   });
 
+  it("reopens a remote host's session when direct pairing replaces a hub-introduced credential", async () => {
+    const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+    const deviceKeyStore = createInMemoryDeviceKeyStore();
+    await registry.upsertRemote(
+      remoteHost({
+        hostId: decodeHostId(HOST_A),
+        displayName: "Studio",
+        origin: "https://100.101.102.105:8443",
+        through: "hub",
+        credential: {
+          keyId: "hub-key-1",
+          credentialGeneration: 1,
+          hostKeyFingerprint: "a".repeat(64),
+          deviceId: "hub-device-1",
+        },
+      }),
+    );
+    const created: Array<ReturnType<typeof createFakeBridge>> = [];
+    const transports = createHostFederationTransports({
+      registry,
+      deviceKeyStore,
+      factory: {
+        createRemoteBridge: (registration) => {
+          const bridge = createFakeBridge(registration.hostId, registration.displayName);
+          created.push(bridge);
+          return bridge;
+        },
+      },
+    });
+
+    await transports.syncEnabledHosts();
+    expect(created).toHaveLength(1);
+    const firstBridge = created[0];
+    if (firstBridge === undefined) throw new Error("Expected initial bridge.");
+
+    await registry.upsertRemote(
+      remoteHost({
+        hostId: decodeHostId(HOST_A),
+        displayName: "Studio",
+        origin: "https://100.101.102.105:8443",
+        credential: {
+          keyId: "direct-key-2",
+          credentialGeneration: 1,
+          hostKeyFingerprint: "a".repeat(64),
+          deviceId: "direct-device-2",
+        },
+      }),
+    );
+    await transports.syncEnabledHosts();
+
+    expect(firstBridge.disconnect).toHaveBeenCalledOnce();
+    expect(created).toHaveLength(2);
+    expect(created[1]?.resume).toHaveBeenCalledWith("https://100.101.102.105:8443");
+    expect(transports.get(HOST_A)?.bridge).toBe(created[1]);
+  });
+
   it("globalEntityReference rejects empty entity ids via contracts", () => {
     expect(() => globalEntityReference(HOST_A, "")).toThrow();
     expect(decodeEntityId("thread-9")).toBe("thread-9");

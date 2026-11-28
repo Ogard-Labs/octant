@@ -229,8 +229,15 @@ export function createHostFederationTransports(
     const hostId = registration.hostId;
     const existing = bridges.get(hostId);
     if (existing !== undefined) {
-      registrations.set(hostId, registration);
-      return existing;
+      const previous = registrations.get(hostId);
+      const credentialChanged =
+        previous?.credential?.keyId !== registration.credential?.keyId ||
+        previous?.origin !== registration.origin;
+      if (!credentialChanged) {
+        registrations.set(hostId, registration);
+        return existing;
+      }
+      dropRemote(hostId);
     }
     const bridge = factory.createRemoteBridge(registration);
     bridges.set(hostId, bridge);
