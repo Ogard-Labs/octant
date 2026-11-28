@@ -641,26 +641,36 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
       return;
     }
     let cancelled = false;
-    try {
-      void props.clients.project
-        .bootstrap()
-        .then((bootstrap) => {
-          if (cancelled) return;
-          const ids = new Set(
-            bootstrap.active
-              .filter((project) => project.type === "code" && project.lifecycle === "active")
-              .map((project) => String(project.id)),
-          );
-          setActProjectIds(ids);
-        })
-        .catch(() => {
-          if (!cancelled) setActProjectIds(undefined);
-        });
-    } catch {
-      setActProjectIds(undefined);
-    }
+    const refreshActScope = () => {
+      try {
+        void props.clients.project
+          .bootstrap()
+          .then((bootstrap) => {
+            if (cancelled) return;
+            const ids = new Set(
+              bootstrap.active
+                .filter((project) => project.type === "code" && project.lifecycle === "active")
+                .map((project) => String(project.id)),
+            );
+            setActProjectIds(ids);
+          })
+          .catch(() => {
+            if (!cancelled) setActProjectIds(undefined);
+          });
+      } catch {
+        if (!cancelled) setActProjectIds(undefined);
+      }
+    };
+    refreshActScope();
+    // Re-read the Act scope while a thread stays open (matching the code
+    // navigation refresh interval) and on window focus so adding or removing
+    // the open Project from Act updates Watching mode without reconnecting.
+    const interval = window.setInterval(refreshActScope, 5_000);
+    window.addEventListener("focus", refreshActScope);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshActScope);
     };
   }, [props.actsAsHostPerson, props.clients.project, props.connected, props.readOnly]);
   const controller = useCodeController({

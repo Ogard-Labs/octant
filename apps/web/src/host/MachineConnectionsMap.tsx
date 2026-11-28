@@ -68,7 +68,11 @@ function readRosterMembers(
       role,
       addresses,
       ...(typeof port === "number" ? { port } : {}),
-      ...(acceptedIds === undefined ? {} : { accepted: acceptedIds.has(memberId) }),
+      // On a spoke, `acceptedMemberIds` tracks peer grants only; the hub holds
+      // its own hub grant and must not be marked as an unconfirmed peer.
+      ...(acceptedIds === undefined || role === "hub"
+        ? {}
+        : { accepted: acceptedIds.has(memberId) }),
     });
   }
   return members;
@@ -176,6 +180,8 @@ function layoutNodes(
 export interface MachineConnectionsMapProps {
   readonly listenerStatus?: PrivateListenerPublicStatus | undefined;
   readonly hub?: HubAdministrationBridge | undefined;
+  /** Bumped when hub administration actions change roster/role state on this page. */
+  readonly hubRevision?: number | undefined;
   /** Starts the existing direct pairing flow for a target computer. */
   readonly onStartDirectPairing?: (node: MachineConnectionNode) => void;
   /**
@@ -203,6 +209,7 @@ interface MintedHubJoinCode {
 export function MachineConnectionsMap({
   listenerStatus,
   hub,
+  hubRevision,
   onStartDirectPairing,
   fixture,
 }: MachineConnectionsMapProps) {
@@ -240,7 +247,7 @@ export function MachineConnectionsMap({
     return () => {
       cancelled = true;
     };
-  }, [fixture, hub, listenerHostname]);
+  }, [fixture, hub, hubRevision, listenerHostname]);
 
   const mapInput = useMemo<MachineConnectionMapInput>(() => {
     if (fixture !== undefined) return fixture;

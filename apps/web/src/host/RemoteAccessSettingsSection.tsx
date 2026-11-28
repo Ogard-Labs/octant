@@ -249,6 +249,10 @@ export function RemoteAccessSettingsSection({
   );
   const [paused, setPaused] = useState<boolean>();
   const [pairingPromptName, setPairingPromptName] = useState<string>();
+  const [hubRevision, setHubRevision] = useState(0);
+  const bumpHubRevision = useCallback(() => {
+    setHubRevision((current) => current + 1);
+  }, []);
   const listenerOpener = useRef<HTMLButtonElement>(null);
   const revokeAllOpener = useRef<HTMLButtonElement>(null);
   const hostnameId = useId();
@@ -1135,6 +1139,7 @@ export function RemoteAccessSettingsSection({
       {hub === undefined && pairedComputers === undefined ? null : (
         <MachineConnectionsMap
           hub={hub}
+          hubRevision={hubRevision}
           listenerStatus={status}
           onStartDirectPairing={(node) => {
             setPairingPromptName(node.displayName);
@@ -1149,6 +1154,7 @@ export function RemoteAccessSettingsSection({
         <HubSettingsSection
           hub={hub}
           pairing={bridge}
+          onHubStatusChanged={bumpHubRevision}
           {...(ownerUnlock === undefined ? {} : { ownerUnlock })}
           {...(projectNames === undefined ? {} : { projectNames })}
         />

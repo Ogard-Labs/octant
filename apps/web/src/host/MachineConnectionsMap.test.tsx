@@ -218,4 +218,104 @@ describe("MachineConnectionsMap", () => {
       "Pair Mac mini directly with Studio",
     );
   });
+
+  it("does not mark the hub as an unconfirmed peer on a spoke and reloads when hubRevision changes", async () => {
+    let statusCalls = 0;
+    const hub = {
+      hubAdministrationRequest: async (operation: string) => {
+        if (operation !== "status") return { status: 404, body: {} };
+        statusCalls += 1;
+        return {
+          status: 200,
+          body: {
+            hub: { enabled: false },
+            spoke: {
+              membership: "member",
+              acceptedMemberIds: ["member-peer-1"],
+              heldMembers: [],
+              roster: {
+                roster: {
+                  members: [
+                    {
+                      memberId: "member-hub",
+                      name: "Main Hub",
+                      role: "hub",
+                      addresses: ["100.64.0.1"],
+                      port: 49152,
+                    },
+                    {
+                      memberId: "member-spoke",
+                      name: "This Laptop",
+                      role: "spoke",
+                      addresses: ["100.64.0.2"],
+                      port: 49152,
+                    },
+                    {
+                      memberId: "member-peer-2",
+                      name: "Unconfirmed Peer",
+                      role: "spoke",
+                      addresses: ["100.64.0.3"],
+                      port: 49152,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        };
+      },
+    };
+
+    const { rerender } = render(
+      <MachineConnectionsMap
+        hub={hub}
+        hubRevision={0}
+        listenerStatus={{
+          enabled: true,
+          state: "ready",
+          hostname: "100.64.0.2",
+          port: 49152,
+          origin: "https://100.64.0.2:49152",
+          certificateSource: "self-made",
+          exposureClass: "tailscale",
+          certificateFingerprint: null,
+          certificateReady: true,
+          tlsPin: null,
+        }}
+      />,
+    );
+    const list = screen.getByRole("list", { name: "Connections list" });
+    await vi.waitFor(() => {
+      const hubItem = within(list)
+        .getAllByRole("listitem")
+        .find((item) => item.textContent?.includes("Main Hub"));
+      expect(hubItem).toBeDefined();
+      expect(hubItem).not.toHaveTextContent("Unconfirmed member");
+      const peerItem = within(list)
+        .getAllByRole("listitem")
+        .find((item) => item.textContent?.includes("Unconfirmed Peer"));
+      expect(peerItem).toHaveTextContent("Unconfirmed member");
+    });
+    expect(statusCalls).toBe(1);
+
+    rerender(
+      <MachineConnectionsMap
+        hub={hub}
+        hubRevision={1}
+        listenerStatus={{
+          enabled: true,
+          state: "ready",
+          hostname: "100.64.0.2",
+          port: 49152,
+          origin: "https://100.64.0.2:49152",
+          certificateSource: "self-made",
+          exposureClass: "tailscale",
+          certificateFingerprint: null,
+          certificateReady: true,
+          tlsPin: null,
+        }}
+      />,
+    );
+    await vi.waitFor(() => expect(statusCalls).toBe(2));
+  });
 });
