@@ -175,6 +175,36 @@ describe("SidebarThreadRowContent", () => {
     expect(container.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
   });
 
+  it("says what a running turn is doing on its own line, and on which server", () => {
+    const { container, rerender } = render(
+      <SidebarThreadRowContent
+        activity="Running bench.ts"
+        host="studio-linux"
+        projectName="octant"
+        state={{ status: "working", text: "Working 9m", age: "9m" }}
+        title="Journal replay benchmark"
+      />,
+    );
+    const lines = container.querySelector(".sidebar-navigation__thread-copy")?.children;
+    expect(lines).toHaveLength(3);
+    expect(lines?.[2]).toHaveClass("sidebar-navigation__thread-detail");
+    expect(lines?.[2]).toHaveTextContent(/^Running bench\.tsstudio-linux$/);
+    expect(screen.getByTitle("On studio-linux")).toBeInTheDocument();
+
+    rerender(
+      <SidebarThreadRowContent
+        activity="Editing composerThreadDraft.ts"
+        projectName="octant"
+        state={{ status: "working", text: "Working 4m", age: "4m" }}
+        title="Composer draft restore"
+      />,
+    );
+    expect(container.querySelector(".sidebar-navigation__thread-detail")).toHaveTextContent(
+      /^Editing composerThreadDraft\.ts$/,
+    );
+    expect(container.querySelector(".sidebar-navigation__thread-host")).toBeNull();
+  });
+
   it("names a worker's coordinator on a third line and marks a coordinator in place of its provider", () => {
     const { container, rerender } = render(
       <SidebarThreadRowContent
@@ -295,6 +325,18 @@ describe("sidebarThreadRowLabel", () => {
     ).toBe(
       "Phone app, pull request #1205 open and 21 more pull requests, in a stack of 2, issue OCT-1001, and 24 issues, 3h",
     );
+  });
+
+  it("reads a working row's activity after its state, and a server Project's host after the Project", () => {
+    expect(
+      sidebarThreadRowLabel({
+        title: "Journal replay benchmark",
+        projectName: "octant",
+        host: "studio-linux",
+        state: "Working",
+        activity: "Running bench.ts",
+      }),
+    ).toBe("Journal replay benchmark, octant, on studio-linux, Working, Running bench.ts");
   });
 
   it("falls back to the time when the thread has no state, and leaves out what a view hides", () => {

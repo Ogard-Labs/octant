@@ -2999,6 +2999,7 @@ The sidebar speaks about what a thread is doing now with one fixed vocabulary, a
 - The jump adds no host read.
 - A row's age slot and provider mark never move on hover, focus or an open menu (maintainer request, 2026-11-15); the uncommitted-changes count lives in Environment (maintainer request, 2026-11-16).
 - A row puts the title first and draws its status as a mark and a short age at the title line's end (a spinner and "9m", a pause mark and "5m" for Needs you), with the words kept in the tooltip and the accessible name; the Project, branch, counted marks and provider mark share a quiet second line (maintainer decision, 2026-11-28).
+- Every Working row says what its turn is doing in plain words made from the live step ("Running bun bench.ts", "Editing composerThreadDraft.ts"), and a server Project's working row names its server; a local Project names none (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Workspace: Sidebar thread status](workspace.md#sidebar-thread-status) and [Jump to the next waiting thread](workspace.md#jump-to-the-next-waiting-thread).
 

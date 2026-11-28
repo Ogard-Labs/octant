@@ -1637,6 +1637,42 @@ html[data-octant-density="compact"] .sidebar-navigation__thread {
   white-space: nowrap;
 }
 
+/* A running turn's step in plain words takes the third line's room and gives
+   way first: it truncates, and the server's name after it stays whole. */
+.sidebar-navigation__thread-activity {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The server a server Project's turn runs on: its glyph and name inside a
+   hairline, the one fact on the line that is a place rather than an act. */
+.sidebar-navigation__thread-host {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 50%;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding-inline: var(--oct-space-1);
+  border-radius: var(--oct-radius-sm);
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+
+.sidebar-navigation__thread-host > svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.sidebar-navigation__thread-host-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A Project with no icon of its own gets two letters on a small rounded square
    whose hue comes from the Project, so it is the same colour on every row. It
    is the one colour a row spends besides its state. */

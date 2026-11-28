@@ -2,7 +2,15 @@ import type { PullRequestStackPlace, ThreadBoardPullRequestSummaries } from "@oc
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { pullRequestStateMark } from "../code/pullRequestState";
 import { stackPlaceSentence } from "../code/stackPlace";
-import { Bot, CircleDot, GitBranch, Layers, Network, type IconComponent } from "../ui/icons";
+import {
+  Bot,
+  CircleDot,
+  GitBranch,
+  Layers,
+  Network,
+  Server,
+  type IconComponent,
+} from "../ui/icons";
 import { ProjectMark } from "./ProjectMark";
 import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
 import type { ReactNode } from "react";
@@ -77,8 +85,12 @@ export interface SidebarThreadRowState {
 export function sidebarThreadRowLabel(input: {
   readonly title: string;
   readonly projectName?: string | undefined;
+  /** The server a server Project's thread runs on. */
+  readonly host?: string | undefined;
   readonly branch?: string | undefined;
   readonly state?: string | undefined;
+  /** What a running turn is doing, in plain words. */
+  readonly activity?: string | undefined;
   readonly age?: string | undefined;
   readonly pullRequest?: ThreadRowPullRequest | undefined;
   /** The thread's pull requests beyond `pullRequest`. */
@@ -90,6 +102,7 @@ export function sidebarThreadRowLabel(input: {
   return [
     input.title,
     input.projectName,
+    input.host === undefined ? undefined : `on ${input.host}`,
     input.branch,
     input.pullRequest === undefined
       ? undefined
@@ -100,6 +113,7 @@ export function sidebarThreadRowLabel(input: {
       ? undefined
       : `${input.issueKey === undefined ? "" : "and "}${issueCountWords(input.issueCount)}`,
     input.state ?? input.age,
+    input.activity,
   ]
     .filter((part): part is string => part !== undefined && part !== "")
     .join(", ");
@@ -120,7 +134,9 @@ export function sidebarThreadRowLabel(input: {
  * requests in the first one's state colour, its stack, the issue it belongs
  * to and how many others it wrote to), and the provider's mark at its end. A
  * third line appears only when there is something to put on it: who started
- * the thread and a worker's coordinator.
+ * the thread, a worker's coordinator, and, while a turn runs, what it is doing
+ * in plain words ("Running bun bench.ts") with the server it runs on when its
+ * Project lives on one.
  *
  * Which facts appear is still each view's own property choice: a caller passes
  * only what its view currently shows, and an absent fact leaves no gap. A row
@@ -165,6 +181,10 @@ export function SidebarThreadRowContent(props: {
   readonly age?: { readonly label: string; readonly title?: string };
   /** The thread's state; its mark and age replace the plain age at the end of the title line. */
   readonly state?: SidebarThreadRowState;
+  /** What a running turn is doing, in plain words, on the row's last line. */
+  readonly activity?: string;
+  /** The server a server Project's running turn is on, named beside its activity. */
+  readonly host?: string;
   /** New activity: a dot with its own name beside the age. */
   readonly unread?: boolean;
   /** A coordinator's workers that its row stands for, counted beside the title. */
@@ -179,7 +199,11 @@ export function SidebarThreadRowContent(props: {
     props.stack !== undefined ||
     props.issueKey !== undefined ||
     issueCount > 0;
-  const hasDetail = startedBy !== undefined || props.coordinatorName !== undefined;
+  const hasDetail =
+    startedBy !== undefined ||
+    props.coordinatorName !== undefined ||
+    props.activity !== undefined ||
+    props.host !== undefined;
   const pullRequestMark =
     props.pullRequest === undefined ? undefined : pullRequestStateMark(props.pullRequest.state);
   const StateIcon = props.state?.icon;
@@ -340,6 +364,17 @@ export function SidebarThreadRowContent(props: {
               <span className="sidebar-navigation__thread-project-label">
                 {props.coordinatorName}
               </span>
+            </span>
+          )}
+          {props.activity === undefined ? null : (
+            <span className="sidebar-navigation__thread-activity" title={props.activity}>
+              {props.activity}
+            </span>
+          )}
+          {props.host === undefined ? null : (
+            <span className="sidebar-navigation__thread-host" title={`On ${props.host}`}>
+              <Server aria-hidden="true" size={12} />
+              <span className="sidebar-navigation__thread-host-label">{props.host}</span>
             </span>
           )}
         </span>

@@ -1,5 +1,6 @@
 import { CoordinatorWorkerCounts } from "./ProjectThreadList";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
+import { useWorkingRowLine } from "./useWorkingRowLine";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -1727,6 +1728,7 @@ function ActivityThreadButton(props: {
         now,
       })
     : NO_THREAD_ROW_STATE;
+  const workingLine = useWorkingRowLine(props.thread, rowState.state?.status === "working");
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
 
@@ -1740,6 +1742,7 @@ function ActivityThreadButton(props: {
         ...(pullRequest === undefined ? {} : { pullRequest, morePullRequests }),
         ...rowCounts,
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...workingLine,
         ...(age === undefined ? {} : { age: age.label }),
       })}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
@@ -1799,6 +1802,7 @@ function ActivityThreadButton(props: {
         {...(pullRequest === undefined ? {} : { pullRequest, morePullRequests })}
         {...rowCounts}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
+        {...workingLine}
         threadId={props.thread.threadId}
         unread={rowState.unread}
         {...(shows.status && props.thread.hiddenWorkers !== undefined

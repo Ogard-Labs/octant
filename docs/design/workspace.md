@@ -3242,7 +3242,17 @@ mark's tooltip and the row's accessible name. A quiet second line in the meta
 ink names where the thread lives and what it carries, in a fixed order: the
 Project's 12px mark and name, the branch in the mono face, the counted marks,
 and the provider's mark at its end. A third line appears only for who started
-the thread or a worker's coordinator. The Project tree's second line has no
+the thread, a worker's coordinator, or a running turn's activity. Every Working
+row says on it what the turn is doing, in plain words made from the live step
+the host already sends ("Running bun bench.ts", "Editing
+composerThreadDraft.ts", "Reading notes.md", "Searching for useDraft"), and
+"Thinking" before the turn's first tool or from a host that reports no step;
+the step names one tool at a time, so the line never counts files. A server
+Project's working row names the server after it, its glyph and alias in a
+hairline, read from the server Project catalog the window already holds; a
+local Project names no host (maintainer decision, 2026-11-28). The activity
+truncates first, and both are read after the state in the row's accessible
+name. The Project tree's second line has no
 Project, because the Project is its heading. A row with nothing for its second
 line keeps the provider's mark at the end of the title line. The row is one
 button whose accessible name reads title, Project, branch, the counted marks,

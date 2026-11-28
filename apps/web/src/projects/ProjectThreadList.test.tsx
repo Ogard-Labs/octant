@@ -14,6 +14,7 @@ import {
   threadRowShortAge,
 } from "./ProjectThreadList";
 import { mergeThreadRowActions } from "./mergeThreadRowActions";
+import { ServerCodeProjectsContext } from "./serverProjectEntries";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
 import {
@@ -249,7 +250,7 @@ describe("ProjectThreadRows", () => {
       unread: true,
       woke: true,
       word: "Working",
-      label: "Controller foundation, Working, Snooze ended, New activity",
+      label: "Controller foundation, Working, Snooze ended, New activity, Thinking",
     },
     {
       activity: "attention",
@@ -287,6 +288,55 @@ describe("ProjectThreadRows", () => {
     );
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).getByTitle("Working 14m")).toHaveTextContent(/^14m$/);
+  });
+
+  it("says what a working thread is doing in plain words under its title, and names no host for a local Project", () => {
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[
+          {
+            ...thread,
+            activity: "working",
+            projectId,
+            liveStep: { kind: "tool", tool: "Edit", argument: "src/composerThreadDraft.ts" },
+          },
+        ]}
+      />,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByText("Editing composerThreadDraft.ts")).toBeVisible();
+    expect(row.querySelector(".sidebar-navigation__thread-host")).toBeNull();
+    expect(row).toHaveAccessibleName(/Working, Editing composerThreadDraft\.ts$/);
+  });
+
+  it("names the server a server Project's working thread runs on, and says nothing of it once the turn ends", () => {
+    const servers = {
+      catalog: "ready" as const,
+      projects: [
+        { projectId, name: "Service", location: "studio-linux:/srv", serverName: "studio-linux" },
+      ],
+      workProjects: [],
+      refresh: vi.fn(),
+    };
+    const { rerender } = render(
+      <ServerCodeProjectsContext.Provider value={servers}>
+        <ProjectThreadRows
+          onSelectThread={vi.fn()}
+          threads={[{ ...thread, activity: "working", projectId }]}
+        />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(within(row).getByTitle("On studio-linux")).toHaveTextContent("studio-linux");
+    expect(within(row).getByText("Thinking")).toBeVisible();
+
+    rerender(
+      <ServerCodeProjectsContext.Provider value={servers}>
+        <ProjectThreadRows onSelectThread={vi.fn()} threads={[{ ...thread, projectId }]} />
+      </ServerCodeProjectsContext.Provider>,
+    );
+    expect(row.querySelector(".sidebar-navigation__thread-detail")).toBeNull();
   });
 
   it("says how long an idle thread has waited on its pull request, once its new activity is read", () => {
