@@ -2094,6 +2094,13 @@ const ApprovalReviewedEvent = Schema.Struct({
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   questionnaire: Schema.optional(Questionnaire),
+  /**
+   * True only for an app-owned native-harness `ask-user` question, which the
+   * thread's harness session surface renders so cross-window answers sync.
+   * Absent for provider-native questions and questionnaires (Claude, Codex,
+   * OpenCode, ACP), which render on the thread's provider-request card.
+   */
+  harnessQuestion: Schema.optional(Schema.Literal(true)),
   requestId: ProviderRequestId,
   prompt: CodeQuestionPromptText,
   options: Schema.Array(CodeQuestionOptionText).pipe(

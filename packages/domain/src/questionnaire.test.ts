@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { validateCanvasChoiceAnswer, validateQuestionnaireAnswer } from "./questionnaire";
+import {
+  parseRecommendedOptionLabel,
+  resolveQuestionnaireAnswerValues,
+  validateCanvasChoiceAnswer,
+  validateQuestionnaireAnswer,
+} from "./questionnaire";
 
 const questionnaire = {
   questions: [
@@ -120,6 +125,74 @@ describe("questionnaire answers", () => {
   it("refuses malformed and oversized input", () => {
     expect(validateQuestionnaireAnswer(questionnaire, "not JSON").status).toBe("invalid");
     expect(validateQuestionnaireAnswer(questionnaire, " ".repeat(16_385)).status).toBe("invalid");
+  });
+  it("extracts trailing (Recommended) markers into a recommended flag without losing the label", () => {
+    expect(parseRecommendedOptionLabel("PostgreSQL (Recommended)")).toEqual({
+      label: "PostgreSQL",
+      recommended: true,
+    });
+    expect(parseRecommendedOptionLabel("SQLite (recommended)")).toEqual({
+      label: "SQLite",
+      recommended: true,
+    });
+    expect(parseRecommendedOptionLabel("MySQL")).toEqual({
+      label: "MySQL",
+      recommended: false,
+    });
+    expect(parseRecommendedOptionLabel("(Recommended)")).toEqual({
+      label: "(Recommended)",
+      recommended: false,
+    });
+  });
+  it("resolves validated answers back to original provider option labels and custom text", () => {
+    expect(
+      resolveQuestionnaireAnswerValues(
+        questionnaire,
+        {
+          version: 1,
+          answers: [
+            { questionId: "formats", selectedOptionIds: ["pdf", "md"] },
+            { questionId: "open", selectedOptionIds: [], customAnswer: "Later" },
+          ],
+        },
+        [
+          ["PDF (Recommended)", "Markdown"],
+          ["Open it", "Save only"],
+        ],
+      ),
+    ).toEqual([["PDF (Recommended)", "Markdown"], ["Later"]]);
+  });
+  it("validates free-text questions with no preset options", () => {
+    const freeText = {
+      questions: [
+        {
+          id: "q0",
+          header: "Tests",
+          prompt: "Add tests too?",
+          selection: "single" as const,
+          options: [],
+          allowCustom: true,
+        },
+      ],
+    };
+    expect(
+      validateQuestionnaireAnswer(
+        freeText,
+        JSON.stringify({
+          version: 1,
+          answers: [{ questionId: "q0", selectedOptionIds: [], customAnswer: "Yes, unit tests" }],
+        }),
+      ).status,
+    ).toBe("valid");
+    expect(
+      validateQuestionnaireAnswer(
+        freeText,
+        JSON.stringify({
+          version: 1,
+          answers: [{ questionId: "q0", selectedOptionIds: [] }],
+        }),
+      ).status,
+    ).toBe("invalid");
   });
 });
 

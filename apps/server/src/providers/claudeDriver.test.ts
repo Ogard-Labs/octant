@@ -3984,15 +3984,35 @@ describe("Claude execution policy", () => {
         const signal = controller.signal;
         const input = {
           questions: [
-            { question: "First?", options: [{ label: "One" }] },
-            { question: "Second?", options: [{ label: "Two" }] },
+            {
+              header: "Storage",
+              question: "First?",
+              options: [
+                { label: "One (Recommended)", description: "First choice" },
+                { label: "Other", description: "Alternative" },
+              ],
+            },
+            {
+              header: "Checks",
+              question: "Second?",
+              multiSelect: true,
+              options: [
+                { label: "Lint", description: "Run linter" },
+                { label: "Test", description: "Run tests" },
+              ],
+            },
+            {
+              header: "Notes",
+              question: "Third?",
+              options: [{ label: "Ship it" }],
+            },
           ],
         };
         const collected = Effect.runPromise(
           Stream.runCollect(
             Stream.unwrapScoped(acquired.connection.subscribe).pipe(
               Stream.filter((event) => event.kind === "user-input-request"),
-              Stream.take(2),
+              Stream.take(1),
             ),
           ),
         );
@@ -4010,32 +4030,54 @@ describe("Claude execution policy", () => {
           toolUseId: "question-set",
           signal,
         });
-        const [first, second] = Array.from(await collected);
-        if (first?.kind !== "user-input-request" || second?.kind !== "user-input-request")
-          throw new Error("Missing questions");
-        expect(first.requestId).not.toBe(second.requestId);
-        let settled = false;
-        void callback.then(() => {
-          settled = true;
+        const [asked] = Array.from(await collected);
+        if (asked?.kind !== "user-input-request") throw new Error("Missing question");
+        expect(asked.questionnaire).toMatchObject({
+          allowComment: false,
+          questions: [
+            {
+              id: "q0",
+              header: "Storage",
+              prompt: "First?",
+              selection: "single",
+              options: [
+                { id: "o0", label: "One", description: "First choice", recommended: true },
+                { id: "o1", label: "Other", description: "Alternative" },
+              ],
+            },
+            {
+              id: "q1",
+              header: "Checks",
+              prompt: "Second?",
+              selection: "multiple",
+              options: [
+                { id: "o0", label: "Lint", description: "Run linter" },
+                { id: "o1", label: "Test", description: "Run tests" },
+              ],
+            },
+            {
+              id: "q2",
+              header: "Notes",
+              prompt: "Third?",
+              selection: "single",
+              options: [{ id: "o0", label: "Ship it" }],
+            },
+          ],
         });
-        await Effect.runPromise(
-          acquired.connection.answerUserInput({
-            sessionId,
-            requestId: second.requestId,
-            answer: "Two",
-          }),
-        );
-        expect(settled).toBe(false);
-        const duplicate = await Effect.runPromise(
+        // An incomplete questionnaire reply is rejected and keeps the callback pending.
+        const incomplete = await Effect.runPromise(
           Effect.exit(
             acquired.connection.answerUserInput({
               sessionId,
-              requestId: second.requestId,
-              answer: "Wrong",
+              requestId: asked.requestId,
+              answer: JSON.stringify({
+                version: 1,
+                answers: [{ questionId: "q0", selectedOptionIds: ["o0"] }],
+              }),
             }),
           ),
         );
-        expect(duplicate._tag).toBe("Failure");
+        expect(incomplete._tag).toBe("Failure");
         if (outcome === "cancel") {
           controller.abort();
           await expect(callback).resolves.toMatchObject({ behavior: "deny" });
@@ -4043,8 +4085,15 @@ describe("Claude execution policy", () => {
             Effect.exit(
               acquired.connection.answerUserInput({
                 sessionId,
-                requestId: first.requestId,
-                answer: "One",
+                requestId: asked.requestId,
+                answer: JSON.stringify({
+                  version: 1,
+                  answers: [
+                    { questionId: "q0", selectedOptionIds: ["o0"] },
+                    { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+                    { questionId: "q2", selectedOptionIds: [], customAnswer: "Tomorrow" },
+                  ],
+                }),
               }),
             ),
           );
@@ -4054,13 +4103,27 @@ describe("Claude execution policy", () => {
         await Effect.runPromise(
           acquired.connection.answerUserInput({
             sessionId,
-            requestId: first.requestId,
-            answer: "One",
+            requestId: asked.requestId,
+            answer: JSON.stringify({
+              version: 1,
+              answers: [
+                { questionId: "q0", selectedOptionIds: ["o0"] },
+                { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+                { questionId: "q2", selectedOptionIds: [], customAnswer: "Tomorrow" },
+              ],
+            }),
           }),
         );
         await expect(callback).resolves.toEqual({
           behavior: "allow",
-          updatedInput: { ...input, answers: { "First?": "One", "Second?": "Two" } },
+          updatedInput: {
+            ...input,
+            answers: {
+              "First?": "One (Recommended)",
+              "Second?": "Lint, Test",
+              "Third?": "Tomorrow",
+            },
+          },
         });
       } finally {
         await acquired.close();

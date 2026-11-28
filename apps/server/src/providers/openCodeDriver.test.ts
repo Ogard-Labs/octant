@@ -1121,11 +1121,29 @@ describe("OpenCode driver", () => {
         events: [
           questionFormEvent("provider-session", "question-set", [
             {
+              header: "Queue",
               question: "How should I proceed?",
-              options: [{ label: "Dequeue, push, re-queue" }, { label: "Let it merge" }],
+              options: [
+                {
+                  label: "Dequeue, push, re-queue (Recommended)",
+                  description: "Leave queue, push, re-enter",
+                },
+                { label: "Let it merge", description: "Keep fix as follow-up" },
+              ],
             },
             {
+              header: "Checks",
+              question: "Which checks should run?",
+              multiple: true,
+              options: [
+                { label: "Unit", description: "Fast tests" },
+                { label: "Lint", description: "Static checks" },
+              ],
+            },
+            {
+              header: "Threads",
               question: "Mark the threads resolved?",
+              custom: false,
               options: [{ label: "Resolve" }, { label: "Leave open" }],
             },
           ]),
@@ -1161,7 +1179,7 @@ describe("OpenCode driver", () => {
                     new Promise<void>((resolve, reject) => {
                       const started = Date.now();
                       const poll = () => {
-                        if (questions.length === 2) {
+                        if (questions.length === 1) {
                           resolve();
                           return;
                         }
@@ -1174,36 +1192,79 @@ describe("OpenCode driver", () => {
                       poll();
                     }),
                 );
-                const first = questions[0];
-                const second = questions[1];
-                if (first === undefined || second === undefined)
-                  throw new Error("Missing questions");
-                expect(first.requestId).not.toBe(second.requestId);
-                expect(second.sequence).toBe(first.sequence + 1);
-                // Answers can arrive from different surfaces in either order.
-                yield* connection.answerUserInput({
-                  sessionId,
-                  requestId: second.requestId,
-                  answer: "Resolve",
+                const asked = questions[0];
+                if (asked === undefined) throw new Error("Missing question");
+                expect(asked.questionnaire).toMatchObject({
+                  allowComment: false,
+                  questions: [
+                    {
+                      id: "q0",
+                      header: "Queue",
+                      prompt: "How should I proceed?",
+                      selection: "single",
+                      allowCustom: true,
+                      options: [
+                        {
+                          id: "o0",
+                          label: "Dequeue, push, re-queue",
+                          description: "Leave queue, push, re-enter",
+                          recommended: true,
+                        },
+                        { id: "o1", label: "Let it merge", description: "Keep fix as follow-up" },
+                      ],
+                    },
+                    {
+                      id: "q1",
+                      header: "Checks",
+                      prompt: "Which checks should run?",
+                      selection: "multiple",
+                      allowCustom: true,
+                      options: [
+                        { id: "o0", label: "Unit", description: "Fast tests" },
+                        { id: "o1", label: "Lint", description: "Static checks" },
+                      ],
+                    },
+                    {
+                      id: "q2",
+                      header: "Threads",
+                      prompt: "Mark the threads resolved?",
+                      selection: "single",
+                      allowCustom: false,
+                      options: [
+                        { id: "o0", label: "Resolve" },
+                        { id: "o1", label: "Leave open" },
+                      ],
+                    },
+                  ],
                 });
+                const incomplete = yield* Effect.exit(
+                  connection.answerUserInput({
+                    sessionId,
+                    requestId: asked.requestId,
+                    answer: JSON.stringify({
+                      version: 1,
+                      answers: [{ questionId: "q0", selectedOptionIds: ["o0"] }],
+                    }),
+                  }),
+                );
+                expect(incomplete._tag).toBe("Failure");
                 expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
                   [],
                 );
-                const duplicate = yield* Effect.exit(
-                  connection.answerUserInput({
-                    sessionId,
-                    requestId: second.requestId,
-                    answer: "Leave open",
-                  }),
-                );
-                expect(duplicate._tag).toBe("Failure");
                 if (outcome === "interrupt") {
                   yield* connection.interrupt(sessionId);
                   const late = yield* Effect.exit(
                     connection.answerUserInput({
                       sessionId,
-                      requestId: first.requestId,
-                      answer: "Late",
+                      requestId: asked.requestId,
+                      answer: JSON.stringify({
+                        version: 1,
+                        answers: [
+                          { questionId: "q0", selectedOptionIds: ["o0"] },
+                          { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+                          { questionId: "q2", selectedOptionIds: ["o0"] },
+                        ],
+                      }),
                     }),
                   );
                   expect(late._tag).toBe("Failure");
@@ -1212,8 +1273,15 @@ describe("OpenCode driver", () => {
                 }
                 yield* connection.answerUserInput({
                   sessionId,
-                  requestId: first.requestId,
-                  answer: "Dequeue, push, re-queue",
+                  requestId: asked.requestId,
+                  answer: JSON.stringify({
+                    version: 1,
+                    answers: [
+                      { questionId: "q0", selectedOptionIds: ["o0"] },
+                      { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+                      { questionId: "q2", selectedOptionIds: ["o0"] },
+                    ],
+                  }),
                 });
                 yield* Fiber.interrupt(subscriber);
               }),
@@ -1222,7 +1290,9 @@ describe("OpenCode driver", () => {
         ),
       );
       expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual(
-        outcome === "complete" ? ["question.reply:Dequeue, push, re-queue|Resolve"] : [],
+        outcome === "complete"
+          ? ["question.reply:Dequeue, push, re-queue (Recommended)|Unit,Lint|Resolve"]
+          : [],
       );
     },
   );
@@ -5805,7 +5875,10 @@ function questionFormEvent(
   id: string,
   requestId: string,
   questions: ReadonlyArray<{
+    readonly header?: string;
     readonly question: string;
+    readonly multiple?: boolean;
+    readonly custom?: boolean;
     readonly options: ReadonlyArray<{ readonly label: string; readonly description?: string }>;
   }>,
 ): Event {
@@ -5819,8 +5892,10 @@ function questionFormEvent(
         metadata: { kind: "question" },
         fields: questions.map((question, index) => ({
           key: `q${index}`,
-          type: "string",
+          type: question.multiple === true ? "multiselect" : "string",
+          ...(question.header === undefined ? {} : { title: question.header }),
           description: question.question,
+          ...(question.custom === undefined ? {} : { custom: question.custom }),
           options: question.options,
         })),
       },

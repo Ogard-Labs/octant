@@ -14,7 +14,13 @@ import {
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
-import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } from "./workRequests";
+import {
+  MAX_WORK_REQUEST_OPTIONS,
+  WorkQuestionnaire,
+  WorkRequestId,
+  WorkRequestSanitizedText,
+} from "./workRequests";
+import { Questionnaire } from "./questionnaire";
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
 
@@ -325,6 +331,7 @@ const LeadQuestionFields = {
   projectId: ProjectId,
   threadId: WorkThreadId,
   text: WorkRequestSanitizedText,
+  questionnaire: Schema.optional(WorkQuestionnaire),
 } as const;
 
 export const PendingRequest = Schema.Union(
@@ -337,6 +344,7 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: WorkRequestSanitizedText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    questionnaire: Schema.optional(WorkQuestionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
@@ -361,6 +369,7 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    questionnaire: Schema.optional(Questionnaire),
     /**
      * The question asks for a secret. The row finds it and leaves the answer
      * to the thread's masked field, so no list answers it as evidence.
@@ -424,6 +433,7 @@ export const PendingRequest = Schema.Union(
     threadId: ChatThreadId,
     text: ChatAttemptQuestion.from.fields.prompt,
     options: ChatAttemptQuestion.from.fields.options,
+    questionnaire: Schema.optional(Questionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
     answer: ChatPendingQuestionAnswer,

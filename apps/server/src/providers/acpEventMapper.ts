@@ -5,10 +5,15 @@ import type {
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  Questionnaire,
   UtcTimestamp,
   ProviderApprovalCall,
 } from "@octant/contracts";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_QUESTIONNAIRE_OPTIONS,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+} from "@octant/contracts";
+import { parseRecommendedOptionLabel } from "@octant/domain";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
 import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
@@ -105,6 +110,8 @@ export type AcpMappedPermission =
       readonly providerRequestId: string | number;
       readonly optionIds: ReadonlyMap<string, string>;
       readonly skipOptionId?: string;
+      readonly questionnaire?: Questionnaire;
+      readonly originalOptionLabels?: ReadonlyArray<string>;
       readonly event: ProviderRuntimeEvent;
     }
   | { readonly kind: "protocol-failure"; readonly failure: ProviderFailure };
@@ -668,28 +675,86 @@ export function mapAcpPermissionRequest(
   const toolKind = request.params.toolCall.kind ?? tool?.kind ?? "tool";
   const requestId = context.makeRequestId();
   context.requestIds.set(request.id, requestId);
-  const questionOptions = request.params.options.filter((option) =>
-    /^q0_opt_\d+$/.test(option.optionId),
-  );
-  if (questionOptions.length > 0) {
-    const options = questionOptions.map((option) => ({ label: option.name }));
-    const optionIds = new Map(questionOptions.map((option) => [option.name, option.optionId]));
-    const skipOptionId = request.params.options.find(
-      (option) => option.optionId === "q0_skip",
-    )?.optionId;
+  const mapPermissionQuestion = (
+    promptTitle: string,
+    choices: ReadonlyArray<{
+      readonly optionId: string;
+      readonly name: string;
+      readonly description?: string | null | undefined;
+    }>,
+    skipOptionId: string | undefined,
+  ): AcpMappedPermission => {
+    const parsedChoices = choices.map((option, optionIndex) => {
+      const parsed = parseRecommendedOptionLabel(option.name);
+      const description =
+        typeof option.description === "string" ? normalized(option.description, 512) : undefined;
+      return {
+        optionId: option.optionId,
+        originalLabel: option.name,
+        id: `o${optionIndex}`,
+        label: parsed.label,
+        ...(description === undefined ? {} : { description }),
+        ...(parsed.recommended ? { recommended: true } : {}),
+      };
+    });
+    const options = parsedChoices.map((option) => ({
+      label: option.label,
+      ...(option.description === undefined ? {} : { description: option.description }),
+    }));
+    const optionIds = new Map<string, string>();
+    for (const option of parsedChoices) {
+      optionIds.set(option.originalLabel, option.optionId);
+      if (!optionIds.has(option.label)) optionIds.set(option.label, option.optionId);
+    }
+    const questionnaire: Questionnaire | undefined =
+      parsedChoices.length > 0 && parsedChoices.length <= MAX_QUESTIONNAIRE_OPTIONS
+        ? {
+            allowComment: false,
+            questions: [
+              {
+                id: "q0",
+                prompt: promptTitle,
+                selection: "single",
+                options: parsedChoices.map((option) => ({
+                  id: option.id,
+                  label: option.label,
+                  ...(option.description === undefined ? {} : { description: option.description }),
+                  ...(option.recommended === true ? { recommended: true } : {}),
+                })),
+                allowCustom: false,
+              },
+            ],
+          }
+        : undefined;
     return {
       kind: "question",
       requestId,
       providerRequestId: request.id,
       optionIds,
       ...(skipOptionId === undefined ? {} : { skipOptionId }),
+      ...(questionnaire === undefined
+        ? {}
+        : {
+            questionnaire,
+            originalOptionLabels: parsedChoices.map((option) => option.originalLabel),
+          }),
       event: mappedEvent(context, {
         kind: "user-input-request",
         requestId,
-        prompt: title,
+        prompt: promptTitle,
         options,
+        ...(questionnaire === undefined ? {} : { questionnaire }),
       }),
     };
+  };
+  const questionOptions = request.params.options.filter((option) =>
+    /^q0_opt_\d+$/.test(option.optionId),
+  );
+  if (questionOptions.length > 0) {
+    const skipOptionId = request.params.options.find(
+      (option) => option.optionId === "q0_skip",
+    )?.optionId;
+    return mapPermissionQuestion(title, questionOptions, skipOptionId);
   }
   const allow = request.params.options.find((option) => option.kind === "allow_once");
   const allowAlways = request.params.options.find((option) => option.kind === "allow_always");
@@ -706,19 +771,7 @@ export function mapAcpPermissionRequest(
     !request.params.options.some((option) => option.kind.startsWith("allow"))
   ) {
     const answers = request.params.options.filter((option) => !option.kind.startsWith("reject"));
-    return {
-      kind: "question",
-      requestId,
-      providerRequestId: request.id,
-      optionIds: new Map(answers.map((option) => [option.name, option.optionId])),
-      ...(reject === undefined ? {} : { skipOptionId: reject.optionId }),
-      event: mappedEvent(context, {
-        kind: "user-input-request",
-        requestId,
-        prompt: title,
-        options: answers.map((option) => ({ label: option.name })),
-      }),
-    };
+    return mapPermissionQuestion(title, answers, reject?.optionId);
   }
   // Such an agent may offer only `allow_always` beside its reject; that is
   // still an approval, which the driver answers with allow-always only where

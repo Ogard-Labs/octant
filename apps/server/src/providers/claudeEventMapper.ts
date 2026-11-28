@@ -5,15 +5,18 @@ import type {
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  Questionnaire,
   UtcTimestamp,
   ProviderLevelChangeRequest,
   ThreadForgeReference,
 } from "@octant/contracts";
 import {
   MAX_PROVIDER_PLAN_CHARACTERS,
+  MAX_QUESTIONNAIRE_HEADER_LENGTH,
   MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS,
   decodeProviderModelId,
 } from "@octant/contracts";
+import { parseRecommendedOptionLabel } from "@octant/domain";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
@@ -263,10 +266,14 @@ export interface ClaudePendingApproval extends ClaudePendingRequestBase {
 
 export interface ClaudePendingQuestion extends ClaudePendingRequestBase {
   readonly kind: "question";
+  /** The one questionnaire carrying every question of this AskUserQuestion call. */
+  readonly questionnaire: Questionnaire;
+  /** Original provider option labels per question, so the reply returns Claude's exact strings. */
+  readonly originalOptionLabels: ReadonlyArray<ReadonlyArray<string>>;
   /**
-   * One event per question the tool call asked, in its order, under this one
-   * request identity. Each parks the turn in turn; the answers ride back to
-   * the provider as one callback decision carrying every answer.
+   * The single user-input-request event carrying the full questionnaire under
+   * this request identity; the answers ride back to the provider as one
+   * callback decision carrying every answer.
    */
   readonly events: ReadonlyArray<ProviderRuntimeEvent>;
 }
@@ -1906,23 +1913,28 @@ function mapQuestion(
       typeof question?.question === "string"
         ? normalized(question.question, SUMMARY_MAX_CHARACTERS)
         : undefined;
+    const header =
+      typeof question?.header === "string"
+        ? normalized(question.header, MAX_QUESTIONNAIRE_HEADER_LENGTH)
+        : undefined;
     const rawOptions = question?.options;
     const options = Array.isArray(rawOptions)
       ? rawOptions.flatMap((optionValue) => {
           const option = record(optionValue);
-          const label =
+          const rawLabel =
             typeof option?.label === "string"
               ? normalized(option.label, LABEL_MAX_CHARACTERS)
               : undefined;
-          if (label === undefined) return [];
+          if (rawLabel === undefined) return [];
+          const parsed = parseRecommendedOptionLabel(rawLabel);
           const rawDescription = option?.description;
           const description =
-            typeof rawDescription === "string"
-              ? normalized(rawDescription, SUMMARY_MAX_CHARACTERS)
-              : undefined;
+            typeof rawDescription === "string" ? normalized(rawDescription, 512) : undefined;
           return [
             {
-              label,
+              originalLabel: typeof option?.label === "string" ? option.label.trim() : rawLabel,
+              label: parsed.label,
+              ...(parsed.recommended ? { recommended: true } : {}),
               ...(description === undefined ? {} : { description }),
             },
           ];
@@ -1930,7 +1942,6 @@ function mapQuestion(
       : [];
     if (
       prompt === undefined ||
-      question?.multiSelect === true ||
       !Array.isArray(rawOptions) ||
       options.length !== rawOptions.length ||
       options.length === 0 ||
@@ -1938,9 +1949,17 @@ function mapQuestion(
     ) {
       return [];
     }
-    return [{ prompt, options }];
+    return [
+      {
+        ...(header === undefined ? {} : { header }),
+        prompt,
+        multiSelect: question?.multiSelect === true,
+        options,
+      },
+    ];
   });
-  if (mapped.length !== questions.length) {
+  const first = mapped[0];
+  if (mapped.length !== questions.length || first === undefined) {
     return failure("Claude returned an unsupported user question.", "unsupported");
   }
   const correlated = correlatedRequestId(context, {
@@ -1952,17 +1971,40 @@ function mapQuestion(
   });
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
-  const events = mapped.map((question, index) =>
+  const questionnaire: Questionnaire = {
+    allowComment: false,
+    questions: mapped.map((question, index) => ({
+      id: `q${index}`,
+      ...(question.header === undefined ? {} : { header: question.header }),
+      prompt: question.prompt,
+      selection: question.multiSelect ? "multiple" : "single",
+      options: question.options.map((option, optionIndex) => ({
+        id: `o${optionIndex}`,
+        label: option.label,
+        ...(option.description === undefined ? {} : { description: option.description }),
+        ...(option.recommended === true ? { recommended: true } : {}),
+      })),
+      allowCustom: true,
+    })),
+  };
+  const originalOptionLabels = mapped.map((question) =>
+    question.options.map((option) => option.originalLabel),
+  );
+  const events = [
     mappedEvent(context, {
       kind: "user-input-request",
       requestId: normalizedRequestId,
-      prompt: question.prompt,
-      options: question.options,
-      // Keep the private callback correlation here; the connection assigns
-      // each question its own answer identity before publishing it.
-      ...(mapped.length > 1 ? { questionIndex: index + 1, questionCount: mapped.length } : {}),
+      prompt: first.prompt,
+      options:
+        mapped.length === 1
+          ? first.options.map((option) => ({
+              label: option.label,
+              ...(option.description === undefined ? {} : { description: option.description }),
+            }))
+          : [],
+      questionnaire,
     }),
-  );
+  ];
   return {
     kind: "question",
     request: {
@@ -1971,6 +2013,8 @@ function mapQuestion(
       providerSessionId: context.claudeSessionId,
       providerToolUseId: request.toolUseId,
       inputDigest: digest,
+      questionnaire,
+      originalOptionLabels,
       events,
     },
   };

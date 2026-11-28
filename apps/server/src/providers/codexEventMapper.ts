@@ -5,10 +5,17 @@ import type {
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  Questionnaire,
   UtcTimestamp,
 } from "@octant/contracts";
 import { forgeReferencesFromToolCall } from "@octant/provider-sdk/forge-references";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
+import {
+  MAX_QUESTIONNAIRE_HEADER_LENGTH,
+  MAX_QUESTIONNAIRE_QUESTIONS,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+  decodeProviderModelId,
+} from "@octant/contracts";
+import { parseRecommendedOptionLabel } from "@octant/domain";
 import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
@@ -121,9 +128,10 @@ export interface CodexPendingTool {
 }
 
 /**
- * One `request_user_input` set waiting on the person. Each question is its
- * own questionnaire request, in order; Codex is answered once, by question
- * id, when every one of them is answered.
+ * One `request_user_input` set waiting on the person. A non-secret set of up
+ * to four questions becomes one questionnaire answered once; a set that asks
+ * for a secret (outside Strict) keeps each question separate so the secret
+ * stays in its masked field and never enters a journaled questionnaire.
  */
 export interface CodexPendingQuestion {
   readonly providerRequestId: CodexRpcId;
@@ -131,6 +139,8 @@ export interface CodexPendingQuestion {
   readonly turnId: string;
   readonly questionIds: ReadonlyArray<string>;
   readonly requestIds: ReadonlyArray<string>;
+  readonly questionnaire?: Questionnaire;
+  readonly originalOptionLabels?: ReadonlyArray<ReadonlyArray<string>>;
   readonly events: ReadonlyArray<ProviderRuntimeEvent>;
 }
 
@@ -945,16 +955,88 @@ function userInputRequest(
   const prompts = questions.flatMap((question) => {
     const prompt = normalized(question.question, SUMMARY_MAX_CHARACTERS);
     if (prompt === undefined) return [];
+    const header = normalized(question.header, MAX_QUESTIONNAIRE_HEADER_LENGTH);
     const options = (question.options ?? []).flatMap((option) => {
-      const label = normalized(option.label, LABEL_MAX_CHARACTERS);
-      if (label === undefined) return [];
-      const description = normalized(option.description, SUMMARY_MAX_CHARACTERS);
-      return [{ label, ...(description === undefined ? {} : { description }) }];
+      const rawLabel = normalized(option.label, LABEL_MAX_CHARACTERS);
+      if (rawLabel === undefined) return [];
+      const parsed = parseRecommendedOptionLabel(rawLabel);
+      const description = normalized(option.description, 512);
+      return [
+        {
+          originalLabel: option.label.trim(),
+          label: parsed.label,
+          ...(parsed.recommended ? { recommended: true } : {}),
+          ...(description === undefined ? {} : { description }),
+        },
+      ];
     });
-    return [{ prompt, options, secret: secret(question) }];
+    const allowCustom = options.length === 0 ? true : question.isOther !== false;
+    return [
+      {
+        ...(header === undefined ? {} : { header }),
+        prompt,
+        options,
+        allowCustom,
+        secret: secret(question),
+      },
+    ];
   });
   if (prompts.length !== questions.length || prompts.some((prompt) => prompt.options.length > 20)) {
     return protocolFailure("Provider question set was malformed.");
+  }
+  const hasSecret = prompts.some((prompt) => prompt.secret);
+  const firstPrompt = prompts[0];
+  if (firstPrompt === undefined) return protocolFailure("Provider question set was malformed.");
+  if (!hasSecret && prompts.length <= MAX_QUESTIONNAIRE_QUESTIONS) {
+    const requestId = context.makeRequestId();
+    const questionnaire: Questionnaire = {
+      allowComment: false,
+      questions: prompts.map((item, index) => ({
+        id: `q${index}`,
+        ...(item.header === undefined ? {} : { header: item.header }),
+        prompt: item.prompt,
+        selection: "single",
+        options: item.options.map((option, optionIndex) => ({
+          id: `o${optionIndex}`,
+          label: option.label,
+          ...(option.description === undefined ? {} : { description: option.description }),
+          ...(option.recommended === true ? { recommended: true } : {}),
+        })),
+        allowCustom: item.allowCustom,
+      })),
+    };
+    const originalOptionLabels = prompts.map((item) =>
+      item.options.map((option) => option.originalLabel),
+    );
+    const event = mappedEvent(context, {
+      kind: "user-input-request",
+      requestId,
+      prompt: firstPrompt.prompt,
+      options:
+        prompts.length === 1
+          ? firstPrompt.options.map((option) => ({
+              label: option.label,
+              ...(option.description === undefined ? {} : { description: option.description }),
+            }))
+          : [],
+      questionnaire,
+    });
+    context.requestIds.set(message.id, requestId);
+    return [
+      {
+        kind: "question",
+        question: {
+          providerRequestId: message.id,
+          threadId: message.params.threadId,
+          turnId: message.params.turnId,
+          questionIds: questions.map((question) => question.id),
+          requestIds: [requestId],
+          questionnaire,
+          originalOptionLabels,
+          events: [event],
+        },
+      },
+    ];
   }
   const count = prompts.length;
   const asked = prompts.map(({ prompt, options, secret }, index) => {
@@ -965,7 +1047,10 @@ function userInputRequest(
         kind: "user-input-request",
         requestId,
         prompt,
-        options,
+        options: options.map((option) => ({
+          label: option.label,
+          ...(option.description === undefined ? {} : { description: option.description }),
+        })),
         ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
         ...(secret ? { secret: true } : {}),
       }),

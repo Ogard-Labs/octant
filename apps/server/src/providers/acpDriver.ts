@@ -10,7 +10,11 @@ import {
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
-import { providerCommandOf } from "@octant/domain";
+import {
+  providerCommandOf,
+  resolveQuestionnaireAnswerValues,
+  validateQuestionnaireAnswer,
+} from "@octant/domain";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import {
   CorrelationId,
@@ -225,6 +229,8 @@ interface PendingQuestion {
   readonly providerRequestId: string | number;
   readonly optionIds: ReadonlyMap<string, string>;
   readonly skipOptionId?: string;
+  readonly questionnaire?: import("@octant/contracts").Questionnaire;
+  readonly originalOptionLabels?: ReadonlyArray<string>;
 }
 
 interface AcpRetainedRuntime {
@@ -2985,8 +2991,25 @@ function makeConnection(
             if (pending === undefined) {
               return Effect.fail(failure("protocol", `${name} question is not pending.`));
             }
+            let selectedLabel = input.answer;
+            if (pending.questionnaire !== undefined) {
+              const trimmed = input.answer.trim();
+              const validated = validateQuestionnaireAnswer(pending.questionnaire, trimmed);
+              if (validated.status === "valid") {
+                const values = resolveQuestionnaireAnswerValues(
+                  pending.questionnaire,
+                  validated.response,
+                  pending.originalOptionLabels === undefined
+                    ? undefined
+                    : [pending.originalOptionLabels],
+                );
+                selectedLabel = values[0]?.[0] ?? "";
+              } else if (trimmed.startsWith("{")) {
+                return Effect.fail(failure("protocol", "The questionnaire answer is invalid."));
+              }
+            }
             state.questions.delete(input.requestId);
-            const optionId = pending.optionIds.get(input.answer) ?? pending.skipOptionId;
+            const optionId = pending.optionIds.get(selectedLabel) ?? pending.skipOptionId;
             return request(() =>
               state.client.respondPermission(pending.providerRequestId, optionId),
             );
@@ -3031,6 +3054,10 @@ function rememberPermission(state: SessionState, mapped: AcpMappedPermission): v
       providerRequestId: mapped.providerRequestId,
       optionIds: mapped.optionIds,
       ...(mapped.skipOptionId === undefined ? {} : { skipOptionId: mapped.skipOptionId }),
+      ...(mapped.questionnaire === undefined ? {} : { questionnaire: mapped.questionnaire }),
+      ...(mapped.originalOptionLabels === undefined
+        ? {}
+        : { originalOptionLabels: mapped.originalOptionLabels }),
     });
   }
 }

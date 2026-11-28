@@ -1,13 +1,22 @@
 import { Schema } from "effect";
-import { Questionnaire, type QuestionnaireResponse } from "@octant/contracts";
-import { validateQuestionnaireAnswer } from "@octant/domain";
+import {
+  MAX_QUESTIONNAIRE_HEADER_LENGTH,
+  MAX_QUESTIONNAIRE_OPTIONS,
+  Questionnaire,
+  type QuestionnaireResponse,
+} from "@octant/contracts";
+import { parseRecommendedOptionLabel, validateQuestionnaireAnswer } from "@octant/domain";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Choice = Schema.Struct({
   const: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
 }).annotations(strict);
-const Choices = Schema.Array(Choice).pipe(Schema.minItems(2), Schema.maxItems(8));
+const Choices = Schema.Array(Choice).pipe(
+  Schema.minItems(2),
+  Schema.maxItems(MAX_QUESTIONNAIRE_OPTIONS),
+);
 const Header = {
   title: Schema.optional(Schema.NullOr(Schema.String)),
   description: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
@@ -66,6 +75,11 @@ export function normalizeAcpElicitation(
         new Set(choices.map((choice) => choice.const)).size !== choices.length
       )
         throw new Error("duplicate choice");
+      const trimmedTitle = typeof field.title === "string" ? field.title.trim() : "";
+      const header =
+        trimmedTitle.length > 0 && trimmedTitle.length <= MAX_QUESTIONNAIRE_HEADER_LENGTH
+          ? trimmedTitle
+          : undefined;
       return {
         key,
         questionId: `q${index}`,
@@ -73,12 +87,21 @@ export function normalizeAcpElicitation(
         multiple: field.type === "array",
         question: {
           id: `q${index}`,
-          prompt: [field.title, field.description].filter(Boolean).join("\n"),
+          ...(header === undefined ? {} : { header }),
+          prompt:
+            header !== undefined
+              ? field.description
+              : [field.title, field.description].filter(Boolean).join("\n"),
           selection: field.type === "array" ? ("multiple" as const) : ("single" as const),
-          options: choices.map((choice, choiceIndex) => ({
-            id: `o${choiceIndex}`,
-            label: choice.const,
-          })),
+          options: choices.map((choice, choiceIndex) => {
+            const parsed = parseRecommendedOptionLabel(choice.const);
+            return {
+              id: `o${choiceIndex}`,
+              label: parsed.label,
+              ...(choice.description === undefined ? {} : { description: choice.description }),
+              ...(parsed.recommended ? { recommended: true } : {}),
+            };
+          }),
           allowCustom: true,
         },
       };

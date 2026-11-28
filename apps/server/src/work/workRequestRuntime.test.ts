@@ -94,7 +94,7 @@ describe("WorkRequestRuntime", () => {
       providerSessionId: sessionId,
       providerCallbackId: "input-1",
       providerOptionValues: ["PDF"],
-      detail: { kind: "user-input", prompt: "Choose a format", options: ["Option 1: PDF"] },
+      detail: { kind: "user-input", prompt: "Choose a format", options: ["PDF"] },
     });
   });
 
@@ -170,8 +170,8 @@ describe("WorkRequestRuntime", () => {
       } as never,
       uuid: () => "00000000-0000-4000-8000-000000000905",
     });
-    // With the "Option 1: " prefix, the 256-character limit ends on this space.
-    const longLabel = `${"a".repeat(245)} ${"b".repeat(10)}`;
+    // The 256-character limit ends on this space.
+    const longLabel = `${"a".repeat(255)} ${"b".repeat(10)}`;
     const connection = {
       subscribe: Effect.succeed(
         Stream.fromIterable<ProviderRuntimeEvent>([
@@ -189,6 +189,7 @@ describe("WorkRequestRuntime", () => {
               questions: [
                 {
                   id: "q0",
+                  header: "Output /tmp/secret",
                   prompt: "Pick one",
                   selection: "single",
                   options: [{ id: "o0", label: longLabel }],
@@ -209,7 +210,12 @@ describe("WorkRequestRuntime", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]?.detail).toMatchObject({
       questionnaire: {
-        questions: [{ options: [{ id: "o0", label: `Option 1: ${"a".repeat(245)}` }] }],
+        questions: [
+          {
+            header: "Output [redacted path]",
+            options: [{ id: "o0", label: "a".repeat(255) }],
+          },
+        ],
       },
     });
   });
@@ -333,14 +339,17 @@ describe("WorkRequestRuntime", () => {
           kind: "user-input",
           prompt: expect.not.stringMatching(/[\\/]|https?:|file:/i),
           options: [
-            "Option 1: [redacted reference]",
-            "Option 2: [redacted path]",
-            "Option 3: [redacted path]",
-            "Option 4: [redacted path]",
-            "Option 5: [redacted path]",
-            "Option 6: [redacted path]",
-            "Option 7: [redacted path]",
-            "Option 8: [redacted path]",
+            "[redacted reference]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
+            "[redacted path]",
           ],
         },
       }),

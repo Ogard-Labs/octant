@@ -119,6 +119,61 @@ const codeQuestion = {
   answer: { threadId: ids.codeThread, checkoutId: ids.checkout, requestId: "question-1" },
 } as const;
 
+describe("pending request questionnaires", () => {
+  it("carries a structured questionnaire on Code, Chat, Work, and lead question rows", () => {
+    const questionnaire = {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Branch",
+          prompt: "Which branch?",
+          selection: "single" as const,
+          options: [{ id: "o0", label: "main", recommended: true }],
+        },
+      ],
+    };
+    expect(decodePendingRequest({ ...codeQuestion, questionnaire })).toMatchObject({
+      mode: "code",
+      kind: "question",
+      questionnaire,
+    });
+    expect(
+      decodePendingRequest({
+        mode: "work",
+        kind: "question",
+        projectId: ids.project,
+        threadId: ids.workThread,
+        threadTitle: "Quarterly report",
+        text: "Choose format",
+        options: [],
+        questionnaire,
+        requestedAt,
+        answer: { requestId: ids.workRequest, expectedVersion: 1 },
+      }),
+    ).toMatchObject({ mode: "work", kind: "question", questionnaire });
+    expect(
+      decodePendingRequest({
+        mode: "chat",
+        kind: "question",
+        threadId: ids.chatThread,
+        threadTitle: "Chat",
+        text: "Choose format",
+        options: [],
+        questionnaire,
+        requestedAt,
+        answer: {
+          threadId: ids.chatThread,
+          expectedVersion: 1,
+          turnId: ids.turn,
+          attemptId: ids.attempt,
+          requestId: "req-1",
+        },
+      }),
+    ).toMatchObject({ mode: "chat", kind: "question", questionnaire });
+  });
+});
+
 const chatQuestion = {
   mode: "chat",
   kind: "question",

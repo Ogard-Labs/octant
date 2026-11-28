@@ -113,7 +113,7 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const APP_MANAGED_TOOL_DEADLINE_MS = 5 * 60_000;
 // A question record holds at most this many options, matching the attempt
 // contract; longer option lists are cut, not refused.
-const MAX_ATTEMPT_QUESTION_OPTIONS = 8;
+const MAX_ATTEMPT_QUESTION_OPTIONS = 32;
 
 /**
  * Caps one line of a provider question at the attempt record's bound. The

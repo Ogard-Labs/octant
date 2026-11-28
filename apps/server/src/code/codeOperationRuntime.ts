@@ -5223,6 +5223,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       event: {
         kind: "input-requested",
         ...(input.questionnaire === undefined ? {} : { questionnaire: input.questionnaire }),
+        harnessQuestion: true,
         requestId: input.questionId,
         prompt: input.prompt,
         options: input.options,
@@ -5428,6 +5429,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             requestId: event.requestId,
             prompt: event.prompt,
             options: event.options,
+            ...(event.questionnaire === undefined ? {} : { questionnaire: event.questionnaire }),
             ...(event.secret === true ? { secret: true } : {}),
           });
         }

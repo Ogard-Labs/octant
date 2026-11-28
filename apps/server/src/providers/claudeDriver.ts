@@ -6,6 +6,7 @@ import { copyClaudeAccountSession } from "./claudeAccountSessionCopy";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
+import { resolveQuestionnaireAnswerValues, validateQuestionnaireAnswer } from "@octant/domain";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -4648,11 +4649,6 @@ function makeConnection(
             const pending: ClaudePendingQuestionState = {
               ...mapped.request,
               answer: deferred<Record<string, string> | undefined>(),
-              events: mapped.request.events.map((event) =>
-                event.kind === "user-input-request" && mapped.request.events.length > 1
-                  ? { ...event, requestId: randomUUID() }
-                  : event,
-              ),
               received: new Map(),
               providerPrompts,
             };
@@ -6282,48 +6278,58 @@ function makeConnection(
       answerUserInput: (answer) =>
         Effect.suspend(() => {
           const state = sessions.get(answer.sessionId);
-          const pending = [...(state?.pendingQuestions.values() ?? [])].find((candidate) =>
-            candidate.events.some(
-              (event) =>
-                event.kind === "user-input-request" && event.requestId === answer.requestId,
-            ),
-          );
-          const index =
-            pending?.events.findIndex(
-              (event) =>
-                event.kind === "user-input-request" && event.requestId === answer.requestId,
-            ) ?? -1;
+          const pending = state?.pendingQuestions.get(answer.requestId);
           if (
             state === undefined ||
             state.terminal ||
             state.releasing ||
             state.released ||
-            pending === undefined ||
-            index < 0 ||
-            pending.received.has(index)
+            pending === undefined
           ) {
             return Effect.fail(failure("protocol", "Claude user question is not active."));
           }
-          if (answer.answer.length > USER_ANSWER_MAX_CHARACTERS * 2) {
+          if (answer.answer.length > USER_ANSWER_MAX_CHARACTERS * 4) {
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
           const normalizedAnswer = answer.answer.trim();
-          if (
-            normalizedAnswer.length === 0 ||
-            exceedsCodePointLimit(normalizedAnswer, USER_ANSWER_MAX_CHARACTERS)
+          if (normalizedAnswer.length === 0) {
+            return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
+          }
+          const validated = validateQuestionnaireAnswer(pending.questionnaire, normalizedAnswer);
+          let resolvedAnswers: ReadonlyArray<string>;
+          if (validated.status === "valid") {
+            resolvedAnswers = resolveQuestionnaireAnswerValues(
+              pending.questionnaire,
+              validated.response,
+              pending.originalOptionLabels,
+            ).map((values) => values.join(", "));
+          } else if (
+            pending.questionnaire.questions.length === 1 &&
+            pending.questionnaire.questions[0]?.selection === "single" &&
+            !normalizedAnswer.startsWith("{") &&
+            !exceedsCodePointLimit(normalizedAnswer, USER_ANSWER_MAX_CHARACTERS)
           ) {
+            // Preserve direct single-question plain-text answers (e.g. option label or custom text).
+            const firstQuestion = pending.questionnaire.questions[0];
+            const matchedIndex = firstQuestion.options.findIndex(
+              (option) => option.label === normalizedAnswer,
+            );
+            const mappedLabel =
+              matchedIndex >= 0
+                ? (pending.originalOptionLabels[0]?.[matchedIndex] ?? normalizedAnswer)
+                : normalizedAnswer;
+            resolvedAnswers = [mappedLabel];
+          } else {
             return Effect.fail(failure("invalid-configuration", "Claude user answer is invalid."));
           }
           return Effect.sync(() => {
-            pending.received.set(index, normalizedAnswer);
-            if (pending.received.size < pending.events.length) return;
             state.pendingQuestions.delete(pending.requestId);
             freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
             const answers = Object.fromEntries(
               pending.providerPrompts.map((prompt, position) => [
                 prompt,
-                pending.received.get(position) ?? "",
+                resolvedAnswers[position] ?? "",
               ]),
             );
             pending.answer.resolve(answers);

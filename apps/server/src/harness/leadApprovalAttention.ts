@@ -8,6 +8,7 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import { modeText } from "../agentRun/childPendingRequests";
+import { sanitizedQuestionnaire } from "../work/workRequestRuntime";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -273,6 +274,9 @@ export async function listLeadQuestionRequests(
           threadId: lead.threadId,
           threadTitle: thread.title,
           text,
+          ...(lead.question.questionnaire === undefined
+            ? {}
+            : { questionnaire: sanitizedQuestionnaire(lead.question.questionnaire) }),
           requestedAt: lead.question.askedAt,
         }),
       );

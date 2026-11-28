@@ -3742,7 +3742,7 @@ describe("mapClaudeToolRequest", () => {
     expect(JSON.stringify(result)).not.toMatch(/raw question input|must-not-cross/);
   });
 
-  it("maps a multi-question AskUserQuestion into one event per question under one request", () => {
+  it("maps a multi-question AskUserQuestion with multiSelect into one questionnaire preserving headers, descriptions, and recommended", () => {
     const result = mapClaudeToolRequest(
       context(),
       toolRequest({
@@ -3751,15 +3751,27 @@ describe("mapClaudeToolRequest", () => {
         input: {
           questions: [
             {
-              header: "First",
-              question: "How should I proceed?",
-              options: [{ label: "Yes", description: "Go ahead" }],
+              header: "Storage",
+              question: "Which database should we use?",
+              options: [
+                { label: "PostgreSQL (Recommended)", description: "Managed relational database" },
+                { label: "SQLite", description: "Single-file local database" },
+              ],
               multiSelect: false,
             },
             {
-              header: "Second",
-              question: "Mark it resolved?",
-              options: [{ label: "Resolve" }, { label: "Leave open" }],
+              header: "Features",
+              question: "Which features should be enabled?",
+              options: [
+                { label: "Audit log", description: "Record state changes" },
+                { label: "Metrics", description: "Export timing counters" },
+              ],
+              multiSelect: true,
+            },
+            {
+              header: "Rollout",
+              question: "Deploy immediately?",
+              options: [{ label: "Yes" }, { label: "Wait for review" }],
               multiSelect: false,
             },
           ],
@@ -3771,20 +3783,60 @@ describe("mapClaudeToolRequest", () => {
       kind: "question",
       request: {
         requestId: "request-1",
+        originalOptionLabels: [
+          ["PostgreSQL (Recommended)", "SQLite"],
+          ["Audit log", "Metrics"],
+          ["Yes", "Wait for review"],
+        ],
         events: [
           {
             kind: "user-input-request",
             requestId: "request-1",
-            prompt: "How should I proceed?",
-            questionIndex: 1,
-            questionCount: 2,
-          },
-          {
-            kind: "user-input-request",
-            requestId: "request-1",
-            prompt: "Mark it resolved?",
-            questionIndex: 2,
-            questionCount: 2,
+            prompt: "Which database should we use?",
+            options: [],
+            questionnaire: {
+              allowComment: false,
+              questions: [
+                {
+                  id: "q0",
+                  header: "Storage",
+                  prompt: "Which database should we use?",
+                  selection: "single",
+                  allowCustom: true,
+                  options: [
+                    {
+                      id: "o0",
+                      label: "PostgreSQL",
+                      description: "Managed relational database",
+                      recommended: true,
+                    },
+                    { id: "o1", label: "SQLite", description: "Single-file local database" },
+                  ],
+                },
+                {
+                  id: "q1",
+                  header: "Features",
+                  prompt: "Which features should be enabled?",
+                  selection: "multiple",
+                  allowCustom: true,
+                  options: [
+                    { id: "o0", label: "Audit log", description: "Record state changes" },
+                    { id: "o1", label: "Metrics", description: "Export timing counters" },
+                  ],
+                },
+                {
+                  id: "q2",
+                  header: "Rollout",
+                  prompt: "Deploy immediately?",
+                  selection: "single",
+                  allowCustom: true,
+                  options: [
+                    { id: "o0", label: "Yes" },
+                    { id: "o1", label: "Wait for review" },
+                  ],
+                },
+              ],
+            },
           },
         ],
       },

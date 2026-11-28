@@ -9,6 +9,8 @@ import {
   planReadOnlyToolServers,
   projectCodeEntries,
   providerOwnMemoryLaunches,
+  resolveQuestionnaireAnswerValues,
+  validateQuestionnaireAnswer,
 } from "@octant/domain";
 import {
   decodeProviderFailure,
@@ -4553,15 +4555,55 @@ function makeConnection(
                 failure("protocol", "Codex question request is not pending for this turn."),
               );
             }
-            pending.answers.set(index, input.answer);
-            if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
-            state.pendingQuestion = undefined;
-            const answers = Object.fromEntries(
-              pending.question.questionIds.map((questionId, position) => [
-                questionId,
-                { answers: [pending.answers.get(position) ?? ""] },
-              ]),
-            );
+            const questionnaire = pending.question.questionnaire;
+            let answers: Readonly<Record<string, { readonly answers: ReadonlyArray<string> }>>;
+            if (questionnaire !== undefined) {
+              const trimmed = input.answer.trim();
+              const validated = validateQuestionnaireAnswer(questionnaire, trimmed);
+              if (validated.status === "valid") {
+                const values = resolveQuestionnaireAnswerValues(
+                  questionnaire,
+                  validated.response,
+                  pending.question.originalOptionLabels,
+                );
+                answers = Object.fromEntries(
+                  pending.question.questionIds.map((questionId, position) => [
+                    questionId,
+                    { answers: values[position] ?? [] },
+                  ]),
+                );
+              } else if (
+                pending.question.questionIds.length === 1 &&
+                !trimmed.startsWith("{") &&
+                trimmed.length > 0
+              ) {
+                const firstQuestion = questionnaire.questions[0];
+                const matchedIndex =
+                  firstQuestion?.options.findIndex((option) => option.label === trimmed) ?? -1;
+                const mappedLabel =
+                  matchedIndex >= 0
+                    ? (pending.question.originalOptionLabels?.[0]?.[matchedIndex] ?? trimmed)
+                    : trimmed;
+                const onlyQuestionId = pending.question.questionIds[0];
+                if (onlyQuestionId === undefined) {
+                  return Effect.fail(failure("protocol", "The questionnaire answer is invalid."));
+                }
+                answers = { [onlyQuestionId]: { answers: [mappedLabel] } };
+              } else {
+                return Effect.fail(failure("protocol", "The questionnaire answer is invalid."));
+              }
+              state.pendingQuestion = undefined;
+            } else {
+              pending.answers.set(index, input.answer);
+              if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
+              state.pendingQuestion = undefined;
+              answers = Object.fromEntries(
+                pending.question.questionIds.map((questionId, position) => [
+                  questionId,
+                  { answers: [pending.answers.get(position) ?? ""] },
+                ]),
+              );
+            }
             // The JSON-RPC reply to Codex's question request, sent the way
             // an approval's reply is.
             return request(() =>

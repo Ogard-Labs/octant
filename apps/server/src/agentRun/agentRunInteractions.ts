@@ -271,18 +271,24 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       readonly signal: AbortSignal;
     }): Promise<string | undefined> => {
       const choices = input.event.options;
-      const prompt = [
-        input.event.prompt,
-        ...(input.event.questionIndex === undefined
-          ? []
-          : [`Question ${input.event.questionIndex} of ${input.event.questionCount}.`]),
-        ...choices
-          .filter((option) => option.description !== undefined)
-          .map((option) => `${option.label}: ${option.description}`),
-      ].join("\n\n");
+      const prompt =
+        input.event.questionnaire !== undefined
+          ? input.event.prompt
+          : [
+              input.event.prompt,
+              ...(input.event.questionIndex === undefined
+                ? []
+                : [`Question ${input.event.questionIndex} of ${input.event.questionCount}.`]),
+              ...choices
+                .filter((option) => option.description !== undefined)
+                .map((option) => `${option.label}: ${option.description}`),
+            ].join("\n\n");
       const outcome = await ask({
         ...input,
         prompt,
+        ...(input.event.questionnaire === undefined
+          ? {}
+          : { questionnaire: input.event.questionnaire }),
         options: choices.map((option) => option.label),
         // Its answer comes back here in memory; the parent's journal keeps
         // only that it was given.

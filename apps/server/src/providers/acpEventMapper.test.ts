@@ -860,8 +860,13 @@ describe("ACP event normalization", () => {
         sessionId: "acp-session-1",
         toolCall: { toolCallId: "question-1", title: "Choose a target" },
         options: [
-          { optionId: "q0_opt_0", name: "A", kind: "allow_once" },
-          { optionId: "q0_opt_1", name: "B", kind: "allow_once" },
+          {
+            optionId: "q0_opt_0",
+            name: "A (Recommended)",
+            description: "Primary build target",
+            kind: "allow_once",
+          },
+          { optionId: "q0_opt_1", name: "B", description: "Fallback target", kind: "allow_once" },
           { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
         ],
       },
@@ -872,7 +877,25 @@ describe("ACP event normalization", () => {
       event: {
         kind: "user-input-request",
         prompt: "Choose a target",
-        options: [{ label: "A" }, { label: "B" }],
+        options: [
+          { label: "A", description: "Primary build target" },
+          { label: "B", description: "Fallback target" },
+        ],
+        questionnaire: {
+          allowComment: false,
+          questions: [
+            {
+              id: "q0",
+              prompt: "Choose a target",
+              selection: "single",
+              allowCustom: false,
+              options: [
+                { id: "o0", label: "A", description: "Primary build target", recommended: true },
+                { id: "o1", label: "B", description: "Fallback target" },
+              ],
+            },
+          ],
+        },
       },
     });
   });

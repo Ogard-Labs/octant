@@ -611,14 +611,10 @@ function requestOptions(options: ReadonlyArray<{ readonly label: string }>): {
   readonly labels: ReadonlyArray<string>;
   readonly values: ReadonlyArray<string>;
 } {
-  const values = options.slice(0, 8).map((option) => option.label);
-  const labels = values.map((option, index) => {
-    const label = `Option ${index + 1}: ${sanitizeRequestText(option, "Option unavailable")}`.slice(
-      0,
-      2_000,
-    );
-    return label;
-  });
+  const values = options.slice(0, 32).map((option) => option.label);
+  const labels = values.map((option) =>
+    sanitizeRequestText(option, "Option unavailable").slice(0, 2_000).trim(),
+  );
   return { labels, values };
 }
 
@@ -630,27 +626,34 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Work request lifecycle update failed.";
 }
 
-function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
+export function sanitizedQuestionnaire(questionnaire: Questionnaire): Questionnaire {
   return {
     ...(questionnaire.allowComment === undefined
       ? {}
       : { allowComment: questionnaire.allowComment }),
-    questions: questionnaire.questions.map((question) => ({
-      ...question,
-      prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024).trim(),
-      options: question.options.map((option, index) => ({
-        ...option,
-        label: `Option ${index + 1}: ${sanitizeRequestText(option.label, "Choice")}`
-          .slice(0, 256)
-          .trim(),
-        ...(option.description === undefined
+    questions: questionnaire.questions.map((question) => {
+      const sanitizedHeader =
+        question.header === undefined
+          ? undefined
+          : sanitizeRequestText(question.header, "Question").slice(0, 64).trim();
+      return {
+        ...question,
+        ...(sanitizedHeader === undefined || sanitizedHeader.length === 0
           ? {}
-          : {
-              description: sanitizeRequestText(option.description, "Choice description")
-                .slice(0, 512)
-                .trim(),
-            }),
-      })),
-    })),
+          : { header: sanitizedHeader }),
+        prompt: sanitizeRequestText(question.prompt, "Input requested").slice(0, 1_024).trim(),
+        options: question.options.map((option) => ({
+          ...option,
+          label: sanitizeRequestText(option.label, "Choice").slice(0, 256).trim(),
+          ...(option.description === undefined
+            ? {}
+            : {
+                description: sanitizeRequestText(option.description, "Choice description")
+                  .slice(0, 512)
+                  .trim(),
+              }),
+        })),
+      };
+    }),
   };
 }

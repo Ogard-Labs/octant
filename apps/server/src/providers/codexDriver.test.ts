@@ -5302,7 +5302,7 @@ describe("Codex execution authority and approvals", () => {
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
     );
-    const asked = takeEvents(acquired.connection, 2);
+    const asked = takeEvents(acquired.connection, 1);
     const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
       ({
         kind: "request",
@@ -5318,8 +5318,18 @@ describe("Codex execution authority and approvals", () => {
           question: "Which module first?",
           isOther: true,
           options: [
-            { label: "Parser", description: "Start with parsing" },
+            { label: "Parser (Recommended)", description: "Start with parsing" },
             { label: "Writer", description: "Start with output" },
+          ],
+        },
+        {
+          id: "mode",
+          header: "Mode",
+          question: "Which output mode?",
+          isOther: false,
+          options: [
+            { label: "Strict", description: "Fail on unknown tokens" },
+            { label: "Lenient", description: "Skip unknown tokens" },
           ],
         },
         { id: "tests", header: "Tests", question: "Add tests too?", options: null },
@@ -5330,31 +5340,76 @@ describe("Codex execution authority and approvals", () => {
       {
         kind: "user-input-request",
         prompt: "Which module first?",
-        options: [
-          { label: "Parser", description: "Start with parsing" },
-          { label: "Writer", description: "Start with output" },
-        ],
-        questionIndex: 1,
-        questionCount: 2,
+        options: [],
+        questionnaire: {
+          allowComment: false,
+          questions: [
+            {
+              id: "q0",
+              header: "Scope",
+              prompt: "Which module first?",
+              selection: "single",
+              allowCustom: true,
+              options: [
+                {
+                  id: "o0",
+                  label: "Parser",
+                  description: "Start with parsing",
+                  recommended: true,
+                },
+                { id: "o1", label: "Writer", description: "Start with output" },
+              ],
+            },
+            {
+              id: "q1",
+              header: "Mode",
+              prompt: "Which output mode?",
+              selection: "single",
+              allowCustom: false,
+              options: [
+                { id: "o0", label: "Strict", description: "Fail on unknown tokens" },
+                { id: "o1", label: "Lenient", description: "Skip unknown tokens" },
+              ],
+            },
+            {
+              id: "q2",
+              header: "Tests",
+              prompt: "Add tests too?",
+              selection: "single",
+              allowCustom: true,
+              options: [],
+            },
+          ],
+        },
       },
-      { kind: "user-input-request", prompt: "Add tests too?", questionIndex: 2, questionCount: 2 },
     ]);
-    for (const [event, answer] of [
-      [events[0], "Parser"],
-      [events[1], "Yes, unit tests"],
-    ] as const) {
-      if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
-      await Effect.runPromise(
-        acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
-      );
-    }
+    const event = events[0];
+    if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+    await Effect.runPromise(
+      acquired.connection.answerUserInput({
+        sessionId,
+        requestId: event.requestId,
+        answer: JSON.stringify({
+          version: 1,
+          answers: [
+            { questionId: "q0", selectedOptionIds: ["o0"] },
+            { questionId: "q1", selectedOptionIds: ["o1"] },
+            { questionId: "q2", selectedOptionIds: [], customAnswer: "Yes, unit tests" },
+          ],
+        }),
+      }),
+    );
     expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
       {
         method: "approval/respond",
         input: {
           providerRequestId: "ask-1",
           result: {
-            answers: { scope: { answers: ["Parser"] }, tests: { answers: ["Yes, unit tests"] } },
+            answers: {
+              scope: { answers: ["Parser (Recommended)"] },
+              mode: { answers: ["Lenient"] },
+              tests: { answers: ["Yes, unit tests"] },
+            },
           },
         },
       },

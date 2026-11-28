@@ -364,6 +364,84 @@ describe("one harness session on every surface", () => {
     ]);
   });
 
+  it("accepts a phone's structured QuestionnaireResponse for a pending native-harness questionnaire", async () => {
+    const { store } = journaledSession();
+    let counter = 0;
+    const questions = new NativeHarnessQuestionStore({
+      sessions: store,
+      uuid: () => `eeeeeeee-eeee-4eee-8eee-${(++counter).toString(16).padStart(12, "0")}`,
+      clock: () => "2026-10-06T12:00:00.000Z",
+    });
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store,
+      followUps: {} as never,
+      authorizeThread: () => true,
+      answerQuestion: ({ threadId, questionId, answer, secret, actor }) =>
+        questions.answer(threadId, questionId, answer, actor, secret),
+    });
+    const lead = decodeNativeHarnessSlotCandidate({
+      hostId: "00000000-0000-4000-8000-0000000000aa",
+      providerInstanceId: "00000000-0000-4000-8000-000000000001",
+      modelId: "frontier-large",
+    });
+    const asked = questions.ask({
+      threadId,
+      mode: "work",
+      lead,
+      prompt: "Before running",
+      options: [],
+      questionnaire: {
+        allowComment: false,
+        questions: [
+          {
+            id: "q0",
+            header: "Branch",
+            prompt: "Which branch?",
+            selection: "single",
+            options: [
+              { id: "o0", label: "main", recommended: true },
+              { id: "o1", label: "release" },
+            ],
+          },
+          {
+            id: "q1",
+            header: "Suites",
+            prompt: "Which suites?",
+            selection: "multiple",
+            options: [
+              { id: "o0", label: "Unit" },
+              { id: "o1", label: "Smoke" },
+            ],
+          },
+        ],
+      },
+    });
+    const pendingId = store.read(threadId)?.questions[0]?.id;
+    const answerPayload = JSON.stringify({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o0"] },
+        { questionId: "q1", selectedOptionIds: ["o0", "o1"] },
+      ],
+    });
+    const request = new Request(
+      `http://127.0.0.1/api/native-harness/sessions/${threadId}/questions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ questionId: pendingId, answer: answerPayload }),
+      },
+    );
+    const deviceId = "55000000-0000-4000-8000-0000000000d1";
+    bindPrincipalRouteContext(request, {
+      principal: { kind: "remote-device", deviceId, admittedBy: "host-person" } as never,
+      scopeId: windowId,
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(200);
+    expect(await asked).toMatchObject({ status: "answered", answer: answerPayload });
+  });
+
   it("hands a subagent's secret question's answer back to it from the person alone and never journals it", async () => {
     const { store } = journaledSession();
     const directory = directories.at(-1) ?? "";

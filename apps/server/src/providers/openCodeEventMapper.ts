@@ -5,9 +5,16 @@ import type {
   ProviderOutputStopReason,
   ProviderRuntimeEvent,
   ProviderSessionId,
+  Questionnaire,
   UtcTimestamp,
 } from "@octant/contracts";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_QUESTIONNAIRE_HEADER_LENGTH,
+  MAX_QUESTIONNAIRE_OPTIONS,
+  MAX_QUESTIONNAIRE_QUESTIONS,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+} from "@octant/contracts";
+import { parseRecommendedOptionLabel } from "@octant/domain";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
@@ -174,57 +181,92 @@ function mapQuestion(
   }>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   if (questions.length === 0) return [];
-  if (
-    questions.some(
-      (question) => question.multiple === true || normalizeText(question.question) === undefined,
-    )
-  ) {
+  if (questions.length > MAX_QUESTIONNAIRE_QUESTIONS) {
     return [
       mappedEvent(context, {
         kind: "failed",
         failure: {
           category: "unsupported",
-          message:
-            "This provider question format is not supported. Ask one single-select question at a time.",
+          message: "This provider question format exceeds the supported question count.",
         },
       }),
     ];
   }
   const normalizedRequestId = normalizeText(requestId);
   if (normalizedRequestId === undefined) return [];
-  const count = questions.length;
-  return questions.flatMap((question, index) => {
-    const prompt = normalizeText(question.question);
-    if (prompt === undefined) return [];
-    const options = question.options.flatMap((option) => {
-      const label = normalizeText(option.label);
-      if (label === undefined) return [];
+  const mappedQuestions = questions.flatMap((question, index) => {
+    const prompt = normalizeText(question.question)?.slice(0, 1_024).trim();
+    if (prompt === undefined || prompt.length === 0) return [];
+    const header =
+      typeof question.header === "string"
+        ? normalizeText(question.header)?.slice(0, MAX_QUESTIONNAIRE_HEADER_LENGTH).trim()
+        : undefined;
+    const options = question.options.flatMap((option, optionIndex) => {
+      const rawLabel = normalizeText(option.label)?.slice(0, 256).trim();
+      if (rawLabel === undefined || rawLabel.length === 0) return [];
+      const parsed = parseRecommendedOptionLabel(rawLabel);
       const rawDescription = option.description;
       const description =
-        typeof rawDescription === "string" ? normalizeText(rawDescription) : undefined;
+        typeof rawDescription === "string"
+          ? normalizeText(rawDescription)?.slice(0, 512).trim()
+          : undefined;
       return [
         {
-          label,
-          ...(description === undefined ? {} : { description }),
+          id: `o${optionIndex}`,
+          label: parsed.label,
+          ...(description === undefined || description.length === 0 ? {} : { description }),
+          ...(parsed.recommended ? { recommended: true } : {}),
         },
       ];
     });
+    if (options.length > MAX_QUESTIONNAIRE_OPTIONS) return [];
+    const allowCustom = options.length === 0 ? true : question.custom !== false;
     return [
-      mappedEvent(
-        context,
-        {
-          kind: "user-input-request",
-          requestId: normalizedRequestId,
-          prompt,
-          options,
-          // Keep the provider callback here; the connection assigns each
-          // question its own answer identity before publishing it.
-          ...(count > 1 ? { questionIndex: index + 1, questionCount: count } : {}),
-        },
-        index,
-      ),
+      {
+        id: `q${index}`,
+        ...(header === undefined || header.length === 0 ? {} : { header }),
+        prompt,
+        selection: question.multiple === true ? ("multiple" as const) : ("single" as const),
+        options,
+        allowCustom,
+      },
     ];
   });
+  const first = mappedQuestions[0];
+  if (mappedQuestions.length !== questions.length || first === undefined) {
+    return [
+      mappedEvent(context, {
+        kind: "failed",
+        failure: {
+          category: "unsupported",
+          message: "This provider question format is not supported.",
+        },
+      }),
+    ];
+  }
+  const questionnaire: Questionnaire = {
+    allowComment: false,
+    questions: mappedQuestions,
+  };
+  return [
+    mappedEvent(
+      context,
+      {
+        kind: "user-input-request",
+        requestId: normalizedRequestId,
+        prompt: first.prompt,
+        options:
+          mappedQuestions.length === 1
+            ? first.options.map((option) => ({
+                label: option.label,
+                ...(option.description === undefined ? {} : { description: option.description }),
+              }))
+            : [],
+        questionnaire,
+      },
+      0,
+    ),
+  ];
 }
 
 /**

@@ -4,6 +4,8 @@ import {
   planReadOnlyToolServers,
   providerCommandOf,
   providerRunsAsItself,
+  resolveQuestionnaireAnswerValues,
+  validateQuestionnaireAnswer,
 } from "@octant/domain";
 import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
@@ -200,7 +202,7 @@ export interface OpenCodeClientPort {
   readonly replyQuestion: (
     sessionId: string,
     requestId: string,
-    answers: ReadonlyArray<string>,
+    answers: ReadonlyArray<string | ReadonlyArray<string>>,
   ) => Promise<void>;
   /**
    * Sets a session's own permission rules, which OpenCode applies after its
@@ -357,6 +359,8 @@ interface SessionState {
       readonly providerRequestId: string;
       readonly index: number;
       readonly count: number;
+      readonly questionnaire?: import("@octant/contracts").Questionnaire;
+      readonly originalOptionLabels?: ReadonlyArray<ReadonlyArray<string>>;
     }
   >;
   readonly questionAnswers: Map<string, Map<number, string>>;
@@ -3906,6 +3910,58 @@ function makeConnection(
                       return Effect.fail(
                         fail("protocol", "Provider question request is not pending."),
                       );
+                    if (question.questionnaire !== undefined) {
+                      const trimmed = input.answer.trim();
+                      const validated = validateQuestionnaireAnswer(
+                        question.questionnaire,
+                        trimmed,
+                      );
+                      let ordered: ReadonlyArray<string | ReadonlyArray<string>>;
+                      if (validated.status === "valid") {
+                        const values = resolveQuestionnaireAnswerValues(
+                          question.questionnaire,
+                          validated.response,
+                          question.originalOptionLabels,
+                        );
+                        ordered = question.questionnaire.questions.map((entry, position) =>
+                          entry.selection === "multiple"
+                            ? (values[position] ?? [])
+                            : (values[position]?.[0] ?? ""),
+                        );
+                      } else if (
+                        question.questionnaire.questions.length === 1 &&
+                        question.questionnaire.questions[0]?.selection === "single" &&
+                        !trimmed.startsWith("{") &&
+                        trimmed.length > 0
+                      ) {
+                        const firstQuestion = question.questionnaire.questions[0];
+                        const matchedIndex = firstQuestion.options.findIndex(
+                          (option) => option.label === trimmed,
+                        );
+                        const mappedLabel =
+                          matchedIndex >= 0
+                            ? (question.originalOptionLabels?.[0]?.[matchedIndex] ?? trimmed)
+                            : trimmed;
+                        ordered = [mappedLabel];
+                      } else {
+                        return Effect.fail(
+                          fail("protocol", "The questionnaire answer is invalid."),
+                        );
+                      }
+                      return request(() =>
+                        activeClient.replyQuestion(
+                          state.requestSources.get(question.providerRequestId) ?? source,
+                          question.providerRequestId,
+                          ordered,
+                        ),
+                      ).pipe(
+                        Effect.tap(() =>
+                          Effect.sync(() => {
+                            state.questions.delete(input.requestId);
+                          }),
+                        ),
+                      );
+                    }
                     const answers =
                       state.questionAnswers.get(question.providerRequestId) ??
                       new Map<number, string>();
@@ -4425,13 +4481,28 @@ function mapAndOffer(
     if (normalized.kind === "user-input-request") {
       const providerRequestId = normalized.requestId;
       const index = normalized.questionIndex ?? 1;
-      const count = normalized.questionCount ?? 1;
+      const count = normalized.questionnaire?.questions.length ?? normalized.questionCount ?? 1;
       const existing = [...state.questions].find(
         ([, pending]) => pending.providerRequestId === providerRequestId && pending.index === index,
       );
-      const requestId = existing?.[0] ?? (count === 1 ? providerRequestId : crypto.randomUUID());
+      const requestId =
+        existing?.[0] ??
+        (normalized.questionnaire !== undefined || count === 1
+          ? providerRequestId
+          : crypto.randomUUID());
       if (state.questionAnswers.get(providerRequestId)?.has(index)) continue;
-      state.questions.set(requestId, { providerRequestId, index, count });
+      const originalOptionLabels = questionForm?.properties.questions.map((entry) =>
+        entry.options.map((option) => option.label.trim()),
+      );
+      state.questions.set(requestId, {
+        providerRequestId,
+        index,
+        count,
+        ...(normalized.questionnaire === undefined
+          ? {}
+          : { questionnaire: normalized.questionnaire }),
+        ...(originalOptionLabels === undefined ? {} : { originalOptionLabels }),
+      });
       normalized = { ...normalized, requestId };
     }
     // Where the turn ends in OpenCode's own session, for a later fork or rewind.
@@ -4988,6 +5059,7 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
       readonly title?: unknown;
       readonly description?: unknown;
       readonly options?: unknown;
+      readonly custom?: unknown;
     };
     if (
       field.key !== `q${index}` ||
@@ -5012,6 +5084,7 @@ export function openCodeQuestionForm(properties: unknown): OpenCodeQuestionEvent
       header: typeof field.title === "string" ? field.title : "",
       options,
       ...(field.type === "multiselect" ? { multiple: true } : {}),
+      ...(typeof field.custom === "boolean" ? { custom: field.custom } : {}),
     });
   }
   return { id, type: "question.v2.asked", properties: { id, sessionID, questions } };

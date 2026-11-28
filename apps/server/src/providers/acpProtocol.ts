@@ -180,6 +180,7 @@ const PermissionRequestParams = Schema.Struct({
       optionId: Schema.NonEmptyTrimmedString,
       name: Schema.NonEmptyTrimmedString,
       kind: Schema.NonEmptyTrimmedString,
+      description: Schema.optional(Schema.NullOr(Schema.String)),
     }),
   ),
 });

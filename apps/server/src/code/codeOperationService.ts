@@ -1327,6 +1327,7 @@ export type CodeTurnPendingRequest = {
       readonly requestId: string;
       readonly prompt: string;
       readonly options: ReadonlyArray<string>;
+      readonly questionnaire?: import("@octant/contracts").Questionnaire;
       /** Answered only in its thread, masked; see `input-requested`'s `secret`. */
       readonly secret?: true;
     }
@@ -3275,6 +3276,9 @@ export class CodeOperationService {
               kind: "question",
               text: request.prompt,
               options: request.options.map((label) => ({ label })),
+              ...(request.questionnaire === undefined
+                ? {}
+                : { questionnaire: request.questionnaire }),
               ...(request.secret === true ? { secret: true } : {}),
               answer: {
                 threadId: scope.thread.id,

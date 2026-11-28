@@ -352,21 +352,18 @@ describe("mapOpenCodeEvent", () => {
 
   it.each([
     {
-      name: "a multi-select question",
+      name: "an oversized question set",
       event: official({
-        id: "event-question-multiple",
+        id: "event-question-oversized",
         type: "question.v2.asked",
         properties: {
-          id: "question-multiple",
+          id: "question-oversized",
           sessionID: "provider-session",
-          questions: [
-            {
-              header: "Choose",
-              question: "Raw multi-select question must-not-cross?",
-              options: [{ label: "Raw option must-not-cross", description: "private" }],
-              multiple: true,
-            },
-          ],
+          questions: Array.from({ length: 5 }, (_, index) => ({
+            header: `Q${index + 1}`,
+            question: `Raw oversized question ${index} must-not-cross?`,
+            options: [{ label: "Raw option must-not-cross", description: "private" }],
+          })),
         },
       }),
     },
@@ -378,8 +375,6 @@ describe("mapOpenCodeEvent", () => {
         kind: "failed",
         failure: {
           category: "unsupported",
-          message:
-            "This provider question format is not supported. Ask one single-select question at a time.",
         },
       },
     ]);
@@ -387,7 +382,7 @@ describe("mapOpenCodeEvent", () => {
     expect(JSON.stringify(results)).not.toMatch(/must-not-cross|metadata|providerID/i);
   });
 
-  it("maps a multi-question set into one event per question, each with its place", () => {
+  it("maps a multi-question set with multiple-choice, headers, custom setting, descriptions, and recommended into one questionnaire", () => {
     const results = mapped(
       official({
         id: "event-question-groups",
@@ -397,19 +392,29 @@ describe("mapOpenCodeEvent", () => {
           sessionID: "provider-session",
           questions: [
             {
-              header: "First",
+              header: "Queue",
               question: "How should I proceed?",
               options: [
                 {
-                  label: "Dequeue, push, re-queue",
+                  label: "Dequeue, push, re-queue (Recommended)",
                   description: "Leave the queue, push the fix, re-enter it.",
                 },
                 { label: "Let it merge", description: "Keep the fix as a follow-up." },
               ],
             },
             {
-              header: "Second",
+              header: "Checks",
+              question: "Which checks should run?",
+              multiple: true,
+              options: [
+                { label: "Unit tests", description: "Fast suite" },
+                { label: "Typecheck", description: "Workspace types" },
+              ],
+            },
+            {
+              header: "Threads",
               question: "Mark the review threads resolved?",
+              custom: false,
               options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
             },
           ],
@@ -422,26 +427,60 @@ describe("mapOpenCodeEvent", () => {
         kind: "user-input-request",
         requestId: "question-groups",
         prompt: "How should I proceed?",
-        options: [
-          {
-            label: "Dequeue, push, re-queue",
-            description: "Leave the queue, push the fix, re-enter it.",
-          },
-          { label: "Let it merge", description: "Keep the fix as a follow-up." },
-        ],
-        questionIndex: 1,
-        questionCount: 2,
-      },
-      {
-        kind: "user-input-request",
-        requestId: "question-groups",
-        prompt: "Mark the review threads resolved?",
-        options: [{ label: "Resolve verified", description: "Note each thread briefly." }],
-        questionIndex: 2,
-        questionCount: 2,
+        options: [],
+        questionnaire: {
+          allowComment: false,
+          questions: [
+            {
+              id: "q0",
+              header: "Queue",
+              prompt: "How should I proceed?",
+              selection: "single",
+              allowCustom: true,
+              options: [
+                {
+                  id: "o0",
+                  label: "Dequeue, push, re-queue",
+                  description: "Leave the queue, push the fix, re-enter it.",
+                  recommended: true,
+                },
+                {
+                  id: "o1",
+                  label: "Let it merge",
+                  description: "Keep the fix as a follow-up.",
+                },
+              ],
+            },
+            {
+              id: "q1",
+              header: "Checks",
+              prompt: "Which checks should run?",
+              selection: "multiple",
+              allowCustom: true,
+              options: [
+                { id: "o0", label: "Unit tests", description: "Fast suite" },
+                { id: "o1", label: "Typecheck", description: "Workspace types" },
+              ],
+            },
+            {
+              id: "q2",
+              header: "Threads",
+              prompt: "Mark the review threads resolved?",
+              selection: "single",
+              allowCustom: false,
+              options: [
+                {
+                  id: "o0",
+                  label: "Resolve verified",
+                  description: "Note each thread briefly.",
+                },
+              ],
+            },
+          ],
+        },
       },
     ]);
-    expect(results).toHaveLength(2);
+    expect(results).toHaveLength(1);
   });
 
   it("refuses a question set with an unanswerable blank item", () => {

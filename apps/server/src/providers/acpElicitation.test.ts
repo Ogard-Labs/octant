@@ -54,6 +54,62 @@ describe("session forms", () => {
     ).toEqual({ status: "valid", content: { native_single: "CSV", native_multi: ["XML"] } });
   });
 
+  it("preserves option descriptions, short headers, and recommended markers", () => {
+    const described = normalizeAcpElicitation("Choose setup", {
+      type: "object",
+      required: ["db"],
+      properties: {
+        db: {
+          type: "string",
+          title: "Database",
+          description: "Which database should we configure?",
+          oneOf: [
+            {
+              const: "PostgreSQL (Recommended)",
+              title: "PostgreSQL (Recommended)",
+              description: "Managed relational store",
+            },
+            { const: "SQLite", title: "SQLite", description: "Embedded file store" },
+          ],
+        },
+      },
+    });
+    expect(described?.questionnaire).toEqual({
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Database",
+          prompt: "Which database should we configure?",
+          selection: "single",
+          options: [
+            {
+              id: "o0",
+              label: "PostgreSQL",
+              description: "Managed relational store",
+              recommended: true,
+            },
+            { id: "o1", label: "SQLite", description: "Embedded file store" },
+          ],
+          allowCustom: true,
+        },
+      ],
+    });
+    if (described === undefined) throw new Error("form missing");
+    expect(
+      answerAcpElicitation(
+        described,
+        JSON.stringify({
+          version: 1,
+          answers: [{ questionId: "q0", selectedOptionIds: ["o0"] }],
+        }),
+      ),
+    ).toEqual({
+      status: "valid",
+      content: { db: "PostgreSQL (Recommended)" },
+    });
+  });
+
   it("refuses unsupported, oversized and ambiguous forms instead of truncating the ask", () => {
     expect(
       normalizeAcpElicitation("Question", { ...schema, required: ["native_single"] }),
@@ -79,7 +135,7 @@ describe("session forms", () => {
           native_single: {
             type: "string",
             description: "Choose",
-            oneOf: Array.from({ length: 9 }, (_, i) => ({ const: String(i) })),
+            oneOf: Array.from({ length: 33 }, (_, i) => ({ const: String(i) })),
           },
         },
         required: ["native_single"],

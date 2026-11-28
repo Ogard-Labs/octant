@@ -10,6 +10,49 @@ export type QuestionnaireAnswerValidation =
   | { readonly status: "valid"; readonly response: QuestionnaireResponse }
   | { readonly status: "invalid"; readonly message: string };
 
+const RECOMMENDED_LABEL_SUFFIX = /\s*\(recommended\)\s*$/i;
+
+/**
+ * Strips a provider's trailing "(Recommended)" marker from an option label so
+ * the UI renders a consistent Recommended pill instead of duplicating text.
+ */
+export function parseRecommendedOptionLabel(rawLabel: string): {
+  readonly label: string;
+  readonly recommended: boolean;
+} {
+  const trimmed = rawLabel.trim();
+  if (!RECOMMENDED_LABEL_SUFFIX.test(trimmed)) {
+    return { label: trimmed, recommended: false };
+  }
+  const stripped = trimmed.replace(RECOMMENDED_LABEL_SUFFIX, "").trim();
+  return stripped.length === 0
+    ? { label: trimmed, recommended: false }
+    : { label: stripped, recommended: true };
+}
+
+/**
+ * Maps a validated questionnaire response back to the provider's original
+ * option values (one array of chosen labels or written text per question).
+ */
+export function resolveQuestionnaireAnswerValues(
+  questionnaire: Questionnaire,
+  response: QuestionnaireResponse,
+  originalLabels?: ReadonlyArray<ReadonlyArray<string>>,
+): ReadonlyArray<ReadonlyArray<string>> {
+  return questionnaire.questions.map((question, questionIndex) => {
+    const answer = response.answers.find((entry) => entry.questionId === question.id);
+    if (answer === undefined) return [];
+    if (answer.customAnswer !== undefined) return [answer.customAnswer];
+    const providerOptions = originalLabels?.[questionIndex];
+    return answer.selectedOptionIds.map((optionId) => {
+      const optionIndex = question.options.findIndex((option) => option.id === optionId);
+      const original = optionIndex >= 0 ? providerOptions?.[optionIndex] : undefined;
+      if (original !== undefined) return original;
+      return question.options[optionIndex]?.label ?? optionId;
+    });
+  });
+}
+
 /** Validate against the exact ask before any answer can settle its request. */
 export function validateQuestionnaireAnswer(
   questionnaire: Questionnaire,

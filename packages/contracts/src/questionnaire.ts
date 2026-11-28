@@ -3,7 +3,9 @@ import { personDecides } from "./hostAnswer";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
-const ChoiceCount = Schema.Int.pipe(Schema.between(0, 8));
+export const MAX_QUESTIONNAIRE_OPTIONS = 32;
+export const MAX_QUESTIONNAIRE_HEADER_LENGTH = 64;
+const ChoiceCount = Schema.Int.pipe(Schema.between(0, MAX_QUESTIONNAIRE_OPTIONS));
 export const MAX_QUESTIONNAIRE_ANSWER_LENGTH = 16_384;
 export const QuestionnaireAnswerText = Schema.NonEmptyTrimmedString.pipe(
   Schema.maxLength(MAX_QUESTIONNAIRE_ANSWER_LENGTH),
@@ -23,9 +25,12 @@ const Option = Schema.Struct({
 }).annotations(strict);
 const questionFields = {
   id: Id,
+  header: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_QUESTIONNAIRE_HEADER_LENGTH)),
+  ),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
   selection: Schema.Literal("single", "multiple"),
-  options: Schema.Array(Option).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  options: Schema.Array(Option).pipe(Schema.maxItems(MAX_QUESTIONNAIRE_OPTIONS)),
   minSelections: Schema.optional(ChoiceCount),
   maxSelections: Schema.optional(ChoiceCount),
   allowCustom: Schema.optional(Schema.Boolean),
@@ -37,7 +42,15 @@ const questionHoldsItsLimits = (question: {
   readonly options: ReadonlyArray<{ readonly id: string }>;
   readonly minSelections?: number | undefined;
   readonly maxSelections?: number | undefined;
+  readonly allowCustom?: boolean | undefined;
 }): boolean => {
+  if (question.options.length === 0) {
+    return (
+      question.allowCustom !== false &&
+      (question.minSelections ?? 0) === 0 &&
+      (question.maxSelections ?? 0) === 0
+    );
+  }
   const min = question.minSelections ?? 1;
   const max =
     question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length);
@@ -106,7 +119,7 @@ export type Questionnaire = typeof Questionnaire.Type;
 
 const QuestionnaireAnswer = Schema.Struct({
   questionId: Id,
-  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(8)),
+  selectedOptionIds: Schema.Array(Id).pipe(Schema.maxItems(MAX_QUESTIONNAIRE_OPTIONS)),
   customAnswer: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
 }).annotations(strict);
 
