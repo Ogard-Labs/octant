@@ -546,20 +546,34 @@ describe("a guest joining a hub that has a spoke", () => {
     expect(await response?.json()).toEqual({ status: "refused", kind: "unknown-sender" });
   });
 
-  it("refuses a guest's sealed notification for the hub to forward, because a guest runs no agents", async () => {
+  it("refuses a guest's push notification for the hub to forward, because a guest runs no agents", async () => {
     const { network, hub } = await startHubAndSpoke();
-    hub.pushSetting.enabled = true;
-    hub.pushSetting.gatewayUrl = "http://127.0.0.1:9";
+    hub.directPush.setEnabled(true, window);
     await hub.push.setEnabled(true, window);
     const { record } = await joinGuest(hub, network);
     const guest = record.roster.roster.members.find((member) => member.role === "guest");
     if (guest === undefined) throw new Error("The guest is not in the roster.");
 
     const outcome = await hub.push.forward(String(guest.memberId), {
-      body: "{}",
-      hostKey: "a2V5",
-      timestamp: new Date().toISOString(),
-      signature: "c2ln",
+      version: 2,
+      platform: "ios",
+      token: "a".repeat(64),
+      message: {
+        type: "alert",
+        alert: {
+          version: 2,
+          kind: "waiting",
+          hostId: String(guest.memberId),
+          threadId: "00000000-0000-4000-8000-000000000001",
+          mode: "code",
+          title: "Waiting for you",
+          body: "On Guest",
+          collapseId: "B".repeat(22),
+          urgency: "high",
+          sequence: 1,
+          occurredAt: new Date().toISOString(),
+        },
+      },
     });
 
     expect(outcome).toEqual({ status: "refused", kind: "not-a-spoke" });

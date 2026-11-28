@@ -2851,7 +2851,8 @@ describe("SettingsView", () => {
       "Files",
       "Threads",
       "Compaction",
-      "Notifications",
+      "Phone notifications",
+      "Automation notifications",
     ]);
     const updates = screen.getByRole("heading", { name: "Updates" }).closest("section")!;
     updates.scrollIntoView = vi.fn();
