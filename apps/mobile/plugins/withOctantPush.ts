@@ -1,19 +1,18 @@
 // Native project changes the phone's push notifications need, applied when the
 // iOS project is generated. The Android side needs none here: the module's
-// own manifest declares the messaging service, and the Firebase project file
-// is named in `app.config.ts` only when the build supplies it.
+// own manifest declares the messaging service and permissions, and the Firebase
+// project file is named in `app.config.ts` only when the build supplies it.
 //
-// Off unless the build asks for it. The push entitlement and the extension
-// need the push capability and Keychain sharing on the app's App ID, which the
-// maintainer enables with the push accounts; a build made before that would
-// fail at signing. A build without push declares nothing, and the module
-// reports push unavailable (`OctantPushEnabled` is absent from its Info.plist).
+// Off unless the build asks for it. The push entitlement, App Group, and the
+// keyless notification service extension need the push and App Group
+// capabilities on the app's App ID; a build made before that would fail at
+// signing. A build without push declares nothing, and the module reports push
+// unavailable (`OctantPushEnabled` is absent from its Info.plist).
 //
-// On iOS this adds the Apple push entitlement to the app, a Keychain access
-// group shared by the app and the notification service extension (so the
-// extension can read the keys the app makes), and the extension target. The
-// extension's sources live in the push module and are copied in, so the
-// module is the one place its Swift is written.
+// On iOS this adds the Apple push entitlement to the app, a shared status App
+// Group (`group.<bundleIdentifier>.status`, used for non-secret status and
+// forgotten-host tracking — no Keychain group, no keys), and the keyless
+// notification service extension target.
 
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,12 +24,12 @@ import {
 } from "expo/config-plugins";
 
 export const NOTIFICATION_SERVICE_TARGET = "OctantNotificationService";
-const KEYCHAIN_GROUP_SUFFIX = "notification-keys";
+const APP_GROUP_SUFFIX = "status";
 const EXTENSION_BUNDLE_SUFFIX = "notification-service";
 const IOS_DEPLOYMENT_TARGET = "16.4";
 
 /** Files shared with the app's module, then the extension's own, relative to the module. */
-const SHARED_SOURCES = ["ios/SealedNotification.swift", "ios/NotificationKeyVault.swift"] as const;
+const SHARED_SOURCES = ["ios/DirectNotification.swift"] as const;
 const EXTENSION_SOURCES = ["notification-service/NotificationService.swift"] as const;
 
 function bundleIdentifierOf(config: { ios?: { bundleIdentifier?: string | undefined } }): string {
@@ -41,24 +40,24 @@ function bundleIdentifierOf(config: { ios?: { bundleIdentifier?: string | undefi
   return bundleIdentifier;
 }
 
-/** The Keychain group, with the team prefix filled in by Xcode at build time. */
-export function keychainAccessGroup(bundleIdentifier: string): string {
-  return `$(AppIdentifierPrefix)${bundleIdentifier}.${KEYCHAIN_GROUP_SUFFIX}`;
+/** The shared non-secret status App Group (`group.app.octant.mobile.status`). */
+export function statusAppGroup(bundleIdentifier: string): string {
+  return `group.${bundleIdentifier}.${APP_GROUP_SUFFIX}`;
 }
 
 export function extensionBundleIdentifier(bundleIdentifier: string): string {
   return `${bundleIdentifier}.${EXTENSION_BUNDLE_SUFFIX}`;
 }
 
-/** The extension's entitlements file: the shared Keychain group and nothing else. */
+/** The extension's entitlements file: the shared non-secret status App Group only. */
 export function extensionEntitlements(bundleIdentifier: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>keychain-access-groups</key>
+	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>${keychainAccessGroup(bundleIdentifier)}</string>
+		<string>${statusAppGroup(bundleIdentifier)}</string>
 	</array>
 </dict>
 </plist>
@@ -67,24 +66,26 @@ export function extensionEntitlements(bundleIdentifier: string): string {
 
 /** Read by the push module: only a build made with the capability reports push supported. */
 export const PUSH_ENABLED_INFO_KEY = "OctantPushEnabled";
+export const STATUS_APP_GROUP_INFO_KEY = "OctantStatusAppGroup";
 
 const withPushEntitlements: ConfigPlugin = (config) => {
   const bundleIdentifier = bundleIdentifierOf(config);
+  const group = statusAppGroup(bundleIdentifier);
   // `development` here; signing a build for distribution replaces it with
   // `production`, which is the value Apple's push service expects for it.
   config = withEntitlementsPlist(config, (mod) => {
     mod.modResults["aps-environment"] ??= "development";
     const groups = new Set<string>(
-      Array.isArray(mod.modResults["keychain-access-groups"])
-        ? (mod.modResults["keychain-access-groups"] as string[])
+      Array.isArray(mod.modResults["com.apple.security.application-groups"])
+        ? (mod.modResults["com.apple.security.application-groups"] as string[])
         : [],
     );
-    groups.add(keychainAccessGroup(bundleIdentifier));
-    mod.modResults["keychain-access-groups"] = [...groups];
+    groups.add(group);
+    mod.modResults["com.apple.security.application-groups"] = [...groups];
     return mod;
   });
   return withInfoPlist(config, (mod) => {
-    mod.modResults.OctantKeychainAccessGroup = keychainAccessGroup(bundleIdentifier);
+    mod.modResults[STATUS_APP_GROUP_INFO_KEY] = group;
     mod.modResults[PUSH_ENABLED_INFO_KEY] = true;
     return mod;
   });
@@ -92,6 +93,7 @@ const withPushEntitlements: ConfigPlugin = (config) => {
 
 const withNotificationServiceTarget: ConfigPlugin = (config) => {
   const bundleIdentifier = bundleIdentifierOf(config);
+  const group = statusAppGroup(bundleIdentifier);
   const teamId = config.ios?.appleTeamId;
   return withXcodeProject(config, (mod) => {
     const project = mod.modResults;
@@ -110,18 +112,18 @@ const withNotificationServiceTarget: ConfigPlugin = (config) => {
     const infoPlist = readFileSync(
       join(moduleRoot, "notification-service", "Info.plist"),
       "utf8",
-    ).replace("__KEYCHAIN_ACCESS_GROUP__", keychainAccessGroup(bundleIdentifier));
+    ).replace("__STATUS_APP_GROUP__", group);
     writeFileSync(join(folder, "Info.plist"), infoPlist);
     const entitlementsName = `${NOTIFICATION_SERVICE_TARGET}.entitlements`;
     writeFileSync(join(folder, entitlementsName), extensionEntitlements(bundleIdentifier));
 
-    const group = project.addPbxGroup(
+    const pbxGroup = project.addPbxGroup(
       [...sources, "Info.plist", entitlementsName],
       NOTIFICATION_SERVICE_TARGET,
       NOTIFICATION_SERVICE_TARGET,
     );
     const mainGroup = project.getFirstProject().firstProject.mainGroup;
-    project.addToPbxGroup(group.uuid, mainGroup);
+    project.addToPbxGroup(pbxGroup.uuid, mainGroup);
 
     const target = project.addTarget(
       NOTIFICATION_SERVICE_TARGET,
@@ -129,9 +131,6 @@ const withNotificationServiceTarget: ConfigPlugin = (config) => {
       NOTIFICATION_SERVICE_TARGET,
       extensionBundleIdentifier(bundleIdentifier),
     );
-    // The app embeds the extension's product, so it must be built first. A
-    // generated project has no dependency sections yet, and the library adds a
-    // dependency only to sections that exist.
     const objects = project.hash.project.objects;
     objects.PBXTargetDependency ??= {};
     objects.PBXContainerItemProxy ??= {};
@@ -140,7 +139,6 @@ const withNotificationServiceTarget: ConfigPlugin = (config) => {
     project.addBuildPhase([], "PBXResourcesBuildPhase", "Resources", target.uuid);
     project.addBuildPhase([], "PBXFrameworksBuildPhase", "Frameworks", target.uuid);
 
-    // The extension carries the app's version, which the App Store requires.
     const allSettings = Object.values(
       project.pbxXCBuildConfigurationSection() as Record<string, unknown>,
     ).flatMap((entry) => {
@@ -169,11 +167,6 @@ const withNotificationServiceTarget: ConfigPlugin = (config) => {
   });
 };
 
-/**
- * Tells EAS about the extension so it registers the extension's identifier and
- * signs it with the app: without this a managed build signs only the app and
- * the extension is left out of the provisioning.
- */
 const withExtensionCredentials: ConfigPlugin = (config) => {
   const bundleIdentifier = bundleIdentifierOf(config);
   const eas = (config.extra?.eas ?? {}) as Record<string, unknown>;
@@ -199,7 +192,7 @@ const withExtensionCredentials: ConfigPlugin = (config) => {
                   targetName: NOTIFICATION_SERVICE_TARGET,
                   bundleIdentifier: extensionBundleIdentifier(bundleIdentifier),
                   entitlements: {
-                    "keychain-access-groups": [keychainAccessGroup(bundleIdentifier)],
+                    "com.apple.security.application-groups": [statusAppGroup(bundleIdentifier)],
                   },
                 },
               ],

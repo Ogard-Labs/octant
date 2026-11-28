@@ -17,37 +17,30 @@ client looks and moves, with the platform's own bars, sheets, menus and
 alerts, is owned by the
 [mobile design system](../../apps/mobile/design-system/README.md).
 
-**Status.** Accepted 2026-10-26; slice 1 (the host keeps push registrations
-and drops them with the device), slice 2 (the host builds sealed, redacted
-thread notifications), slice 3 (camera and file capture), and slice 4 (voice
-input through the host) are implemented and verified in the container; their
-physical-device passes are maintainer gates. Slice 7's host side (the
-Notifications setting and the gateway transport) is implemented and verified
-against a local gateway; the gateway service itself is built in
-`octant-webapp`, and its deployment, platform credentials, and live delivery
-are maintainer gates. Slice 5 (Android internal builds)
-is built in part: the workflow, the `android-internal` profile, and the
-Android hardening adapters are in the repository and verified in the
-container, and its EAS build and Android device pass wait on the maintainer
-steps in [Android build rules](#android-build-rules). Slice 6 is implemented
-and verified without a device: the phone's enable flow, its token rotation and
-its forgetting of a computer's notifications run in the container; the
-iPhone's notification service extension and the Android receiver open what the
-host's real sealer produced (on a Mac with `swiftc`, and on a JVM with
-`kotlinc`, in the server tests); and the extension target and the push module
-compile for the Simulator. A build carries them only when made with the push
-capability on, so the device passes on both platforms, a test gateway, and the
-accounts they need wait on the gates in [Phone rules](#phone-rules). Slices 8
-and 9 are not started. The
-maintainer authorized this scope on 2026-10-26, brought it into the first preview on 2026-11-06, and accepted the
-[maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
-authorizes design, planning, and implementation of the slices below that need
-no new account, spend, hosted service, store submission, or widened authority;
-the account, deployment, and sign-off gates the decisions name stay maintainer
-actions. The release-boundary statement in the architecture is
-updated by a separate change; until it lands, public store work (Phase E) does
-not start. Nothing below is implemented unless
-[Exists today](#exists-today) says so.
+**Status.** Accepted 2026-10-26 and revised 2026-11-28 (direct host push with
+host-side secret checks; sealed push gateway retired). Slice 1 (host keeps push
+registrations and drops them with the device), slice 2 (branded host push
+payload builder with host-side secret checking and opt-in thread names), slice 3
+(camera and file capture), slice 4 (voice input through the host), slice 6
+(phone direct v2 push registration, keyless iOS notification service extension,
+and Android direct FCM receiver), and slice 7 (direct APNs/FCM push sending from
+any host, plus hub forwarding with re-check) are implemented and verified in the
+container; physical-device passes and live delivery remain maintainer gates.
+Slice 5 (Android internal builds) is built in part: the workflow, the
+`android-internal` profile, and the Android hardening adapters are in the
+repository and verified in the container, and its EAS build and Android device
+pass wait on the maintainer steps in [Android build rules](#android-build-rules).
+Live Activity, Android Live Update, Home Screen widget, and Inbox live-status
+surfaces follow in the next part; slices 8 and 9 are not started. The maintainer
+authorized this scope on 2026-10-26, brought it into the first preview on
+2026-11-06, accepted the [maintainer decisions](#maintainer-decisions) below on
+2026-10-26, and approved direct host push on 2026-11-28. That authorizes design,
+planning, and implementation of the slices below that need no new account,
+spend, hosted service, store submission, or widened authority; the account,
+deployment, and sign-off gates the decisions name stay maintainer actions. The
+release-boundary statement in the architecture is updated by a separate change;
+until it lands, public store work (Phase E) does not start. Nothing below is
+implemented unless [Exists today](#exists-today) says so.
 
 ## Outcome
 
@@ -57,8 +50,9 @@ phone more authority than the host grants:
 1. install the same remote client on Android as on iOS without a cable or a
    developer toolchain;
 2. learn on a locked phone that a thread is waiting, failed, finished, or needs
-   an approval, without the notification revealing what the thread is about to
-   Apple, Google, a relay, or a bystander;
+   an approval, sent directly from the computer to Apple and Google with closed
+   status words by default, opt-in thread names, and a host-side secret check on
+   every free-text field;
 3. attach a photo, image, or file and dictate a prompt from the phone, with all
    processing on the host; and, later,
 4. install the client from the public app stores.
@@ -149,10 +143,10 @@ These rules hold for every phase and are not reopened by any slice:
 |-|
 | iOS distribution | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability until a build is made with push on (`OCTANT_MOBILE_PUSH=1`), as [Phone rules](#phone-rules) describes |
 | Android | Package `app.octant.mobile`, built by the `android-internal` EAS profile (signed APK, internal distribution, keystore in EAS) from the manually dispatched `.github/workflows/mobile-android-internal.yml`; no backup, no overlay or location permission. The in-tree `octant-device-protection` module sets the secure window and reports key storage; pinned TLS (`modules/octant-pinned-tls/android`) is exercised on a JVM against a real listener by the server pairing smoke test, which CI's server job requires. CI resolves the Expo configuration for each release profile. No EAS build or device acceptance yet |
-| Push contracts | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt |
-| Push policy | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency |
-| Push on the host | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to the gateway transport (`gatewayPushDeliveryTransport.ts`), which sends only while Settings › General › Phone notifications is on (`pushGatewaySetting.ts`, owner-only `remote/push-gateway-setting.json`, off by default), as [Gateway rules](#gateway-rules) describes |
-| Push on the phone | `enablePhoneNotifications.ts` trades the platform token for a gateway capability bound to the paired computer's key fingerprint at the gateway compiled into the build (`MOBILE_PUSH_GATEWAY_URL`) and registers only the capability with the computer, as [Phone rules](#phone-rules) describes; removing a computer or revoking this phone from it calls the port's `forgetHost`. The in-tree `octant-push` module (`apps/mobile/modules/octant-push`) is the native port (`mobileNotificationPort.native.ts`): the system's permission, the Apple or Firebase token, one X25519 notification key per computer, and the iPhone's notification service extension and the Android messaging service that open sealed content. `rotatePhoneNotifications` re-registers a changed token, and `PushNotificationsPanel.tsx` offers enablement only where the port reports `available`, as [Phone rules](#phone-rules) describes; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}` a held move's `octant://hosts/{hostId}/moves`, and a new device's `octant://hosts/{hostId}/new-devices` |
+| Push contracts | `packages/contracts/src/remotePushNotifications.ts`: v2 registration (`version: 2`, platform, direct platform token, per-kind preferences and opt-in `threadTitles`), `RemotePushStatusV1` availability (`GET /api/remote/auth/push-token`), `PushAlertV2` and `LiveStatusV1` message shapes, `host.push-sender-changed@1`, and the journaled delivery receipt |
+| Push policy | `packages/domain/src/pushLabelPolicy.ts` and `packages/domain/src/pushNotificationPolicy.ts` enforce the single branded `CheckedPushMessageV2` builder under [decision M2](#maintainer-decisions) (closed status words and computer label; thread/project/automation names only for a phone that opted in; every free-text field checked against secret patterns and exact held host secrets, failing closed to a generic placeholder if the check cannot run), deduplication keys, per-device rate limit, and urgency |
+| Push on the host | `GET`/`PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) report availability and store v2 registrations per `{hostId, deviceId}` in owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), clearing legacy v1 records on upgrade and dropping registrations with the device. Any host sends directly to APNs (including `liveactivity` push type) and FCM (`apps/server/src/push/directPushSenders.ts`, `pushSenderService.ts`, `pushSenderRoutes.ts`, `remote/push-sender-setting.json`, off by default) via Settings › General › Phone notifications; ordinary threads (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`, delivering to all standing phones and journaling `remote.push-delivery-recorded@1` for runs with a `threadId`) check every free-text field against `heldSecretValues.ts` before sending. Spokes whose hub grant ticks Push hand checked v2 messages to their hub (`hub/pushService.ts`), which re-checks every free-text field before sending directly with its own credentials |
+| Push on the phone | `enablePhoneNotifications.ts` checks host v2 push status (`GET /api/remote/auth/push-token`; older hosts returning 404/405 clear stale registrations and show "Update Octant on <computer>") and registers the phone's platform token directly with each computer, with "Show thread names" off by default (`PushNotificationsPanel.tsx`); removing a computer or revoking calls `forgetHost`. The in-tree `octant-push` module (`apps/mobile/modules/octant-push`) is the native port (`mobileNotificationPort.native.ts`): system permission, Apple/Firebase token, keyless iOS notification service extension sharing a non-secret status App Group (`group.app.octant.mobile.status`) to build deep links and hide alerts from removed computers, and Android direct FCM receiver (`DirectNotification.swift` and `DirectNotification.kt`); `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`, `octant://hosts/{hostId}/moves`, and `octant://hosts/{hostId}/new-devices` |
 | Capture | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
 | Voice | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use |
 | Reply detail | The phone draws a thread at its own Reply detail level, else the host's default ([DESIGN.md: Transcript](thread-view.md#transcript)): `useThreadReplyDetail.ts` reads `GET /api/reply-detail` (`replyDetailRoutes.ts`, `settings.read-non-secret`, read-only) when a thread opens and when the app returns to the foreground, and draws Low until it answers. The reasoning panel opens at High and shows its first line at Medium; a settled run of tool calls folds behind "N tool calls" at Low, and a finished call's detail opens at High (`apps/mobile/src/ui/replyDetailPresentation.ts`, `ToolActivity.tsx`). The phone cannot change a level. |
@@ -351,433 +345,217 @@ its acceptance.
 
 ### Off until the person turns it on
 
-- Settings › General › **Phone notifications** on the host is off by
-  default. Its row names the delivery path's URL. While it is off, no request reaches
-  the delivery path, the host reports push `unavailable` (the current honest
-  state), and the phone does not offer enablement.
+- Settings › General › **Phone notifications** on any host is off by default.
+  Turning it on and storing Apple (`.p8`) or Firebase service-account push
+  credentials happens only in a local desktop window (`/api/desktop/push-sender*`).
+  While it is off (and the host has no hub Push grant), no request reaches Apple
+  or Google, `GET /api/remote/auth/push-token` reports `status: "unavailable"`
+  with the exact reason (`off` or `no-credentials`), and the phone shows that
+  state honestly.
 - Push is off for every device until the person enables it on that phone. The
-  phone then asks the operating system for permission, obtains a destination
-  from the delivery path, and registers it with each host it chooses.
+  phone asks the operating system for permission, takes the platform token,
+  checks `GET /api/remote/auth/push-token`, and registers directly with each
+  paired computer it chooses.
 - The host owner sees, in Settings › Remote access, which paired devices receive
   notifications and can turn any of them off. A device can change only its own
   preferences. Preferences are per device and per kind: approval needed,
-  waiting, failed, completed.
-- Disabling on the phone clears the registration on every host it can reach
-  and invalidates the destination; a host it cannot reach drops it on its next
-  delivery failure or on revoke.
+  waiting, failed, completed, opt-in "Show thread names" (off by default), and
+  "New devices" (on by default).
+- Disabling on the phone clears the registration on every host it can reach,
+  clears delivered notifications, and marks the computer forgotten locally; a
+  host it cannot reach drops the registration on its next delivery failure
+  (`destination-gone`) or on revoke.
 
 ### What the host keeps
 
-- The destination record (device id, platform, delivery capability, the
-  phone's notification public key, preferences, the collapse key the host
-  makes for it, updated time) is kept
-  owner-only under the data directory, beside the device inventory, outside
+- The destination record (`version: 2`, device id, platform, platform push
+  token, preferences, the collapse key the host makes for it, updated time) is
+  kept owner-only under the data directory, beside the device inventory, outside
   the journal and every export. It survives a restart and is deleted when the
   device is revoked, revokes itself, signs out, or is removed as
-  `pairing-abandoned`.
+  `pairing-abandoned`. Legacy v1 records carrying `notificationPublicKey` are
+  cleared automatically on upgrade (`destination-gone`), and new v1
+  registrations are refused with 400.
+- The host's push sender switch and APNs environment live in
+  `remote/push-sender-setting.json` (owner-only `0600`, written atomically;
+  migrates any legacy `hub.directPush` setting on first load). Apple and Google
+  credentials live in the host's credential broker namespace
+  (`push-platform-credentials`), never in settings files, the journal, logs,
+  responses, or exports. Changes to the switch, environment, or credential
+  presence journal `host.push-sender-changed@1` without any credential value.
 - The journal records that a device's push registration was added, changed, or
-  cleared, and one delivery receipt per notification (kind, device id, thread
-  id, outcome, time). It records no capability, token, key, or notification
-  text. Capabilities and tokens never appear in logs, responses, diagnostics,
-  or receipts.
-- The record lives in `remote/push-registrations.json` (directory `0700`, file
-  `0600`), written by an atomic rename, and is one of the named `remote/`
-  files that removing all local data deletes. Each device's registration is
-  one journal aggregate (`remote-push-registration`, keyed by device id) with
-  `remote.push-registration-recorded@1` (change `added` or `changed`, with the
-  platform) and `remote.push-registration-cleared@1` (with the reason). A
-  repeat of the current registration or of a clear journals nothing. A file
-  that cannot be read back exactly holds no registrations, so the host
-  delivers nothing until each phone registers again.
+  cleared, and one delivery receipt per notification (`remote.push-delivery-recorded@1`:
+  kind, device id, thread id, outcome, time). It records no token, credential,
+  or notification text. Tokens and credentials never appear in logs, responses,
+  diagnostics, or receipts.
+- `remote/push-registrations.json` and `remote/push-sender-setting.json`
+  (directory `0700`, files `0600`) are written by atomic rename and deleted when
+  removing all local data. A file that cannot be read back exactly holds no
+  registrations, so the host delivers nothing until each phone registers again.
 - Which credential changes clear a registration: a sign-out, and every loss
   of standing (a revoke by the host or by the device, `pairing-abandoned`,
   credential expiry, host key recovery). A key rotation keeps it, and so does
-  a listener stop, which is how a restart ends sessions. A reason the host
-  does not name clears it as a revoke, so a new way to lose standing cannot
-  leave a phone receiving notifications. When the remote gateway is enabled,
-  any registration whose device is not active is cleared
-  (`device-without-standing`), because the clear runs after the revoke
-  commits and a host stopped between the two would otherwise keep it.
+  a listener stop. A reason the host does not name clears it as a revoke. When
+  the remote gateway is enabled, any registration whose device is not active is
+  cleared (`device-without-standing`).
 - A clear removes the token before journaling it, so a failed append still
-  leaves it gone and is reported (a revoke's receipt counts it as a failed
-  hook, and a retry clears again). A registration writes the file inside the
-  journal's transaction and restores the previous file if the append fails,
-  so no token is kept that the journal does not record. The registration
-  route checks the device's session again after reading the body, so a
-  registration cannot land after a concurrent revoke or sign-out cleared it.
+  leaves it gone and is reported. A registration writes the file inside the
+  journal's transaction and restores the previous file if the append fails, so
+  no token is kept that the journal does not record. The registration route
+  checks the device's session again after reading the body, so a registration
+  cannot land after a concurrent revoke or sign-out cleared it.
 
 ### What leaves the host
 
-A notification has two layers:
+Every push message sent to Apple (APNs) or Google (FCM) is constructed through
+one nominal branded domain builder (`CheckedPushMessageV2` in
+`packages/domain/src/pushNotificationPolicy.ts`); `directPushSenders.ts`
+accepts no other type.
 
-| Layer | Seen by | Contents |
-|-|
-| Delivery envelope | Delivery path, Apple or Google, the operating system | A fixed placeholder alert ("Octant" / "A paired computer has an update"), a opaque collapse id the host derives per destination and thread with a key it keeps, an urgency, and the sealed content. No host name, thread id, title, or kind |
-| Sealed content | Only the phone that registered the key | Kind, host id, thread id, mode, and display text built by the domain redaction policy |
-
-- The sealed content is encrypted to the phone's per-host notification key
-  pair, created on the phone at registration and kept in its secure storage;
-  only the public key goes to the host. The construction is HPKE (RFC 9180)
-  base mode with DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, and AES-256-GCM, with
-  the host id and device id bound into the HPKE info, and sealed content is at most
-  2 KiB.
-- The phone opens the sealed content on the device (an iOS notification service
-  extension; an Android data-message receiver that posts the notification
-  itself) and replaces the placeholder. If it cannot open it, the placeholder
-  stays and nothing else is shown.
-- Display text follows the redaction policy: kind and the computer's label by
-  default. The thread title appears only when the person enabled thread names
-  for that phone ([decision M2](#maintainer-decisions)). Prompts, transcript
-  text, diffs, paths, tool arguments, and secrets never appear in either
-  layer; the existing scrubber stays as a second guard, not the primary rule.
-- On revoke, sign-out, or host removal the phone removes delivered
-  notifications for that host and forgets its notification key.
-
-#### Sealing
-
-- The registration carries the phone's raw X25519 public key for this host
-  (43 unpadded base64url characters) and its preferences: approval needed,
-  waiting, failed, completed, and thread titles, which the phone sends off
-  until the person turns them on. A registration without them is refused. A
-  change to either is journaled as `changed`, and keeps the destination's
-  collapse key.
-- The envelope (`RemotePushEnvelopeV1`) is the placeholder alert; a collapse
-  id of 22 unpadded base64url characters, the first 16 bytes of HMAC-SHA256
-  over the thread id (the run id for an Automation run without a thread, the
-  wait for a held thread move)
-  under a random 32-byte key the host makes per registration and keeps beside
-  it; an urgency, `high` for approval needed, waiting, and a held thread move
-  and `normal` otherwise; and the sealed content as `encapsulatedKey` and `ciphertext`
-  (content and tag), both unpadded base64url.
-- Sealing is single-shot HPKE (sequence 0) with empty associated data and the
-  UTF-8 info `octant-push-v1\n<hostId>\n<deviceId>`, where the host id is the
-  one the phone paired with. The plaintext is the sealed content as JSON,
-  padded with trailing spaces to 2 KiB so the ciphertext's length names no
-  kind or title. The
-  host builds it with `node:crypto` alone and checks it against the published
-  RFC 9180 vector for this suite. Content over 2 KiB, or a key that is not a
-  usable X25519 public key (a low-order point included), is refused and
-  journaled as a failure, never sent in another form.
-- The display text is the kind ("Approval needed", "Waiting for you", "Thread
-  failed", "Thread completed") and "On" the computer's label, the name the
-  listener's hello shows. Only for a phone that opted in does ": " and the
-  thread title follow the kind. A title the scrubber flags as a secret or a
-  path is left out whole, and a label it flags reads "your paired
-  computer". A local-only approval's text is the exception described under
-  [When the host sends](#when-the-host-sends). Automation runs follow the
-  same rule, with the automation's name where a thread title would be, and
-  show no failure message.
+- **Allowed fields.** Closed status words ("Approval needed", "Waiting for you",
+  "Thread failed", "Thread completed", "Move waiting", "New device"), counts,
+  opaque IDs (`hostId`, optional `threadId`, `mode`), transport fields
+  (`version: 2`, `collapseId`, `urgency`), and the computer's label. Thread
+  titles, project names, and automation names are included **only** when that
+  phone opted in to **Show thread names** (off by default; [decision M2](#maintainer-decisions)).
+  Device names on `device-joined` and destination names on `move-waiting` still
+  show when Show thread names is off; `privateAddress` is dropped from
+  `device-joined`, outside-agent name prefixes are dropped from thread alerts,
+  and `alertId`, `automationId`, and `automationRunId` never leave in push
+  payloads.
+- **Never sent.** Prompts, transcript text, diffs, file paths, tool arguments,
+  private addresses, and secrets never enter the builder.
+- **Host-side secret check.** Before shortening or sending, every free-text
+  field (thread title, project name, automation name, computer label, device
+  name, destination name) passes `checkPushLabel` (`packages/domain/src/pushLabelPolicy.ts`):
+  1. It checks secret-shaped patterns (`secretShapedTextPolicy.ts`,
+     `secretGuardPolicy.ts`, legacy `SECRETISH`, and `ABSOLUTE_PATH`) on both
+     the raw and control-stripped text.
+  2. It checks against the exact values of secrets Octant holds on the host
+     (`apps/server/src/push/heldSecretValues.ts`): active and recently ended
+     in-memory secrets (`secretRedaction.ts`, including broker-issued secrets
+     and OAuth tokens), remembered pasted thread secrets, and stored host
+     credentials in the credential broker (provider keys and push credentials)
+     — reading stored secrets into host memory once per run and **never**
+     reading linked 1Password items (those are skipped by reference status).
+  3. Any matching field is dropped whole to its safe fallback (status word only
+     for thread/project/automation names; `"your paired computer"` for computer
+     label; `"A new device"` / `"another computer"` for device/destination).
+  4. **Fail closed.** If the host cannot read its stored secrets (for example,
+     a locked or unavailable keyring), the builder drops all free-text fields
+     to the generic placeholder (`"Octant"` / `"A paired computer has an update"`).
+- **Wire shapes.**
+  - **APNs alerts:** `apns-push-type: alert`, `apns-collapse-id`, `apns-priority`
+    (10 for `high`, 5 for `normal`), `aps.alert` (`title` ≤ 80 B, `body` ≤ 120 B),
+    `aps.thread-id: hostId`, `aps.mutable-content: 1`, and
+    `octant: { v: 2, kind, hostId, threadId?, mode? }`.
+  - **APNs Live Activities (used by Slices 4/5):** `apns-push-type: liveactivity`,
+    `apns-topic: <bundleId>.push-type.liveactivity`, `aps.content-state`
+    carrying `{ name: "AgentActivity", props: { ... } }` with `stale-date` and
+    `timestamp`.
+  - **FCM alerts:** data-only message with string fields `v: "2"`, `kind`,
+    `hostId`, optional `threadId`/`mode`, `title`, `body`, `collapse_key`, and
+    Android priority (`high` / `normal`).
+  - **FCM live status:** data-only message with `type: "live-status"` and
+    checked JSON `payload`, without `collapse_key`.
+- **Collapse id.** 22 unpadded base64url characters, the first 16 bytes of
+  HMAC-SHA256 over the thread id (run id for an Automation run without a thread,
+  or wait id for a held move) under a random 32-byte key kept per registration.
 
 ### When the host sends
 
-- Ordinary threads in every mode notify on the four kinds above, observed from
-  journal lifecycle facts, deduplicated per thread, kind, and run, and rate
-  limited per device. Automation runs keep their existing delivery service and
-  receipts, moved onto the same transport and sealing.
+- Ordinary threads in every mode notify on the four kinds (`approval-needed`,
+  `waiting`, `failure`, `completion`), observed from journal lifecycle facts,
+  deduplicated per thread, kind, and run, and rate limited per device (at most
+  six notifications in any sixty seconds). Automation runs share the same
+  builder, secret check, per-device rate limit, and transport, deliver to all
+  standing devices whose preferences allow the kind, and write
+  `remote.push-delivery-recorded@1` per device for runs with a `threadId`.
 - An approval-needed notification is sent whether or not the approval is
-  remotely answerable; the thread screen states which. The
-  host never sends a notification to a device whose authority could not read
-  that thread.
-- Delivery failure never changes thread, run, or approval state. A delivery
-  path that refuses a destination as gone clears it.
-- A thread move a window holds for an owner phone is one more notification on
-  the same path, its own kind (`move-waiting`) outside the four a phone turns
-  on one by one: once per wait, only to the source's owner phones, only when
-  that phone's Approval needed is on, and saying only that a move waits and
-  the destination's name, never a thread title. It opens the Computers screen
-  at `octant://hosts/<host>/moves`. Its receipt names no thread
-  ([Hub and spokes: telling the phone a move waits](hub-and-spokes.md#moving-a-thread-to-another-member)).
-- A new device on a paired computer is its own kind too (`device-joined`),
-  with its own phone setting, New devices, on by default. The phone sends the
-  setting to the computer only when it is off, so a computer from before the
-  setting still registers the phone. It opens the Computers screen at
-  `octant://hosts/<host>/new-devices`, whose list reads every paired
-  computer's alerts and names each computer it could not ask
-  ([Hub and spokes: new-device alerts](hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation)).
+  remotely answerable; the thread screen states which. The host never sends a
+  notification to a device whose authority could not read that thread.
+- Delivery failure never changes thread, run, or approval state. A platform
+  response reporting a gone token (`destination-gone`, e.g., APNs 410 /
+  `BadDeviceToken` / `Unregistered` or FCM `UNREGISTERED`) clears the
+  registration.
+- A thread move a window holds for an owner phone (`move-waiting`) notifies
+  once per wait, only to the source's owner phones with Approval needed on,
+  naming only the checked destination name, and opens
+  `octant://hosts/<host>/moves`.
+- A new device on a paired computer (`device-joined`) notifies standing phones
+  that kept New devices on, naming only the checked device name (no private
+  address), and opens `octant://hosts/<host>/new-devices`.
 
-#### Sending
+### Direct delivery (any host and hub)
 
-- The lifecycle facts are: a Chat `chat.attempt-updated@1` whose outcome is
-  completed, failed, or waiting; a Work `work.turn-updated@1` with the same
-  statuses and a `work.request-recorded@1` that requests an approval (approval
-  needed) or an answer (waiting); a Code `code.runtime-work-updated@1` for a
-  provider turn with the same states and a `code.operation-event-recorded@1`
-  that requests an approval or an answer; and the harness's
-  `native-harness-approval-asked@1` and `native-harness-question-asked@1` in
-  any mode. Interrupted and cancelled turns notify nothing. The run is the
-  attempt or turn for a lifecycle fact, and the request itself (the Work
-  request, the Code approval or question, the harness ask) for one that asks
-  the person, since one turn can ask several.
-- Every registration in the host's file is the host's own, under the listener
-  host id the phone paired with; the host's local id names none of them. So
-  delivery reads them all and seals each under its own host id. A device
-  receives a notification only while its record under that host id is active
-  and unexpired. That is asked for every notification, immediately before its
-  send, not only when the gateway starts, so a revoke or sign-out that lands
-  first stops it. The device must also want the kind, and a paired device must
-  be able to read the thread: it exists, is not being deleted, is not a Side
-  Chat or assistant lane, and its mode is on. A device's preferences filter
-  Automation runs too.
-- Each notification to one device is one journal aggregate
-  (`remote-push-delivery`) holding one `remote.push-delivery-recorded@1`: host
-  id, device id, thread id, kind, outcome (`delivered`, `failed`,
-  `rate-limited`, `destination-gone`), a failure-category slug, and the time. A
-  fact whose receipt already exists sends nothing, so a repeat after a restart
-  stays silent. Ordinary-thread notifications are tried once.
-- A device receives at most six notifications in any sixty seconds; the rest
-  are journaled `rate-limited` and not sent later. A burst of threads ending
-  together reaches the phone as its first few, and the thread list shows the
-  rest; a later send would be stale.
-- While the transport is unavailable, ordinary threads seal, send, and journal
-  nothing. The transport is unavailable while the Notifications setting is
-  off. Automation runs keep their existing receipts.
+Octant runs no hosted push gateway ([decision M1](#maintainer-decisions)). Any
+host sends directly to Apple and Google with the person's own credentials, or
+hands checked v2 messages to its hub:
 
-### Delivery path
-
-Apple and Google deliver only on behalf of the developer account that signs
-the app, with that account's credential. Hosts are people's own computers, so
-that credential cannot be shipped to them. Remote push therefore needs a
-sender holding it. The sender is a minimal Octant push gateway
-([decision M1](#maintainer-decisions)):
-
-- The phone, when push is enabled, sends its platform token and the host's
-  identity fingerprint to the gateway once per host and receives a delivery
-  capability: the token, platform, and fingerprint sealed under a gateway key.
-  The gateway stores nothing per device.
-- The phone gives the capability to the host over the existing pinned,
-  device-authenticated push registration route. The host sends the envelope
-  with the capability, signing the request with its host identity key. The
-  gateway accepts only a request signed by the key whose fingerprint is sealed
-  in the capability, so a leaked capability alone sends nothing.
-- The gateway never sees sealed content in the clear, product traffic,
-  pairing material, or host routes. It is not a principal, cannot reach a
-  host, and carries nothing toward one; it is not a relay for product traffic.
-  It keeps per-capability rate counters in memory and logs
-  counts and failure categories only.
-- The phone uses the gateway compiled into its build, because only a gateway
-  holding that build's signing-account credential can deliver to it. The
-  host's gateway URL is the Notifications setting, with the Octant service as
-  the default; a capability is valid only at the gateway that issued it, and a
-  mismatch reports `unavailable` rather than failing silently.
-
-#### Gateway rules
-
-The wire shapes are in `packages/contracts/src/remotePushNotifications.ts` and
-the signing text in `packages/domain/src/pushNotificationPolicy.ts`; the
-gateway service implements them in `octant-webapp` (`apps/push`), and a hub
-serves the same rules for a phone app its person built themselves
-([Building the phone app yourself](#building-the-phone-app-yourself)).
-
-- **Capability.** The phone posts `RemotePushCapabilityRequestV1` (platform,
-  platform token, the host key fingerprint it saw at pairing) to
-  `<gateway>/v1/capabilities` and receives `v1.<key id>.<sealed>`: a random
-  12-byte nonce, then AES-256-GCM over the JSON of those three fields under the
-  named gateway key, with `octant-push-capability-v1\n<key id>` as associated
-  data, unpadded base64url. The gateway records nothing when it issues one. It
-  refuses a token over 512 bytes, a platform it holds no credential for
-  (`unavailable`), and more than thirty requests from one client address in a
-  minute (`rate-limited`). Keys are named so one can be retired: a capability whose key
-  the gateway does not hold is answered `421 capability-not-issued-here`.
-- **Delivery.** The host posts `RemotePushDeliveryRequestV1` (the capability
-  and the envelope) to `<gateway>/v1/deliveries` with three headers: the
-  listener identity key's SPKI DER, a timestamp, and an ECDSA P-256 SHA-256
-  signature (IEEE P1363) over `octant-push-delivery-v1`, the timestamp, and the
-  body's SHA-256, one per line, made with the key the phone paired with. The
-  gateway checks, in order: the body's shape and an 8 KiB bound (`400
-malformed`); that it can open the capability (`421`); that the key's SHA-256
-  is the sealed fingerprint (`403 host-key-mismatch`); that the timestamp is
-  within five minutes of its clock and the signature verifies, and that it has
-  not seen that signature in the last ten minutes (`401 signature-invalid`);
-  and at most twelve deliveries per capability, and twelve per phone across
-  every capability that names it (keyed by a SHA-256 hash of the platform and
-  token, in memory), in any sixty seconds (`429
-rate-limited`). Then it sends, and answers `202` when the platform accepted
-  it, `410 destination-gone` when the platform refused the token as gone, `502
-platform-failed` otherwise, and `503 unavailable` without that platform's
-  credential. _Reason:_ the fingerprint check is what makes a leaked capability
-  useless without the host's private key; the replay window stops a captured
-  request from being sent twice.
-- **What reaches Apple and Google.** APNs gets the placeholder alert with
-  `mutable-content`, so the notification service extension runs, the collapse
-  id as `apns-collapse-id`, priority 10 for `high` and 5 for `normal`, and the
-  sealed content under one custom key (`octant`: version, encapsulated key,
-  ciphertext). FCM gets a data-only message holding the version, encapsulated
-  key, and ciphertext, with the collapse id as `collapse_key` and the urgency as
-  Android priority, so the app's receiver opens it and posts the notification
-  itself. No other field is added.
-- **What the gateway keeps.** Its keys, its platform credentials, per-capability
-  rate counters and recently seen signed requests (keyed by the signed text,
-  since an ECDSA signature has a second valid form), all in memory except the
-  credentials. Its logs hold counts and failure categories only: never a
-  token, capability, fingerprint, envelope, or address.
-- **The host's side.** The transport reports delivery `available` only while
-  the setting is on, and reads the setting before every send, so turning it off
-  stops the next one. It signs with the listener identity key and sends
-  nothing when the host has none (`host-identity-unavailable`): a host that
-  never enabled its listener has no paired phone. It follows no redirect, waits
-  at most ten seconds, and reads the gateway's answer as `delivered`,
-  `destination-gone` (which clears the registration), or a failure category:
-  `gateway-mismatch` for a capability another gateway issued, which the person
-  fixes by pointing the setting back or the phone registering again,
-  `gateway-refused`, `gateway-rate-limited`, `gateway-malformed`,
-  `gateway-unreachable`, or `gateway-failed`. A window on the computer or a
-  paired device changes the setting (maintainer decision, 2026-11-12; not built
-  yet: today a paired device reads it and is refused a change).
-
-#### Building the phone app yourself
-
-A person who builds the phone app from source, with their own Apple Developer
-and Firebase accounts, can let their own hub be that phone's push gateway, so
-nothing goes through an Octant-run service. The hub serves the rules above
-unchanged (`POST /v1/capabilities` and `POST /v1/deliveries`, the same
-bounds, refusals, and status codes) and sends to Apple and Google itself with
-the person's credentials. A build from the Octant release, the store build,
-cannot use it: only the account that signs an app holds the push credential
-that reaches it.
-
-- **Build the app.** Use your own bundle identifier (reverse-DNS, such as
-  `com.example.octant`) in place of the release's, signed by your own team.
-  Turn on the Push Notifications capability for that App ID and add the
-  `aps-environment` entitlement (`development` for a build installed from Xcode,
-  `production` for TestFlight and the App Store). In a Firebase project, add an
-  Android app with your package name and take its `google-services.json` into
-  the build.
-- **Make the credentials.** In your Apple Developer account, create a key with
-  the Apple Push Notifications service enabled and download the `.p8` file once;
-  note its key ID and your team ID. In the Firebase console, open Project
-  settings › Service accounts and generate a private key for the Firebase Admin
-  service account, which downloads a JSON file.
-- **Turn it on at the hub.** On the hub's own window, open Settings › Remote
-  access › Send notifications directly. Enter the key ID, team ID, bundle
-  identifier, and the `.p8` text; paste the service-account JSON; mark a build
-  installed from Xcode as a development build; then switch it on. The values go
-  to the host's credential store. They are never shown again, journaled,
-  logged, or returned: Settings says only _Stored_ or _Not stored_.
-- **Point the app at the hub.** Build the app with its push gateway address
-  (`MOBILE_PUSH_GATEWAY_URL`) set to the hub's private address, the same
-  `https://` name the phone pairs with. The phone trades its platform token for
-  a capability there, exactly as it would at the Octant service, and the hub
-  seals it under a key it keeps in the credential store. A capability from any
-  other gateway is answered `421`, and the sender reports `gateway-mismatch`.
-- **What stays the same.** The hub answers these two routes only on the private
-  listener it already uses, and only while the switch is on; with it off, both
-  answer `503 unavailable`. A spoke that ticked Push hands the hub its sealed,
-  spoke-signed requests as before, and the hub delivers them itself instead of
-  forwarding to a gateway. A window on the hub or a device paired to it changes this (maintainer
-  decision, 2026-11-12; not built yet: today only a window on the hub); a
-  peer, guest, agent, or routine cannot.
-- **What reaches Apple and Google.** Exactly the payloads under [Gateway
-  rules](#gateway-rules). APNs uses `alert` push type with `mutable-content` and
-  the collapse id; the sealed content sits under the `octant` key as `version`,
-  `encapsulatedKey`, and `ciphertext`. FCM gets the same three as string data
-  values, with the collapse id as `collapse_key`. The provider token is an ES256
-  token from your `.p8` key; the FCM access token is minted from the service
-  account with an RS256 assertion. The hub reads no address from either file, so
-  the only hosts it reaches are `api.push.apple.com` (or
-  `api.sandbox.push.apple.com`), `oauth2.googleapis.com`, and
-  `fcm.googleapis.com`.
-- **Not yet proven.** Delivery to a real phone, on either platform, is a
-  maintainer check that needs a device built this way. The phone side that opens
-  the content (the notification service extension and the Android receiver) is
-  in the repository, as [Phone rules](#phone-rules) says. A build made with your
-  own accounts sets `OCTANT_MOBILE_PUSH=1` for iOS and supplies
-  `google-services.json` through `GOOGLE_SERVICES_JSON` for Android.
+- **Any host.** In a local desktop window, open Settings › General › **Phone
+  notifications**. Enter your Apple Developer `.p8` key (key ID, team ID, bundle
+  ID, private key) and/or Firebase Admin service-account JSON, mark an
+  Xcode-installed build as a development build if needed, and turn **Phone
+  notifications** on. Credentials go directly into the host's credential store
+  and are never returned, logged, or journaled; Settings shows only _Stored_ or
+  _Not stored_.
+- **Fixed outbound origins.** The host reads no URL from either credential file
+  and follows no redirects. Outbound requests go only to `api.push.apple.com`
+  (or `api.sandbox.push.apple.com`), `oauth2.googleapis.com`, and
+  `fcm.googleapis.com`, with a 10-second timeout.
+- **Through a hub.** A spoke whose hub grant ticks Push hands checked v2
+  messages (`HubPushHandoffV2`: `{ version: 2, platform, token, message }`) to
+  its hub over the signed hub link. The hub repeats the host-side secret check
+  (`recheckHubPushMessage`) against its own held secrets and sends directly to
+  Apple or Google using its own stored credentials. A standing-in standby sends
+  for spokes only if it holds its own credentials; credentials are never copied
+  between hosts. If a spoke also has its own direct sender on, it falls back to
+  sending directly when the hub cannot.
+- **Version skew.** An older spoke sending a v1 sealed hub handoff is refused
+  with `update-member`. An older host without `GET /api/remote/auth/push-token`
+  (404/405) causes the updated phone to clear any stale registration and show
+  `"Update Octant on <computer> to use notifications."` A legacy v1
+  `PUT /api/remote/auth/push-token` carrying `notificationPublicKey` is refused
+  with 400.
 
 #### Phone rules
 
-- The phone offers to turn notifications on for a computer only while its
-  build has a notification port that reports itself `available`. Turning them
-  on asks the system for permission, takes the platform token, makes or reads
-  this computer's notification key, and trades the token at the gateway
-  compiled into the build for a capability bound to the fingerprint the phone
-  recorded at pairing. The computer is then given the capability, the public
-  key, and preferences with thread titles off; it never receives the platform
-  token. A refusal at any step registers nothing and names the step.
-- The port is `available` only where push can work, and fails closed
-  everywhere else, with the reason shown rather than a registration of
-  nothing. It is unavailable on the iOS Simulator (Apple issues it no token),
-  on an iPhone earlier than iOS 17 (CryptoKit's HPKE, which opens the sealed
-  content, starts there, so a token it registered could only ever show the
-  placeholder), in an iOS build made without the push capability, in an Android
-  build with no Firebase project, in Expo Go, and on the web. A permission the
-  person has declined, or a system that gives no token, refuses enablement and
-  leaves the computer with no registration.
-- The iOS key and the notification service extension. The app and the
-  extension are two processes, so the phone's notification keys (one raw X25519
-  private key per computer, with the device id the key was made for) live in
-  Keychain items readable after the first unlock and never restored to another
-  device, in an access group both targets name (`OctantKeychainAccessGroup`,
-  with the team prefix filled in at build time). The extension reads the
-  placeholder's custom `octant` key (`v`, `ek`, `ct`), tries each held key, and
-  opens the sealed content with CryptoKit's HPKE for this suite, the host id and
-  device id bound into the info as [Sealing](#sealing) says. It then replaces
-  the placeholder's title and body, groups the notification under the computer's
-  host id so `forgetHost` can remove it, and keeps only the thread link as the
-  notification's data. If no key opens it, or the content breaks the rules
-  below, the placeholder stays untouched. If the extension runs out of time it
-  delivers the placeholder.
-- The Android key and receiver. Each private key is encrypted under an AES key
-  held in the Android Keystore, and only that ciphertext is kept in the app's
-  private storage (backup is off). The Firebase messaging service reads the
-  data-only message (`v`, `ek`, `ct`), tries each held key, opens the content
-  with the same suite, and posts the notification itself, or the placeholder
-  when nothing opens. Android 13 and later ask for the notification permission
-  first. It uses a plain X25519 (RFC 7748) rather than the platform's, which
-  Android has only from 13, so it is not constant time; the key never leaves the
-  phone and a sender sees only whether a notification opened.
-- What the phone shows from opened content, on both platforms and by the same
-  rules, whatever the host sealed: the kind is one of the four; the host id is
-  the one the key belongs to; the host and thread ids hold only letters,
-  digits, `-`, `_`, `.`, and `~` and are at most 64 bytes, because they go into
-  a link; the mode, if present, is one of the three; the title is not empty and
-  at most 80 bytes and the body at most 120 bytes after control characters, line
-  and paragraph separators, and the characters that reorder or hide text are
-  removed; and a seal is exactly the padded size. Content that breaks any of
-  these is not shown. The notification has no action; tapping it opens
-  `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`, and the app's
-  authenticated session and biometric gate apply there. A held thread move
-  (`move-waiting`) carries no thread id or mode, and one that does is not
-  shown; tapping it opens `octant://hosts/{hostId}/moves`, the Computers
-  screen. A new device (`device-joined`) likewise carries neither and opens
-  `octant://hosts/{hostId}/new-devices`; on Android each such notice keeps
-  its own place in the tray rather than replacing the last.
-- Rotation. The phone records, for each computer it registered with, a digest
-  of the platform token the registration was made under, in secure storage
-  (never the token, the capability, or a key). When the app opens, returns to
-  the foreground, or a computer connects, it asks the system for the current
-  token and registers a changed one with each connected computer through a new
-  capability, keeping the notification key. A computer that is not connected,
-  or a gateway that cannot be reached, leaves its record for the next run. If
-  notifications have since been switched off for Octant in the system, the
-  phone clears every registration and forgets every key.
-- Removing a computer, the phone revoking itself, and turning notifications
-  off for a computer run the same forgetting before the rest of the removal:
-  the computer is asked to drop its registration (waiting at most three
-  seconds), then `forgetHost` removes the notifications delivered for that
-  computer and its key, and the phone's record of the registration goes, even
-  if an earlier step failed. Forgetting first ends any enablement or rotation
-  under way for that computer and runs after it stops (waiting at most five
-  seconds), and a rotation reads the computer's record again before it acts, so
-  an older run cannot register, make the key, or restore the record after the
-  person has turned notifications off. A key the phone could not delete is not
-  reported as gone: the record is kept, marked, the person is told, and the next
-  run deletes the key again and never registers that computer. A revoke made on
-  the computer reaches the phone as a refused session; the host has already
-  dropped the registration.
-- A build carries the iOS extension, the push entitlement, and the shared
-  Keychain group only when it is made with `OCTANT_MOBILE_PUSH=1`, because they
-  need the push capability and Keychain sharing on the app's App ID and the
-  extension's own App ID, which the maintainer enables with the push accounts
-  (decision M1). Without it a build signs as it did before and the module
-  reports push unavailable. On Android the Firebase project's
-  `google-services.json` is named by the `GOOGLE_SERVICES_JSON` build variable,
-  never kept in the repository.
-- Still to do, each a maintainer gate: the account steps above; the device
-  pass on both platforms against a test gateway, which also settles what the
-  container cannot: that Apple and Firebase issue tokens to the signed build,
-  that the extension runs and opens a real notification, that a tap opens the
-  thread from a cold start, and that Android 13's permission prompt and the
-  Keystore path work on a phone.
+- The phone offers to turn notifications on for a computer only while its build
+  has a notification port that reports `available` (false on the iOS Simulator,
+  in an iOS build made without `OCTANT_MOBILE_PUSH=1`, in an Android build
+  without `GOOGLE_SERVICES_JSON`, in Expo Go, and on web).
+- Turning notifications on asks the system for permission, takes the platform
+  token, checks `GET /api/remote/auth/push-token`, and registers the platform
+  token directly with the computer (`version: 2`, with `threadTitles: false` by
+  default). Turning **Show thread names** or **New devices** on or off
+  re-registers immediately.
+- **Keyless iOS notification service extension.** On iOS, the build plugin
+  (`apps/mobile/plugins/withOctantPush.ts`) adds `aps-environment`, a shared
+  non-secret App Group (`group.app.octant.mobile.status`), and a keyless
+  `OctantNotificationService` extension target (no Keychain group, no HPKE, no
+  network). Before iOS displays an alert, the extension validates `octant`
+  (`v == 2`, allowed `kind`, bounded `hostId`/`threadId`/`mode`, stripped
+  display text within 80 B title / 120 B body), sets `threadIdentifier = hostId`,
+  builds the deep link (`octant://hosts/...`), and checks the App Group's
+  non-secret forgotten-host list: if the payload is invalid or the computer was
+  removed from this phone, it replaces the alert with the generic placeholder
+  (`"Octant"` / `"A paired computer has an update"`) and strips the deep link.
+- **Android direct FCM receiver.** `OctantMessagingService` validates the
+  data-only v2 fields with the same rules (`DirectNotification.kt`), drops
+  messages from forgotten hosts silently, and posts the notification under
+  `tag = hostId`. The manifest also declares `POST_PROMOTED_NOTIFICATIONS` for
+  Android Live Updates.
+- **Rotation and forgetting.** The phone records only a SHA-256 digest of the
+  platform token and per-computer preference choices (`octant.mobile.push-registrations.v2`)
+  in secure storage. When the platform rotates the token, connected computers
+  re-register automatically with the same preferences. Removing a computer,
+  revoking, signing out, or turning notifications off asks the computer to clear
+  its registration (up to 3 seconds), clears delivered notifications for that
+  `hostId`, marks the host forgotten locally, and removes the registration
+  record.
+- **Maintainer gates.** Physical-device passes on iOS (`OCTANT_MOBILE_PUSH=1`
+  with Push + App Group capabilities on the App ID and extension) and Android
+  (`GOOGLE_SERVICES_JSON`) with live APNs/FCM delivery remain maintainer gates.
 
 ## Phase D: capture and voice as remote input
 
@@ -964,12 +742,11 @@ its T2, T7, and T9 residuals are closed by Phase C.
 
 | Id | Threat | Mitigation |
 |-|
-| P1 | Apple, Google, or the gateway read what a thread is about | Envelope carries only a placeholder and a keyed collapse hash; content is sealed to a key only the phone holds |
-| P2 | Lock-screen bystander reads thread detail | Default text is kind and computer label; thread titles opt-in per phone; scrubber as second guard |
-| P3 | Revoked or lost phone keeps receiving | Destination deleted with the device; phone forgets keys and clears delivered notifications on revoke, sign-out, or host removal |
-| P4 | Leaked capability or platform token used to spam or phish a phone | Gateway requires the sealed host fingerprint's signature; per-capability and per-phone rate limits; undecryptable content shows only the placeholder; a leaked platform token is accepted as residual ([M7](#maintainer-decisions)) |
+| P1 | Apple, Google, or a forwarding hub read what a thread is about | By default notifications carry only closed status words, counts, IDs, and computer label (no prompts, transcripts, diffs, paths, tool input, or private addresses); thread/project/automation names are opt-in per phone ("Show thread names", off by default); every free-text field is checked on the host (and re-checked on a forwarding hub) against secret patterns and exact held host secrets, failing closed to a generic placeholder when the check cannot run |
+| P2 | Lock-screen bystander reads thread detail | Default text is closed status word and computer label; thread/project/automation names opt-in per phone; host-side secret check + display text stripping as guards |
+| P3 | Revoked or lost phone keeps receiving | Destination deleted with the device on the host; phone clears delivered notifications and marks the computer forgotten so the keyless iOS extension hides late alerts behind a generic placeholder and Android drops them |
+| P4 | Leaked platform token used to spam or phish a phone | APNs and FCM require the person's own Apple `.p8` or Firebase service-account credential to send; notifications carry no actions and cannot mutate host state; per-device host rate limit (6/min) bounds legitimate bursts |
 | P5 | Notification used to approve or act without the vault | Notifications carry no actions; approval runs only in the authenticated session behind the biometric gate |
-| P6 | Gateway becomes a relay or an authority | Gateway has no host route, stores no per-device state, and carries nothing toward a host; host checks stay as today |
 | P7 | Photo reveals location or device identity to providers | Host strips image metadata for every paired-device upload; phone requests no location |
 | P8 | Microphone or camera used without the person knowing | Explicit, visible acts only; foreground only; 60-second clip cap; audio not persisted on phone or host |
 | P9 | Phone spends the host owner's transcription budget | Per-device budget; same `ready` gate; host owner can revoke the device |
@@ -977,12 +754,13 @@ its T2, T7, and T9 residuals are closed by Phase C.
 | P11 | Release credential exposed through CI | Manual dispatch from `main`, protected environment, Expo token only; signing material stays in EAS |
 | P12 | Store build or demo exposes host data or bypasses pairing | Demo has no network and no pairing; store build is the same client with the same authority |
 
-Residual: a compromised host can still send whatever notifications its policy
-allows; the gateway operator can observe delivery timing, host and phone IP
-addresses, and platform tokens. Anyone holding a phone's platform token can mint
-their own capability for it and send that phone placeholder notifications, at most
-twelve a minute however many capabilities they mint, and that flood shares
-the phone's limit with its real notifications ([M7](#maintainer-decisions)).
+Residual: Apple and Google (and a forwarding hub for spokes that grant Push) see
+readable status labels and, if the phone opted in to Show thread names, checked
+thread/project/automation names in transit. A compromised host can still send
+whatever notifications its policy allows, and an offline-removed computer that
+still holds an iOS push token can still cause iOS to wake the keyless extension
+(which hides the alert behind the generic placeholder) until the host clears the
+registration or the token expires.
 
 ## Settled by existing specifications
 
@@ -1011,13 +789,13 @@ names are still maintainer actions, not facts.
 
 | Id | Decision | Rule | Alternatives considered, and remaining gates |
 |-|
-| M1 | Push delivery path | The Octant push gateway described above, in `octant-webapp` (the Canvas share service moved to `apps/share` in this repository and is self-hosted), off by default | Rejected: Expo's push service, which sees envelopes and whose token is itself a send capability; no remote push, notifying only while the phone runs. Gates: the Apple push capability, a Firebase project, deployment, and a release-boundary entry |
-| M2 | Lock-screen text | Kind and computer label; thread titles only when the person opts in for that phone | Rejected: thread title always (the current policy); placeholder only |
+| M1 | Push delivery path | Revised 2026-11-28: direct APNs and FCM delivery from any host (or a hub for spokes that grant Push) using the person's own push credentials in Settings › General; no Octant-hosted push gateway | Replaced the 2026-10-26 sealed-push gateway design because iOS Live Activity updates cannot pass through a Notification Service Extension and maintaining an Octant-run relay/gateway added operational surface without protecting live-status payloads |
+| M2 | Lock-screen text | Closed status words and computer label; thread, project, and automation names only when the person opts in to "Show thread names" (off by default), checked on the host against secret patterns and exact held host secrets | Rejected: thread titles always on; placeholder only |
 | M3 | Android internal distribution | EAS internal distribution (signed APK by link) now | Play internal testing track only when Phase E opens; it needs a Play Console account and fee |
 | M4 | Signing and publisher identity | Organization accounts before Phase E; internal tracks stay on the current accounts | Rejected: personal accounts for the store. Gate: creating the organization accounts (a D-U-N-S number; new personal Google developer accounts must run a closed test before production access) |
 | M5 | Where speech is transcribed | The host's Voice endpoint | Rejected: the phone's operating-system recognizer, which may send audio to Apple or Google outside host policy |
 | M6 | Store review path | An offline, clearly labelled demo | Rejected: a reviewer-reachable demo host, which would be a hosted, always-on Octant host |
-| M7 | Capability issuance | Accepted 2026-10-28: the gateway issues a capability to any caller that presents a platform token, without proof that the caller is the Octant app | Rejected for now: requiring App Attest (iOS) or Play Integrity (Android) before issuing, which adds a dependency on Apple's and Google's checking services and, on Android, on Google Play. Reason: someone holding a phone's platform token can mint capabilities bound to their own key and send that phone placeholder notifications, which reveal nothing and carry no action (P4). Capabilities can be minted repeatedly (thirty a minute per client address), so the gateway also limits deliveries per phone, twelve a minute across every capability; a flood can therefore hold back that phone's real notifications for the rest of the minute, and several computers paired to one phone share the twelve. Revisit if the gateway's failure counts show abuse |
+| M7 | Capability issuance | Retired 2026-11-28 with the push gateway | No delivery capability is minted; hosts send directly to APNs/FCM with the person's own credentials |
 
 ## Delivery plan
 
@@ -1041,18 +819,18 @@ maintainer decision. Slice 6 depends on 1, 2, and 7; slice 9 on 8.
 
 ## Rationale
 
-- **Sealed push rather than redaction alone.** Redaction decides what a
-  bystander sees; it does not stop the delivery path, Apple, or Google from
-  reading the payload, and thread titles routinely name customers, projects,
-  and incidents. Sealing to a phone-held key keeps the local-first promise for
-  every party between host and phone at the cost of a notification extension.
-- **A gateway rather than credentials on hosts.** The platform push credential
-  is bound to the signing account and can send to every install; putting it on
-  people's computers would leak it. A stateless gateway with host-signed,
-  fingerprint-bound capabilities is the smallest sender that keeps no device
-  database. Expo's service was rejected as the default because it sees
-  envelopes, and its tokens are bearer send rights unless every send carries
-  an account access token, which hosts cannot be given.
+- **Direct host push with host-side secret checking rather than a sealed gateway.**
+  iOS Live Activity pushes go straight to WidgetKit without passing through a
+  Notification Service Extension, so HPKE sealing could never cover live status.
+  Sending directly from each host (or a hub with the person's own credentials)
+  retires the Octant-hosted gateway completely while keeping a strong privacy
+  floor: closed status words by default, opt-in thread names, a nominal branded
+  payload builder, and a fail-closed check against both secret patterns and
+  exact held host secrets before any free-text field leaves the computer.
+- **Keyless iOS extension rather than Keychain-sharing crypto.** Keeping a tiny,
+  keyless extension sharing a non-secret status App Group avoids Keychain
+  sharing and HPKE complexity while still validating v2 metadata, building deep
+  links, and hiding late alerts from removed computers.
 - **Metadata stripped on the host.** Stripping on the phone depends on each
   picker and platform; one host rule covers phone and paired browser and is
   testable without a device.

@@ -26,7 +26,7 @@ describe("mobile notification settings", () => {
         children: createElement(PushNotificationsPanel, {
           transport: undefined,
           permission: createUnavailableNotificationPermissionPort(),
-          hostKeyFingerprint: "f".repeat(64),
+          hostLabel: "Studio Mac",
           book: createPushRegistrationBook(emptyStorage()),
           resolveDeviceId: async () => undefined,
         }),
@@ -48,13 +48,14 @@ describe("mobile notification settings", () => {
           children: createElement(PushNotificationsPanel, {
             transport: undefined,
             permission: { ...createUnavailableNotificationPermissionPort(), available },
-            hostKeyFingerprint: "f".repeat(64),
+            hostLabel: "Studio Mac",
             book: createPushRegistrationBook(emptyStorage()),
             resolveDeviceId: async () => undefined,
           }),
         }),
       );
     expect(render(true)).toContain("Turn on for this computer");
+    expect(render(true)).not.toContain("sealed");
     expect(render(false)).not.toContain("Turn on for this computer");
   });
 });

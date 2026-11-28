@@ -20,8 +20,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>OctantKeychainAccessGroup</key>
-	<string>__KEYCHAIN_ACCESS_GROUP__</string>
+	<key>OctantStatusAppGroup</key>
+	<string>__STATUS_APP_GROUP__</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

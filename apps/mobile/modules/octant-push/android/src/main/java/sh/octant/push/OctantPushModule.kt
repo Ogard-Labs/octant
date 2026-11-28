@@ -1,12 +1,10 @@
 // The phone's side of push notifications on Android, as the Expo module the
 // push port calls: whether this build can receive push at all, the
-// notification setting, the Firebase token, and one X25519 notification key
-// per paired computer. Opening a notification belongs to the messaging
-// service, which reads the same key store.
+// notification setting, the Firebase token, and tracking forgotten computers.
 //
 // Push is reported unsupported when the build carries no Firebase project
-// (`google-services.json`), which is how a build made without the maintainer's
-// push account behaves: it offers no notifications rather than failing later.
+// (`google-services.json`), which is how a build made without push credentials
+// behaves: it offers no notifications rather than failing later.
 
 package sh.octant.push
 
@@ -49,17 +47,19 @@ class OctantPushModule : Module() {
       }
     }
 
-    AsyncFunction("notificationPublicKey") { hostId: String, deviceId: String ->
-      NotificationKeyVault(context).publicKey(hostId, deviceId)
+    AsyncFunction("allowHost") { hostId: String ->
+      OctantForgottenHosts.allow(context, hostId)
+      true
     }
 
-    // Removes the notifications posted for one computer and its key.
+    // Removes the notifications posted for one computer and marks it forgotten
+    // so late messages from it are dropped.
     AsyncFunction("forgetHost") { hostId: String ->
       val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       for (active in manager.activeNotifications) {
         if (active.tag == hostId) manager.cancel(active.tag, active.id)
       }
-      NotificationKeyVault(context).forget(hostId)
+      OctantForgottenHosts.forget(context, hostId)
     }
   }
 }

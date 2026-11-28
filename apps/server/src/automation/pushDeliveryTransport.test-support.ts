@@ -1,9 +1,7 @@
-// Test doubles for the host push transport, so delivery tests need no gateway.
+// Test doubles for the host push transport, so delivery tests need no live APNs/FCM.
 
-import type {
-  AutomationNotificationProviderDelivery,
-  RemotePushEnvelopeV1,
-} from "@octant/contracts";
+import type { AutomationNotificationProviderDelivery } from "@octant/contracts";
+import type { CheckedPushMessageV2 } from "@octant/domain/push-notification-policy";
 import type { PushDeliveryDestination, PushDeliveryTransport } from "./pushDeliveryTransport";
 
 export function createUnavailablePushDeliveryTransport(): PushDeliveryTransport {
@@ -19,19 +17,19 @@ export function createUnavailablePushDeliveryTransport(): PushDeliveryTransport 
   };
 }
 
-/** Test double that records sends without requiring APNs/FCM credentials. */
+/** Test double that records checked push messages without requiring APNs/FCM credentials. */
 export function createRecordingPushDeliveryTransport(options?: {
   readonly providerDelivery?: AutomationNotificationProviderDelivery;
   readonly send?: PushDeliveryTransport["send"];
 }): PushDeliveryTransport & {
   readonly sent: Array<{
     readonly destination: PushDeliveryDestination;
-    readonly envelope: RemotePushEnvelopeV1;
+    readonly message: CheckedPushMessageV2;
   }>;
 } {
   const sent: Array<{
     readonly destination: PushDeliveryDestination;
-    readonly envelope: RemotePushEnvelopeV1;
+    readonly message: CheckedPushMessageV2;
   }> = [];
   return {
     sent,

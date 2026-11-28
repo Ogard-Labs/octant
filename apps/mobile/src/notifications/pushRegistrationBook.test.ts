@@ -3,7 +3,7 @@ import { createPushRegistrationBook, digestPlatformToken } from "./pushRegistrat
 
 function storage(initial?: string) {
   const values = new Map<string, string>();
-  if (initial !== undefined) values.set("octant.mobile.push-registrations.v1", initial);
+  if (initial !== undefined) values.set("octant.mobile.push-registrations.v2", initial);
   return {
     values,
     getItem: async (key: string) => values.get(key) ?? null,
@@ -15,18 +15,20 @@ function storage(initial?: string) {
 const record = (hostId: string, tokenDigest = "a".repeat(64)) => ({
   hostId,
   deviceId: "device",
-  hostKeyFingerprint: "f".repeat(64),
   tokenDigest,
 });
 
 describe("the record of computers this phone registered notifications with", () => {
-  it("keeps one record per computer, replaces it when the token changes, and drops it on removal", async () => {
+  it("keeps one record per computer, replaces it when the token or preferences change, and drops it on removal", async () => {
     const store = storage();
     const book = createPushRegistrationBook(store);
     await book.record(record("one"));
-    await book.record(record("two"));
+    await book.record({ ...record("two"), threadTitles: true as const });
     await book.record(record("one", "b".repeat(64)));
-    expect(await book.list()).toEqual([record("two"), record("one", "b".repeat(64))]);
+    expect(await book.list()).toEqual([
+      { ...record("two"), threadTitles: true },
+      record("one", "b".repeat(64)),
+    ]);
     await book.remove("one");
     await book.remove("two");
     expect(await book.list()).toEqual([]);

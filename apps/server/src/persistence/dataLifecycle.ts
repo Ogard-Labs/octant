@@ -275,6 +275,8 @@ const PRIVATE_LISTENER_HOST_IDENTITY_ARTIFACTS = [
   join("remote", "private-listener-tls-cert.pem"),
   join("remote", "private-listener-tls-key.pem"),
   join("remote", "push-registrations.json"),
+  join("remote", "push-sender-setting.json"),
+  // Legacy gateway setting file, removed alongside current data if present.
   join("remote", "push-gateway-setting.json"),
   // Which secret stores the person linked. It names no item and holds no
   // value, but it is local data and goes with the rest.
@@ -287,7 +289,7 @@ const PRIVATE_LISTENER_HOST_IDENTITY_ARTIFACTS = [
 // secret material, so removal takes those with the rest. The pattern names
 // exactly those five files and a numeric process id.
 const PRIVATE_LISTENER_STAGING_LEFTOVER =
-  /^(?:remote[\\/](?:private-listener-(?:tls-key\.pem|tls-cert\.pem|setting\.json)|push-(?:registrations|gateway-setting)\.json)|secret-stores[\\/]linked-secret-stores\.json)\.\d+\.tmp$/;
+  /^(?:remote[\\/](?:private-listener-(?:tls-key\.pem|tls-cert\.pem|setting\.json)|push-(?:registrations|sender-setting|gateway-setting)\.json)|secret-stores[\\/]linked-secret-stores\.json)\.\d+\.tmp$/;
 
 /**
  * A regular file, or a link standing in for a listener file. The link is

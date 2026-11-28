@@ -1,44 +1,56 @@
-// Opens each push notification before the system draws it. The delivery path
-// sends a placeholder alert and the content sealed to this phone; this
-// extension replaces the placeholder with the opened text when a key it holds
-// opens the content, and leaves the placeholder untouched otherwise. It sets
-// no action and no attachment: a notification is awareness, and acting on a
-// thread happens in the app, behind its own unlock.
+// Keyless notification service extension. Holds no Keychain item, no
+// cryptography, and makes no network calls. It checks the v2 `octant` metadata
+// against this phone's rules, builds the deep link, sets `threadIdentifier`,
+// and replaces alert text with a generic placeholder for malformed payloads or
+// computers the person removed from this phone.
 
 import UserNotifications
 
 class NotificationService: UNNotificationServiceExtension {
   private var contentHandler: ((UNNotificationContent) -> Void)?
-  private var placeholder: UNNotificationContent?
+  private var fallback: UNNotificationContent?
 
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
     self.contentHandler = contentHandler
-    placeholder = request.content
-    guard let sealed = request.content.userInfo["octant"] as? [String: Any],
-      let version = sealed["v"] as? Int,
-      let encapsulatedKey = sealed["ek"] as? String,
-      let ciphertext = sealed["ct"] as? String,
-      let opened = SealedNotificationOpener.open(
-        version: version, encapsulatedKey: encapsulatedKey, ciphertext: ciphertext,
-        entries: NotificationKeyVault().entries()),
+    let placeholder = Self.placeholderContent(from: request.content)
+    self.fallback = placeholder
+
+    guard let octant = request.content.userInfo["octant"] as? [String: Any],
+      let parsed = DirectNotificationParser.parse(
+        octant: octant,
+        title: request.content.title,
+        body: request.content.body,
+        forgottenHosts: ForgottenHostStore.readForgottenHosts()
+      ),
       let content = request.content.mutableCopy() as? UNMutableNotificationContent
     else {
-      contentHandler(request.content)
+      contentHandler(placeholder)
       return
     }
-    content.title = opened.title
-    content.body = opened.body
-    // Only the link stays: the sealed bytes are not needed past this point.
-    content.userInfo = ["url": opened.deepLink]
-    content.threadIdentifier = opened.hostId
+    content.title = parsed.title
+    content.body = parsed.body
+    content.userInfo = ["url": parsed.deepLink]
+    content.threadIdentifier = parsed.hostId
     contentHandler(content)
   }
 
-  /// Out of time: show the placeholder rather than nothing.
   override func serviceExtensionTimeWillExpire() {
-    if let contentHandler, let placeholder { contentHandler(placeholder) }
+    if let contentHandler, let fallback { contentHandler(fallback) }
+  }
+
+  private static func placeholderContent(
+    from original: UNNotificationContent
+  ) -> UNNotificationContent {
+    guard let mutable = original.mutableCopy() as? UNMutableNotificationContent else {
+      return original
+    }
+    mutable.title = DirectNotificationParser.placeholderTitle
+    mutable.body = DirectNotificationParser.placeholderBody
+    mutable.threadIdentifier = ""
+    mutable.userInfo = [:]
+    return mutable
   }
 }

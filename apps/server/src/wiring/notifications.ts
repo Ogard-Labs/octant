@@ -7,7 +7,6 @@ import {
 } from "@octant/contracts";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import { Effect } from "effect";
-import { readAgentThreadName } from "../persistence/agentAccessProjection";
 import { ThreadNotificationDeliveryService } from "../remote/threadNotificationDeliveryService";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ServerStart } from "./serverShape";
@@ -18,7 +17,11 @@ import type { FoundationsWiring } from "./foundations";
 export type ThreadNotificationDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     AutomationWiring,
-    "hasPushStanding" | "pushComputerLabel" | "pushDeliveryTransport" | "pushNotificationTokenStore"
+    | "hasPushStanding"
+    | "heldSecretValues"
+    | "pushComputerLabel"
+    | "pushDeliveryTransport"
+    | "pushNotificationTokenStore"
   > &
   Pick<ChatWiring, "chatHiddenThreadIds"> &
   Pick<FoundationsWiring, "workThreadProjection">;
@@ -33,14 +36,16 @@ function decoded<A>(decode: (value: unknown) => A, value: string): A | undefined
 
 /**
  * Ordinary-thread notifications for paired phones. The service follows the
- * journal as it commits and shares the Automation path's registrations and
- * transport, so the Notifications setting and a device's standing govern both.
- * The remote wiring also tells owner phones through it when a move waits.
+ * journal as it commits and shares the Automation path's registrations, secret
+ * check, and transport, so direct-push availability and a device's standing
+ * govern both. Outside-agent names are not prefixed to thread titles (only
+ * approved push fields leave the host).
  */
 export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
   const {
     chatHiddenThreadIds,
     hasPushStanding,
+    heldSecretValues,
     persistence,
     pushComputerLabel,
     pushDeliveryTransport,
@@ -51,7 +56,7 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
     // A thread a paired device could read: it still exists, is not being
     // deleted, is not a hidden lane, and its mode is on. Anything else names
     // nothing to the phone.
-    const readVisibleThread = (
+    const readThread = (
       threadId: string,
     ): { readonly mode: OctantMode; readonly title: string } | undefined => {
       const modes = enabledModes(
@@ -76,18 +81,6 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
       if (code !== undefined && modes.includes("code")) return { mode: "code", title: code.title };
       return undefined;
     };
-    // A thread an outside agent started says so on the phone, as it does in
-    // Needs you, so an approval it raised is not mistaken for the person's own.
-    const readThread = (
-      threadId: string,
-    ): { readonly mode: OctantMode; readonly title: string } | undefined => {
-      const thread = readVisibleThread(threadId);
-      if (thread === undefined) return undefined;
-      const agentName = readAgentThreadName(persistence.connection, threadId);
-      return agentName === undefined
-        ? thread
-        : { ...thread, title: `${agentName} · ${thread.title}` };
-    };
     const threadNotifications = new ThreadNotificationDeliveryService({
       journal: persistence.journal,
       registrations: pushNotificationTokenStore,
@@ -95,6 +88,7 @@ export function wireThreadNotifications(deps: ThreadNotificationDependencies) {
       hasStanding: hasPushStanding,
       readThread,
       computerLabel: pushComputerLabel,
+      readHeldSecrets: () => heldSecretValues.read(),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
       hostActorId: OCTANT_LOCAL_ACTOR_ID,

@@ -44,6 +44,7 @@
     "./code-worktree-naming": "./src/codeWorktreeNaming.ts",
     "./code-worktree-source-policy": "./src/codeWorktreeSourcePolicy.ts",
     "./delivery-target-policy": "./src/deliveryTargetPolicy.ts",
+    "./push-label-policy": "./src/pushLabelPolicy.ts",
     "./push-notification-policy": "./src/pushNotificationPolicy.ts",
     "./automation-notification-policy": "./src/automationNotificationPolicy.ts",
     "./mobile-hardening-policy": "./src/mobileHardeningPolicy.ts",

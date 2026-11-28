@@ -8,11 +8,11 @@ import appConfig from "../../app.config";
 import withOctantPush, {
   extensionBundleIdentifier,
   extensionEntitlements,
-  keychainAccessGroup,
+  statusAppGroup,
 } from "../../plugins/withOctantPush";
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const group = "$(AppIdentifierPrefix)app.octant.mobile.notification-keys";
+const group = "group.app.octant.mobile.status";
 
 /** The configuration the build resolves, with the push plugin's changes applied. */
 async function resolvedPushConfig(enabled: boolean) {
@@ -31,6 +31,9 @@ describe("mobile push notification configuration", () => {
   it("leaves the App ID's capabilities alone in a build made without the push capability", async () => {
     expect(appConfig.plugins).toContainEqual(["./plugins/withOctantPush", { enabled: false }]);
     const resolved = await resolvedPushConfig(false);
+    expect(resolved.ios?.entitlements ?? {}).not.toHaveProperty(
+      "com.apple.security.application-groups",
+    );
     expect(resolved.ios?.entitlements ?? {}).not.toHaveProperty("keychain-access-groups");
     expect(resolved.ios?.infoPlist ?? {}).not.toHaveProperty("OctantPushEnabled");
     expect(JSON.stringify(resolved.extra)).not.toContain("appExtensions");
@@ -47,13 +50,17 @@ describe("mobile push notification configuration", () => {
     expect(other.plugins).toContainEqual(["./plugins/withOctantPush", { enabled: false }]);
   });
 
-  it("shares one Keychain group between the app and its notification service extension, and tells EAS about the extension", async () => {
+  it("shares one non-secret status App Group between the app and keyless notification extension, with no Keychain group", async () => {
     const resolved = await resolvedPushConfig(true);
-    expect(resolved.ios?.entitlements).toMatchObject({ "keychain-access-groups": [group] });
+    expect(resolved.ios?.entitlements).toMatchObject({
+      "com.apple.security.application-groups": [group],
+    });
+    expect(resolved.ios?.entitlements).not.toHaveProperty("keychain-access-groups");
     expect(resolved.ios?.infoPlist).toMatchObject({
-      OctantKeychainAccessGroup: group,
+      OctantStatusAppGroup: group,
       OctantPushEnabled: true,
     });
+    expect(resolved.ios?.infoPlist).not.toHaveProperty("OctantKeychainAccessGroup");
     const extra = resolved.extra as {
       eas: { build: { experimental: { ios: { appExtensions: unknown[] } } } };
     };
@@ -61,18 +68,19 @@ describe("mobile push notification configuration", () => {
       {
         targetName: "OctantNotificationService",
         bundleIdentifier: "app.octant.mobile.notification-service",
-        entitlements: { "keychain-access-groups": [group] },
+        entitlements: { "com.apple.security.application-groups": [group] },
       },
     ]);
   });
 
-  it("gives the extension the app's Keychain group and nothing else", () => {
-    expect(keychainAccessGroup("app.octant.mobile")).toBe(group);
+  it("gives the extension only the non-secret status App Group entitlement", () => {
+    expect(statusAppGroup("app.octant.mobile")).toBe(group);
     expect(extensionBundleIdentifier("app.octant.mobile")).toBe(
       "app.octant.mobile.notification-service",
     );
     const entitlements = extensionEntitlements("app.octant.mobile");
     expect(entitlements).toContain(group);
+    expect(entitlements).not.toContain("keychain-access-groups");
     expect(entitlements.match(/<key>/g)).toHaveLength(1);
   });
 

@@ -1,10 +1,7 @@
-// Receives the data-only message the push gateway sends, opens the sealed
-// content, and posts the notification itself. Google never draws a
-// notification from this message, so what the lock screen shows is whatever
-// this receiver decides: the opened text, or, when no held key opens the
-// content, the same placeholder the iPhone shows. The notification carries
-// no action: tapping it opens the thread's link, and acting on the thread
-// happens in the app, behind its own unlock.
+// Receives the data-only v2 message a paired computer sends directly through
+// FCM, validates its fields and display text, and posts the notification
+// itself. Messages from a computer the person removed from this phone are
+// dropped. Tapping opens the deep link in the app, behind its own unlock.
 
 package sh.octant.push
 
@@ -23,9 +20,13 @@ import com.google.firebase.messaging.RemoteMessage
 class OctantMessagingService : FirebaseMessagingService() {
   override fun onMessageReceived(message: RemoteMessage) {
     val data = message.data
-    val opened =
-      SealedNotificationOpener.open(data["v"], data["ek"], data["ct"], NotificationKeyVault(this).keys())
-    post(this, opened)
+    // Live-status snapshots are handled separately from alert notifications.
+    if (data["type"] == "live-status") return
+    val forgotten = OctantForgottenHosts.read(this)
+    val hostId = data["hostId"]
+    if (hostId != null && forgotten.contains(hostId)) return
+    val parsed = DirectNotificationParser.parse(data, forgotten)
+    post(this, parsed)
   }
 
   // A new token is noticed the next time the app opens, which compares it with
@@ -34,10 +35,8 @@ class OctantMessagingService : FirebaseMessagingService() {
 
   companion object {
     private const val CHANNEL_ID = "octant-threads"
-    private const val PLACEHOLDER_TITLE = "Octant"
-    private const val PLACEHOLDER_BODY = "A paired computer has an update"
 
-    fun post(context: Context, opened: OpenedNotification?) {
+    fun post(context: Context, parsed: DirectNotification?) {
       val manager = NotificationManagerCompat.from(context)
       if (!manager.areNotificationsEnabled()) return
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -48,26 +47,22 @@ class OctantMessagingService : FirebaseMessagingService() {
       val builder =
         NotificationCompat.Builder(context, CHANNEL_ID)
           .setSmallIcon(context.applicationInfo.icon)
-          .setContentTitle(opened?.title ?: PLACEHOLDER_TITLE)
-          .setContentText(opened?.body ?: PLACEHOLDER_BODY)
+          .setContentTitle(parsed?.title ?: DirectNotificationParser.PLACEHOLDER_TITLE)
+          .setContentText(parsed?.body ?: DirectNotificationParser.PLACEHOLDER_BODY)
           .setAutoCancel(true)
       // A thread keeps one notification: the next update replaces it.
       var tag: String? = null
       var id = 0
-      if (opened != null) {
-        tag = opened.hostId
-        // A thread's link is its identity; every new-device notice from a host
-        // shares one link, so it is told apart by its alert. Two guests with
-        // the same name and no address read alike, so the text cannot do it.
+      if (parsed != null) {
+        tag = parsed.hostId
         id =
-          if (opened.deepLink.endsWith("/new-devices")) {
-            (opened.deepLink + "\n" + (opened.alertId ?: (opened.title + "\n" + opened.body)))
-              .hashCode()
+          if (parsed.deepLink.endsWith("/new-devices")) {
+            (parsed.deepLink + "\n" + parsed.title + "\n" + parsed.body).hashCode()
           } else {
-            opened.deepLink.hashCode()
+            parsed.deepLink.hashCode()
           }
         val open =
-          Intent(Intent.ACTION_VIEW, Uri.parse(opened.deepLink))
+          Intent(Intent.ACTION_VIEW, Uri.parse(parsed.deepLink))
             .setPackage(context.packageName)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         builder.setContentIntent(
@@ -81,7 +76,7 @@ class OctantMessagingService : FirebaseMessagingService() {
       }
       try {
         manager.notify(tag, id, builder.build())
-      } catch (error: SecurityException) {
+      } catch (_: SecurityException) {
         // Notifications were switched off between the check and the post.
       }
     }

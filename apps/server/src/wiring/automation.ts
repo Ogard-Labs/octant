@@ -83,13 +83,19 @@ import {
   pushDestinationStands,
 } from "../remote/pushNotificationTokenStore";
 import { createHubPushDeliveryTransport, createHubPushHandoffSlot } from "../hub/hubPushTransport";
-import { createGatewayPushDeliveryTransport } from "../remote/gatewayPushDeliveryTransport";
+import { privateListenerDisplayName } from "../remote/privateListenerHostIdentity";
+import { createDirectPushDeliveryTransport } from "../push/directPushDeliveryTransport";
+import { createDirectPushSender } from "../push/directPushSenders";
+import { createHeldSecretValuesReader, type StoredSecretNamespace } from "../push/heldSecretValues";
+import { createPushSenderRouteHandler } from "../push/pushSenderRoutes";
+import { DIRECT_PUSH_CREDENTIAL_REFS, PushSenderService } from "../push/pushSenderService";
 import {
-  existingPrivateListenerSigning,
-  privateListenerDisplayName,
-} from "../remote/privateListenerHostIdentity";
-import { createPushGatewaySetting } from "../remote/pushGatewaySetting";
-import type { HostSigningPort } from "../remote/remoteProtocolService";
+  makeCredentialBrokerClient,
+  makeProviderKeyReferenceReader,
+  makePushPlatformCredentialBrokerClient,
+} from "../providers/credentialBrokerClient";
+import type { RememberedThreadSecrets } from "../threadSecrets/rememberedThreadSecrets";
+import { createHubStateStore } from "../hub/hubStateStore";
 import {
   readDeviceAccessLevel,
   readDeviceApprovedByPerson,
@@ -124,6 +130,7 @@ import type { AutomationSourceBranch } from "../automation/automationCodeDispatc
 
 export type AutomationDependencies = {
   readonly integrationEventSources: IntegrationEventSourceProvider;
+  readonly rememberedThreadSecrets?: RememberedThreadSecrets | undefined;
 } & Pick<ServerStart, "persistence" | "options"> &
   Pick<
     AuthorityWiring,
@@ -203,41 +210,104 @@ export function wireAutomation(deps: AutomationDependencies) {
       store: automationEventStore,
       projection: persistence.automationProjection,
     }) === "ok";
-  // Shared device destinations, opt-in preferences, durable delivery
-  // receipts. The host holds no platform push credential: it sends sealed
-  // envelopes through the push gateway the Notifications setting names, and
-  // reports delivery unavailable while that setting is off (the default).
-  // Registrations are kept owner-only under the data directory and survive a
-  // restart. One transport carries sealed envelopes for Automation runs and
-  // ordinary threads alike.
+  // Shared device destinations, direct APNs/FCM sender, host-side secret floor,
+  // and durable delivery receipts. Any host with stored credentials can send
+  // directly; a spoke whose hub grant ticks Push hands checked v2 messages to
+  // its hub first and falls back to its own direct sender if available.
   const pushNotificationTokenStore = createPushNotificationTokenStore({
     dataDirectory: persistence.dataDirectory,
     journal: persistence.journal,
     uuid: randomUUID,
     hostActorId: OCTANT_LOCAL_ACTOR_ID,
   });
-  const pushGatewaySetting = createPushGatewaySetting(persistence.dataDirectory);
-  // The key is read once it exists and kept: every send signs with it.
-  let pushSigning: HostSigningPort | undefined;
-  const signPush = () => {
-    pushSigning ??= existingPrivateListenerSigning(
-      persistence.dataDirectory,
-      deps.options.serverIdentityFiles,
-    );
-    return pushSigning;
-  };
-  // Where this host's hub grant ticks Push, sealed envelopes go to the hub to
-  // forward, and fall back to this host's own gateway when the hub cannot. The
-  // remote wiring binds the hub's side once it exists; until then, and on a host
-  // that is no hub's spoke, every delivery is the host's own.
+  const pushPlatformCredentials =
+    deps.options.credentialBrokerUrl === undefined ||
+    deps.options.credentialBrokerToken === undefined
+      ? undefined
+      : makePushPlatformCredentialBrokerClient({
+          url: deps.options.credentialBrokerUrl,
+          token: deps.options.credentialBrokerToken,
+        });
+  const secretNamespaces: Array<StoredSecretNamespace> = [];
+  if (
+    deps.options.credentialBrokerUrl !== undefined &&
+    deps.options.credentialBrokerToken !== undefined
+  ) {
+    const brokerOptions = {
+      url: deps.options.credentialBrokerUrl,
+      token: deps.options.credentialBrokerToken,
+    };
+    const readProviderReference = makeProviderKeyReferenceReader(brokerOptions);
+    secretNamespaces.push({
+      listIds: () => persistence.readProviderInstances().map((instance) => String(instance.id)),
+      store: makeCredentialBrokerClient(brokerOptions),
+      referenceStatus: async (id) => (await readProviderReference(id)).status,
+    });
+    if (pushPlatformCredentials !== undefined) {
+      secretNamespaces.push({
+        listIds: () => [DIRECT_PUSH_CREDENTIAL_REFS.apple, DIRECT_PUSH_CREDENTIAL_REFS.google],
+        store: pushPlatformCredentials,
+      });
+    }
+  }
+  const rememberedThreadSecrets = deps.rememberedThreadSecrets;
+  const heldSecretValues = createHeldSecretValuesReader({
+    namespaces: secretNamespaces,
+    ...(rememberedThreadSecrets === undefined
+      ? {}
+      : {
+          rememberedThreadSecrets: {
+            listPasted: () =>
+              rememberedThreadSecrets
+                .list()
+                .filter((entry) => entry.source === "pasted")
+                .map(({ id, name }) => ({ id, name })),
+            resolvePasted: async (id, name) => {
+              const resolved = await rememberedThreadSecrets.resolve(id, name);
+              if (resolved === undefined) return { status: "missing" };
+              if (resolved.kind === "value") return { status: "found", value: resolved.value };
+              return { status: "missing" };
+            },
+          },
+        }),
+  });
+  const pushSenderService = new PushSenderService({
+    dataDirectory: persistence.dataDirectory,
+    credentials: pushPlatformCredentials,
+    journal: persistence.journal,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    hostActorId: OCTANT_LOCAL_ACTOR_ID,
+    legacySetting: () => {
+      try {
+        return createHubStateStore(persistence.dataDirectory).load().hub?.directPush;
+      } catch {
+        return undefined;
+      }
+    },
+    onCredentialChanged: () => heldSecretValues.invalidate(),
+  });
+  void pushSenderService.refreshCredentialPresence().catch(() => undefined);
+  const directPushSender = createDirectPushSender({
+    credentials: pushSenderService.credentialSource(),
+    environment: () => pushSenderService.environment(),
+    now: Date.now,
+  });
+  const directPushDeliveryTransport = createDirectPushDeliveryTransport({
+    pushSender: pushSenderService,
+    sender: directPushSender,
+  });
+  const pushSenderRoutes = createPushSenderRouteHandler({
+    desktopBridgeSecret: deps.options.desktopBridgeSecret,
+    windowAuthorityStore,
+    pushSender: pushSenderService,
+  });
+  // Where this host's hub grant ticks Push, checked v2 messages go to the hub
+  // to send directly, and fall back to this host's own direct sender when the
+  // hub cannot. The remote wiring binds the spoke's port once it exists.
   const hubPushHandoffSlot = createHubPushHandoffSlot();
   const pushDeliveryTransport = createHubPushDeliveryTransport({
-    direct: createGatewayPushDeliveryTransport({
-      settings: pushGatewaySetting.current,
-      signing: signPush,
-    }),
-    settings: pushGatewaySetting.current,
-    signing: signPush,
+    direct: directPushDeliveryTransport,
     handoff: hubPushHandoffSlot.current,
   });
   const hasPushStanding = (hostId: string, deviceId: string): boolean =>
@@ -265,8 +335,12 @@ export function wireAutomation(deps: AutomationDependencies) {
     tokens: pushNotificationTokenStore,
     hasStanding: hasPushStanding,
     computerLabel: pushComputerLabel,
+    readHeldSecrets: () => heldSecretValues.read(),
     transport: pushDeliveryTransport,
     clock: () => new Date().toISOString() as UtcTimestamp,
+    uuid: randomUUID,
+    journal: persistence.journal,
+    hostActorId: OCTANT_LOCAL_ACTOR_ID,
     resolveAutomationProjectId: (automationId) => {
       const definition = persistence.automationProjection.getDefinition(automationId);
       return definition === undefined ? undefined : String(definition.projectId);
@@ -292,7 +366,6 @@ export function wireAutomation(deps: AutomationDependencies) {
     windowAuthorityStore,
     preferences: automationNotificationPreferencesStore,
     delivery: automationNotificationDelivery,
-    pushGateway: pushGatewaySetting,
   });
   const automationCommandService = new AutomationCommandService({
     store: automationEventStore,
@@ -1252,13 +1325,16 @@ export function wireAutomation(deps: AutomationDependencies) {
     automationRoutes,
     automationScheduler,
     completedThreadArchiveSweep,
+    directPushSender,
     hasPushStanding,
+    heldSecretValues,
     hubPushHandoffSlot,
     webhookEventSourceSlot,
     pushComputerLabel,
     pushDeliveryTransport,
-    pushGatewaySetting,
     pushNotificationTokenStore,
+    pushSenderRoutes,
+    pushSenderService,
   };
 }
 

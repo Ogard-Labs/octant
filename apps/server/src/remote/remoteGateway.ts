@@ -219,6 +219,8 @@ export interface RemoteGatewayServices {
    * answers unavailable rather than keeping a token it would lose.
    */
   readonly pushTokenStore?: PushNotificationTokenStore;
+  /** Answers whether this host can deliver push notifications (`GET /api/remote/auth/push-token`). */
+  readonly pushStatus?: () => Promise<import("@octant/contracts").RemotePushStatusV1>;
   /**
    * Opening dev servers from a paired device. Absent, the proxy session route
    * and every proxy route answer unavailable.
@@ -923,6 +925,7 @@ function assembleServices(
       options.signing.signHostPayload(payload),
     credentialSelfService,
     ...(pushTokenStore === undefined ? {} : { pushTokenStore }),
+    ...(options.pushStatus === undefined ? {} : { pushStatus: options.pushStatus }),
     requestRegistry: registry as RemoteRequestRegistryPort,
     sessionRevalidation,
     sessionNow: now,

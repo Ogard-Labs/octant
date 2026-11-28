@@ -1,20 +1,16 @@
 // The phone's side of push notifications on iOS, as the Expo module the push
-// port calls: the system's permission, the Apple push token, and one X25519
-// notification key per paired computer. Opening a notification belongs to the
-// notification service extension, which reads the same Keychain items.
+// port calls: the system's permission, the Apple push token, and tracking
+// which paired computers have been forgotten so the keyless notification
+// service extension hides late alerts after removal.
 //
-// Push is reported unsupported on the Simulator, which has no Apple push
-// token to give, and on iOS earlier than 17, whose CryptoKit cannot open the
-// sealed content: a build that could register a token but never show what it
-// receives would only ever show the placeholder.
+// Push is reported unsupported on the Simulator, which has no Apple push token
+// to give, and in builds made without the push capability.
 
 import ExpoModulesCore
 import UIKit
 import UserNotifications
 
 public class OctantPushModule: Module {
-  private let vault = NotificationKeyVault()
-
   public func definition() -> ModuleDefinition {
     Name("OctantPush")
 
@@ -22,11 +18,10 @@ public class OctantPushModule: Module {
       #if targetEnvironment(simulator)
         return false
       #else
-        // The build's config plugin writes this key only when the app was
-        // made with the push entitlement and the extension; without them a
-        // token could be asked for but never delivered to.
+        // The build's config plugin writes this key only when the app was made
+        // with the push entitlement and the keyless notification extension.
         let built = Bundle.main.object(forInfoDictionaryKey: "OctantPushEnabled") as? Bool
-        return built == true && SealedNotificationOpener.canOpen
+        return built == true
       #endif
     }
 
@@ -50,13 +45,16 @@ public class OctantPushModule: Module {
       return await PushTokenReceiver.shared.next(timeout: 10)
     }
 
-    AsyncFunction("notificationPublicKey") { (hostId: String, deviceId: String) -> String? in
-      self.vault.publicKey(hostId: hostId, deviceId: deviceId)
+    // Clears a computer from the forgotten list when notifications are enabled
+    // for it again.
+    AsyncFunction("allowHost") { (hostId: String) -> Bool in
+      ForgottenHostStore.allow(hostId: hostId)
+      return true
     }
 
-    // Removes the notifications delivered for one computer and its key.
-    // Delivered notifications carry the host id in their thread identifier,
-    // which the extension sets once it has opened the content.
+    // Removes delivered notifications for one computer and marks it forgotten
+    // in the shared App Group so late alerts from that computer are replaced
+    // with a generic placeholder.
     AsyncFunction("forgetHost") { (hostId: String) async -> Bool in
       let center = UNUserNotificationCenter.current()
       let delivered = await center.deliveredNotifications()
@@ -64,7 +62,7 @@ public class OctantPushModule: Module {
         $0.request.content.threadIdentifier == hostId
       }.map { $0.request.identifier }
       center.removeDeliveredNotifications(withIdentifiers: identifiers)
-      return self.vault.forget(hostId: hostId)
+      return ForgottenHostStore.forget(hostId: hostId)
     }
   }
 
@@ -111,7 +109,7 @@ final class PushTokenReceiver {
 /// Receives Apple's registration answer, and shows a tapped notification's
 /// thread by opening the app's own link, which the app's navigation already
 /// parses. A notification that arrives while Octant is open is shown as a
-/// banner; the extension has already replaced its placeholder by then.
+/// banner.
 public class OctantPushAppDelegateSubscriber: ExpoAppDelegateSubscriber, UNUserNotificationCenterDelegate {
   public func application(
     _ application: UIApplication,

@@ -14,7 +14,6 @@ import {
   OWNER_SESSION_HEADER,
   OWNER_UNLOCK_HEADER,
   PUBLIC_FORWARD_MAX_WIRE_BYTES,
-  REMOTE_PUSH_DELIVERY_HEADERS,
   REMOTE_SERVER_PROXY_RELAYED,
   REMOTE_SERVER_PROXY_RELAYED_HEADER,
   SHELL_SETTINGS_PATH,
@@ -229,8 +228,6 @@ export const REMOTE_HUB_LINK_ROUTE_IDS = {
   push: "hub-link-push",
   pushGrant: "hub-link-push-grant",
   pushCopy: "hub-link-push-copy",
-  directPushCapabilities: "hub-link-direct-push-capabilities",
-  directPushDeliveries: "hub-link-direct-push-deliveries",
   provisionOffer: "hub-link-provision-offer",
   provisionMirror: "hub-link-provision-mirror",
   signInRequest: "hub-link-sign-in-request",
@@ -696,37 +693,6 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 1_024,
     maxResponseBytes: 4_096,
   },
-  // A hub that sends notifications directly is the push gateway for a phone app its
-  // person built: a phone trades its platform token for a capability, and a computer
-  // posts one sealed envelope signed with its host key. The hub answers `unavailable`
-  // for both while its switch is off.
-  {
-    id: REMOTE_HUB_LINK_ROUTE_IDS.directPushCapabilities,
-    match: { kind: "exact", path: "/v1/capabilities" },
-    surface: "pre-auth",
-    methods: ["POST"],
-    allowQuery: false,
-    allowedRequestHeaders: ["content-type"],
-    allowedContentTypes: ["application/json"],
-    maxBodyBytes: 8_192,
-    maxResponseBytes: 4_096,
-  },
-  {
-    id: REMOTE_HUB_LINK_ROUTE_IDS.directPushDeliveries,
-    match: { kind: "exact", path: "/v1/deliveries" },
-    surface: "pre-auth",
-    methods: ["POST"],
-    allowQuery: false,
-    allowedRequestHeaders: [
-      "content-type",
-      REMOTE_PUSH_DELIVERY_HEADERS.hostKey,
-      REMOTE_PUSH_DELIVERY_HEADERS.timestamp,
-      REMOTE_PUSH_DELIVERY_HEADERS.signature,
-    ],
-    allowedContentTypes: ["application/json"],
-    maxBodyBytes: 8_192,
-    maxResponseBytes: 4_096,
-  },
   // Provisioning: the hub's offer to a spoke (configuration, never a secret) and a
   // spoke's request for the signed update feed document an offer mirrors.
   {
@@ -1030,7 +996,7 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     id: "remote-auth-push-token",
     match: { kind: "exact", path: "/api/remote/auth/push-token" },
     surface: "authenticated-product",
-    methods: ["PUT", "DELETE"],
+    methods: ["GET", "PUT", "DELETE"],
     allowQuery: false,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"],
@@ -1746,14 +1712,6 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     methods: ["GET"] as const,
     allowQuery: true,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
-  },
-  {
-    kind: "exact" as const,
-    path: "/api/push-notifications/gateway",
-    methods: ["GET", "PUT"] as const,
-    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
-    allowedContentTypes: ["application/json"] as const,
-    maxBodyBytes: 8_192,
   },
   // Artifact library, tags, Claude page snapshots/copies, mirror, and synced
   // artifacts. Restricted devices reach only `/api/artifacts/library` under

@@ -1,57 +1,94 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { RemotePushGatewaySettingsV1 } from "@octant/contracts/remote-push-notifications";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { HubAdministrationBridge, HubAdministrationOperation } from "../shell/hostBridge";
 import { PhoneNotificationSettings } from "./PhoneNotificationSettings";
 
-const off: RemotePushGatewaySettingsV1 = {
-  kind: "remote-push-gateway-settings",
+const off = {
   enabled: false,
-  gatewayUrl: "https://push.octant.sh",
-  version: 0,
+  environment: "production",
+  ios: "not-stored",
+  android: "not-stored",
 };
 
-function makeClient(current = off) {
-  return {
-    pushGateway: vi.fn(async () => current),
-    setPushGateway: vi.fn(async (input: { enabled: boolean; gatewayUrl: string }) => ({
-      ...current,
-      enabled: input.enabled,
-      gatewayUrl: input.gatewayUrl,
-      version: current.version + 1,
-    })),
+function makeHub(
+  responses: Partial<
+    Record<HubAdministrationOperation, { readonly status: number; readonly body: unknown }>
+  >,
+) {
+  const calls: Array<{ readonly operation: HubAdministrationOperation; readonly body: unknown }> =
+    [];
+  const hub: HubAdministrationBridge = {
+    hubAdministrationRequest: async (operation, body) => {
+      calls.push({ operation, body });
+      return (
+        responses[operation] ?? {
+          status: 200,
+          body: { pushSender: off },
+        }
+      );
+    },
   };
+  return { hub, calls };
 }
 
 describe("PhoneNotificationSettings", () => {
-  it("starts off, names the gateway, and turns on from the version it read", async () => {
+  it("starts off on any host, turns on direct sending, and shows only whether credentials are stored", async () => {
     const user = userEvent.setup();
-    const client = makeClient();
-    render(<PhoneNotificationSettings client={client} />);
+    const { hub, calls } = makeHub({
+      "push-sender-status": { status: 200, body: { pushSender: { ...off, ios: "stored" } } },
+      "direct-push": { status: 200, body: { status: "changed" } },
+      "direct-push-credential-remove": { status: 200, body: { status: "changed" } },
+    });
+    render(<PhoneNotificationSettings hub={hub} />);
 
     const toggle = await screen.findByRole("switch", { name: "Phone notifications" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
-    expect(screen.getByText(/Notifications go through https:\/\/push\.octant\.sh/)).toBeTruthy();
+    expect(screen.getByText(/^Stored: the \.p8 key/)).toBeTruthy();
+    expect(screen.getByText(/^Not stored: the service-account JSON/)).toBeTruthy();
 
     await user.click(toggle);
-    expect(client.setPushGateway).toHaveBeenCalledWith({
-      enabled: true,
-      gatewayUrl: "https://push.octant.sh",
-      expectedVersion: 0,
-    });
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "direct-push")?.body).toEqual({
+        enabled: true,
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(
+        calls.find((call) => call.operation === "direct-push-credential-remove")?.body,
+      ).toEqual({ platform: "ios" }),
+    );
   });
 
-  it("refuses a plain http gateway off this computer without sending it", async () => {
+  it("sends a Google service account once, clears the field before the reply, and shows a refusal plainly", async () => {
     const user = userEvent.setup();
-    const client = makeClient();
-    render(<PhoneNotificationSettings client={client} />);
+    const { hub, calls } = makeHub({
+      "push-sender-status": { status: 200, body: { pushSender: off } },
+      "direct-push-credential": {
+        status: 409,
+        body: { status: "refused", reason: "invalid-credential" },
+      },
+    });
+    render(<PhoneNotificationSettings hub={hub} />);
 
-    const address = await screen.findByLabelText("Push gateway");
-    await user.clear(address);
-    await user.type(address, "http://push.example.test");
-    await user.click(screen.getByRole("button", { name: "Save address" }));
+    const field = await screen.findByLabelText("Service account (JSON)");
+    await user.type(field, "bad-account");
+    await user.click(screen.getByRole("button", { name: "Store service account" }));
 
-    expect(await screen.findByText(/must be an https address/)).toBeTruthy();
-    expect(client.setPushGateway).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(calls.find((call) => call.operation === "direct-push-credential")?.body).toEqual({
+        platform: "android",
+        serviceAccount: "bad-account",
+      }),
+    );
+    expect((field as HTMLTextAreaElement).value).toBe("");
+    expect(await screen.findByText(/not a key Apple or Google issues/)).toBeTruthy();
+  });
+
+  it("shows a host-only note when opened from a paired browser without the local desktop bridge", () => {
+    render(<PhoneNotificationSettings />);
+    expect(screen.getByText(/set up on the host machine/i)).toBeTruthy();
   });
 });

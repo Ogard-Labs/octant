@@ -19,9 +19,9 @@ async function requestAndroidRuntimePermission(): Promise<boolean> {
 
 /**
  * The phone's notification port: the in-tree native module, which reports
- * itself unsupported on the Simulator, on an iPhone older than iOS 17, and on
- * an Android build with no push project. A build without the module (Expo Go)
- * gets the unavailable port.
+ * itself unsupported on the Simulator, in an iOS build made without the push
+ * capability, and on an Android build with no push project. A build without
+ * the module (Expo Go) gets the unavailable port.
  */
 export const mobileNotificationPort: MobileNotificationPermissionPort =
   createNativeNotificationPermissionPort(native, {

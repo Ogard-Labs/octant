@@ -3,10 +3,10 @@ import { RemotePushPlatform } from "./remotePushNotifications";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
-// A hub that sends notifications directly is the push gateway for a phone app
-// its person built with their own Apple and Firebase credentials. The wire
-// shapes it serves are the push gateway's (`remotePushNotifications.ts`); these
-// are the person's acts in a window on the hub.
+// Any host that sends notifications directly to Apple (APNs) and Google (FCM)
+// with the signing account's credentials: its switch, the Apple environment,
+// and credential storage. All changes are local-only acts in a window on that
+// host (`/api/desktop/push-sender*`).
 
 /** Which Apple push service a build talks to: App Store and TestFlight builds use production. */
 export const HubDirectPushEnvironment = Schema.Literal("production", "development");

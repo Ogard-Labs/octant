@@ -1,12 +1,9 @@
-import type {
-  AutomationNotificationProviderDelivery,
-  RemotePushEnvelopeV1,
-  RemotePushPlatform,
-} from "@octant/contracts";
+import type { AutomationNotificationProviderDelivery, RemotePushPlatform } from "@octant/contracts";
+import type { CheckedPushMessageV2 } from "@octant/domain/push-notification-policy";
 
 export type PushDeliverySendResult =
   | { readonly kind: "delivered" }
-  /** The delivery path refused the destination as gone; the host clears it. */
+  /** The platform refused the destination as gone; the host clears it. */
   | { readonly kind: "destination-gone" }
   | {
       readonly kind: "failed";
@@ -21,15 +18,16 @@ export interface PushDeliveryDestination {
 }
 
 /**
- * Host-side push transport, shared by ordinary threads and Automation runs. It
- * is handed only the sealed envelope, never the notification's content.
- * The host's transport sends through the push gateway the Notifications
- * setting names (`remote/gatewayPushDeliveryTransport.ts`).
+ * Host-side push transport, shared by ordinary threads and Automation runs.
+ * Accepts only `CheckedPushMessageV2`, branded by the domain push builder after
+ * every free-text field has passed the host-side secret check. Sends directly
+ * to Apple (APNs) or Google (FCM), or hands off to the host's hub when Push is
+ * granted.
  */
 export interface PushDeliveryTransport {
   readonly providerDelivery: () => AutomationNotificationProviderDelivery;
   readonly send: (input: {
     readonly destination: PushDeliveryDestination;
-    readonly envelope: RemotePushEnvelopeV1;
+    readonly message: CheckedPushMessageV2;
   }) => Promise<PushDeliverySendResult>;
 }

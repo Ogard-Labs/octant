@@ -15,13 +15,14 @@
 // once per wait and only to phones on this host's owner list: that a move
 // waits and the destination's name, nothing about its threads.
 //
-// What reaches the transport is the sealed envelope alone: the display text
-// is built by the domain redaction policy and sealed to the phone's key. The
-// journal gets one receipt per notification (kind, device, thread, outcome,
-// time) and nothing else; a delivery that fails never moves a thread, run, or
-// approval. Nothing here logs content, tokens, or keys.
+// Every payload is built through the single domain builder (`buildPushAlert`)
+// with the host's held-secret snapshot, so every free-text field passes the
+// host-side secret check (failing closed to the generic placeholder when the
+// check cannot run). The journal gets one receipt per notification (kind,
+// device, thread, outcome, time) and nothing else; a delivery that fails never
+// moves a thread, run, or approval. Nothing here logs content, tokens, or secrets.
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Option, Schema } from "effect";
 import {
   decodeRemotePushDeliveryRecordedV1,
@@ -32,22 +33,21 @@ import {
   REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES,
   type OctantMode,
   type RemotePushDeliveryOutcome,
-  type RemotePushDeviceJoinedKind,
-  type RemotePushMoveWaitingKind,
   type RemotePushNotificationKind,
+  type StableHostId,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import {
   admitRemotePushByRate,
-  buildRedactedDeviceJoinedPushNotification,
-  buildRedactedMoveWaitingPushNotification,
-  buildRedactedPushNotification,
+  buildPushAlert,
   remotePushDedupeKey,
   remotePushPreferenceAllows,
   remotePushWantsNewDevices,
+  type CheckedPushMessageV2,
+  type HeldSecretSnapshot,
 } from "@octant/domain/push-notification-policy";
 import type { PushDeliveryTransport } from "../automation/pushDeliveryTransport";
 import type { Journal } from "../persistence/journal";
-import { sealPushNotification } from "./pushNotificationSealing";
 import type { PushNotificationTokenStore, PushTokenRecord } from "./pushNotificationTokenStore";
 
 /** Each notification to one device is one aggregate holding its one receipt. */
@@ -65,14 +65,18 @@ export interface ThreadNotificationDeliveryOptions {
    */
   readonly readThread: (
     threadId: string,
-  ) => { readonly mode: OctantMode; readonly title: string } | undefined;
+  ) =>
+    | { readonly mode: OctantMode; readonly title: string; readonly projectName?: string }
+    | undefined;
   /** The name the paired computer shows the phone. */
   readonly computerLabel: () => string;
+  /** Reads the host's held secret values for the push-label secret floor. */
+  readonly readHeldSecrets: () => Promise<HeldSecretSnapshot>;
   readonly clock: () => string;
   readonly uuid: () => string;
   /** The host's own actor, for the receipts it journals. */
   readonly hostActorId: string;
-  /** Told a fixed sentence when delivery fails; never content, a token, or a key. */
+  /** Told a fixed sentence when delivery fails; never content, a token, or a secret. */
   readonly onError?: (message: string) => void;
 }
 
@@ -84,18 +88,17 @@ interface ThreadNotificationFact {
   readonly input?: { readonly requestId: string; readonly kind: "approval" | "question" };
 }
 
-/** A move a window holds here until an owner phone confirms it. */
 /** A new-device alert this host raised, for every paired phone to hear of. */
 export interface DeviceJoinedFact {
-  /** The alert's own id: one notification per alert and phone. */
+  /** The alert's own id: one notification per alert and phone (never put on the wire). */
   readonly alertId: string;
   readonly deviceName: string;
-  readonly privateAddress?: string;
   readonly joined: "hub" | "host";
   /** A device that paired with this host is not told about itself. */
   readonly newDeviceId?: string;
 }
 
+/** A move a window holds here until an owner phone confirms it. */
 export interface MoveWaitingFact {
   /** The wait's own id: one notification per wait, never one per thread it holds. */
   readonly waitId: string;
@@ -118,12 +121,13 @@ interface DeliveryResult {
 interface Delivery {
   readonly destination: PushTokenRecord;
   readonly receiptId: string;
-  readonly kind:
-    | RemotePushNotificationKind
-    | RemotePushMoveWaitingKind
-    | RemotePushDeviceJoinedKind;
   readonly collapseOn: string;
-  readonly content: unknown;
+  readonly buildMessage: (input: {
+    readonly collapseId: string;
+    readonly sequence: number;
+    readonly occurredAt: UtcTimestamp;
+    readonly heldSecrets: HeldSecretSnapshot;
+  }) => CheckedPushMessageV2;
   /** The receipt the journal keeps for this delivery; never its text. */
   readonly receipt: (result: DeliveryResult, recordedAt: string) => ReceiptEvent;
 }
@@ -306,6 +310,16 @@ function receiptAggregateId(destination: PushTokenRecord, dedupeKey: string): st
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
+/** 22 unpadded base64url chars derived per destination and collapse subject. */
+export function derivePushCollapseId(collapseKey: string, subject: string): string {
+  const key = Buffer.from(collapseKey, "base64url");
+  return createHmac("sha256", key)
+    .update(subject, "utf8")
+    .digest()
+    .subarray(0, 16)
+    .toString("base64url");
+}
+
 const FAILURE_CATEGORY = /^[a-z0-9-]{1,64}$/;
 
 export class ThreadNotificationDeliveryService {
@@ -315,6 +329,7 @@ export class ThreadNotificationDeliveryService {
   readonly #hasStanding: ThreadNotificationDeliveryOptions["hasStanding"];
   readonly #readThread: ThreadNotificationDeliveryOptions["readThread"];
   readonly #computerLabel: () => string;
+  readonly #readHeldSecrets: () => Promise<HeldSecretSnapshot>;
   readonly #clock: () => string;
   readonly #uuid: () => string;
   readonly #hostActorId: string;
@@ -323,6 +338,7 @@ export class ThreadNotificationDeliveryService {
   readonly #recentSends = new Map<string, ReadonlyArray<number>>();
   /** Notifications go out one at a time, in commit order. */
   #queue: Promise<void> = Promise.resolve();
+  #sequence = 0;
 
   constructor(options: ThreadNotificationDeliveryOptions) {
     this.#journal = options.journal;
@@ -331,6 +347,7 @@ export class ThreadNotificationDeliveryService {
     this.#hasStanding = options.hasStanding;
     this.#readThread = options.readThread;
     this.#computerLabel = options.computerLabel;
+    this.#readHeldSecrets = options.readHeldSecrets;
     this.#clock = options.clock;
     this.#uuid = options.uuid;
     this.#hostActorId = options.hostActorId;
@@ -392,16 +409,19 @@ export class ThreadNotificationDeliveryService {
       await this.#deliver({
         destination,
         receiptId: receiptAggregateId(destination, `device-joined:${fact.alertId}`),
-        kind: "device-joined",
         collapseOn: `device-joined:${fact.alertId}`,
-        content: buildRedactedDeviceJoinedPushNotification({
-          hostId: destination.hostId,
-          alertId: fact.alertId,
-          deviceName: fact.deviceName,
-          ...(fact.privateAddress === undefined ? {} : { privateAddress: fact.privateAddress }),
-          joined: fact.joined,
-          computerLabel: this.#computerLabel(),
-        }),
+        buildMessage: ({ collapseId, sequence, occurredAt, heldSecrets }) =>
+          buildPushAlert({
+            source: "device-joined",
+            hostId: destination.hostId as StableHostId,
+            deviceName: fact.deviceName,
+            joined: fact.joined,
+            computerLabel: this.#computerLabel(),
+            collapseId,
+            sequence,
+            occurredAt,
+            heldSecrets,
+          }),
         receipt: (result, recordedAt) => ({
           eventName: REMOTE_PUSH_DEVICE_JOINED_DELIVERY_EVENT_NAMES.recorded,
           payload: decodeRemotePushDeviceJoinedDeliveryRecordedV1({
@@ -428,12 +448,17 @@ export class ThreadNotificationDeliveryService {
       await this.#deliver({
         destination,
         receiptId: receiptAggregateId(destination, `move-waiting:${wait.waitId}`),
-        kind: "move-waiting",
         collapseOn: `move-waiting:${wait.waitId}`,
-        content: buildRedactedMoveWaitingPushNotification({
-          hostId: destination.hostId,
-          destinationName: wait.destinationName,
-        }),
+        buildMessage: ({ collapseId, sequence, occurredAt, heldSecrets }) =>
+          buildPushAlert({
+            source: "move-waiting",
+            hostId: destination.hostId as StableHostId,
+            destinationName: wait.destinationName,
+            collapseId,
+            sequence,
+            occurredAt,
+            heldSecrets,
+          }),
         receipt: (result, recordedAt) => ({
           eventName: REMOTE_PUSH_MOVE_WAITING_DELIVERY_EVENT_NAMES.recorded,
           payload: decodeRemotePushMoveWaitingDeliveryRecordedV1({
@@ -448,7 +473,7 @@ export class ThreadNotificationDeliveryService {
   }
 
   async #notify(observed: ThreadNotificationFact): Promise<void> {
-    // With the Notifications setting off, nothing is sealed, sent, or journaled.
+    // While direct push is unavailable, nothing is built, sent, or journaled.
     if (this.#transport.providerDelivery() !== "available") return;
     const thread = this.#readThread(observed.threadId);
     if (thread === undefined) return;
@@ -459,7 +484,7 @@ export class ThreadNotificationDeliveryService {
 
   async #notifyDevice(
     observed: ThreadNotificationFact,
-    thread: { readonly mode: OctantMode; readonly title: string },
+    thread: { readonly mode: OctantMode; readonly title: string; readonly projectName?: string },
     listed: PushTokenRecord,
   ): Promise<void> {
     const destination = this.#current(listed);
@@ -468,17 +493,23 @@ export class ThreadNotificationDeliveryService {
     await this.#deliver({
       destination,
       receiptId: receiptAggregateId(destination, remotePushDedupeKey(observed)),
-      kind: observed.kind,
       collapseOn: observed.threadId,
-      content: buildRedactedPushNotification({
-        kind: observed.kind,
-        hostId: destination.hostId,
-        threadId: observed.threadId,
-        mode: thread.mode,
-        computerLabel: this.#computerLabel(),
-        threadTitle: thread.title,
-        threadTitles: destination.preferences.threadTitles,
-      }),
+      buildMessage: ({ collapseId, sequence, occurredAt, heldSecrets }) =>
+        buildPushAlert({
+          source: "thread",
+          kind: observed.kind,
+          hostId: destination.hostId as StableHostId,
+          threadId: observed.threadId,
+          mode: thread.mode,
+          computerLabel: this.#computerLabel(),
+          threadTitle: thread.title,
+          ...(thread.projectName === undefined ? {} : { projectName: thread.projectName }),
+          threadTitles: destination.preferences.threadTitles,
+          collapseId,
+          sequence,
+          occurredAt,
+          heldSecrets,
+        }),
       receipt: (result, recordedAt) => ({
         eventName: REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded,
         payload: decodeRemotePushDeliveryRecordedV1({
@@ -495,8 +526,7 @@ export class ThreadNotificationDeliveryService {
 
   /**
    * The destination as it stands now, after earlier sends yielded: a revoke or
-   * sign-out that landed since leaves no registration or no standing, and
-   * nothing between this check and the send in `#deliver` yields.
+   * sign-out that landed since leaves no registration or no standing.
    */
   #current(listed: PushTokenRecord): PushTokenRecord | undefined {
     const destination = this.#registrations.get({
@@ -524,22 +554,23 @@ export class ThreadNotificationDeliveryService {
       return;
     }
 
-    const sealed = sealPushNotification({
-      hostId: destination.hostId,
-      deviceId: destination.deviceId,
-      notificationPublicKey: destination.notificationPublicKey,
-      collapseKey: destination.collapseKey,
-      threadId: delivery.collapseOn,
-      kind: delivery.kind,
-      content: delivery.content,
-    });
-    if (sealed.status === "refused") {
-      this.#receipt(delivery, {
-        outcome: "failed",
-        failureCategory: `sealing-${sealed.reason}`,
-      });
-      return;
+    let heldSecrets: HeldSecretSnapshot;
+    try {
+      heldSecrets = await this.#readHeldSecrets();
+    } catch {
+      heldSecrets = { status: "unavailable" };
     }
+
+    // Re-check standing after the async secret read before sending.
+    if (this.#current(destination) === undefined) return;
+
+    this.#sequence += 1;
+    const message = delivery.buildMessage({
+      collapseId: derivePushCollapseId(destination.collapseKey, delivery.collapseOn),
+      sequence: this.#sequence,
+      occurredAt: recordedAt as UtcTimestamp,
+      heldSecrets,
+    });
 
     let result: Awaited<ReturnType<PushDeliveryTransport["send"]>>;
     try {
@@ -549,7 +580,7 @@ export class ThreadNotificationDeliveryService {
           platform: destination.platform,
           token: destination.token,
         },
-        envelope: sealed.envelope,
+        message,
       });
     } catch {
       this.#report("A thread notification failed in the push transport.");

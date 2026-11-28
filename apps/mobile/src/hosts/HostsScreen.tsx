@@ -88,8 +88,8 @@ export function HostsScreen(props: {
       setRemoveFailed(false);
       setNotificationKeyKept(false);
       // The computer is asked to drop its registration while the connection
-      // still stands, then notifications already shown for it go, and so does
-      // the key that opens them, whether or not the rest of the removal lands.
+      // still stands, then notifications already shown for it are cleared and
+      // the computer is marked forgotten so late alerts are hidden or dropped.
       void forgetPhoneNotificationsForHost({
         hostId,
         permission: notificationPermission,
@@ -97,9 +97,9 @@ export function HostsScreen(props: {
         transport: transportForHost(hostId),
       })
         .then((forgotten) => {
-          // The record of the key stays, so the next time the app opens it
-          // deletes the key again; the person is told it is not gone yet.
-          if (!forgotten.keyForgotten) setNotificationKeyKept(true);
+          // The record stays marked if local cleanup failed, so the next open
+          // retries clearing notifications; the person is told it is not done.
+          if (!forgotten.localCleared) setNotificationKeyKept(true);
         })
         .catch(() => undefined)
         .then(() => removeMobileHostInTurn(hostId))
@@ -333,7 +333,7 @@ export function HostsScreen(props: {
                               <ConnectorSignInPanel transport={transportForHost(host.hostId)} />
                               <AccessActivityPanel transport={transportForHost(host.hostId)} />
                               <PushNotificationsPanel
-                                hostKeyFingerprint={host.hostKeyFingerprint}
+                                hostLabel={host.label}
                                 permission={notificationPermission}
                                 transport={transportForHost(host.hostId)}
                                 book={pushRegistrations}

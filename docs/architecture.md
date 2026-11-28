@@ -145,15 +145,17 @@ The design rests on a small set of invariants that every package obeys:
   separate call.
   Opening Updates reads the desktop's current local update state so the installed
   version and saved preferences appear without requesting the signed feed.
-  One more call exists only on a hub whose person turned on Send notifications
-  directly (off by default, window only): the hub calls Apple's push service
-  (`api.push.apple.com`, or `api.sandbox.push.apple.com` when the person marked
-  the build as development), `oauth2.googleapis.com`, and `fcm.googleapis.com`
-  with the person's own Apple and Firebase credentials, kept in the credential
-  store, to deliver sealed notifications to a phone app that person built
-  themselves. No other host, no redirect, ten seconds at most, and the content
-  stays sealed to the phone ([Building the phone app
-  yourself](design/mobile-maturity.md#building-the-phone-app-yourself)).
+  One more call exists on any host whose person turned on Phone notifications
+  (off by default, local desktop window only): the host calls Apple's push
+  service (`api.push.apple.com`, or `api.sandbox.push.apple.com` when the
+  person marked the build as development), `oauth2.googleapis.com`, and
+  `fcm.googleapis.com` directly with the person's own Apple and Firebase
+  credentials, kept in the credential store, to deliver checked v2 status
+  notifications (and, for a hub with Push sender on, spokes' checked status
+  notifications) to paired phones. No Octant push gateway exists, no other
+  host is contacted, no redirect is followed, ten seconds at most, and every
+  free-text field passes the host-side secret check before leaving
+  ([Phase C: host-originated push](design/mobile-maturity.md#phase-c-host-originated-push)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal, optional spend ceiling) runs in
   `apps/server` before a side effect. The renderer and mobile app render what
@@ -17659,7 +17661,7 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   public key, journaled as that device), Settings › Code › Worktrees and Xcode
   cleanup, local leftover server confirmation and stop, billed desktop spend
   cap, recipe machine listing, and disposable desktop preview grants, routine
-  notification and push-gateway settings, Canvas Allow network, answers,
+  notification settings, Canvas Allow network, answers,
   boards, comments, design-system switches, refresh/action/share/export/public-link
   controls, and unconfirmed export notice dismissal, Artifact library/tags/Claude
   page copy/mirror/synced routes, thread export with captures and tool-call
@@ -20147,7 +20149,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     grants; a coordinator's proposed worker; Canvas HTML import; Settings ›
     Permissions › Servers, worktree and Xcode cleanup, leftover servers,
     desktop spend cap, recipe machines, disposable desktop previews, routine
-    notifications and push gateway; Canvas controls (Allow network, answers,
+    notifications; Canvas controls (Allow network, answers,
     boards, comments, design systems, refresh, actions, share, export, public
     links, export notices); Artifact library, tags, Claude page copy, mirror
     and synced routes; thread export with captures; Preview text editing; the

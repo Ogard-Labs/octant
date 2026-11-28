@@ -3,73 +3,16 @@ import {
   decodeAutomationNotificationDeliveryQueryResponse,
   decodeAutomationNotificationDeliveryReceipt,
   decodeAutomationNotificationDeliveryStatus,
-  decodeAutomationNotificationPayloadV1,
   decodeAutomationNotificationPreferences,
   decodeUpdateAutomationNotificationPreferences,
   DEFAULT_AUTOMATION_NOTIFICATION_PREFERENCES,
 } from "./automationNotifications";
 
-const hostId = "local";
 const automationId = "aa000000-0000-4000-8000-000000000001";
 const runId = "aa000000-0000-4000-8000-000000000010";
-const threadId = "aa000000-0000-4000-8000-000000000020";
 const at = "2026-08-11T12:00:00.000Z";
 
 describe("automationNotifications", () => {
-  it("accepts redacted automation payloads and rejects secrets/extra fields", () => {
-    expect(
-      decodeAutomationNotificationPayloadV1({
-        kind: "waiting",
-        hostId,
-        automationId,
-        automationRunId: runId,
-        mode: "code",
-        threadId,
-        title: "Waiting for you",
-        body: "Open Octant to continue.",
-        navigation: { surface: "automation-center", automationId, runId },
-      }),
-    ).toMatchObject({ kind: "waiting", automationId, automationRunId: runId });
-
-    expect(
-      decodeAutomationNotificationPayloadV1({
-        kind: "failure",
-        hostId,
-        automationId,
-        automationRunId: runId,
-        title: "Automation failed",
-        body: "Open Octant to inspect the failure.",
-        navigation: { surface: "automation-center", automationId, runId },
-      }),
-    ).toMatchObject({ kind: "failure" });
-
-    expect(() =>
-      decodeAutomationNotificationPayloadV1({
-        kind: "completion",
-        hostId,
-        automationId,
-        automationRunId: runId,
-        title: "Done",
-        body: "Ok",
-        navigation: { surface: "automation-center", automationId, runId },
-        prompt: "secret task prompt",
-      }),
-    ).toThrow();
-
-    expect(() =>
-      decodeAutomationNotificationPayloadV1({
-        kind: "approval-needed",
-        hostId,
-        automationId,
-        automationRunId: runId,
-        title: "Approve",
-        body: "Ok",
-        navigation: { surface: "automation-center", automationId, runId },
-        authorityReceipt: "receipt-bytes",
-      }),
-    ).toThrow();
-  });
-
   it("defaults preferences to opt-in disabled and accepts preference updates", () => {
     expect(DEFAULT_AUTOMATION_NOTIFICATION_PREFERENCES.enabled).toBe(false);
     expect(

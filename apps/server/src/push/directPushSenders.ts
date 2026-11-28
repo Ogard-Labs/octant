@@ -1,25 +1,22 @@
-// What a hub that sends notifications directly sends to Apple and to Google,
-// with the person's own credentials.
+// Direct push delivery from any Octant host to Apple (APNs) and Google (FCM)
+// using the signing account's own credentials.
 //
-// APNs takes the placeholder alert with `mutable-content`, so the phone's
-// notification service extension runs, plus the sealed content under one
-// custom key. FCM takes a data-only message holding the same sealed content, so
-// the app's receiver opens it and posts the notification itself. Nothing else is
-// added: no host, thread, title, or kind leaves the hub, and the credential
-// never appears in a payload, a log, or an answer.
-//
-// The only hosts this code reaches are Apple's push service (production or
-// sandbox, as the person marked the build), Google's OAuth endpoint, and the FCM
-// endpoint. None is read from a credential file or a request. An answer that
-// redirects is a failure, and no call waits more than ten seconds.
+// Only `CheckedPushMessageV2` (branded by the domain push builder after the
+// host-side secret check) is accepted. No gateway or third-party push service
+// is ever contacted: the only origins this module reaches are APNs (production
+// or sandbox), Google's OAuth token service, and FCM v1. None is read from a
+// credential file or a request. Redirects are refused and every call has a
+// 10-second timeout.
 
 import { createPrivateKey, sign } from "node:crypto";
 import { connect, constants as http2Constants } from "node:http2";
 import type {
   HubDirectPushEnvironment,
-  RemotePushEnvelopeV1,
+  LiveStatusV1,
+  PushAlertV2,
   RemotePushPlatform,
 } from "@octant/contracts";
+import type { CheckedPushMessageV2 } from "@octant/domain/push-notification-policy";
 
 /** The only hosts a direct send reaches. */
 export const DIRECT_PUSH_ORIGINS = {
@@ -33,7 +30,7 @@ const SEND_TIMEOUT_MS = 10_000;
 const FCM_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 /** Apple refuses a provider token older than an hour and a new one more often than every twenty minutes. */
 const APNS_TOKEN_LIFETIME_MS = 45 * 60_000;
-const ENVELOPE_VERSION = 1;
+const LIVE_ACTIVITY_WIDGET_NAME = "AgentActivity";
 
 export interface AppleCredential {
   readonly keyId: string;
@@ -49,7 +46,7 @@ export interface GoogleCredential {
   readonly projectId: string;
 }
 
-/** The platform credentials the hub holds; undefined when it holds none. Read before every send. */
+/** The platform credentials this host holds; undefined when it holds none. Read before every send. */
 export interface DirectPushCredentialSource {
   readonly apple: () => Promise<AppleCredential | undefined>;
   readonly google: () => Promise<GoogleCredential | undefined>;
@@ -62,14 +59,14 @@ export type DirectPushSendOutcome =
   | "destination-gone"
   /** The platform did not take it, or could not be reached. */
   | "failed"
-  /** The hub holds no credential for that platform. */
+  /** This host holds no credential for that platform. */
   | "unavailable";
 
 export interface DirectPushSendInput {
   readonly platform: RemotePushPlatform;
-  /** The platform token, opened from a capability this hub issued. */
+  /** The phone's APNs hex token or FCM registration token. */
   readonly token: string;
-  readonly envelope: RemotePushEnvelopeV1;
+  readonly message: CheckedPushMessageV2;
 }
 
 export interface DirectPushSender {
@@ -84,6 +81,117 @@ export interface DirectPushSenderOptions {
   readonly origins?: Partial<Record<keyof typeof DIRECT_PUSH_ORIGINS, string>>;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
+}
+
+function buildApnsAlertRequest(
+  credential: AppleCredential,
+  jwt: string,
+  alert: PushAlertV2,
+): { readonly headers: Record<string, string>; readonly body: string } {
+  const octant: Record<string, string | number> = {
+    v: alert.version,
+    kind: alert.kind,
+    hostId: String(alert.hostId),
+    ...(alert.threadId === undefined ? {} : { threadId: alert.threadId }),
+    ...(alert.mode === undefined ? {} : { mode: alert.mode }),
+  };
+  return {
+    headers: {
+      authorization: `bearer ${jwt}`,
+      "apns-topic": credential.bundleId,
+      "apns-push-type": "alert",
+      "apns-priority": alert.urgency === "high" ? "10" : "5",
+      "apns-collapse-id": alert.collapseId,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      aps: {
+        alert: { title: alert.title, body: alert.body },
+        "thread-id": String(alert.hostId),
+        "mutable-content": 1,
+      },
+      octant,
+    }),
+  };
+}
+
+function buildApnsLiveActivityRequest(
+  credential: AppleCredential,
+  jwt: string,
+  liveStatus: LiveStatusV1,
+): { readonly headers: Record<string, string>; readonly body: string } {
+  const timestamp = Math.floor(Date.parse(liveStatus.occurredAt) / 1_000);
+  const staleDate = Math.floor(Date.parse(liveStatus.staleAt) / 1_000);
+  const contentState = {
+    name: LIVE_ACTIVITY_WIDGET_NAME,
+    props: {
+      v: liveStatus.version,
+      hostId: String(liveStatus.hostId),
+      computerName: liveStatus.computerName,
+      counts: liveStatus.counts,
+      rows: liveStatus.rows,
+      sequence: liveStatus.sequence,
+      occurredAt: liveStatus.occurredAt,
+      staleAt: liveStatus.staleAt,
+    },
+  };
+  const aps: Record<string, unknown> = {
+    timestamp,
+    event: liveStatus.event,
+    "content-state": contentState,
+    ...(liveStatus.event === "end" ? { "dismissal-date": timestamp } : { "stale-date": staleDate }),
+  };
+  return {
+    headers: {
+      authorization: `bearer ${jwt}`,
+      "apns-topic": `${credential.bundleId}.push-type.liveactivity`,
+      "apns-push-type": "liveactivity",
+      "apns-priority": liveStatus.urgency === "high" ? "10" : "5",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ aps }),
+  };
+}
+
+function buildFcmAlertBody(token: string, alert: PushAlertV2): string {
+  const data: Record<string, string> = {
+    v: String(alert.version),
+    kind: alert.kind,
+    hostId: String(alert.hostId),
+    ...(alert.threadId === undefined ? {} : { threadId: alert.threadId }),
+    ...(alert.mode === undefined ? {} : { mode: alert.mode }),
+    title: alert.title,
+    body: alert.body,
+  };
+  return JSON.stringify({
+    message: {
+      token,
+      data,
+      android: {
+        collapse_key: alert.collapseId,
+        priority: alert.urgency === "high" ? "HIGH" : "NORMAL",
+      },
+    },
+  });
+}
+
+function buildFcmLiveStatusBody(token: string, liveStatus: LiveStatusV1): string {
+  // Android live-status messages carry no collapse_key: collapsible messages
+  // are throttled by FCM to a burst of 20 then 1 per 3 minutes.
+  return JSON.stringify({
+    message: {
+      token,
+      data: {
+        v: "2",
+        type: "live-status",
+        hostId: String(liveStatus.hostId),
+        payload: JSON.stringify(liveStatus),
+      },
+      android: {
+        priority: liveStatus.urgency === "high" ? "HIGH" : "NORMAL",
+      },
+    },
+  });
 }
 
 export function createDirectPushSender(options: DirectPushSenderOptions): DirectPushSender {
@@ -114,25 +222,15 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
     }
     const origin =
       options.environment() === "development" ? origins.apnsDevelopment : origins.apnsProduction;
+    const built =
+      input.message.type === "alert"
+        ? buildApnsAlertRequest(credential, appleToken.jwt, input.message.alert)
+        : buildApnsLiveActivityRequest(credential, appleToken.jwt, input.message.liveStatus);
     const answer = await appleRequest({
       origin,
       path: `/3/device/${input.token.toLowerCase()}`,
-      headers: {
-        authorization: `bearer ${appleToken.jwt}`,
-        "apns-topic": credential.bundleId,
-        "apns-push-type": "alert",
-        "apns-priority": input.envelope.urgency === "high" ? "10" : "5",
-        "apns-collapse-id": input.envelope.collapseId,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        aps: { alert: input.envelope.alert, "mutable-content": 1 },
-        octant: {
-          version: ENVELOPE_VERSION,
-          encapsulatedKey: input.envelope.sealed.encapsulatedKey,
-          ciphertext: input.envelope.sealed.ciphertext,
-        },
-      }),
+      headers: built.headers,
+      body: built.body,
       timeoutMs,
     });
     if (answer === undefined) return "failed";
@@ -200,6 +298,10 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
     if (credential === undefined) return "unavailable";
     const accessToken = await googleAccessToken(credential);
     if (accessToken === undefined) return "failed";
+    const body =
+      input.message.type === "alert"
+        ? buildFcmAlertBody(input.token, input.message.alert)
+        : buildFcmLiveStatusBody(input.token, input.message.liveStatus);
     try {
       const response = await fetchImpl(
         `${origins.fcm}/v1/projects/${credential.projectId}/messages:send`,
@@ -209,20 +311,7 @@ export function createDirectPushSender(options: DirectPushSenderOptions): Direct
             authorization: `Bearer ${accessToken}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({
-            message: {
-              token: input.token,
-              data: {
-                version: String(ENVELOPE_VERSION),
-                encapsulatedKey: input.envelope.sealed.encapsulatedKey,
-                ciphertext: input.envelope.sealed.ciphertext,
-              },
-              android: {
-                collapse_key: input.envelope.collapseId,
-                priority: input.envelope.urgency === "high" ? "HIGH" : "NORMAL",
-              },
-            },
-          }),
+          body,
           redirect: "manual",
           signal: AbortSignal.timeout(timeoutMs),
         },

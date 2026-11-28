@@ -320,6 +320,7 @@ describe("hub administration controls", () => {
   it("sends the direct sending operations only with their decoded bodies", async () => {
     const { calls, runtime: controls } = runtime(() => Response.json({ status: "changed" }));
 
+    await sendHubAdministrationOperation(controls, "push-sender-status", undefined);
     await sendHubAdministrationOperation(controls, "direct-push", { enabled: true });
     await sendHubAdministrationOperation(controls, "direct-push-environment", {
       environment: "development",
@@ -328,9 +329,10 @@ describe("hub administration controls", () => {
       platform: "ios",
     });
     expect(calls.map((call) => call.url)).toEqual([
-      "http://127.0.0.1:4317/api/desktop/hub/direct-push",
-      "http://127.0.0.1:4317/api/desktop/hub/direct-push/environment",
-      "http://127.0.0.1:4317/api/desktop/hub/direct-push/credential/remove",
+      "http://127.0.0.1:4317/api/desktop/push-sender",
+      "http://127.0.0.1:4317/api/desktop/push-sender",
+      "http://127.0.0.1:4317/api/desktop/push-sender/environment",
+      "http://127.0.0.1:4317/api/desktop/push-sender/credential/remove",
     ]);
 
     for (const [operation, body] of [
@@ -345,7 +347,7 @@ describe("hub administration controls", () => {
         status: 400,
       });
     }
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
   });
 
   it("sends an offer, and a proposal's apply, only with a body that carries no secret", async () => {

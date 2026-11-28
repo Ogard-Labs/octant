@@ -4,7 +4,20 @@ import {
   type GithubActionsSourceRead,
   type GithubActionsSourceResult,
 } from "@octant/host-runtime";
+import { noteIssuedSecret } from "../../process/secretRedaction";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function noteOAuthTokensInResponse(value: unknown): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  for (const field of ["accessToken", "access_token", "refreshToken", "refresh_token", "token"]) {
+    const token = record[field];
+    if (typeof token === "string" && token.length > 0) {
+      noteIssuedSecret(token);
+    }
+  }
+}
 
 export interface HostOAuthBrokerDescriptor {
   readonly descriptorId: string;
@@ -266,18 +279,20 @@ export function makeHostOAuthBrokerClient(options: {
       }
       return post("/v1/oauth/status", { attemptId }, AbortSignal.timeout(10_000));
     },
-    refresh: (credentialRef) => {
+    refresh: async (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
-      return post("/v1/oauth/refresh", { credentialRef });
+      const value = await post("/v1/oauth/refresh", { credentialRef });
+      noteOAuthTokensInResponse(value);
+      return value;
     },
-    access: (credentialRef, binding) => {
+    access: async (credentialRef, binding) => {
       if (!UUID_PATTERN.test(credentialRef)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
       // Exactly one kind's four binding fields: the broker refuses any other shape.
-      return post(
+      const value = await post(
         "/v1/oauth/access",
         binding === undefined
           ? { credentialRef }
@@ -299,6 +314,8 @@ export function makeHostOAuthBrokerClient(options: {
                     },
             },
       );
+      noteOAuthTokensInResponse(value);
+      return value;
     },
     revoke: (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {

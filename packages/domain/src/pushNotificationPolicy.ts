@@ -1,61 +1,64 @@
 import type {
-  AutomationId,
   AutomationNotificationKind,
-  AutomationNotificationMode,
-  AutomationNotificationPayloadV1,
   AutomationNotificationPreferences,
-  AutomationRunId,
   AutomationRunLifecycle,
-  AutomationThreadId,
-  RemotePushDeviceJoinedKind,
-  RemotePushDeviceJoinedPayloadV1,
-  RemotePushMoveWaitingKind,
-  RemotePushMoveWaitingPayloadV1,
+  LiveStatusCountsV1,
+  LiveStatusEventV1,
+  LiveStatusRowState,
+  LiveStatusRowV1,
+  LiveStatusV1,
+  PushAlertV2,
+  PushMessageV2,
+  RemotePushAlertKind,
   RemotePushNotificationKind,
-  RemotePushNotificationPayloadV1,
+  RemotePushNotificationMode,
   RemotePushPreferencesV1,
+  RemotePushUrgency,
+  StableHostId,
+  UtcTimestamp,
 } from "@octant/contracts";
+import { REMOTE_PUSH_PLACEHOLDER_ALERT } from "@octant/contracts";
+import { checkPushLabel } from "./pushLabelPolicy";
 
-const MAX_TITLE = 80;
-const MAX_BODY = 120;
+const MAX_TITLE_BYTES = 80;
+const MAX_BODY_BYTES = 120;
+const MAX_PROJECT_BYTES = 60;
+const MAX_LIVE_STATUS_ROWS = 5;
 
-// Token prefixes run straight into the token, so only the words need a
-// boundary after them; a trailing `\b` after `ghp_` never matched a token.
-const SECRETISH =
-  /\b(?:sk-|ghp_|github_pat_)|-----BEGIN|\b(?:password|api[_-]?key|authorization|bearer)\b/i;
-const ABSOLUTE_PATH = /(?:^|[\s"'`])(?:\/(?:Users|home|private|var|tmp|etc)\/|\w:\\)/;
+const FALLBACK_COMPUTER_NAME = "your paired computer";
+const FALLBACK_DESTINATION_NAME = "another computer";
+const FALLBACK_DEVICE_TITLE = "New device";
 
-export interface PushNotificationDraftInput {
-  readonly kind: RemotePushNotificationKind;
-  /** The id the phone knows this host by. */
-  readonly hostId: string;
-  readonly threadId: string;
-  readonly mode: NonNullable<RemotePushNotificationPayloadV1["mode"]>;
-  /** The name the paired computer shows the phone. */
-  readonly computerLabel: string;
-  readonly threadTitle?: string;
-  /** Whether the person enabled thread names for this phone. */
-  readonly threadTitles: boolean;
+declare const CHECKED_PUSH_MESSAGE_BRAND: unique symbol;
+
+/**
+ * A push message whose every free-text field has passed the host-side secret
+ * check (or been replaced by its fallback / generic placeholder). Transports
+ * accept only this branded type so no un-checked payload can reach APNs, FCM,
+ * or a hub handoff.
+ */
+export type CheckedPushMessageV2 = PushMessageV2 & {
+  readonly [CHECKED_PUSH_MESSAGE_BRAND]: "checked-push-message-v2";
+};
+
+function brand(message: PushMessageV2): CheckedPushMessageV2 {
+  return message as CheckedPushMessageV2;
 }
 
-export interface AutomationPushNotificationDraftInput {
-  readonly kind: AutomationNotificationKind;
-  readonly hostId: string;
-  readonly automationId: AutomationId;
-  readonly automationRunId: AutomationRunId;
-  readonly mode?: AutomationNotificationMode;
-  readonly threadId?: AutomationThreadId;
-  readonly displayName?: string;
-  /** The name the paired computer shows the phone. */
-  readonly computerLabel: string;
-  /** Whether the person enabled thread names for this phone. */
-  readonly threadTitles: boolean;
-}
+/**
+ * Snapshot of the secret values the host holds in memory and in its local
+ * credential store. When `status` is `"unavailable"` (for example, a locked or
+ * unreadable keyring), the builder fails closed and emits only the generic
+ * placeholder text.
+ */
+export type HeldSecretSnapshot =
+  | { readonly status: "ready"; readonly values: ReadonlyArray<string> }
+  | { readonly status: "unavailable" };
 
 const encoder = new TextEncoder();
 
-/** Collapses whitespace and cuts to a UTF-8 byte budget, never inside a character. */
-function clamp(value: string, maxBytes: number): string {
+/** Cuts already-cleaned text to a UTF-8 byte budget, never splitting a character. */
+function clampBytes(value: string, maxBytes: number): string {
   const trimmed = value.replace(/\s+/g, " ").trim();
   if (encoder.encode(trimmed).byteLength <= maxBytes) return trimmed;
   const budget = maxBytes - encoder.encode("…").byteLength;
@@ -70,146 +73,406 @@ function clamp(value: string, maxBytes: number): string {
   return `${kept.trimEnd()}…`;
 }
 
-/**
- * The display text is built from the kind, the computer's label, and, when the
- * phone opted in, a name the person chose. The scrubber is a second guard on
- * those names: one that looks like a secret or a path is left out whole.
- */
-function shownName(value: string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  const collapsed = value.replace(/\s+/g, " ").trim();
-  if (collapsed.length === 0 || SECRETISH.test(collapsed) || ABSOLUTE_PATH.test(collapsed)) {
-    return undefined;
-  }
-  return collapsed;
-}
-
-function titled(kindTitle: string, name: string | undefined, threadTitles: boolean): string {
-  const shown = threadTitles ? shownName(name) : undefined;
-  return clamp(shown === undefined ? kindTitle : `${kindTitle}: ${shown}`, MAX_TITLE);
-}
-
-function computerName(computerLabel: string): string {
-  return shownName(computerLabel) ?? "your paired computer";
-}
-
-function computerLine(computerLabel: string): string {
-  return clamp(`On ${computerName(computerLabel)}`, MAX_BODY);
-}
-
-const KIND_TITLE: Record<AutomationNotificationKind, string> = {
+const KIND_TITLE: Readonly<Record<RemotePushNotificationKind, string>> = {
   completion: "Thread completed",
   waiting: "Waiting for you",
   failure: "Thread failed",
   "approval-needed": "Approval needed",
 };
 
-const AUTOMATION_KIND_TITLE: Record<AutomationNotificationKind, string> = {
+const AUTOMATION_KIND_TITLE: Readonly<Record<AutomationNotificationKind, string>> = {
   completion: "Automation completed",
   waiting: "Automation waiting",
   failure: "Automation failed",
   "approval-needed": "Automation needs approval",
 };
 
-/**
- * Build the display text a phone shows for an ordinary thread: the kind and
- * the computer's label, and the thread title only when the person enabled
- * thread names for that phone. Prompts, transcript text, diffs, paths, tool
- * arguments, and failure messages are not inputs, so none can appear.
- */
-export function buildRedactedPushNotification(
-  input: PushNotificationDraftInput,
-): RemotePushNotificationPayloadV1 {
-  return {
-    kind: input.kind,
-    hostId: input.hostId as RemotePushNotificationPayloadV1["hostId"],
-    threadId: input.threadId,
-    mode: input.mode,
-    title: titled(KIND_TITLE[input.kind], input.threadTitle, input.threadTitles),
-    body: computerLine(input.computerLabel),
-  };
+const MOVE_WAITING_TITLE = "A move is waiting for your phone";
+
+const LIVE_STATUS_PRIORITY: Readonly<Record<LiveStatusRowState, number>> = {
+  "approval-needed": 0,
+  "needs-input": 1,
+  failed: 2,
+  working: 3,
+  done: 4,
+};
+
+function checkedTitled(
+  kindTitle: string,
+  name: string | undefined,
+  threadTitles: boolean,
+  heldValues: ReadonlyArray<string>,
+): string {
+  const shown = threadTitles ? checkPushLabel(name, heldValues) : undefined;
+  return clampBytes(shown === undefined ? kindTitle : `${kindTitle}: ${shown}`, MAX_TITLE_BYTES);
 }
 
-/**
- * Build the display text a phone shows for a thread move a window holds for an
- * owner phone: that a move waits and the destination's name. No thread title
- * is an input, whatever the phone's thread-names setting, because a move can
- * hold several threads and the phone's own list shows them once it opens.
- */
-export function buildRedactedMoveWaitingPushNotification(input: {
-  readonly hostId: string;
-  /** The destination member's name as this host's roster gives it. */
-  readonly destinationName: string;
-}): RemotePushMoveWaitingPayloadV1 {
-  return {
-    kind: "move-waiting",
-    hostId: input.hostId as RemotePushMoveWaitingPayloadV1["hostId"],
-    title: "A move is waiting for your phone",
-    body: clamp(`To ${shownName(input.destinationName) ?? "another computer"}`, MAX_BODY),
-  };
+function checkedComputerName(computerLabel: string, heldValues: ReadonlyArray<string>): string {
+  return clampBytes(
+    checkPushLabel(computerLabel, heldValues) ?? FALLBACK_COMPUTER_NAME,
+    MAX_TITLE_BYTES,
+  );
 }
 
+function checkedComputerBody(computerLabel: string, heldValues: ReadonlyArray<string>): string {
+  return clampBytes(`On ${checkedComputerName(computerLabel, heldValues)}`, MAX_BODY_BYTES);
+}
+
+interface PushAlertCommonInput {
+  readonly hostId: StableHostId;
+  readonly collapseId: string;
+  readonly sequence: number;
+  readonly occurredAt: UtcTimestamp;
+  readonly heldSecrets: HeldSecretSnapshot;
+}
+
+export type PushAlertBuildInput = PushAlertCommonInput &
+  (
+    | {
+        readonly source: "thread";
+        readonly kind: RemotePushNotificationKind;
+        readonly threadId: string;
+        readonly mode: RemotePushNotificationMode;
+        readonly computerLabel: string;
+        readonly threadTitle?: string;
+        readonly projectName?: string;
+        /** Whether "Show thread names" is enabled for this phone. */
+        readonly threadTitles: boolean;
+      }
+    | {
+        readonly source: "automation";
+        readonly kind: AutomationNotificationKind;
+        readonly threadId?: string;
+        readonly mode?: RemotePushNotificationMode;
+        readonly computerLabel: string;
+        readonly displayName?: string;
+        /** Whether "Show thread names" is enabled for this phone. */
+        readonly threadTitles: boolean;
+      }
+    | {
+        readonly source: "move-waiting";
+        readonly destinationName: string;
+      }
+    | {
+        readonly source: "device-joined";
+        readonly deviceName: string;
+        readonly joined: "hub" | "host";
+        readonly computerLabel: string;
+      }
+  );
+
 /**
- * Build the text a phone shows when a new device joins the hub or pairs with a
- * host: its name and private address, sealed so only the phone reads them
- * (maintainer decision, 2026-11-19). A name that looks like a secret or a path
- * is left out, as anywhere else.
+ * The single host-side alert builder every push path calls.
+ *
+ * Accepts only the closed set of fields authorized for push payloads: fixed
+ * status words, checked short labels, routing IDs, and transport metadata.
+ * Transcript text, replies, prompts, tool input, file paths, diffs, error
+ * messages, and private network addresses are never inputs.
+ *
+ * If `heldSecrets` is `"unavailable"` (the secret check could not run), emits
+ * only the generic placeholder title and body.
  */
-export function buildRedactedDeviceJoinedPushNotification(input: {
-  readonly hostId: string;
-  readonly alertId: string;
-  readonly deviceName: string;
-  readonly privateAddress?: string;
-  /** Joined this host's hub, or paired with this host directly. */
-  readonly joined: "hub" | "host";
-  /** The name the paired computer shows the phone. */
+export function buildPushAlert(input: PushAlertBuildInput): CheckedPushMessageV2 {
+  const kind: RemotePushAlertKind =
+    input.source === "move-waiting"
+      ? "move-waiting"
+      : input.source === "device-joined"
+        ? "device-joined"
+        : input.kind;
+  const urgency = remotePushUrgency(kind);
+  const routing =
+    input.source === "thread"
+      ? { threadId: input.threadId, mode: input.mode }
+      : input.source === "automation"
+        ? {
+            ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+            ...(input.mode === undefined ? {} : { mode: input.mode }),
+          }
+        : {};
+
+  if (input.heldSecrets.status === "unavailable") {
+    const alert: PushAlertV2 = {
+      version: 2,
+      kind,
+      hostId: input.hostId,
+      ...routing,
+      title: REMOTE_PUSH_PLACEHOLDER_ALERT.title,
+      body: REMOTE_PUSH_PLACEHOLDER_ALERT.body,
+      collapseId: input.collapseId,
+      urgency,
+      sequence: input.sequence,
+      occurredAt: input.occurredAt,
+    };
+    return brand({ type: "alert", alert });
+  }
+
+  const held = input.heldSecrets.values;
+  let title: string;
+  let body: string;
+
+  switch (input.source) {
+    case "thread": {
+      title = checkedTitled(KIND_TITLE[input.kind], input.threadTitle, input.threadTitles, held);
+      const shownProject = input.threadTitles ? checkPushLabel(input.projectName, held) : undefined;
+      const computer = checkedComputerName(input.computerLabel, held);
+      body =
+        shownProject === undefined
+          ? clampBytes(`On ${computer}`, MAX_BODY_BYTES)
+          : clampBytes(
+              `${clampBytes(shownProject, MAX_PROJECT_BYTES)} · On ${computer}`,
+              MAX_BODY_BYTES,
+            );
+      break;
+    }
+    case "automation":
+      title = checkedTitled(
+        AUTOMATION_KIND_TITLE[input.kind],
+        input.displayName,
+        input.threadTitles,
+        held,
+      );
+      body = checkedComputerBody(input.computerLabel, held);
+      break;
+    case "move-waiting": {
+      const destination = checkPushLabel(input.destinationName, held) ?? FALLBACK_DESTINATION_NAME;
+      title = MOVE_WAITING_TITLE;
+      body = clampBytes(`To ${destination}`, MAX_BODY_BYTES);
+      break;
+    }
+    case "device-joined": {
+      // Private addresses are deliberately excluded from readable push payloads.
+      const device = checkPushLabel(input.deviceName, held);
+      title =
+        device === undefined
+          ? FALLBACK_DEVICE_TITLE
+          : clampBytes(`New device: ${device}`, MAX_TITLE_BYTES);
+      body =
+        input.joined === "hub"
+          ? "Joined the hub"
+          : clampBytes(
+              `Paired with ${checkedComputerName(input.computerLabel, held)}`,
+              MAX_BODY_BYTES,
+            );
+      break;
+    }
+  }
+
+  const alert: PushAlertV2 = {
+    version: 2,
+    kind,
+    hostId: input.hostId,
+    ...routing,
+    title,
+    body,
+    collapseId: input.collapseId,
+    urgency,
+    sequence: input.sequence,
+    occurredAt: input.occurredAt,
+  };
+  return brand({ type: "alert", alert });
+}
+
+export interface LiveStatusRowInput {
+  readonly threadId: string;
+  readonly mode: RemotePushNotificationMode;
+  readonly status: LiveStatusRowState;
+  readonly title?: string;
+  readonly projectName?: string;
+  readonly updatedAt: UtcTimestamp;
+}
+
+export interface LiveStatusBuildInput {
+  readonly hostId: StableHostId;
   readonly computerLabel: string;
-}): RemotePushDeviceJoinedPayloadV1 {
-  const name = shownName(input.deviceName);
-  const where =
-    input.joined === "hub" ? "joined the hub" : `paired with ${computerName(input.computerLabel)}`;
-  const line =
-    input.privateAddress === undefined
-      ? `${where.charAt(0).toUpperCase()}${where.slice(1)}`
-      : `${input.privateAddress} · ${where}`;
-  return {
-    kind: "device-joined",
-    hostId: input.hostId as RemotePushDeviceJoinedPayloadV1["hostId"],
-    alertId: input.alertId,
-    title: clamp(name === undefined ? "New device" : `New device: ${name}`, MAX_TITLE),
-    body: clamp(line, MAX_BODY),
+  readonly event: LiveStatusEventV1;
+  readonly counts: LiveStatusCountsV1;
+  readonly rows: ReadonlyArray<LiveStatusRowInput>;
+  /** Whether "Show thread names" is enabled for this phone. */
+  readonly threadTitles: boolean;
+  readonly sequence: number;
+  readonly occurredAt: UtcTimestamp;
+  readonly staleAt: UtcTimestamp;
+  readonly heldSecrets: HeldSecretSnapshot;
+}
+
+/**
+ * Builds a checked live-status push message for iOS Live Activities and Android
+ * Live Updates: at most five rows ordered needs-you, failed, working, done.
+ * When `heldSecrets` is unavailable, emits the generic computer label and omits
+ * every thread title and project name.
+ */
+export function buildLiveStatusPushMessage(input: LiveStatusBuildInput): CheckedPushMessageV2 {
+  const sorted = [...input.rows]
+    .sort((left, right) => {
+      const priority = LIVE_STATUS_PRIORITY[left.status] - LIVE_STATUS_PRIORITY[right.status];
+      if (priority !== 0) return priority;
+      return String(right.updatedAt).localeCompare(String(left.updatedAt));
+    })
+    .slice(0, MAX_LIVE_STATUS_ROWS);
+
+  const urgent = sorted.some(
+    (row) =>
+      row.status === "approval-needed" || row.status === "needs-input" || row.status === "failed",
+  );
+  const urgency: RemotePushUrgency = urgent ? "high" : "normal";
+
+  if (input.heldSecrets.status === "unavailable") {
+    const liveStatus: LiveStatusV1 = {
+      version: 1,
+      hostId: input.hostId,
+      computerName: FALLBACK_COMPUTER_NAME,
+      event: input.event,
+      counts: input.counts,
+      rows: sorted.map((row) => ({
+        threadId: row.threadId,
+        mode: row.mode,
+        status: row.status,
+        updatedAt: row.updatedAt,
+      })),
+      sequence: input.sequence,
+      occurredAt: input.occurredAt,
+      staleAt: input.staleAt,
+      urgency,
+    };
+    return brand({ type: "live-status", liveStatus });
+  }
+
+  const held = input.heldSecrets.values;
+  const rows: ReadonlyArray<LiveStatusRowV1> = sorted.map((row) => {
+    const checkedTitle = input.threadTitles ? checkPushLabel(row.title, held) : undefined;
+    const checkedProject = input.threadTitles ? checkPushLabel(row.projectName, held) : undefined;
+    return {
+      threadId: row.threadId,
+      mode: row.mode,
+      status: row.status,
+      ...(checkedTitle === undefined ? {} : { title: clampBytes(checkedTitle, MAX_TITLE_BYTES) }),
+      ...(checkedProject === undefined
+        ? {}
+        : { projectName: clampBytes(checkedProject, MAX_PROJECT_BYTES) }),
+      updatedAt: row.updatedAt,
+    };
+  });
+
+  const liveStatus: LiveStatusV1 = {
+    version: 1,
+    hostId: input.hostId,
+    computerName: checkedComputerName(input.computerLabel, held),
+    event: input.event,
+    counts: input.counts,
+    rows,
+    sequence: input.sequence,
+    occurredAt: input.occurredAt,
+    staleAt: input.staleAt,
+    urgency,
   };
+  return brand({ type: "live-status", liveStatus });
+}
+
+function fallbackAlertTitleForKind(kind: RemotePushAlertKind): string {
+  switch (kind) {
+    case "move-waiting":
+      return MOVE_WAITING_TITLE;
+    case "device-joined":
+      return FALLBACK_DEVICE_TITLE;
+    default:
+      return KIND_TITLE[kind];
+  }
+}
+
+function fallbackAlertBodyForKind(kind: RemotePushAlertKind): string {
+  switch (kind) {
+    case "move-waiting":
+      return `To ${FALLBACK_DESTINATION_NAME}`;
+    case "device-joined":
+      return `Paired with ${FALLBACK_COMPUTER_NAME}`;
+    default:
+      return `On ${FALLBACK_COMPUTER_NAME}`;
+  }
+}
+
+/**
+ * Hub-side re-check before delivering a spoke's `HubPushHandoffV2`. Re-runs
+ * `checkPushLabel` against the hub's own held secrets and credential patterns
+ * so a spoke's message cannot leak a secret the hub holds, and fails closed to
+ * the generic placeholder when the hub's check cannot run.
+ */
+export function recheckHubPushMessage(
+  message: PushMessageV2,
+  heldSecrets: HeldSecretSnapshot,
+): CheckedPushMessageV2 {
+  if (message.type === "alert") {
+    const { alert } = message;
+    if (heldSecrets.status === "unavailable") {
+      return brand({
+        type: "alert",
+        alert: {
+          ...alert,
+          title: REMOTE_PUSH_PLACEHOLDER_ALERT.title,
+          body: REMOTE_PUSH_PLACEHOLDER_ALERT.body,
+        },
+      });
+    }
+    const checkedTitle = checkPushLabel(alert.title, heldSecrets.values);
+    const checkedBody = checkPushLabel(alert.body, heldSecrets.values);
+    return brand({
+      type: "alert",
+      alert: {
+        ...alert,
+        title:
+          checkedTitle === undefined
+            ? fallbackAlertTitleForKind(alert.kind)
+            : clampBytes(checkedTitle, MAX_TITLE_BYTES),
+        body:
+          checkedBody === undefined
+            ? fallbackAlertBodyForKind(alert.kind)
+            : clampBytes(checkedBody, MAX_BODY_BYTES),
+      },
+    });
+  }
+
+  const { liveStatus } = message;
+  if (heldSecrets.status === "unavailable") {
+    return brand({
+      type: "live-status",
+      liveStatus: {
+        ...liveStatus,
+        computerName: FALLBACK_COMPUTER_NAME,
+        rows: liveStatus.rows.map((row) => ({
+          threadId: row.threadId,
+          mode: row.mode,
+          status: row.status,
+          updatedAt: row.updatedAt,
+        })),
+      },
+    });
+  }
+  const held = heldSecrets.values;
+  return brand({
+    type: "live-status",
+    liveStatus: {
+      ...liveStatus,
+      computerName: checkedComputerName(liveStatus.computerName, held),
+      rows: liveStatus.rows.map((row) => {
+        const title = checkPushLabel(row.title, held);
+        const projectName = checkPushLabel(row.projectName, held);
+        return {
+          threadId: row.threadId,
+          mode: row.mode,
+          status: row.status,
+          ...(title === undefined ? {} : { title: clampBytes(title, MAX_TITLE_BYTES) }),
+          ...(projectName === undefined
+            ? {}
+            : { projectName: clampBytes(projectName, MAX_PROJECT_BYTES) }),
+          updatedAt: row.updatedAt,
+        };
+      }),
+    },
+  });
 }
 
 /** Whether a phone hears about new devices: on unless it turned them off. */
 export function remotePushWantsNewDevices(preferences: RemotePushPreferencesV1): boolean {
   return preferences.newDevices !== false;
-}
-
-/**
- * Build the display text a phone shows for an Automation run, under the same
- * rule as ordinary threads: the automation's name stands where a thread title
- * would and is shown only when the phone opted in. Includes Automation Center
- * navigation and only attaches a thread id after ordinary-thread creation.
- */
-export function buildRedactedAutomationPushNotification(
-  input: AutomationPushNotificationDraftInput,
-): AutomationNotificationPayloadV1 {
-  return {
-    kind: input.kind,
-    hostId: input.hostId as AutomationNotificationPayloadV1["hostId"],
-    automationId: input.automationId,
-    automationRunId: input.automationRunId,
-    title: titled(AUTOMATION_KIND_TITLE[input.kind], input.displayName, input.threadTitles),
-    body: computerLine(input.computerLabel),
-    navigation: {
-      surface: "automation-center",
-      automationId: input.automationId,
-      runId: input.automationRunId,
-    },
-    ...(input.mode === undefined ? {} : { mode: input.mode }),
-    ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-  };
 }
 
 /** Map notifiable Automation run lifecycles onto push kinds. */
@@ -300,9 +563,7 @@ export function admitRemotePushByRate(input: {
 }
 
 /** What waits on the person goes at high urgency; the rest at normal. */
-export function remotePushUrgency(
-  kind: RemotePushNotificationKind | RemotePushMoveWaitingKind | RemotePushDeviceJoinedKind,
-): "high" | "normal" {
+export function remotePushUrgency(kind: RemotePushAlertKind): RemotePushUrgency {
   // A device the person did not add is worth seeing at once.
   return kind === "approval-needed" ||
     kind === "waiting" ||
@@ -310,16 +571,4 @@ export function remotePushUrgency(
     kind === "device-joined"
     ? "high"
     : "normal";
-}
-
-/**
- * What a host signs for one push gateway delivery: `octant-push-delivery-v1`,
- * the timestamp, and the request body's SHA-256 (unpadded base64url), one per
- * line. The gateway rebuilds the same text to verify the signature.
- */
-export function remotePushDeliverySigningText(input: {
-  readonly timestamp: string;
-  readonly bodySha256: string;
-}): string {
-  return `octant-push-delivery-v1\n${input.timestamp}\n${input.bodySha256}`;
 }
