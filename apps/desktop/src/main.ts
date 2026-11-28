@@ -26,6 +26,11 @@ import {
   type BackgroundHostSettings,
 } from "./backgroundHost";
 import { KeepAwakeController, readDesktopAgentWork } from "./keepAwakeController";
+import {
+  DesktopRemoteUpdateController,
+  postDesktopHostUpdateReport,
+  readDesktopHostUpdatePending,
+} from "./desktopRemoteUpdateController";
 import { createOffscreenBrowserSurface } from "./offscreenBrowserSurface";
 import { startThreadVideoArchiveDownload } from "./threadVideoArchiveDownload";
 import { ownNightlyWindowLeases } from "./nightlyBrowserLease";
@@ -2605,6 +2610,7 @@ export async function restartDesktopHostAndRefreshWindowAuthorities(options: {
 
 async function restartDesktopHost(): Promise<HostAdmission> {
   keepAwakeController?.hostStopped();
+  desktopRemoteUpdateController?.hostStopped();
   const finishRestart = desktopClientLifetime.beginHostRestart();
   const outcome = await restartDesktopHostAndRefreshWindowAuthorities({
     restart: async () => {
@@ -2629,6 +2635,7 @@ async function restartDesktopHost(): Promise<HostAdmission> {
     updateHostTray();
   } else {
     void keepAwakeController?.pollNow();
+    void desktopRemoteUpdateController?.pollNow();
   }
   return { status: "running", host: outcome.host };
 }
@@ -2646,6 +2653,7 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
   },
   reportFatal: (error) => {
     keepAwakeController?.hostStopped();
+    desktopRemoteUpdateController?.hostStopped();
     showNoticeWithoutBlocking(
       mainWindow,
       "Octant could not restart its local server",
@@ -2709,6 +2717,7 @@ async function createWindow(stillRequested: () => boolean): Promise<void> {
   }
   ensureHostTray();
   ensureKeepAwake();
+  ensureDesktopRemoteUpdate();
   // Host admission already proved readiness. Menu-bar activity and fleet data
   // may refresh beside native state and window authority preparation instead
   // of adding another loopback round trip to first paint.
@@ -3671,6 +3680,7 @@ async function startHostFromMenu(): Promise<void> {
   }
   ensureHostTray();
   ensureKeepAwake();
+  ensureDesktopRemoteUpdate();
   await refreshHostActivity();
 }
 
@@ -3680,6 +3690,7 @@ async function stopHostFromMenu(): Promise<void> {
     throw new Error("Octant cannot stop a separately managed host.");
   }
   keepAwakeController?.hostStopped();
+  desktopRemoteUpdateController?.hostStopped();
   await hostLifecycle.stop();
   updateHostTray();
 }
@@ -3693,6 +3704,7 @@ async function restartHostFromMenu(): Promise<void> {
   await writeDesktopBridgeProjection();
   ensureHostTray();
   ensureKeepAwake();
+  ensureDesktopRemoteUpdate();
   await refreshHostActivity();
 }
 
@@ -5467,6 +5479,7 @@ function closeBrowserAdmissionForQuit(): void {
 
 async function stopHostForQuit(): Promise<void> {
   disposeKeepAwake();
+  disposeDesktopRemoteUpdate();
   closeBrowserAdmissionForQuit();
   const browserStopped = browserQuitCleanup;
   const prototypesStopped = canvasPrototypeSurface?.stop();
@@ -5507,6 +5520,7 @@ async function stopHostForQuit(): Promise<void> {
 function finishQuit(): void {
   try {
     disposeKeepAwake();
+    disposeDesktopRemoteUpdate();
   } catch (error) {
     logQuitProblem(`Octant could not release sleep prevention at quit: ${String(error)}`);
   }
@@ -5628,6 +5642,43 @@ function ensureKeepAwake(): KeepAwakeController {
 function disposeKeepAwake(): void {
   const controller = keepAwakeController;
   keepAwakeController = undefined;
+  controller?.dispose();
+}
+
+let desktopRemoteUpdateController: DesktopRemoteUpdateController | undefined;
+function ensureDesktopRemoteUpdate(): DesktopRemoteUpdateController {
+  if (desktopRemoteUpdateController === undefined) {
+    desktopRemoteUpdateController = new DesktopRemoteUpdateController({
+      readPending: async () =>
+        await readDesktopHostUpdatePending({
+          host: hostLifecycle.snapshot(),
+          brokerHeaders: desktopBrokerHeaders,
+          fetch: globalThis.fetch,
+          onHostLost: () => desktopRemoteUpdateController?.hostStopped(),
+        }),
+      reportUpdate: async (report) =>
+        await postDesktopHostUpdateReport({
+          host: hostLifecycle.snapshot(),
+          brokerHeaders: desktopBrokerHeaders,
+          fetch: globalThis.fetch,
+          report,
+          onHostLost: () => desktopRemoteUpdateController?.hostStopped(),
+        }),
+      updater: appUpdates(),
+      readWorkInFlight: () =>
+        workInFlight({
+          refreshActivity: refreshHostActivity,
+          snapshot: hostLifecycle.snapshot,
+        }),
+    });
+    desktopRemoteUpdateController.start();
+  }
+  return desktopRemoteUpdateController;
+}
+
+function disposeDesktopRemoteUpdate(): void {
+  const controller = desktopRemoteUpdateController;
+  desktopRemoteUpdateController = undefined;
   controller?.dispose();
 }
 

@@ -339,6 +339,7 @@ describe("fleetUpdateEngine", () => {
       inventory: {
         hosts,
         remoteProviderClients: new Map([["remote-1", { bootstrap, execute }]]),
+        remoteHostControlClients: new Map(),
         sshServersById: new Map(),
       },
       sources,
@@ -497,7 +498,12 @@ describe("fleetUpdateEngine", () => {
       },
     ];
 
-    const inventory = { hosts, remoteProviderClients: new Map(), sshServersById: new Map() };
+    const inventory = {
+      hosts,
+      remoteProviderClients: new Map(),
+      remoteHostControlClients: new Map(),
+      sshServersById: new Map(),
+    };
     const plan = planFleetUpdate(hosts);
     let latest: ReadonlyArray<FleetUpdateStepState> = [];
     await runFleetUpdatePlan({
@@ -780,5 +786,334 @@ describe("fleetUpdateEngine", () => {
     expect(sshStep?.retryable).toBe(true);
     expect(localStep?.status).toBe("held");
     expect(installAppUpdate).not.toHaveBeenCalled();
+  });
+
+  it("updates standalone headless hosts and remote desktop apps via /api/host-control/update, maps 404 to manual-update-required, and isolates failures", async () => {
+    const installAppUpdate = vi.fn(async () => ({ kind: "installing" as const }));
+    const executionOrder: string[] = [];
+
+    const makeBridgeFor = (
+      handler: (path: string, body: unknown) => { readonly status: number; readonly json: unknown },
+    ) => {
+      const authenticatedFetch = vi.fn(
+        async (input: { readonly path: string; readonly body?: string | Uint8Array }) => {
+          const parsed =
+            typeof input.body === "string"
+              ? JSON.parse(input.body)
+              : input.body instanceof Uint8Array
+                ? JSON.parse(new TextDecoder().decode(input.body))
+                : undefined;
+          const result = handler(input.path, parsed);
+          return new Response(JSON.stringify(result.json), {
+            status: result.status,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      );
+      return {
+        connection: () => ({
+          session: () => ({ token: "session-token" }),
+          authenticatedFetch,
+        }),
+      };
+    };
+
+    const standingTransport = {
+      authenticatedFetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              deviceId: "22222222-2222-4222-8222-222222222222",
+              deviceLabel: "This Mac",
+              origin: "https://remote.example.test",
+              credentialGeneration: 1,
+              createdAt: "2026-11-01T00:00:00.000Z",
+              expiresAt: "2027-11-01T00:00:00.000Z",
+              lastSeenAt: "2026-11-28T07:00:00.000Z",
+              state: "active",
+              actsAsHostPerson: true,
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      ),
+    };
+
+    const headlessBridge = makeBridgeFor((path, body) => {
+      if (path === "/api/providers/bootstrap") {
+        return { status: 200, json: { instances: [], observedStates: [], defaults: {} } };
+      }
+      if (path === "/api/host-control/update") {
+        const req = body as { readonly action: string; readonly requestId?: string };
+        if (req.action === "prepare") {
+          return {
+            status: 200,
+            json: {
+              requestId: req.requestId,
+              hostKind: "headless",
+              state: "update-available",
+              fromVersion: "0.1.0",
+              toVersion: "0.2.0",
+              ring: "stable",
+              storeMigration: false,
+            },
+          };
+        }
+        if (req.action === "start") {
+          executionOrder.push("headless-start");
+          return {
+            status: 200,
+            json: {
+              requestId: req.requestId,
+              hostKind: "headless",
+              state: "updated",
+              fromVersion: "0.1.0",
+              toVersion: "0.2.0",
+              ring: "stable",
+            },
+          };
+        }
+      }
+      return { status: 404, json: { message: "not found" } };
+    });
+
+    const remoteDesktopBridge = makeBridgeFor((path, body) => {
+      if (path === "/api/providers/bootstrap") {
+        return { status: 200, json: { instances: [], observedStates: [], defaults: {} } };
+      }
+      if (path === "/api/host-control/update") {
+        const req = body as { readonly action: string; readonly requestId?: string };
+        if (req.action === "prepare") {
+          return {
+            status: 200,
+            json: {
+              requestId: req.requestId,
+              hostKind: "desktop",
+              state: "update-available",
+              fromVersion: "0.1.0",
+              toVersion: "0.2.0",
+              ring: "stable",
+            },
+          };
+        }
+        if (req.action === "start") {
+          executionOrder.push("desktop-start");
+          return {
+            status: 200,
+            json: {
+              requestId: req.requestId,
+              hostKind: "desktop",
+              state: "installing",
+              fromVersion: "0.1.0",
+              toVersion: "0.2.0",
+              ring: "stable",
+            },
+          };
+        }
+      }
+      return { status: 404, json: { message: "not found" } };
+    });
+
+    const olderHostBridge = makeBridgeFor((path) => {
+      if (path === "/api/providers/bootstrap") {
+        return { status: 200, json: { instances: [], observedStates: [], defaults: {} } };
+      }
+      // Older host does not know `/api/host-control/update` -> 404.
+      return { status: 404, json: { message: "Not Found" } };
+    });
+
+    const snapshots = [
+      {
+        hostId: "headless-1",
+        displayName: "Linux Box",
+        kind: "remote" as const,
+        state: "ready" as const,
+        serverBuildVersion: "0.1.0",
+      },
+      {
+        hostId: "desktop-2",
+        displayName: "Studio Mac",
+        kind: "remote" as const,
+        state: "ready" as const,
+        serverBuildVersion: "0.1.0",
+      },
+      {
+        hostId: "older-3",
+        displayName: "Older Box",
+        kind: "remote" as const,
+        state: "ready" as const,
+        serverBuildVersion: "0.0.9",
+      },
+    ];
+    const bridges = new Map([
+      ["headless-1", { bridge: headlessBridge, serverBuildVersion: "0.1.0" }],
+      ["desktop-2", { bridge: remoteDesktopBridge, serverBuildVersion: "0.1.0" }],
+      ["older-3", { bridge: olderHostBridge, serverBuildVersion: "0.0.9" }],
+    ]);
+
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "ready" }),
+        downloadAppUpdate: vi.fn(async () => localAppState({ status: "ready" })),
+        installAppUpdate: vi.fn(async () => {
+          executionOrder.push("local-app");
+          return installAppUpdate();
+        }),
+      },
+      hostFederationLifecycle: {
+        list: () => snapshots as never,
+      },
+      hostFederationTransports: {
+        get: (id) => bridges.get(id) as never,
+        remoteTransportFor: () => standingTransport as never,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const inventory = await collectFleetUpdateInventory(sources);
+    const plan = planFleetUpdate(inventory.hosts);
+    const byId = new Map(plan.machines.map((m) => [m.hostId, m]));
+
+    // Neither headless nor remote desktop is skipped; older host gets exact 404 guidance.
+    expect(byId.get("headless-1")?.disposition).toBe("will-update");
+    expect(byId.get("headless-1")?.octantAction).toBe("remote-octant-host-control");
+    expect(byId.get("desktop-2")?.disposition).toBe("will-update");
+    expect(byId.get("desktop-2")?.octantAction).toBe("remote-octant-host-control");
+    expect(byId.get("older-3")?.disposition).toBe("skipped");
+    expect(byId.get("older-3")?.skipReason).toBe("manual-update-required");
+    expect(byId.get("older-3")?.skipMessage).toBe(
+      "Update this computer once by hand, then it can update from here.",
+    );
+    expect(plan.machines.every((m) => m.skipReason !== ("headless" as string))).toBe(true);
+
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory,
+      sources,
+      drain: { kind: "wait", minutes: 10 },
+      onStepStatesChange: () => undefined,
+    });
+    expect(states.every((s) => s.status === "succeeded")).toBe(true);
+    // Remote headless + remote desktop run BEFORE this local app restarts last.
+    expect(executionOrder.at(-1)).toBe("local-app");
+    expect(executionOrder).toContain("headless-start");
+    expect(executionOrder).toContain("desktop-start");
+  });
+
+  it("reports post-update protocol incompatibility clearly without stopping other hosts", async () => {
+    let incompatibleNow = false;
+    const sources: FleetUpdateSources = {
+      localApp: {
+        displayName: "This Mac",
+        state: localAppState({ status: "up-to-date" }),
+      },
+      hostFederationLifecycle: {
+        list: () =>
+          [
+            {
+              hostId: "headless-incompat",
+              displayName: "Newer Host",
+              kind: "remote" as const,
+              state: incompatibleNow ? ("incompatible" as const) : ("ready" as const),
+              serverBuildVersion: "0.1.0",
+            },
+            {
+              hostId: "headless-ok",
+              displayName: "Healthy Host",
+              kind: "remote" as const,
+              state: "ready" as const,
+              serverBuildVersion: "0.1.0",
+            },
+          ] as never,
+      },
+      sleep: async () => undefined,
+      pollMs: 0,
+    };
+
+    const hosts = [
+      {
+        hostId: "headless-incompat",
+        displayName: "Newer Host",
+        kind: "remote" as const,
+        isHeadless: true,
+        connectionState: "ready" as const,
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "standalone-headless" as const,
+          currentVersion: "0.1.0",
+          toVersion: "0.3.0",
+          requestId: "11111111-1111-4111-8111-111111111111",
+          state: "update-available" as const,
+        },
+        providers: [],
+      },
+      {
+        hostId: "headless-ok",
+        displayName: "Healthy Host",
+        kind: "remote" as const,
+        isHeadless: true,
+        connectionState: "ready" as const,
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "standalone-headless" as const,
+          currentVersion: "0.1.0",
+          toVersion: "0.2.0",
+          requestId: "22222222-2222-4222-8222-222222222222",
+          state: "update-available" as const,
+        },
+        providers: [],
+      },
+    ];
+    const plan = planFleetUpdate(hosts);
+    const states = await runFleetUpdatePlan({
+      plan,
+      inventory: {
+        hosts,
+        remoteProviderClients: new Map(),
+        remoteHostControlClients: new Map([
+          [
+            "headless-incompat",
+            {
+              update: async () => {
+                incompatibleNow = true;
+                return {
+                  hostKind: "headless",
+                  state: "updated",
+                  fromVersion: "0.1.0",
+                  toVersion: "0.3.0",
+                };
+              },
+            },
+          ],
+          [
+            "headless-ok",
+            {
+              update: async () => ({
+                hostKind: "headless",
+                state: "updated",
+                fromVersion: "0.1.0",
+                toVersion: "0.2.0",
+              }),
+            },
+          ],
+        ]),
+        sshServersById: new Map(),
+      },
+      sources,
+      drain: { kind: "stop-now" },
+      onStepStatesChange: () => undefined,
+    });
+    const byHost = new Map(states.map((s) => [s.step.hostId, s]));
+    expect(byHost.get("headless-incompat")?.status).toBe("failed");
+    expect(byHost.get("headless-incompat")?.message).toBe(
+      "This computer's protocol range does not cover this app.",
+    );
+    expect(byHost.get("headless-ok")?.status).toBe("succeeded");
   });
 });
