@@ -37,7 +37,7 @@ import { foldCodeTurnUsage } from "@octant/domain";
 import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
-import { toolKind, toolPreview } from "../transcript/toolKinds";
+import { toolKind } from "../transcript/toolKinds";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
 export type CodeProviderRequest =
@@ -774,10 +774,12 @@ async function readConversationText(
 
 /**
  * The line of the call an approval gates, read from the tool row that call
- * already drew (a command's first line, a file's name), so the card shows what
- * would run without a read of its own. Nothing when the approval names no
- * call or no turn on screen holds it: the card then asks without a well rather
- * than guess from a neighbouring row.
+ * already drew (a command's first line, a file's whole path), so the card shows
+ * what would run without a read of its own. A row's own preview shortens a path
+ * to its file's name, which is too little to consent to ("Edit .env" in which
+ * folder?), so the well keeps the path. Nothing when the approval names no call
+ * or no turn on screen holds it: the card then asks without a well rather than
+ * guess from a neighbouring row.
  */
 function approvalCallPreview(
   activity: ReadonlyMap<string, TurnActivity>,
@@ -788,7 +790,15 @@ function approvalCallPreview(
     const row = turn.rows.find(
       (candidate) => candidate.kind === "tool" && candidate.id === toolCallId,
     );
-    if (row?.kind === "tool") return toolPreview(toolKind(row.toolName), row.summary);
+    if (row?.kind !== "tool") continue;
+    const line = row.summary
+      ?.split("\n")
+      .map((part) => part.trim())
+      .find((part) => part.length > 0);
+    if (line === undefined) return undefined;
+    const kind = toolKind(row.toolName);
+    // "Edit: apps/server/.env" names the verb the row's icon already shows.
+    return kind === "read" || kind === "edit" ? line.replace(/^[A-Za-z]+:\s+/, "") : line;
   }
   return undefined;
 }

@@ -2973,6 +2973,9 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
+.approval-row__well > code {
+  font: inherit;
+}
 
 /* Provider and extension requests are waiting state, not a decorative brass
    accent. Keep the actionable row in the same neutral surface language as the

@@ -44,9 +44,10 @@ describe("provider approval prompt", () => {
     expect(
       within(card).getByText("This thread asks before it runs commands or changes files."),
     ).toBeTruthy();
-    const well = within(card).getByLabelText("The call it asks about");
+    const well = within(card).getByRole("group", { name: "The call it asks about" });
     expect(well.textContent).toBe("bun test apps/web/src/composer");
-    // The command is read before the answers, in layout and in reading order.
+    // The command comes before the answers in the document, so a screen reader
+    // meets it first; the stylesheet lays the card out in the same order.
     const answers = within(card).getAllByRole("button");
     expect(answers.map((button) => button.textContent)).toEqual([
       "Allow once",
@@ -64,7 +65,7 @@ describe("provider approval prompt", () => {
         summary="Let this thread use the iPhone?"
       />,
     );
-    expect(screen.queryByLabelText("The call it asks about")).toBeNull();
+    expect(screen.queryByRole("group", { name: "The call it asks about" })).toBeNull();
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 

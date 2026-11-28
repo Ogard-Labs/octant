@@ -155,6 +155,12 @@ describe("approvalCallPreview", () => {
     expect(approvalCallPreview(activity, "call-7")).toBe("bun test apps/web/src/composer");
   });
 
+  it("keeps a file call's whole path, which the row's own preview shortens to a name", () => {
+    expect(approvalCallPreview(activity, "call-6")).toBe(
+      "apps/web/src/composer/ThreadComposer.tsx",
+    );
+  });
+
   it("names nothing when the approval names no call, or a call no turn holds", () => {
     expect(approvalCallPreview(activity, undefined)).toBeUndefined();
     expect(approvalCallPreview(activity, "call-9")).toBeUndefined();

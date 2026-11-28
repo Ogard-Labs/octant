@@ -71,9 +71,11 @@ export function ProviderApprovalPrompt(props: ProviderApprovalPromptProps) {
       }
       context={
         props.command === undefined ? undefined : (
-          <code aria-label="The call it asks about" className="approval-row__well">
-            {props.command}
-          </code>
+          // A group carries the name: a name on the code element itself is
+          // not one assistive technology has to read.
+          <div aria-label="The call it asks about" className="approval-row__well" role="group">
+            <code>{props.command}</code>
+          </div>
         )
       }
       {...(props.reason === undefined ? {} : { detail: props.reason })}

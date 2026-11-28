@@ -184,10 +184,12 @@ whisper behind its words. The plate is the window coat's own colour (the
 workspace colour) at 94% in either material, so it needs no step-down of the
 ground under Glass, which until v7 dimmed the ground to an eighth while a
 thread was on screen; the ground keeps a quarter of its strength under the
-sidebar under Glass. It has no blur. A tool pane (a browser, files, a diff)
-keeps the full-width veil. Reduced transparency and increased contrast keep
-the reading background opaque: the plate's keep is 100% there, and the pane's
-own fill stays under the thread.
+sidebar under Glass. It has no blur. A tool pane (a browser, files, a diff),
+and a thread pane showing a picture or a capture in the thread's place, keep
+the full-width veil, and a split that holds a tool pane keeps the solid pane
+fill under the stage. Reduced transparency and increased contrast keep the
+reading background opaque: the plate's keep is 100% and it covers the whole
+pane there, and the pane's own fill stays under the thread.
 
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text, tables and code

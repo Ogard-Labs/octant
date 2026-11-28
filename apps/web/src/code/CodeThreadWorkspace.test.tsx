@@ -3626,7 +3626,7 @@ describe("CodeThreadWorkspace", () => {
     expect(
       within(card).getByText("This thread asks before it runs commands or changes files."),
     ).toBeInTheDocument();
-    expect(within(card).getByLabelText("The call it asks about")).toHaveTextContent(
+    expect(within(card).getByRole("group", { name: "The call it asks about" })).toHaveTextContent(
       "bun test apps/web/src/composer",
     );
     expect(within(card).getByRole("button", { name: "Allow once" })).toBeInTheDocument();

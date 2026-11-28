@@ -903,14 +903,18 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    continued, not a tool, so under a ground that runs behind everything it lets
    the ground through as faintly as the sidebar does: the pane colour at the
    sidebar's keep, which is whole under reduced transparency and increased
-   contrast (v7, maintainer decision 2026-11-28). Tool tiles stay solid. */
-.shell--app-backdrop.shell-frame .right-utility-dock[data-dock-environment="true"] {
+   contrast (v7, maintainer decision 2026-11-28). It is set on the section
+   itself and its fill declared again there: set on the dock, it reached the
+   tool tiles beside it through the dock's own pane fill. Tool tiles stay
+   solid. */
+.shell--app-backdrop.shell-frame .right-utility-dock[data-dock-environment="true"] .dock-env-strip {
   --octant-panel-surface: color-mix(
     in srgb,
     color-mix(in srgb, var(--octant-workspace) 98%, var(--octant-text-primary))
       var(--octant-sidebar-keep),
     transparent
   );
+  --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
 }
 
 /* A lone tool beside a start screen has no pane under it (the stage's fill is
@@ -1389,11 +1393,14 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    veil used to be the coat itself, which is see-through by design, so the
    ground had to step down behind every thread to be read through; with the
    veil made of the coat's colour at 94% the ground can stay whole beside the
-   text, and the keep's 100% under reduced transparency and increased contrast
-   makes the veil opaque there. A destination page keeps the coat (below). */
-.shell--app-backdrop.shell-frame
-  .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]) {
-  --octant-veil-surface: var(--octant-workspace);
+   text. Reduced transparency and increased contrast keep the veil they had,
+   opaque. A destination page keeps the coat (below). */
+@media (prefers-reduced-transparency: no-preference) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell--app-backdrop.shell-frame
+    .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]) {
+    --octant-veil-surface: var(--octant-workspace);
+  }
 }
 
 /* A thread reads on a plate, not a wall: the veil runs behind the text column
@@ -1404,9 +1411,30 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    is the pane's width, which is the column's container. The plate starts
    below the title band, which belongs to the window frame. No blur: the
    desktop window draws none, and the ground is never frosted. Tool panes
-   (a browser, files, a diff) keep the full veil above. */
-.shell--app-backdrop.shell-frame
-  .workspace-pane:is([data-surface-kind="thread"], [data-surface-kind="side-chat"]) {
+   (a browser, files, a diff), and a thread pane showing a picture or a
+   capture in its place, keep the full veil above, because their content runs
+   the pane's width. Under a destination page the panes stay clear (below).
+   Reduced transparency and increased contrast widen the plate to the whole
+   pane with no feather (shell.css), so no band of it shows over the pane's
+   own fill there. */
+.shell--app-backdrop.shell-frame:not(
+    :has(
+      .primary-workspace-layer
+        > :is(
+          .inbox-layer,
+          .code-board-layer,
+          .archive-layer,
+          .review-layer,
+          .projects-page-layer,
+          .agents-center-layer,
+          .automation-center-layer,
+          .artifact-library-layer
+        )
+    )
+  )
+  .workspace-pane:is([data-surface-kind="thread"], [data-surface-kind="side-chat"]):not(
+    :has(> .workspace-content-view:not([hidden]))
+  ) {
   background-image: linear-gradient(
     to right,
     transparent
@@ -1434,10 +1462,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
    its own (its clip and mask), so that fill sat over a ground that runs
    behind everything: the plate above had nothing to be a plate over, and a
    thread showed no ground at all. While a thread is in the stage, and no
-   destination page covers it, the fill goes clear the way it does for a start
-   screen, so the ground stands beside the plate in either material. Reduced
-   transparency and increased contrast keep the fill, and a stage with no ground
-   behind it is not touched. */
+   destination page covers it and no tool pane (a browser, files, a diff)
+   shares it, the fill goes clear the way it does for a start screen, so the
+   ground stands beside the plate in either material; a tool pane in a split
+   keeps the solid fill under it. Reduced transparency and increased contrast
+   keep the fill, and a stage with no ground behind it is not touched. */
 @media (prefers-reduced-transparency: no-preference) {
   html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
     .shell--app-backdrop.shell-frame:has(
@@ -1455,6 +1484,14 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
             .automation-center-layer,
             .artifact-library-layer
           )
+      ),
+      :has(
+        .workspace-pane:not(
+          [data-surface-kind="welcome"],
+          [data-surface-kind="draft-thread"],
+          [data-surface-kind="thread"],
+          [data-surface-kind="side-chat"]
+        )
       )
     )
     > .workspace-layer::before {

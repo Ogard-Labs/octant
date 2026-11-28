@@ -179,6 +179,10 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
   --octant-panel-surface: var(--octant-panel-opaque);
   --octant-sidebar-keep: 100%;
   --octant-reading-surface-keep: 100%;
+  /* The thread's plate covers its whole pane, with no feather to show as a
+     band over the pane's own fill. */
+  --octant-reading-plate-pad: 50%;
+  --octant-reading-plate-feather: 0px;
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -192,7 +196,8 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
     --octant-panel-surface: var(--octant-panel-opaque);
     --octant-sidebar-keep: 100%;
     --octant-reading-surface-keep: 100%;
-    --octant-reading-surface-keep: 100%;
+    --octant-reading-plate-pad: 50%;
+    --octant-reading-plate-feather: 0px;
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
