@@ -19,6 +19,25 @@ function clients() {
 }
 
 describe("answering a listed approval", () => {
+  it("sends nothing for an approval to enter or leave Plan, and says to open the thread", async () => {
+    const fake = clients();
+    for (const request of [codeApproval(), workApproval()]) {
+      await expect(
+        answerPendingApproval({
+          request: { ...request, approves: "level-change" },
+          decision: "approved",
+          workRequestClient: fake.workRequestClient,
+          codeClient: fake.codeClient,
+        }),
+      ).resolves.toEqual({
+        status: "refused",
+        message: "Open the thread to answer this approval.",
+      });
+    }
+    expect(fake.execute).not.toHaveBeenCalled();
+    expect(fake.executeOperation).not.toHaveBeenCalled();
+  });
+
   it("resolves a Work approval with the request id and version the host listed", async () => {
     const fake = clients();
     fake.execute.mockResolvedValue({ kind: "work-request-resolved" });

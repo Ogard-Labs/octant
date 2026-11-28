@@ -23,6 +23,7 @@ function approval(threadId: string, threadTitle: string, approvalId: string): Pe
     threadId,
     threadTitle,
     text: `Run: bun run test (${approvalId})`,
+    approves: "tool-call",
     requestedAt,
     answer: { threadId, checkoutId: "checkout-1", approvalId },
   } as unknown as PendingRequest;

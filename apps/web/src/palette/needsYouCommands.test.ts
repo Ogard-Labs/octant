@@ -185,6 +185,21 @@ describe("the Needs you commands", () => {
     expect(onAnswerApproval).not.toHaveBeenCalled();
   });
 
+  it("lists an approval to enter or leave Plan as one row that opens the thread, with no Approve or Deny", () => {
+    const onAnswerApproval = vi.fn();
+    const requests = [
+      { ...codeApproval(), approves: "level-change" as const },
+      { ...workApproval(), approves: "level-change" as const },
+    ];
+    const commands = buildNeedsYouCommands(sources({ requests, onAnswerApproval }));
+
+    expect(commands.map((command) => command.title)).toEqual([
+      "Fix the parser",
+      "Quarterly report",
+    ]);
+    expect(onAnswerApproval).not.toHaveBeenCalled();
+  });
+
   it("lists a Work agent's own question as one row that opens the thread", () => {
     const onOpenThread = vi.fn();
     const commands = buildNeedsYouCommands(

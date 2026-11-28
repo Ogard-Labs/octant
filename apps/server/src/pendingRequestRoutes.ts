@@ -4,8 +4,10 @@ import { Schema } from "effect";
 import type { PrincipalKind } from "@octant/domain/remote-access-policy";
 import type { EventActor } from "@octant/contracts";
 import {
+  PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE,
   PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
   PendingQuestionDeferral,
+  type PendingRequest,
 } from "@octant/contracts/pending-requests";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -47,14 +49,27 @@ export interface PendingRequestRouteDependencies {
  * Listing grants nothing: every answer still passes its own route's check.
  * Deferral stays with a local window.
  */
+function withoutApprovalSubject(request: PendingRequest): PendingRequest {
+  if (request.kind !== "approval" || request.approves === undefined) return request;
+  const { approves: _approves, ...rest } = request;
+  return rest;
+}
+
 export function createPendingRequestRouteHandler(dependencies: PendingRequestRouteDependencies) {
   const read = createLocalWindowReadRoute({
     path: PENDING_REQUESTS_PATH,
     noun: "Pending request",
     plural: "Pending requests",
     read: async (windowId, reader, request, principal) => {
-      const shared = request.headers.get("accept") === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE;
-      const list = await dependencies.service.list(windowId, reader, principal, !shared);
+      const accept = request.headers.get("accept");
+      const subjects = accept === PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE;
+      const shared = subjects || accept === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE;
+      const listed = await dependencies.service.list(windowId, reader, principal, !shared);
+      // A client that did not ask for `approves` would refuse the whole list
+      // over it, so it reads each approval as it did before the field.
+      const list = subjects
+        ? listed
+        : { ...listed, requests: listed.requests.map(withoutApprovalSubject) };
       if (shared) {
         return decodePendingRequestList(list);
       }

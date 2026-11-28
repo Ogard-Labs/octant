@@ -5,6 +5,7 @@ import {
 } from "@octant/client-runtime/work-request-client";
 import { decodeCodeOperationId } from "@octant/contracts";
 import { codeFailure, providerAnswerOutcome } from "../code/codeControllerState";
+import { approvedOnlyInThread } from "../pendingRequests/pendingRequests";
 import type { ApprovalDecision, ApprovalPendingRequest } from "./needsYouCommands";
 
 export type PendingApprovalOutcome =
@@ -26,6 +27,9 @@ export async function answerPendingApproval(input: {
   readonly codeClient: CodeClient;
 }): Promise<PendingApprovalOutcome> {
   const { request, decision } = input;
+  if (approvedOnlyInThread(request)) {
+    return { status: "refused", message: "Open the thread to answer this approval." };
+  }
   try {
     if (request.mode === "work") {
       await input.workRequestClient.execute({

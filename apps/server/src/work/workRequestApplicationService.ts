@@ -180,7 +180,12 @@ function pendingRequestFrom(request: WorkRequest, threadTitle: string): PendingR
     answer: { requestId: request.requestId, expectedVersion: request.version },
   } as const;
   return request.detail.kind === "approval"
-    ? { ...shared, kind: "approval", text: request.detail.description }
+    ? {
+        ...shared,
+        kind: "approval",
+        text: request.detail.description,
+        approves: request.detail.levelChange === undefined ? "tool-call" : "level-change",
+      }
     : {
         ...shared,
         kind: "question",

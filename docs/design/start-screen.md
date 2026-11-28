@@ -672,7 +672,13 @@ card above (the pending-requests read); each surface's own paragraph says when
 it reads. Each item names its mode, Project, thread and title, kind, text,
 options where the mode has them, and when it was asked, and carries the handle
 that mode's own answer command takes, so a surface answers in place through the
-commands the open thread already uses. An answered or ended request is gone
+commands the open thread already uses. A Code or Work approval also says
+what it approves (`approves`): one tool call, or a move into or out of Plan.
+Every surface answers only a tool call; an approval to enter or leave Plan
+changes the level the thread's later turns run at and, leaving Plan, accepts a
+plan only the thread's approval card shows, so its row offers **Review
+request**, which opens the thread, and so does an approval from a host that
+does not say. An answered or ended request is gone
 from the host's next list. The Inbox lists each decision, each waiting subagent, and each agent's own
 harness approval as the same row (a decision answered in place, a subagent
 request reviewed in its Agents tab, an approval reviewed in its thread, where
@@ -719,7 +725,9 @@ detailed with its mode, what it waits on, and how long, and Enter opens the
 thread (when every request on a thread is a subagent's, Enter opens that
 child's Agents tab). A waiting subagent gets one **Review request** command and
 no Approve or Deny; an agent's own approval, or a Work agent's own question,
-is only its thread's row, which opens the thread. Each approval also gets **Approve** and **Deny** commands, so typing
+is only its thread's row, which opens the thread, and so is an approval to
+enter or leave Plan, or one whose host does not say it approves one tool call.
+Each other approval also gets **Approve** and **Deny** commands, so typing
 "approve" finds them; they answer through the mode's own approval command
 without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row

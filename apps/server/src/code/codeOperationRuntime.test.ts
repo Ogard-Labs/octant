@@ -5421,7 +5421,9 @@ describe("CodeOperationRuntime", () => {
       failure: { category: "failed", message: APPROVAL_POSTURE_CHANGED_MESSAGE },
     });
     expect(connection.answerApproval).not.toHaveBeenCalled();
-    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([{ kind: "approval" }]);
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
+      { kind: "approval", approves: "tool-call" },
+    ]);
     // Asked again under the posture the thread holds now, the allow goes through.
     await expect(answer(first, "approved", 18)).resolves.toMatchObject({
       kind: "provider-turn-state",
@@ -8106,6 +8108,11 @@ describe("CodeOperationRuntime", () => {
         );
         expect(asked).toMatchObject({ action: "level-change", levelChange: { to: "plan" } });
       });
+      // Listed as a level change, so a list opens the thread instead of
+      // allowing it as one tool call.
+      expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
+        { kind: "approval", approves: "level-change" },
+      ]);
       const answered = await fixture.runtime.execute(windowId, {
         kind: "answer-provider-approval",
         operationId: operationId(1387),
@@ -8458,6 +8465,9 @@ describe("CodeOperationRuntime", () => {
         expect(asked?.kind).toBe("approval-requested");
         if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
       });
+      expect(await fixture.runtime.pendingRequests?.(windowId)).toMatchObject([
+        { kind: "approval", approves: "level-change" },
+      ]);
       await fixture.runtime.execute(windowId, {
         kind: "answer-provider-approval",
         operationId: operationId(1408),

@@ -225,6 +225,7 @@ describe("WorkRequestApplicationService.listPendingForWindow", () => {
         threadId,
         threadTitle: "Report",
         text: "Run `bun install`.",
+        approves: "tool-call",
         requestedAt: pendingRequest.requestedAt,
         answer: { requestId, expectedVersion: 1 },
       },
@@ -242,6 +243,32 @@ describe("WorkRequestApplicationService.listPendingForWindow", () => {
     });
     expect(await service.listPendingForWindow(windowId)).toMatchObject([
       { mode: "work", kind: "question", text: "Database credential?", secret: true },
+    ]);
+  });
+
+  it("marks an approval to enter or leave Plan as a level change, so no list answers it as one tool call", async () => {
+    const levelChanges = [
+      { to: "plan" as const },
+      { to: "auto" as const, plan: "1. Edit the report\n2. Send it" },
+    ].map((levelChange, index) =>
+      decodeWorkRequest({
+        ...pendingRequest,
+        requestId: `00000000-0000-4000-8000-00000000091${String(index)}`,
+        detail: {
+          kind: "approval",
+          action: "Change level",
+          description: "Change the thread's level.",
+          levelChange,
+        },
+      }),
+    );
+    const { service } = fixture({
+      threads: [{ id: threadId, projectId, title: "Report" }],
+      requestsOverride: { listPending: vi.fn(() => levelChanges) },
+    });
+    expect(await service.listPendingForWindow(windowId)).toMatchObject([
+      { kind: "approval", approves: "level-change" },
+      { kind: "approval", approves: "level-change" },
     ]);
   });
 

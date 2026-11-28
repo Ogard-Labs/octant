@@ -18217,7 +18217,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Chat's [Agents dock](design/workspace.md#subagents) does not extend that scope. An approval a child raises still covers that request only and
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
-  open, which a provider's own approval never carries. Text keeps
+  open, which a provider's own approval never carries. Every Code and Work
+  approval also says what it approves, `approves: "tool-call"` or
+  `"level-change"` (an ask to enter or leave Plan, whose plan and target level
+  the list does not carry). A client answers only a `tool-call` from a list
+  and opens the thread for anything else, including an approval without the
+  field; the host still checks every answer. The host sends the field only to
+  a client that reads with `application/vnd.octant.approval-subjects+json`,
+  because an ask is decoded strictly and a client built before the field would
+  refuse the whole list; any other reader gets each approval without it. Text keeps
   each mode's own bounds and sanitization. A device the host's own person paired reads it as a local window does (maintainer decision, 2026-11-12); the remote action classifier names no action for it, so the route refuses every other device session. The route lists under the device's own scope, so every source answers what that
   device's own answer commands and ask routes would admit (an MCP prompt its
   own turn raised, never a local window's or the host's). A waiting

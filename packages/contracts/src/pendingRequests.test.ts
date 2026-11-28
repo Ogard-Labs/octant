@@ -379,6 +379,26 @@ describe("pending request contract", () => {
     ).toThrow();
   });
 
+  it("says whether a Code or Work approval approves one tool call or a move into or out of Plan, and only on an approval", () => {
+    const codeApproval = {
+      mode: "code",
+      kind: "approval",
+      projectId: ids.project,
+      threadId: ids.codeThread,
+      threadTitle: "Fix the parser",
+      text: "Claude asks to plan first.",
+      requestedAt,
+      answer: { threadId: ids.codeThread, checkoutId: ids.checkout, approvalId: ids.approval },
+    } as const;
+    for (const approves of ["tool-call", "level-change"] as const) {
+      expect(decodePendingRequest({ ...workApproval, approves })).toMatchObject({ approves });
+      expect(decodePendingRequest({ ...codeApproval, approves })).toMatchObject({ approves });
+    }
+    expect(decodePendingRequest(workApproval)).not.toHaveProperty("approves");
+    expect(() => decodePendingRequest({ ...codeApproval, approves: "everything" })).toThrow();
+    expect(() => decodePendingRequest({ ...codeQuestion, approves: "tool-call" })).toThrow();
+  });
+
   it("keeps a Work request as sanitized as the Work record it came from", () => {
     expect(() =>
       decodePendingRequest({ ...workApproval, text: "Open /Users/me/.ssh/id" }),

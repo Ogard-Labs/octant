@@ -1,12 +1,12 @@
 import type { PendingRequestList } from "@octant/contracts";
-import { PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE } from "@octant/contracts/pending-requests";
+import { PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE } from "@octant/contracts/pending-requests";
 import { describe, expect, it, vi } from "vitest";
 import { PendingRequestClientFailure, createPendingRequestClient } from "./pendingRequestClient";
 
 const baseUrl = "http://127.0.0.1:13773";
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const headers = {
-  accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  accept: PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE,
   "x-octant-window-capability": capability,
 };
 
