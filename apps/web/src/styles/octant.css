@@ -2939,8 +2939,9 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
 }
 .approval-card > svg {
   grid-column: 1;
-  /* Centred on the question's first line, whatever the text size. */
-  margin-block-start: calc((1lh - 14px) / 2);
+  /* One line tall, so the 14px mark is centred on the question's first line
+     whatever the text size (the glyph keeps its square in the middle). */
+  height: 1lh;
 }
 .approval-card > :not(svg) {
   grid-column: 2;
