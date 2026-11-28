@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { decodeCodeCheckoutId, type CodeCheckoutId } from "@octant/contracts";
 
 export type GitWorktreeLockState = true | string;
 
@@ -116,8 +117,37 @@ function opaqueRepositoryId(
   return `repo_${digest}`;
 }
 
-function isSubmoduleCommonDirectory(commonDirectory: string): boolean {
-  return /(?:^|\/)\.git\/modules(?:\/|$)/.test(commonDirectory.replaceAll("\\", "/"));
+export function deriveExistingWorktreeCheckoutId(input: {
+  readonly projectId: string;
+  readonly bindingRevisionId: string;
+  readonly repositoryId: string;
+  readonly canonicalRoot: string;
+}): CodeCheckoutId {
+  const digest = createHash("sha256")
+    .update("octant.existing-worktree-checkout.v1\0")
+    .update(input.projectId)
+    .update("\0")
+    .update(input.bindingRevisionId)
+    .update("\0")
+    .update(input.repositoryId)
+    .update("\0")
+    .update(input.canonicalRoot)
+    .digest("hex")
+    .slice(0, 32);
+  return decodeCodeCheckoutId(
+    `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20)}`,
+  );
+}
+
+/**
+ * Whether `commonDirectory` is a submodule's Git directory rather than a
+ * standalone repository. Git places submodules under `.git/modules/<name>` for
+ * a primary checkout and under `.git/worktrees/<id>/modules/<name>` when
+ * initialised inside a linked worktree.
+ */
+export function isSubmoduleCommonDirectory(commonDirectory: string): boolean {
+  const normalized = commonDirectory.replaceAll("\\", "/");
+  return /(?:^|\/)\.git\/(?:worktrees\/[^/]+\/)?modules(?:\/|$)/.test(normalized);
 }
 
 export async function observeRepositoryIdentity(

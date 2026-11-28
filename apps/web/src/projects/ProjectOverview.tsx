@@ -5,6 +5,7 @@ import type { KeyProviderDriverKinds, PermissionMode } from "@octant/contracts/p
 import type { DesignSystemChoice } from "@octant/contracts/design-systems";
 import type { AutoReviewer } from "@octant/contracts/shield";
 import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
+import { createProjectRepositoriesClient } from "@octant/client-runtime/project-repositories-client";
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
@@ -324,6 +325,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
     }
   }, [serverUrl, windowCapability]);
 
+  const projectRepositoriesClient = useMemo(() => {
+    if (serverUrl === undefined || windowCapability === undefined) return undefined;
+    try {
+      return createProjectRepositoriesClient({
+        baseUrl: serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability,
+      });
+    } catch {
+      return undefined;
+    }
+  }, [serverUrl, windowCapability]);
+
   useEffect(() => {
     alive.current = true;
     relinkGeneration.current += 1;
@@ -609,6 +623,20 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                     onRemove: (canonicalRoot: string) =>
                       onRemoveExtraFolder(props.project.id, canonicalRoot),
                   })}
+              {...(() => {
+                if (props.project.type !== "code") return {};
+                const list =
+                  props.projectClient?.listRepositories ??
+                  (projectRepositoriesClient === undefined
+                    ? undefined
+                    : (projectId: ProjectId, signal?: AbortSignal) =>
+                        projectRepositoriesClient.list(projectId, signal));
+                return list === undefined
+                  ? {}
+                  : {
+                      listRepositories: (signal?: AbortSignal) => list(props.project.id, signal),
+                    };
+              })()}
               project={props.project}
             />
             {unavailable ? (

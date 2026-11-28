@@ -125,9 +125,12 @@ import type { CodeProfileSkillResolver } from "./codeProfileSkillResolver";
 import {
   authorizeCodeOperation,
   clampTurnAccessPosture,
+  codeOperationReachScope,
   inPlaceRestoreRefusalText,
   mayWriteToRepository,
+  threadReachesCheckout,
   turnBlocksInPlaceRestore,
+  type CodeCheckoutReachScope,
   type CodeOperation,
 } from "@octant/domain/code-policy";
 import {
@@ -955,6 +958,7 @@ export interface CodeOperationPullRequestPort {
   readonly ensure: (
     input: {
       readonly threadId: CodeThread["id"];
+      readonly checkoutId?: CodeCheckoutId;
       readonly title: string;
       readonly body: string;
       readonly draft?: boolean;
@@ -973,6 +977,7 @@ export interface CodeOperationPullRequestPort {
   readonly update?: (
     input: {
       readonly threadId: CodeThread["id"];
+      readonly checkoutId?: CodeCheckoutId;
       readonly title?: string;
       readonly body?: string;
       readonly draft?: boolean;
@@ -992,6 +997,7 @@ export interface CodeOperationPullRequestPort {
     threadId: CodeThread["id"],
     state: "open" | "closed",
     signal: AbortSignal,
+    checkoutId?: CodeCheckoutId,
   ) => Promise<
     | { readonly status: "found"; readonly pullRequest: CodeOperationPullRequestIdentity }
     | { readonly status: "none" }
@@ -1000,7 +1006,11 @@ export interface CodeOperationPullRequestPort {
   /** The forge calls behind labels, comments, close, reopen, and merge. */
   readonly actions?: CodeOperationPullRequestActions;
   readonly observeReview: (
-    input: { readonly threadId: CodeThread["id"]; readonly maxDiffBytes: number },
+    input: {
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId?: CodeCheckoutId;
+      readonly maxDiffBytes: number;
+    },
     signal: AbortSignal,
   ) => Promise<CodeOperationPullRequestReview>;
 }
@@ -2061,7 +2071,7 @@ export class CodeOperationService {
           options,
         );
     }
-    const scope = await this.#scope(windowId, command);
+    const scope = await this.#scope(windowId, command, codeOperationReachScope(command.kind));
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
     if (hunkCommand && options.admissionCurrent?.() !== true)
       return this.#failed(
@@ -3481,7 +3491,7 @@ export class CodeOperationService {
     },
     admissionCurrent?: () => boolean,
   ): Promise<CodeReviewTarget> {
-    const scope = await this.#scope(windowId, input);
+    const scope = await this.#scope(windowId, input, "git-and-review");
     if ("failure" in scope)
       throw new CodeOperationServiceError(
         scope.failure === "waiting" ? "unavailable" : scope.failure,
@@ -3496,7 +3506,7 @@ export class CodeOperationService {
     const selected = retainedReviewTarget(snapshot, input);
     if (selected === undefined) throw new CodeOperationServiceError("unavailable");
     // A delayed read cannot prepare an anchor under a different checkout binding.
-    const current = await this.#scope(windowId, input);
+    const current = await this.#scope(windowId, input, "git-and-review");
     if ("failure" in current) throw new CodeOperationServiceError("unauthorized");
     if (admissionCurrent?.() === false) throw new CodeOperationServiceError("unauthorized");
     return selected.target;
@@ -3522,10 +3532,14 @@ export class CodeOperationService {
       readonly changedPaths: ReadonlyArray<CodeRelativePath>;
     },
   ): Promise<Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>> {
-    const scope = await this.#scope(windowId, {
-      threadId: input.threadId,
-      checkoutId: input.checkoutId,
-    });
+    const scope = await this.#scope(
+      windowId,
+      {
+        threadId: input.threadId,
+        checkoutId: input.checkoutId,
+      },
+      "git-and-review",
+    );
     if ("failure" in scope) {
       throw new CodeOperationServiceError(
         scope.failure === "waiting" ? "unavailable" : scope.failure,
@@ -3866,11 +3880,13 @@ export class CodeOperationService {
     threadId: CodeThreadId,
     frame: CodeOperationEventFrame,
   ): CodeCheckoutId | false | undefined {
+    const thread = this.#options.authority.readThread(threadId);
     if (frame.event.kind === "conversation-turn-review-preview") {
       const checkoutId = frame.event.preview.capture?.checkoutId;
       if (checkoutId === undefined) return undefined;
       return frame.threadId === threadId &&
-        this.#options.authority.readThread(threadId)?.checkoutId === checkoutId
+        thread !== undefined &&
+        threadReachesCheckout(thread, checkoutId, "git-and-review").reachable
         ? checkoutId
         : false;
     }
@@ -3882,7 +3898,8 @@ export class CodeOperationService {
     const bound = frame.event.result.reviewScope;
     if (bound === undefined) return undefined;
     return bound.threadId === threadId &&
-      this.#options.authority.readThread(threadId)?.checkoutId === bound.checkoutId
+      thread !== undefined &&
+      threadReachesCheckout(thread, bound.checkoutId, "git-and-review").reachable
       ? bound.checkoutId
       : false;
   }
@@ -3893,11 +3910,12 @@ export class CodeOperationService {
     checkoutId: CodeCheckoutId,
     admissionCurrent?: () => boolean,
   ): Promise<void> {
-    const scope = await this.#scope(windowId, { threadId, checkoutId });
+    const scope = await this.#scope(windowId, { threadId, checkoutId }, "git-and-review");
     const current = this.#options.authority.readThread(threadId);
     if (
       "failure" in scope ||
-      current?.checkoutId !== checkoutId ||
+      current === undefined ||
+      !threadReachesCheckout(current, checkoutId, "git-and-review").reachable ||
       current.projectId !== scope.thread.projectId ||
       admissionCurrent?.() === false
     )
@@ -3928,13 +3946,17 @@ export class CodeOperationService {
   ): void {
     const thread = this.#options.authority.readThread(threadId);
     const checkout = this.#options.authority.readCheckout(checkoutId);
+    const reach =
+      thread === undefined
+        ? ({ reachable: false } as const)
+        : threadReachesCheckout(thread, checkoutId, "git-and-review");
     if (
       admissionCurrent?.() !== true ||
       thread?.id !== threadId ||
-      thread.checkoutId !== checkoutId ||
+      !reach.reachable ||
       thread.lifecycle !== "active" ||
       checkout?.availability !== "available" ||
-      checkout.repositoryId !== thread.repositoryId ||
+      String(checkout.repositoryId) !== String(reach.repositoryId) ||
       this.#options.authority.currentProjectAccess?.(windowId, thread.projectId) !== true
     )
       throw new CodeOperationServiceError("unauthorized");
@@ -4221,6 +4243,7 @@ export class CodeOperationService {
   async #scope(
     windowId: WindowId,
     command: Pick<CodeOperationCommand, "threadId" | "checkoutId">,
+    reachScope: CodeCheckoutReachScope = "primary-only",
   ): Promise<
     | { readonly thread: CodeThread; readonly checkout: CodeCheckoutIdentity }
     | { readonly failure: "invalid" | "unauthorized" | "waiting"; readonly message: string }
@@ -4230,18 +4253,17 @@ export class CodeOperationService {
       storedThread === undefined
         ? undefined
         : (this.#options.authority.effectiveThread?.(windowId, storedThread) ?? storedThread);
-    if (
-      thread === undefined ||
-      thread.id !== command.threadId ||
-      thread.checkoutId !== command.checkoutId
-    )
+    if (thread === undefined || thread.id !== command.threadId)
+      return { failure: "invalid", message: "Code thread or checkout is invalid." };
+    const reach = threadReachesCheckout(thread, command.checkoutId, reachScope);
+    if (!reach.reachable)
       return { failure: "invalid", message: "Code thread or checkout is invalid." };
     if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId)))
       return { failure: "unauthorized", message: "Code thread is unauthorized." };
     const checkout = this.#options.authority.readCheckout(command.checkoutId);
     if (
       checkout !== undefined &&
-      checkout.repositoryId === thread.repositoryId &&
+      String(checkout.repositoryId) === String(reach.repositoryId) &&
       thread.lifecycle === "active"
     ) {
       // The folder may be gone while the stored checkout still reads available.
@@ -4252,7 +4274,7 @@ export class CodeOperationService {
     }
     if (
       checkout === undefined ||
-      checkout.repositoryId !== thread.repositoryId ||
+      String(checkout.repositoryId) !== String(reach.repositoryId) ||
       checkout.availability !== "available" ||
       thread.lifecycle !== "active"
     )
@@ -6611,6 +6633,9 @@ export class CodeOperationService {
     const result = await this.#options.pullRequests.ensure(
       {
         threadId: command.threadId,
+        ...(String(command.checkoutId) === String(thread.checkoutId)
+          ? {}
+          : { checkoutId: command.checkoutId }),
         title: command.title,
         body: command.body,
         ...(command.draft === undefined ? {} : { draft: command.draft }),
@@ -6625,7 +6650,9 @@ export class CodeOperationService {
         state: "unavailable",
         ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
-    await this.#recordPullRequestLink(thread, result.pullRequest);
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, result.pullRequest);
+    }
     return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
   }
 
@@ -6648,15 +6675,20 @@ export class CodeOperationService {
         ...(failureCode === undefined ? {} : { failureCode }),
       });
     if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false) return unavailable("no-remote");
+    const linkedCheckoutId =
+      String(command.checkoutId) === String(thread.checkoutId) ? undefined : command.checkoutId;
     if (command.state !== undefined) {
       // Closing finds the open pull request, reopening finds the closed one;
       // either way it is the thread's own, found by its head.
       const located = await this.#locatePullRequest(
         command.threadId,
         command.state === "closed" ? "open" : "closed",
+        linkedCheckoutId,
       );
       if (located.status !== "found") return located.result(command.operationId);
-      await this.#recordPullRequestLink(thread, located.pullRequest);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, located.pullRequest);
+      }
       const done = await pullRequests.actions?.setState(
         { ...located.target, state: command.state },
         new AbortController().signal,
@@ -6672,6 +6704,7 @@ export class CodeOperationService {
       const result = await pullRequests.update(
         {
           threadId: command.threadId,
+          ...(linkedCheckoutId === undefined ? {} : { checkoutId: linkedCheckoutId }),
           ...(command.title === undefined ? {} : { title: command.title }),
           ...(command.body === undefined ? {} : { body: command.body }),
           ...(command.draft === undefined ? {} : { draft: command.draft }),
@@ -6682,12 +6715,16 @@ export class CodeOperationService {
         return unavailable(result.status === "none" ? "not-found" : undefined);
       draft = result.draft;
       identity = result.pullRequest;
-      await this.#recordPullRequestLink(thread, identity);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, identity);
+      }
     }
     if (changesLabels) {
-      const located = await this.#locatePullRequest(command.threadId, "open");
+      const located = await this.#locatePullRequest(command.threadId, "open", linkedCheckoutId);
       if (located.status !== "found") return located.result(command.operationId);
-      await this.#recordPullRequestLink(thread, located.pullRequest);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, located.pullRequest);
+      }
       const done = await pullRequests.actions?.editLabels(
         {
           ...located.target,
@@ -6735,9 +6772,13 @@ export class CodeOperationService {
     }
     if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
-    const located = await this.#locatePullRequest(command.threadId, "open");
+    const linkedCheckoutId =
+      String(command.checkoutId) === String(thread.checkoutId) ? undefined : command.checkoutId;
+    const located = await this.#locatePullRequest(command.threadId, "open", linkedCheckoutId);
     if (located.status !== "found") return located.result(command.operationId);
-    await this.#recordPullRequestLink(thread, located.pullRequest);
+    if (linkedCheckoutId === undefined) {
+      await this.#recordPullRequestLink(thread, located.pullRequest);
+    }
     const already = await this.#settleEarlierComment(command, thread, located.target);
     if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
@@ -6856,7 +6897,11 @@ export class CodeOperationService {
     if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
     const actions = this.#options.pullRequests.actions;
-    const located = await this.#locatePullRequest(command.threadId, "open");
+    const located = await this.#locatePullRequest(
+      command.threadId,
+      "open",
+      String(command.checkoutId) === String(thread.checkoutId) ? undefined : command.checkoutId,
+    );
     if (located.status !== "found") return located.result(command.operationId);
     const knownLink = this.#options.pullRequestLinks?.resolveLink?.({
       projectId: thread.projectId,
@@ -6871,7 +6916,9 @@ export class CodeOperationService {
     ) {
       return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
     }
-    await this.#recordPullRequestLink(thread, located.pullRequest);
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, located.pullRequest);
+    }
     if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
     const signal = new AbortController().signal;
     const summary = await actions.summary(located.target, signal);
@@ -6949,6 +6996,7 @@ export class CodeOperationService {
   async #locatePullRequest(
     threadId: CodeThread["id"],
     state: "open" | "closed",
+    checkoutId?: CodeCheckoutId,
   ): Promise<
     | {
         readonly status: "found";
@@ -6961,7 +7009,12 @@ export class CodeOperationService {
       }
   > {
     const pullRequests = this.#options.pullRequests;
-    const located = await pullRequests.locate?.(threadId, state, new AbortController().signal);
+    const located = await pullRequests.locate?.(
+      threadId,
+      state,
+      new AbortController().signal,
+      checkoutId,
+    );
     if (located?.status === "found") {
       const target = pullRequestTargetOf(located.pullRequest);
       if (target !== undefined)
@@ -7023,7 +7076,13 @@ export class CodeOperationService {
         failureCode: "no-remote",
       });
     const result = await this.#options.pullRequests.observeReview(
-      { threadId: command.threadId, maxDiffBytes: command.maxDiffBytes },
+      {
+        threadId: command.threadId,
+        ...(String(command.checkoutId) === String(thread.checkoutId)
+          ? {}
+          : { checkoutId: command.checkoutId }),
+        maxDiffBytes: command.maxDiffBytes,
+      },
       new AbortController().signal,
     );
     if (result.status === "unavailable")
@@ -7041,21 +7100,23 @@ export class CodeOperationService {
         freshness: "fresh",
       });
     const pr = result.pullRequest;
-    await this.#recordPullRequestLink(thread, {
-      number: pr.number,
-      url: pr.url,
-      baseRepository: pr.baseRepository,
-      ...(pr.canonicalBaseRepository === undefined
-        ? {}
-        : { canonicalBaseRepository: pr.canonicalBaseRepository }),
-      baseBranch: pr.baseBranch,
-      headOwner: pr.headRepository,
-      headBranch: pr.headBranch,
-      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
-      ...(pr.baseRepositoryNodeId === undefined
-        ? {}
-        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
-    });
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, {
+        number: pr.number,
+        url: pr.url,
+        baseRepository: pr.baseRepository,
+        ...(pr.canonicalBaseRepository === undefined
+          ? {}
+          : { canonicalBaseRepository: pr.canonicalBaseRepository }),
+        baseBranch: pr.baseBranch,
+        headOwner: pr.headRepository,
+        headBranch: pr.headBranch,
+        ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+        ...(pr.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+      });
+    }
     return decodeCodeOperationResult({
       kind: "pull-request-review",
       operationId: command.operationId,

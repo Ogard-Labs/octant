@@ -6531,9 +6531,30 @@ thread's [guardrail level](#security-and-authority). New tasks may choose an app
   so each Work and Code turn carries an instruction naming the extra folders
   by absolute path and saying that commands, Git and checkouts start in the
   main folder.
-- **Code.** Worktrees, checkouts, Git and pull requests stay keyed to the
-  main folder; an extra folder is a plain folder with no checkout
-  management. Language services, debug sessions and repository tests do
+- **Code.** A Code Project's main folder may be a Git repository or a plain
+  folder containing Git repositories (even when requiring a Git repository on
+  creation, a plain folder holding at least one discovered repository binds; an
+  empty plain folder without repositories is still refused when that check is
+  on). Repository discovery inspects the main folder, each granted extra folder,
+  and up to two levels beneath them without following symbolic links, skipping
+  hidden folders, dependency directories, and nested linked worktrees, capped at
+  16 repositories (`truncated: true` when more exist); committed submodules
+  (`HEAD:.gitmodules`) are listed under their parent repository without becoming
+  standalone repositories, and `.code-workspace` files offer outside folders
+  through the same single-use extra-folder picker receipt (never granting them
+  automatically; outside folders failing `extraFolderRefusal` are refused).
+  Multi-repository Code threads stay on current checkouts and carry optional
+  `linkedCheckouts` (up to 15) alongside their primary checkout; single-repository
+  Projects emit no `linkedCheckouts` field and see zero change. Each thread
+  reaches its primary checkout and current `linkedCheckouts` for Git observation,
+  diff, stage, unstage, discard, commit, push, branch switching, and pull-request
+  operations (one repository at a time via a repository picker in Diff and Git/PR,
+  and grouped by repository in a turn's changed-files card), while provider turns,
+  terminals, and checkpoints remain anchored to the primary checkout and
+  revoking an extra folder revokes root resolution for repositories inside it.
+  Not built yet: linked worktree sets branching several repositories together,
+  submodule initialization in new worktree sets, and worktree-set archive/erase.
+  Language services, debug sessions and repository tests also
   cover an extra folder: a file there is named by its absolute path, and the
   root authority places it in one of the Project's current extra folders (and
   refuses any other absolute path) after resolving the checkout, so a window,

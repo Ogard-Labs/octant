@@ -120,6 +120,15 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
     };
   }
 
+  const linkedCheckouts =
+    input.prepared.linkedCheckouts !== undefined && input.prepared.linkedCheckouts.length > 0
+      ? input.prepared.linkedCheckouts.map((entry) => ({
+          checkoutId: entry.checkout.id,
+          repositoryId: entry.checkout.repositoryId,
+          label: entry.label,
+        }))
+      : undefined;
+
   return {
     kind: "command",
     command: {
@@ -130,6 +139,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         bindingRevisionId: input.prepared.bindingRevisionId,
         repositoryId: input.prepared.checkout.repositoryId,
         checkoutId: input.prepared.checkout.id,
+        ...(linkedCheckouts === undefined ? {} : { linkedCheckouts }),
         ...(input.composer.workingFolder ?? {}),
         title: input.title,
         lifecycle: "active",

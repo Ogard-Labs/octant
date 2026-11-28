@@ -861,6 +861,39 @@ describe("CodeDiffPane", () => {
     );
     expect(await reviewViewIsOn("Side by side")).toBe(true);
   });
+
+  it("shows a repository picker only when multiple repositories are reachable and switches on selection", async () => {
+    const user = userEvent.setup();
+    const onSelectRepository = vi.fn();
+    const repoB = "20000000-0000-4000-8000-000000000099" as never;
+    const { rerender } = render(
+      <CodeDiffPane
+        client={client()}
+        diff={clean()}
+        onSelectRepository={onSelectRepository}
+        repositories={[{ checkoutId: ids.checkout as never, label: "repo-a" }]}
+        selectedCheckoutId={ids.checkout as never}
+      />,
+    );
+    expect(screen.queryByLabelText("Repository")).not.toBeInTheDocument();
+
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        diff={clean()}
+        onSelectRepository={onSelectRepository}
+        repositories={[
+          { checkoutId: ids.checkout as never, label: "repo-a" },
+          { checkoutId: repoB, label: "repo-b" },
+        ]}
+        selectedCheckoutId={ids.checkout as never}
+      />,
+    );
+    const picker = screen.getByRole("combobox", { name: "Repository" });
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "repo-b" }));
+    expect(onSelectRepository).toHaveBeenCalledWith(repoB);
+  });
 });
 
 const ids = {

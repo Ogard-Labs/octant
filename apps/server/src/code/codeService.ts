@@ -109,6 +109,7 @@ import {
   type CodeThreadWorktreeMoveRefusal,
   CODE_THREAD_MOVED_TO_WORKTREE,
   type CodeCommandResult,
+  type CodePreparedLinkedCheckout,
   type CodeWorktreeCreationProgress,
   type ForkCodeThreadCommand,
   type CodeForkMergeBackOutcome,
@@ -568,6 +569,7 @@ export interface CodeCheckoutObservationPort {
   ) => Promise<{
     readonly bindingRevisionId: BindingRevisionId;
     readonly checkout: CodeCheckoutIdentity;
+    readonly linkedCheckouts?: ReadonlyArray<CodePreparedLinkedCheckout>;
     readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
   }>;
 }
@@ -1531,6 +1533,7 @@ export class CodeService {
     ]);
     const recoveredCheckouts = new Map<string, CodeCheckoutIdentity>();
     const observedExistingCheckouts = new Map<string, CodeCheckoutIdentity | undefined>();
+    const observedExistingLinked = new Map<string, ReadonlyMap<string, CodeCheckoutIdentity>>();
     const attemptedManagedCheckoutIds = new Set<string>();
     const observationFailedProjects = new Set<string>();
     for (const thread of threads) {
@@ -1593,6 +1596,17 @@ export class CodeService {
                 thread.projectId,
               );
               observedExistingCheckouts.set(projectId, prepared.checkout);
+              if (prepared.linkedCheckouts !== undefined && prepared.linkedCheckouts.length > 0) {
+                observedExistingLinked.set(
+                  projectId,
+                  new Map(
+                    prepared.linkedCheckouts.map((entry) => [
+                      String(entry.checkout.id),
+                      entry.checkout,
+                    ]),
+                  ),
+                );
+              }
             } catch {
               // The Project's folder cannot be observed as a checkout now: the
               // binding is gone, the folder moved, or Git refuses it. Leaving
@@ -1637,8 +1651,43 @@ export class CodeService {
       } catch {
         // Restart recovery remains fail-closed at the persisted Waiting checkout.
       }
+      // Recover waiting linked checkouts for multi-repository threads in the
+      // same observation pass so Diff and Git work right after restart.
+      if (thread.linkedCheckouts !== undefined && thread.linkedCheckouts.length > 0) {
+        const projectId = String(thread.projectId);
+        const linkedMap = observedExistingLinked.get(projectId);
+        for (const linked of thread.linkedCheckouts) {
+          const persistedLinked = this.#persistence.readCodeCheckout(linked.checkoutId);
+          if (persistedLinked === undefined) continue;
+          if (persistedLinked.availability !== "waiting") {
+            recoveredCheckouts.set(String(persistedLinked.id), persistedLinked);
+            continue;
+          }
+          const observedLinked = linkedMap?.get(String(linked.checkoutId));
+          if (observedLinked === undefined) continue;
+          try {
+            if (!repeatsJournaledCheckout(persistedLinked, observedLinked)) {
+              this.#append(
+                "code-checkout",
+                observedLinked.id,
+                this.#persistence.readCodeCheckoutAggregateVersion(observedLinked.id),
+                "code.checkout-observed@1",
+                { kind: "checkout-observed", checkout: observedLinked },
+              );
+            }
+            recoveredCheckouts.set(String(observedLinked.id), observedLinked);
+          } catch {
+            // Stay fail-closed at waiting.
+          }
+        }
+      }
     }
-    const checkoutIds = new Set(threads.map(({ checkoutId }) => String(checkoutId)));
+    const checkoutIds = new Set(
+      threads.flatMap((thread) => [
+        String(thread.checkoutId),
+        ...(thread.linkedCheckouts ?? []).map((entry) => String(entry.checkoutId)),
+      ]),
+    );
     // D2: Orphan checkout recovery. If a managed thread creation failed after
     // journaling checkout-observed but the compensating checkout-removed append
     // also failed, the projection retains an available checkout with no
@@ -1653,7 +1702,12 @@ export class CodeService {
     // binding; existing-worktree checkouts are ordinary observations from
     // prepare-code-project-checkout and must survive recovery.
     const allThreadCheckoutIds = new Set(
-      this.#persistence.readCodeThreads().map(({ checkoutId }) => String(checkoutId)),
+      this.#persistence
+        .readCodeThreads()
+        .flatMap((thread) => [
+          String(thread.checkoutId),
+          ...(thread.linkedCheckouts ?? []).map((entry) => String(entry.checkoutId)),
+        ]),
     );
     const allCheckouts = this.#persistence.readCodeCheckouts();
     for (const checkout of allCheckouts) {
@@ -2669,10 +2723,29 @@ export class CodeService {
             { kind: "checkout-observed", checkout: prepared.checkout },
           );
         }
+        for (const linked of prepared.linkedCheckouts ?? []) {
+          if (
+            !repeatsJournaledCheckout(
+              this.#persistence.readCodeCheckout(linked.checkout.id),
+              linked.checkout,
+            )
+          ) {
+            this.#append(
+              "code-checkout",
+              linked.checkout.id,
+              this.#persistence.readCodeCheckoutAggregateVersion(linked.checkout.id),
+              "code.checkout-observed@1",
+              { kind: "checkout-observed", checkout: linked.checkout },
+            );
+          }
+        }
         return {
           kind: "checkout-prepared",
           bindingRevisionId: prepared.bindingRevisionId,
           checkout: prepared.checkout,
+          ...(prepared.linkedCheckouts === undefined || prepared.linkedCheckouts.length === 0
+            ? {}
+            : { linkedCheckouts: prepared.linkedCheckouts }),
         };
       }
       if (command.kind === "get-worktree-remote-facts") {
@@ -2994,6 +3067,33 @@ export class CodeService {
           !sameAvailableCheckout(checkout, prepared.checkout)
         ) {
           throw this.#failure("stale", "Code thread checkout changed; prepare it again.");
+        }
+        if (command.thread.linkedCheckouts !== undefined) {
+          const preparedById = new Map(
+            (prepared.linkedCheckouts ?? []).map((entry) => [String(entry.checkout.id), entry]),
+          );
+          const seenLinked = new Set<string>();
+          for (const linked of command.thread.linkedCheckouts) {
+            const key = String(linked.checkoutId);
+            if (seenLinked.has(key) || key === String(command.thread.checkoutId)) {
+              throw this.#failure("invalid", "Code thread linked checkouts contain a duplicate.");
+            }
+            seenLinked.add(key);
+            const expected = preparedById.get(key);
+            const persistedLinked = this.#persistence.readCodeCheckout(linked.checkoutId);
+            if (
+              expected === undefined ||
+              expected.label !== linked.label ||
+              String(expected.checkout.repositoryId) !== String(linked.repositoryId) ||
+              persistedLinked === undefined ||
+              !sameAvailableCheckout(persistedLinked, expected.checkout)
+            ) {
+              throw this.#failure(
+                "stale",
+                "Code thread linked checkouts changed; prepare them again.",
+              );
+            }
+          }
         }
         // The profile narrows the posture before any gate reads it; every check
         // below, and the thread that is journaled, sees the narrowed value.

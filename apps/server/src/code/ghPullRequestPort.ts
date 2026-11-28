@@ -5,6 +5,7 @@ import {
   MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS,
   MAX_PULL_REQUEST_CHECK_COUNT,
   MAX_PULL_REQUEST_LINE_COUNT,
+  type CodeCheckoutId,
   type CodeProjectPullRequestMergeMethod,
   type CodeThreadId,
   type PullRequestCheckCounts,
@@ -50,6 +51,7 @@ export interface GhCommandPort {
 
 export interface GhPullRequestRequest {
   readonly threadId: CodeThreadId;
+  readonly checkoutId?: CodeCheckoutId;
   readonly title: string;
   readonly body: string;
   readonly draft?: boolean;
@@ -63,6 +65,7 @@ export interface GhPullRequestRequest {
 
 export interface GhPullRequestUpdate {
   readonly threadId: CodeThreadId;
+  readonly checkoutId?: CodeCheckoutId;
   readonly title?: string;
   readonly body?: string;
   /** `false` marks a draft ready for review; `true` turns it back into a draft. */
@@ -327,12 +330,18 @@ const PR_VIEW_FIELDS = [
 
 export class GhPullRequestPort {
   readonly #command: GhCommandPort;
-  readonly #resolveTarget: (threadId: CodeThreadId) => Promise<GhDeliveryTarget | undefined>;
+  readonly #resolveTarget: (
+    threadId: CodeThreadId,
+    checkoutId?: CodeCheckoutId,
+  ) => Promise<GhDeliveryTarget | undefined>;
   readonly #environment: NodeJS.ProcessEnv;
 
   constructor(options: {
     readonly command: GhCommandPort;
-    readonly resolveTarget: (threadId: CodeThreadId) => Promise<GhDeliveryTarget | undefined>;
+    readonly resolveTarget: (
+      threadId: CodeThreadId,
+      checkoutId?: CodeCheckoutId,
+    ) => Promise<GhDeliveryTarget | undefined>;
     readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   }) {
     this.#command = options.command;
@@ -346,7 +355,7 @@ export class GhPullRequestPort {
     }
     let deliveryTarget: GhDeliveryTarget | undefined;
     try {
-      deliveryTarget = await this.#resolveTarget(request.threadId);
+      deliveryTarget = await this.#resolveTarget(request.threadId, request.checkoutId);
     } catch {
       return { status: "unavailable", code: "invalid-target" };
     }
@@ -422,7 +431,7 @@ export class GhPullRequestPort {
     }
     let deliveryTarget: GhDeliveryTarget | undefined;
     try {
-      deliveryTarget = await this.#resolveTarget(request.threadId);
+      deliveryTarget = await this.#resolveTarget(request.threadId, request.checkoutId);
     } catch {
       return { status: "unavailable", code: "invalid-target" };
     }
@@ -494,6 +503,7 @@ export class GhPullRequestPort {
     threadId: CodeThreadId,
     state: "open" | "closed",
     signal: AbortSignal,
+    checkoutId?: CodeCheckoutId,
   ): Promise<
     | Readonly<{ status: "found"; pullRequest: GhPullRequestIdentity }>
     | Readonly<{ status: "none" }>
@@ -501,7 +511,7 @@ export class GhPullRequestPort {
   > {
     let deliveryTarget: GhDeliveryTarget | undefined;
     try {
-      deliveryTarget = await this.#resolveTarget(threadId);
+      deliveryTarget = await this.#resolveTarget(threadId, checkoutId);
     } catch {
       return { status: "unavailable" };
     }
@@ -572,12 +582,16 @@ export class GhPullRequestPort {
    * so the review window shows `Waiting` instead of a settled result.
    */
   async observeReview(
-    request: { readonly threadId: CodeThreadId; readonly maxDiffBytes: number },
+    request: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId?: CodeCheckoutId;
+      readonly maxDiffBytes: number;
+    },
     signal: AbortSignal,
   ): Promise<GhPullRequestReviewResult> {
     let deliveryTarget: GhDeliveryTarget | undefined;
     try {
-      deliveryTarget = await this.#resolveTarget(request.threadId);
+      deliveryTarget = await this.#resolveTarget(request.threadId, request.checkoutId);
     } catch {
       return { status: "unavailable" };
     }

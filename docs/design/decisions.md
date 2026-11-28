@@ -42,7 +42,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [App-managed tools](#app-managed-tools)                                               | 7         | 6       | 1            | 0                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 1       | 1            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 2       | 1            | 0                   |
-| [Modes, Projects and authority](#modes-projects-and-authority)                        | 17        | 14      | 3            | 0                   |
+| [Modes, Projects and authority](#modes-projects-and-authority)                        | 18        | 14      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 6         | 4       | 2            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 8         | 5       | 3            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 6         | 4       | 2            | 0                   |
@@ -1107,7 +1107,7 @@ Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architectu
 
 ### Projects with several folders
 
-A Work or Code Project has one main folder plus extra folders the person adds, each with the same access at the task's level. Code Git and checkouts keep the main folder.
+A Work or Code Project has one main folder plus extra folders the person adds, each with the same access at the task's level. Code checkouts and Git in a single-repository Project keep the main folder; extra folders holding Git repositories join multi-repository Code threads ([Multi-repository Code Projects](#multi-repository-code-projects)).
 
 - Only a person adds or removes an extra folder, through a folder-picker receipt, journaled; at most 16.
 - An extra folder may be home only after the person confirms its warning; never a folder above home, a system or credential folder, or one nested in or around another root ([Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on)).
@@ -1116,6 +1116,21 @@ A Work or Code Project has one main folder plus extra folders the person adds, e
 - A task's folder identity cannot change in place; revocation cancels running work and refuses new effects without redirecting output.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
+
+### Multi-repository Code Projects
+
+A Code Project can span several Git repositories across a plain parent folder or granted extra folders without widening folder grants or changing single-repository Projects (maintainer decision, 2026-11-28).
+
+- Discovery inherits the Project's main and extra folder grants and grants nothing itself: it walks up to two levels without following symbolic links, skips hidden folders, dependency directories, and nested linked worktrees, caps at 16 repositories, lists committed submodules under their parent repository (recognizing both `.git/modules` and linked-worktree `.git/worktrees/<id>/modules`), and offers outside `.code-workspace` folders only through the existing extra-folder picker receipt.
+- A plain folder containing at least one discovered Git repository binds as a Code Project even when requiring a Git repository; an empty plain folder is still refused under that rule.
+- Current-checkout multi-repository threads carry optional `linkedCheckouts` (up to 15) and reach each repository for Diff, Git, and pull-request operations one repository at a time through a repository picker, with turn changed files grouped by repository. Single-repository Projects omit `linkedCheckouts`, omit repository metadata on changed files, and show no picker.
+- Revoking an extra folder revokes root resolution for linked repositories inside it; provider turns, terminals, and checkpoints remain anchored to the primary checkout.
+
+Not built yet:
+
+- Linked worktree sets branching several repositories together, submodule initialization in new worktree sets, and worktree-set archive and erase: planned as the follow-up change once current-checkout discovery, reach, and pickers ship.
+
+Status: Partly built. Since: 2026-11-28. Detail: [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders).
 
 ### Plan and Chat tool parity
 

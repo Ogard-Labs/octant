@@ -11,6 +11,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { CodeRepositoryPicker } from "./CodeRepositoryPicker";
+import type { CodeRepositoryOption } from "./threadRepositories";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type ApprovalAction = "stage" | "unstage" | "discard" | "commit" | "push";
@@ -43,6 +45,9 @@ export interface CodeGitPaneProps {
     command: Parameters<CodeClient["executeOperation"]>[0],
   ) => Promise<CodeApprovalId | undefined>;
   readonly scope: { readonly checkoutId: CodeCheckoutId; readonly threadId: CodeThreadId };
+  /** Reachable Git repositories when this thread spans multiple repositories. */
+  readonly repositories?: ReadonlyArray<CodeRepositoryOption>;
+  readonly onSelectRepository?: (checkoutId: CodeCheckoutId) => void;
 }
 
 export function CodeGitPane(props: CodeGitPaneProps) {
@@ -161,6 +166,16 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           <h1>Checkout changes</h1>
         </div>
         <div className="code-git-pane__toolbar-meta">
+          {props.repositories !== undefined &&
+          props.repositories.length > 1 &&
+          props.onSelectRepository !== undefined ? (
+            <CodeRepositoryPicker
+              label="Repository"
+              onSelect={props.onSelectRepository}
+              repositories={props.repositories}
+              selectedCheckoutId={props.scope.checkoutId}
+            />
+          ) : null}
           <p>
             {head.kind === "detached"
               ? "Detached HEAD"

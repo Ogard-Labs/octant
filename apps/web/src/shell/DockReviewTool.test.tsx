@@ -543,3 +543,34 @@ it("holds Send while a pending note is being edited, then sends the saved edit",
   expect(onSendLineNotes.mock.calls[0]?.[0]).toContain("New text");
   expect(onSendLineNotes.mock.calls[0]?.[0]).not.toContain("Old text");
 });
+
+it("defaults a plain-folder primary checkout prop to its first linked Git checkout", async () => {
+  const props = bound();
+  const plainView = {
+    ...props.view,
+    checkout: {
+      ...props.view.checkout,
+      kind: "plain-folder" as const,
+      head: { kind: "none" as const },
+    },
+    thread: {
+      ...props.view.thread,
+      linkedCheckouts: [
+        {
+          checkoutId: ids.otherCheckout as never,
+          repositoryId: ids.otherCheckout as never,
+          label: "api",
+        },
+      ],
+    },
+  };
+  render(<DockReviewTool {...props} checkoutId={plainView.checkout.id} view={plainView} />);
+  await waitFor(() =>
+    expect(props.client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "observe-git",
+        checkoutId: ids.otherCheckout,
+      }),
+    ),
+  );
+});
