@@ -12,13 +12,11 @@ import { visitorProofPayload } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubTestNetwork, startHubTestHost, type HubTestHost } from "./hubHost.test-support";
-import type { PublicAnswer, PublicRequest, PublicRouteName } from "./publicEntrance";
-import { setServeWhileStandingIn } from "./publicStandIn";
+import { startPublicEntrance, type PublicEntrance } from "./publicEntrance";
+import { servesPublicEntrance, setServeWhileStandingIn } from "./publicStandIn";
 
 const cleanups: Array<() => Promise<void> | void> = [];
-const closers: Array<() => void> = [];
 afterEach(async () => {
-  for (const close of closers.splice(0)) close();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -45,6 +43,25 @@ function start(network: HubTestNetwork, name: string, last: number) {
   });
 }
 
+async function startEntrance(host: HubTestHost): Promise<PublicEntrance> {
+  const entrance = await startPublicEntrance({
+    port: 0,
+    role: () =>
+      servesPublicEntrance({
+        hubEnabled: host.hub.status().enabled,
+        state: host.state.load(),
+      })
+        ? "serve"
+        : "closed",
+    handlers: () => ({
+      webhook: (request) => host.webhooks.handle(request),
+      ...host.visitors.handlers(),
+    }),
+  });
+  cleanups.push(() => entrance.close());
+  return entrance;
+}
+
 async function join(hub: HubTestHost, member: HubTestHost) {
   const minted = hub.hub.mintJoinCode({ owner: false });
   if (minted.status !== "minted") throw new Error(minted.status);
@@ -57,34 +74,34 @@ async function join(hub: HubTestHost, member: HubTestHost) {
   if (finished.status !== "joined") throw new Error(JSON.stringify(finished));
 }
 
-function delivery(endpointId: string, secret: string, id: string): PublicRequest {
-  const body = Buffer.from(`{"workflow":"nightly","run":"${id}"}`);
+async function postDelivery(
+  entrance: PublicEntrance,
+  endpointId: string,
+  secret: string,
+  id: string,
+): Promise<Response> {
+  const body = `{"workflow":"nightly","run":"${id}"}`;
   const seconds = Math.floor(Date.now() / 1000);
   const signature = createHmac("sha256", Buffer.from(secret.slice("whsec_".length), "base64"))
-    .update(`${id}.${seconds}.`)
-    .update(body)
+    .update(`${id}.${seconds}.${body}`)
     .digest("base64");
-  return {
-    route: "webhook",
-    params: { id: endpointId },
+  return fetch(`http://127.0.0.1:${entrance.port}/hooks/${endpointId}`, {
     method: "POST",
-    path: `/hooks/${endpointId}`,
-    headers: new Map([
-      ["webhook-id", id],
-      ["webhook-timestamp", String(seconds)],
-      ["webhook-signature", `v1,${signature}`],
-    ]),
-    principal: { kind: "webhook", endpointId },
-    readBody: async () => ({ status: "read", bytes: body }),
-    signal: new AbortController().signal,
-  };
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": id,
+      "webhook-timestamp": String(seconds),
+      "webhook-signature": `v1,${signature}`,
+    },
+    body,
+  });
 }
 
 /** One browser: its own P-256 key, which signs every request it makes. */
 function browser() {
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
   const spki = publicKey.export({ format: "der", type: "spki" }).toString("base64url");
-  return (method: string, path: string): Map<string, string> => {
+  return (method: string, path: string): Record<string, string> => {
     const timestamp = String(Date.now());
     const nonce = randomBytes(12).toString("base64url");
     const signature = sign(
@@ -92,34 +109,27 @@ function browser() {
       Buffer.from(visitorProofPayload({ method, path, timestamp, nonce })),
       { key: privateKey, dsaEncoding: "ieee-p1363" },
     ).toString("base64url");
-    return new Map([
-      ["octant-visitor-key", spki],
-      ["octant-visitor-proof", `${timestamp}.${nonce}.${signature}`],
-    ]);
+    return {
+      "octant-visitor-key": spki,
+      "octant-visitor-proof": `${timestamp}.${nonce}.${signature}`,
+    };
   };
 }
 
 async function openLink(
-  host: HubTestHost,
+  entrance: PublicEntrance,
   linkId: string,
   secret: string,
   visitor: ReturnType<typeof browser>,
-): Promise<PublicAnswer> {
-  const handler = host.visitors.handlers().visitorOpen;
-  if (handler === undefined) return { status: 404, headers: {} };
-  const route: PublicRouteName = "visitor-open";
+): Promise<Response> {
   const path = `/v/${linkId}/open`;
-  const controller = new AbortController();
-  closers.push(() => controller.abort());
-  return handler({
-    route,
-    params: { id: linkId },
+  return fetch(`http://127.0.0.1:${entrance.port}${path}`, {
     method: "POST",
-    path,
-    headers: visitor("POST", path),
-    principal: { kind: "visitor", linkId },
-    readBody: async () => ({ status: "read", bytes: Buffer.from(JSON.stringify({ secret })) }),
-    signal: controller.signal,
+    headers: {
+      "content-type": "application/json",
+      ...visitor("POST", path),
+    },
+    body: JSON.stringify({ secret }),
   });
 }
 
@@ -130,7 +140,7 @@ async function share(spoke: HubTestHost) {
 }
 
 describe("the public entrance during failover", () => {
-  it("a standing-in standby serves webhooks and visitor links, and hand-back loses and repeats no delivery", async () => {
+  it("a standing-in standby serves webhooks and visitor links through its public entrance, and hand-back loses and repeats no delivery", async () => {
     const network = new HubTestNetwork();
     const hub = await start(network, "Mac mini", 10);
     const standby = await start(network, "Standby", 11);
@@ -157,6 +167,9 @@ describe("the public entrance during failover", () => {
     await standby.failover.tick();
     await spoke.failover.tick();
 
+    const hubEntrance = await startEntrance(hub);
+    const standbyEntrance = await startEntrance(standby);
+
     // The spoke hands both the hub and the standby a copy, each sealed to its own key.
     const created = await spoke.spokeWebhooks.create({ scheme: "standard-webhooks", label: "CI" });
     if (created.status !== "created") throw new Error(created.status);
@@ -167,45 +180,47 @@ describe("the public entrance during failover", () => {
     const revoked = await share(spoke);
     expect(standby.visitors.heldGrants()).toHaveLength(2);
 
-    // Through the hub, as on any day. The standby holds copies but serves nothing.
-    expect(
-      (await hub.webhooks.handle(delivery(created.endpointId, created.secret, "m1"))).status,
-    ).toBe(202);
+    // Through the hub's public entrance, as on any day. The standby holds copies but serves nothing.
+    expect((await postDelivery(hubEntrance, created.endpointId, created.secret, "m1")).status).toBe(
+      202,
+    );
     await hub.webhooks.tick();
     const visitor = browser();
-    expect((await openLink(hub, kept.linkId, kept.secret, visitor)).status).toBe(200);
+    expect((await openLink(hubEntrance, kept.linkId, kept.secret, visitor)).status).toBe(200);
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "m2"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m2")).status,
     ).toBe(404);
-    expect((await openLink(standby, kept.linkId, kept.secret, visitor)).status).toBe(404);
+    expect((await openLink(standbyEntrance, kept.linkId, kept.secret, visitor)).status).toBe(404);
 
-    // The hub stops; after the failover time the standby stands in and serves both.
+    // The hub stops; after the failover time the standby stands in and serves both through its public listener.
     network.stop(hub.address);
     await pause(FAILOVER_AFTER_MS + 40);
     await standby.failover.tick();
     expect(standby.failover.standingIn()).toBe(true);
 
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "m2"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m2")).status,
     ).toBe(202);
     await standby.webhooks.tick();
     expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 1 });
-    expect((await openLink(standby, kept.linkId, kept.secret, visitor)).status).toBe(200);
+    expect((await openLink(standbyEntrance, kept.linkId, kept.secret, visitor)).status).toBe(200);
     // A second browser is still refused: the binding is the spoke's, not the hub's.
-    expect((await openLink(standby, kept.linkId, kept.secret, browser())).status).toBe(403);
+    expect((await openLink(standbyEntrance, kept.linkId, kept.secret, browser())).status).toBe(403);
     // Stopped on the spoke while the hub is down: the standby drops the grant at
     // once, and would the withdrawal be lost, the spoke still refuses the link.
     await spoke.spokeVisitors.stop(revoked.linkId);
     expect(standby.visitors.heldGrants()).toHaveLength(1);
-    expect((await openLink(standby, revoked.linkId, revoked.secret, browser())).status).toBe(404);
+    expect(
+      (await openLink(standbyEntrance, revoked.linkId, revoked.secret, browser())).status,
+    ).toBe(404);
 
     // The spoke goes to sleep; deliveries wait on the standby.
     network.stop(spoke.address);
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "m3"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m3")).status,
     ).toBe(202);
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "m4"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m4")).status,
     ).toBe(202);
     await standby.webhooks.tick();
     expect(standby.webhooks.status().queued).toBe(2);
@@ -213,21 +228,21 @@ describe("the public entrance during failover", () => {
     // The hub returns while the spoke still sleeps. In the split, the sender also
     // reached the hub with m3, and redelivered m2, which the standby already handed on.
     network.start(hub.address);
-    expect(
-      (await hub.webhooks.handle(delivery(created.endpointId, created.secret, "m3"))).status,
-    ).toBe(202);
-    expect(
-      (await hub.webhooks.handle(delivery(created.endpointId, created.secret, "m2"))).status,
-    ).toBe(202);
+    expect((await postDelivery(hubEntrance, created.endpointId, created.secret, "m3")).status).toBe(
+      202,
+    );
+    expect((await postDelivery(hubEntrance, created.endpointId, created.secret, "m2")).status).toBe(
+      202,
+    );
     await standby.failover.tick();
     expect(standby.failover.standingIn()).toBe(false);
     expect(standby.webhooks.status().queued).toBe(0);
     // m3 was already queued on the hub, so only m4 is added: three wait, each once.
     expect(hub.webhooks.status().queued).toBe(3);
     expect(hub.records.map((record) => record.change)).toContain("webhook-deliveries-handed-back");
-    // Back to forwarding only: the standby's entrance serves nothing once it steps down.
+    // Back to closed: the standby's entrance serves nothing once it steps down.
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "m5"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "m5")).status,
     ).toBe(404);
 
     network.start(spoke.address);
@@ -257,6 +272,8 @@ describe("the public entrance during failover", () => {
     if (ordered.status !== "ordered") throw new Error(JSON.stringify(ordered));
     await standby.failover.tick();
 
+    const standbyEntrance = await startEntrance(standby);
+
     const created = await spoke.spokeWebhooks.create({ scheme: "github", label: "Pushes" });
     if (created.status !== "created") throw new Error(created.status);
     expect(hub.webhooks.status().endpoints).toBe(1);
@@ -268,11 +285,11 @@ describe("the public entrance during failover", () => {
     expect(standby.failover.standingIn()).toBe(true);
     expect(standby.visitors.handlers()).toEqual({});
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "x"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "x")).status,
     ).toBe(404);
   });
 
-  it("a standby serves its own webhook endpoint and visitor link while it stands in", async () => {
+  it("a standby serves its own webhook endpoint and visitor link through its public entrance while it stands in", async () => {
     const network = new HubTestNetwork();
     const hub = await start(network, "Mac mini", 30);
     const standby = await start(network, "Standby", 31);
@@ -293,6 +310,8 @@ describe("the public entrance during failover", () => {
     });
     await standby.failover.tick();
 
+    const standbyEntrance = await startEntrance(standby);
+
     // The standby is a spoke too: its own copies stay on it, beside the hub's.
     const created = await standby.spokeWebhooks.create({
       scheme: "standard-webhooks",
@@ -310,11 +329,11 @@ describe("the public entrance during failover", () => {
     await standby.failover.tick();
     expect(standby.failover.standingIn()).toBe(true);
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "own-1"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "own-1")).status,
     ).toBe(202);
     await standby.webhooks.tick();
     expect(standby.webhooks.status()).toMatchObject({ queued: 0, forwarded: 1 });
-    expect((await openLink(standby, own.linkId, own.secret, browser())).status).toBe(200);
+    expect((await openLink(standbyEntrance, own.linkId, own.secret, browser())).status).toBe(200);
   });
 
   it("on a split network, a delivery the spoke refuses from a standing-in standby waits there and runs once after hand-back", async () => {
@@ -340,6 +359,9 @@ describe("the public entrance during failover", () => {
     });
     await standby.failover.tick();
     await spoke.failover.tick();
+
+    const standbyEntrance = await startEntrance(standby);
+
     const created = await spoke.spokeWebhooks.create({ scheme: "standard-webhooks", label: "CI" });
     if (created.status !== "created") throw new Error(created.status);
     expect(standby.webhooks.status().endpoints).toBe(1);
@@ -350,7 +372,7 @@ describe("the public entrance during failover", () => {
     await standby.failover.tick();
     expect(standby.failover.standingIn()).toBe(true);
     expect(
-      (await standby.webhooks.handle(delivery(created.endpointId, created.secret, "s1"))).status,
+      (await postDelivery(standbyEntrance, created.endpointId, created.secret, "s1")).status,
     ).toBe(202);
     await standby.webhooks.tick();
     // The spoke can reach its hub, so it refuses the standby, and nothing runs yet.

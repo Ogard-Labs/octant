@@ -31,6 +31,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import { nodeServe } from "../nodeServe";
 import type { RequestTransportFacts, Serve } from "../server";
 import type { LocalDeviceAdministrationPort } from "../remote/localDeviceAdministrationRoutes";
 import type { PrivateListenerHostStatus } from "../remote/privateListenerLifecycleController";
@@ -389,6 +390,8 @@ export async function startHubTestHost(input: {
   readonly maxProposals?: number;
   /** How long one hub-link request waits before it counts as unreachable; absent, the service's own. A test cannot wait eight seconds. */
   readonly hubLinkTimeoutMs?: number;
+  /** Serve this host's listener over the shipped Node HTTP/WebSocket adapter (`nodeServe`) instead of the test HTTPS upgrade bridge. */
+  readonly useNodeServe?: boolean;
 }): Promise<HubTestHost> {
   const directory = mkdtempSync(join(tmpdir(), "octant-hub-"));
   input.cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
@@ -437,6 +440,39 @@ export async function startHubTestHost(input: {
     input.address,
   );
   if (certificate.status !== "ready") throw new Error(certificate.code);
+  const requests: string[] = [];
+  let gatewayFetch:
+    | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
+    | undefined;
+  let listenerPort = 8443;
+  if (input.useNodeServe === true) {
+    const served = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      listenerTrust: "remote",
+      tls: certificate.tls,
+      tailnetTls: {
+        serverName: input.address,
+        cert: certificate.tls.cert,
+        key: certificate.tls.key,
+      },
+      fetch: async (request, facts) => {
+        requests.push(`${request.method} ${new URL(request.url).pathname}`);
+        if (gatewayFetch === undefined) throw new Error("The gateway is not serving.");
+        return gatewayFetch(request, {
+          ...(facts ?? tailscaleFacts),
+          sourceClass: "tailscale",
+          ...(tailscaleFacts.privateAddress === undefined
+            ? {}
+            : { privateAddress: tailscaleFacts.privateAddress }),
+        });
+      },
+    });
+    listenerPort = Number(served.url.port);
+    origin = `https://${input.address}:${listenerPort}`;
+    input.network.register(input.address, listenerPort);
+    input.cleanups.push(() => served.stop(true));
+  }
   const identity: HubHostIdentity = {
     hostId,
     displayName: input.name,
@@ -450,7 +486,7 @@ export async function startHubTestHost(input: {
     enabled: true,
     state: "ready",
     hostname: input.address,
-    port: 8443,
+    port: listenerPort,
     origin,
     exposureClass: "tailscale",
     certificateFingerprint: hostKeyFingerprint,
@@ -1069,9 +1105,6 @@ export async function startHubTestHost(input: {
     (await threadMoveRoutes(request)) ??
     hubOwnerRoutes(request);
 
-  let gatewayFetch:
-    | ((request: Request, facts?: RequestTransportFacts) => Promise<Response>)
-    | undefined;
   const serve: Serve = (serveOptions) => {
     gatewayFetch = serveOptions.fetch as typeof gatewayFetch;
     return { url: new URL(origin), stop: vi.fn(async () => {}) };
@@ -1097,7 +1130,7 @@ export async function startHubTestHost(input: {
       ...(input.productDispatch === undefined ? {} : { productDispatch: input.productDispatch }),
       serve,
       clock: isoNow,
-      config: { listener: { hostname, port: 8443, origin, tls } },
+      config: { listener: { hostname, port: listenerPort, origin, tls } },
     });
     await started.start();
     return started;
@@ -1107,70 +1140,73 @@ export async function startHubTestHost(input: {
   const administration = gateway.localDeviceAdministration();
   if (administration === undefined) throw new Error("No local administration.");
 
-  const requests: string[] = [];
-  const server: Server = createHttpsServer(certificate.tls, (incoming, outgoing) => {
-    const chunks: Buffer[] = [];
-    incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
-    incoming.on("end", () => {
-      requests.push(`${incoming.method} ${incoming.url?.split("?")[0]}`);
+  let server: Server | undefined;
+  if (input.useNodeServe !== true) {
+    const testServer: Server = createHttpsServer(certificate.tls, (incoming, outgoing) => {
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => {
+        requests.push(`${incoming.method} ${incoming.url?.split("?")[0]}`);
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (typeof value === "string") headers.set(name, value);
+        }
+        const body = chunks.length === 0 ? undefined : Buffer.concat(chunks);
+        const request = new Request(`${origin}${incoming.url}`, {
+          method: incoming.method ?? "GET",
+          headers,
+          ...(body === undefined ? {} : { body }),
+        });
+        void (async () => {
+          if (gatewayFetch === undefined) throw new Error("The gateway is not serving.");
+          const response = await gatewayFetch(request, tailscaleFacts);
+          outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+          outgoing.end(Buffer.from(await response.arrayBuffer()));
+        })();
+      });
+    });
+    // A WebSocket upgrade reaches the gateway as the listener's own transport
+    // hands it over: the device relay's tunnel opens this way.
+    testServer.on("upgrade", (incoming, socket: Socket, head: Buffer) => {
+      socket.on("error", () => undefined);
       const headers = new Headers();
       for (const [name, value] of Object.entries(incoming.headers)) {
         if (typeof value === "string") headers.set(name, value);
       }
-      const body = chunks.length === 0 ? undefined : Buffer.concat(chunks);
-      const request = new Request(`${origin}${incoming.url}`, {
-        method: incoming.method ?? "GET",
-        headers,
-        ...(body === undefined ? {} : { body }),
-      });
       void (async () => {
         if (gatewayFetch === undefined) throw new Error("The gateway is not serving.");
-        const response = await gatewayFetch(request, tailscaleFacts);
-        outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-        outgoing.end(Buffer.from(await response.arrayBuffer()));
-      })();
+        const response = await gatewayFetch(
+          new Request(`${origin}${incoming.url}`, { method: "GET", headers }),
+          tailscaleFacts,
+        );
+        const acceptance = takeWebSocketUpgrade(response);
+        const key = incoming.headers["sec-websocket-key"];
+        if (acceptance === undefined || typeof key !== "string") {
+          socket.end(`HTTP/1.1 ${response.status} Refused\r\nconnection: close\r\n\r\n`);
+          return;
+        }
+        socket.write(
+          `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${webSocketAcceptFor(key)}\r\n\r\n`,
+        );
+        const client = new WebSocketEndpoint(socket, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+        client.start(acceptance.open(client), head);
+      })().catch(() => socket.destroy());
     });
-  });
-  // A WebSocket upgrade reaches the gateway as the listener's own transport
-  // hands it over: the device relay's tunnel opens this way.
-  server.on("upgrade", (incoming, socket: Socket, head: Buffer) => {
-    socket.on("error", () => undefined);
-    const headers = new Headers();
-    for (const [name, value] of Object.entries(incoming.headers)) {
-      if (typeof value === "string") headers.set(name, value);
-    }
-    void (async () => {
-      if (gatewayFetch === undefined) throw new Error("The gateway is not serving.");
-      const response = await gatewayFetch(
-        new Request(`${origin}${incoming.url}`, { method: "GET", headers }),
-        tailscaleFacts,
-      );
-      const acceptance = takeWebSocketUpgrade(response);
-      const key = incoming.headers["sec-websocket-key"];
-      if (acceptance === undefined || typeof key !== "string") {
-        socket.end(`HTTP/1.1 ${response.status} Refused\r\nconnection: close\r\n\r\n`);
-        return;
-      }
-      socket.write(
-        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${webSocketAcceptFor(key)}\r\n\r\n`,
-      );
-      const client = new WebSocketEndpoint(socket, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
-      client.start(acceptance.open(client), head);
-    })().catch(() => socket.destroy());
-  });
-  server.on("tlsClientError", () => undefined);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (address === null || typeof address === "string") throw new Error("No listener port.");
-  input.network.register(input.address, address.port);
-  const listenerPort = address.port;
-  input.cleanups.push(
-    () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  );
+    testServer.on("tlsClientError", () => undefined);
+    await new Promise<void>((resolve) => testServer.listen(0, "127.0.0.1", resolve));
+    const address = testServer.address();
+    if (address === null || typeof address === "string") throw new Error("No listener port.");
+    input.network.register(input.address, address.port);
+    listenerPort = address.port;
+    server = testServer;
+    input.cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          testServer.closeAllConnections();
+          testServer.close(() => resolve());
+        }),
+    );
+  }
 
   return {
     threadMoves,
@@ -1242,7 +1278,7 @@ export async function startHubTestHost(input: {
       );
       if (renamed.status !== "ready") throw new Error(renamed.code);
       Object.assign(listener, { hostname: moved, origin, tlsPin: renamed.tlsPin });
-      server.setSecureContext(renamed.tls);
+      server?.setSecureContext(renamed.tls);
       gateway = await startGateway(moved, renamed.tls);
       input.network.register(moved, listenerPort);
     },

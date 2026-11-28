@@ -108,18 +108,34 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
   // What the hub names as its relay: its entrance through the recording front,
   // known once both are listening.
   let relayAddress: RelayAddress | undefined;
+  const productMarker = randomBytes(24).toString("base64url");
+  const productDispatches: Array<{ readonly path: string; readonly deviceId: string }> = [];
   const hub = await startHubTestHost({
     name: "Mac mini",
     address: "100.101.104.1",
     network,
     cleanups,
     relayAddress: () => relayAddress,
+    useNodeServe: true,
   });
   const spoke = await startHubTestHost({
     name: "Laptop",
     address: "100.101.104.2",
     network,
     cleanups,
+    useNodeServe: true,
+    productDispatch: async (handoff) => {
+      const path = new URL(handoff.request.url).pathname;
+      if (handoff.request.method === "GET" && path === "/api/projects") {
+        productDispatches.push({ path, deviceId: String(handoff.principal.deviceId) });
+        return Response.json({
+          projects: [{ id: "proj-relayed-1", name: "Relayed Project" }],
+          deviceId: String(handoff.principal.deviceId),
+          marker: productMarker,
+        });
+      }
+      return undefined;
+    },
   });
   hub.hub.enable(window);
   await join(hub, spoke);
@@ -181,6 +197,8 @@ async function setUp(options: { readonly grant?: HubGrant } = {}) {
     entrance,
     front,
     relayedFetch,
+    productMarker,
+    productDispatches,
     pauseHub: (value: boolean) => {
       paused = value;
       if (value) hub.relayHub.closeAll();
@@ -216,20 +234,68 @@ function upgradeStatus(port: number): Promise<number> {
 }
 
 describe("your own devices through the hub", () => {
-  it("carries a paired device's pinned TLS to its host, and the hub sees only ciphertext", async () => {
-    const { relayedFetch, spoke, front } = await setUp();
+  it("carries a paired device's pinned TLS to its host over the shipped Node listener adapter, signs in, and runs a signed product request while the hub sees only ciphertext", async () => {
+    const {
+      relayedFetch,
+      spoke,
+      device,
+      registered,
+      deviceId,
+      front,
+      productMarker,
+      productDispatches,
+    } = await setUp();
     const marker = randomBytes(32).toString("base64url");
+    const fetchThroughRelay = relayedFetch();
     const url = new URL("/api/remote/hello", spoke.origin);
     url.searchParams.set(HOST_HELLO_CLIENT_NONCE_PARAMETER, marker);
-    const response = await relayedFetch()(url, { headers: { "x-octant-probe": marker } });
+    const response = await fetchThroughRelay(url, { headers: { "x-octant-probe": marker } });
     expect(response.status).toBe(200);
     const hello = JSON.stringify(await response.json());
     // The host answered this very request: its hello echoes the nonce.
     expect(hello).toContain(marker);
-    // Neither the request nor the answer crossed the hub readable.
-    expect(front.seen().byteLength).toBeGreaterThan(0);
-    expect(front.seen().includes(Buffer.from(marker))).toBe(false);
-    expect(front.seen().includes(Buffer.from("/api/remote/hello"))).toBe(false);
+
+    // Sign the paired device in over the same relayed listener path and send a signed product request.
+    const connection = createRemoteConnection({
+      origin: spoke.origin,
+      webBuildVersion: "0.1.0",
+      fetch: fetchThroughRelay,
+      deviceKey: {
+        loadOrCreate: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        current: async () => ({ publicKeyPem: device.pem, fingerprint: device.fingerprint }),
+        sign: async (payload) => device.sign(payload),
+        clear: async () => undefined,
+      },
+      knownDevice: {
+        hostId: spoke.hostId,
+        deviceId,
+        credentialGeneration: registered.credentialGeneration,
+        hostKeyFingerprint: createHash("sha256")
+          .update(Buffer.from(spoke.hostPublicKey, "base64url"))
+          .digest("hex"),
+      },
+    });
+    cleanups.push(() => connection.disconnect());
+    await connection.connect();
+    const product = await connection.authenticatedFetch({
+      method: "GET",
+      path: "/api/projects",
+    });
+    expect(product.status).toBe(200);
+    expect(await product.json()).toEqual({
+      projects: [{ id: "proj-relayed-1", name: "Relayed Project" }],
+      deviceId,
+      marker: productMarker,
+    });
+    expect(productDispatches).toEqual([{ path: "/api/projects", deviceId }]);
+
+    // Neither the pre-auth hello nor the signed product request or answer crossed the hub readable.
+    const seen = front.seen();
+    expect(seen.byteLength).toBeGreaterThan(0);
+    expect(seen.includes(Buffer.from(marker))).toBe(false);
+    expect(seen.includes(Buffer.from("/api/remote/hello"))).toBe(false);
+    expect(seen.includes(Buffer.from("/api/projects"))).toBe(false);
+    expect(seen.includes(Buffer.from(productMarker))).toBe(false);
   }, 30_000);
 
   it("a relayed connection cannot reach pairing", async () => {
