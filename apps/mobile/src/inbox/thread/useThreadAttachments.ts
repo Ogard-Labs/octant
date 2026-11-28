@@ -1,29 +1,29 @@
-import { useEffect, useReducer } from "react";
-import {
-  uploadMobileChatAttachment,
-  uploadMobileCodeAttachment,
-  uploadMobileWorkAttachment,
-  type MobileAttachmentMode,
-  type MobileAttachmentOffer,
-  type MobileAttachmentSource,
-  type MobileRemoteTransport,
+import { useCallback, useEffect, useReducer } from "react";
+import type {
+  MobileAttachmentMode,
+  MobileAttachmentOffer,
+  MobileAttachmentSource,
+  MobileRemoteTransport,
 } from "@octant/client-runtime";
-import {
-  MAX_CHAT_TURN_ATTACHMENTS,
-  MAX_CODE_TURN_ATTACHMENTS,
-  MAX_WORK_TURN_ATTACHMENTS,
-} from "@octant/contracts";
 import { MOBILE_COPY } from "../../copy";
-import { defaultAttachmentName, readUriBytes } from "./imageBytes";
+import { readUriBytes } from "./imageBytes";
 import { pendingAttachmentsReducer, type PendingAttachment } from "./pendingAttachments";
 import { discardPickedCopy, pickAttachment, type PickedAttachment } from "./pickAttachment";
 import { runMutation } from "./runMutation";
 import type { ThreadHookInput } from "./threadTypes";
+import {
+  TURN_ATTACHMENT_LIMITS,
+  uploadStagedThreadAttachment,
+  uploadStagedThreadAttachments,
+  type StagedBatchUploadResult,
+  type StagedThreadAttachmentUpload,
+} from "./uploadThreadAttachment";
 
-const TURN_ATTACHMENT_LIMITS: Readonly<Record<MobileAttachmentMode, number>> = {
-  chat: MAX_CHAT_TURN_ATTACHMENTS,
-  work: MAX_WORK_TURN_ATTACHMENTS,
-  code: MAX_CODE_TURN_ATTACHMENTS,
+export {
+  uploadStagedThreadAttachment,
+  uploadStagedThreadAttachments,
+  type StagedBatchUploadResult,
+  type StagedThreadAttachmentUpload,
 };
 
 /**
@@ -96,9 +96,43 @@ export function useThreadAttachments(
     });
   };
 
+  /** Receives attachments already uploaded for this thread (e.g. from the OS share sheet). */
+  const receiveStaged = useCallback((attachments: ReadonlyArray<PendingAttachment>) => {
+    dispatch({ type: "staged", attachments });
+  }, []);
+
+  /** Uploads validated staged items for this thread and places them in the composer. */
+  const attachStaged = async (
+    items: ReadonlyArray<StagedThreadAttachmentUpload>,
+  ): Promise<boolean> => {
+    if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
+      return false;
+    }
+    if (!gate.allowProductMutations) {
+      ui.setError(gate.message);
+      return false;
+    }
+    const result = await uploadStagedThreadAttachments({
+      mode,
+      transport,
+      threadId,
+      items,
+      existingCount: pending.length,
+    });
+    if (!guard.isSelected(identity)) return false;
+    if (result.status === "failed") {
+      ui.setError(result.message);
+      return false;
+    }
+    dispatch({ type: "staged", attachments: result.uploaded });
+    return true;
+  };
+
   return {
     pending,
     attach,
+    attachStaged,
+    receiveStaged,
     sent: () => dispatch({ type: "sent" }),
   };
 }
@@ -112,24 +146,11 @@ async function uploadPicked(
   try {
     const read = await readUriBytes(picked.uri);
     if (read.status === "unreadable") return undefined;
-    const attachmentId = globalThis.crypto.randomUUID();
-    const upload = {
-      transport,
-      threadId,
-      attachmentId,
-      displayName: picked.fileName ?? defaultAttachmentName(picked.mediaType, attachmentId),
+    return await uploadStagedThreadAttachment(mode, transport, threadId, {
+      displayName: picked.fileName ?? "",
       mediaType: picked.mediaType,
       bytes: read.bytes,
-    };
-    if (mode === "chat") {
-      const attachment = await uploadMobileChatAttachment(upload);
-      return { id: String(attachment.id), displayName: attachment.displayName };
-    }
-    const reference =
-      mode === "work"
-        ? await uploadMobileWorkAttachment(upload)
-        : await uploadMobileCodeAttachment(upload);
-    return { id: String(reference.attachmentId), displayName: reference.displayName };
+    });
   } finally {
     discardPickedCopy(picked.uri);
   }

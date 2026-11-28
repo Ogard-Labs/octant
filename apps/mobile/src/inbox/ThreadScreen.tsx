@@ -92,7 +92,9 @@ import { useChatThread } from "./thread/useChatThread";
 import { useCodeThread } from "./thread/useCodeThread";
 import { useThreadTurnActions } from "./thread/useThreadTurnActions";
 import { useWorkThread } from "./thread/useWorkThread";
-import { typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import { composerTextReplaced, typedClaimFor } from "@octant/client-runtime/typed-composer-text";
+import { useMobileShare } from "../share/ShareContext";
+import { combineComposerWithSharedText } from "../share/shareDestinations";
 import {
   MOBILE_CHAT_IDLE_REFRESH_INITIAL_DELAY_MS,
   MOBILE_CHAT_IDLE_REFRESH_MAX_DELAY_MS,
@@ -146,11 +148,21 @@ export function ThreadScreen(props: ThreadScreenProps) {
       ? ""
       : `${selectedHost?.hostKeyFingerprint ?? ""}:${selected.hostId}:${selected.mode}:${selected.threadId}`;
   const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
+  const { handoffVersion, takeThreadHandoff, completeStagedShare } = useMobileShare();
+  const activeShareIdRef = useRef<string | undefined>(undefined);
   // A send can land after this screen is gone, on the draft or on a later screen
   // of the same thread, so the words are cleared by what was sent.
   const sentPrompt = (next: string) => {
-    if (next === "") drafts.sent(draftKey, prompt);
-    else setPrompt(next);
+    if (next === "") {
+      drafts.sent(draftKey, prompt);
+      const completedShareId = activeShareIdRef.current;
+      if (completedShareId !== undefined) {
+        activeShareIdRef.current = undefined;
+        completeStagedShare(completedShareId);
+      }
+    } else {
+      setPrompt(next);
+    }
   };
   useEffect(
     () =>
@@ -346,6 +358,29 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const attachmentOffer = mobileAttachmentOffer(mode ?? "chat", attachmentModel);
   const threadAttachments = mode === "work" ? work : mode === "code" ? code : chat;
   const pendingAttachments = threadAttachments.pendingAttachments;
+  const receiveStagedAttachments = threadAttachments.receiveStagedAttachments;
+  useEffect(() => {
+    void handoffVersion;
+    if (selected === undefined) return;
+    const handoff = takeThreadHandoff({
+      hostId: selected.hostId,
+      mode: selected.mode,
+      threadId: selected.threadId,
+    });
+    if (handoff === undefined) return;
+    activeShareIdRef.current = handoff.shareId;
+    if (handoff.text.trim().length > 0) {
+      setPrompt((current) => {
+        const combined = combineComposerWithSharedText(current, handoff.text);
+        // Shared text is never marked typed by the person until they edit it themselves.
+        composerTextReplaced(typedScope, combined);
+        return combined;
+      });
+    }
+    if (handoff.attachments.length > 0) {
+      receiveStagedAttachments(handoff.attachments);
+    }
+  }, [handoffVersion, receiveStagedAttachments, selected, takeThreadHandoff, typedScope]);
   const attachFrom = (source: MobileAttachmentSource) => {
     if (offlineDemo || !composerAccess.editable) return;
     setAttachOpen(false);

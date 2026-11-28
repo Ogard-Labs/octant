@@ -97,6 +97,7 @@ export function useWorkThread(input: ThreadHookInput) {
     sendFollowUp,
     pendingAttachments: attachments.pending,
     attach: attachments.attach,
+    receiveStagedAttachments: attachments.receiveStaged,
     attachmentsSent: attachments.sent,
   };
 }

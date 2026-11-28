@@ -33,6 +33,8 @@ function AppShell(props: {
   readonly onDeepLinkConsumed: () => void;
   readonly pendingDeepLinkRow?: MobileInboxRow | undefined;
   readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
+  readonly pendingShareSignal?: number | undefined;
+  readonly onShareSignalConsumed?: (() => void) | undefined;
 }) {
   const { colors, scheme } = useTheme();
 
@@ -105,6 +107,12 @@ function AppShell(props: {
           {...(props.pendingComputersLink === undefined
             ? {}
             : { pendingComputersLink: props.pendingComputersLink })}
+          {...(props.pendingShareSignal === undefined
+            ? {}
+            : { pendingShareSignal: props.pendingShareSignal })}
+          {...(props.onShareSignalConsumed === undefined
+            ? {}
+            : { onShareSignalConsumed: props.onShareSignalConsumed })}
         />
       </View>
     </GestureRoot>
@@ -151,13 +159,21 @@ export default function App() {
   const live = (
     <AppearanceProvider>
       <MobileDeepLinkCapture>
-        {(pendingDeepLinkRow, onDeepLinkConsumed, pendingComputersLink) => (
+        {(
+          pendingDeepLinkRow,
+          onDeepLinkConsumed,
+          pendingComputersLink,
+          pendingShareSignal,
+          onShareSignalConsumed,
+        ) => (
           <AppVaultGate authenticator={authenticator}>
             <MobileSessionProvider>
               <AppShell
                 onDeepLinkConsumed={onDeepLinkConsumed}
+                onShareSignalConsumed={onShareSignalConsumed}
                 {...(pendingDeepLinkRow === undefined ? {} : { pendingDeepLinkRow })}
                 {...(pendingComputersLink === undefined ? {} : { pendingComputersLink })}
+                {...(pendingShareSignal === undefined ? {} : { pendingShareSignal })}
               />
             </MobileSessionProvider>
           </AppVaultGate>

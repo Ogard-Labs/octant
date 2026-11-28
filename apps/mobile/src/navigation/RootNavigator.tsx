@@ -43,6 +43,7 @@ import { mobileNotificationPort } from "../notifications/mobileNotificationPort"
 import { mobilePushRegistrationBook } from "../notifications/mobilePushRegistrationBook";
 import { usePhoneNotificationRotation } from "../notifications/usePhoneNotificationRotation";
 import { useMobileSession } from "../session/MobileSessionContext";
+import { ShareProvider, useMobileShare } from "../share/ShareContext";
 import { TodosScreen } from "../todos/TodosScreen";
 import { UsageScreen } from "../usage/UsageScreen";
 import { PullRequestDetailScreen } from "../pulls/PullRequestDetailScreen";
@@ -64,6 +65,9 @@ export interface RootNavigatorProps {
   /** A tapped notification that a move waits for this phone. */
   readonly pendingComputersLink?: MobileComputersDeepLinkTarget | undefined;
   readonly onDeepLinkConsumed?: (() => void) | undefined;
+  /** Bumped when Android opens bare `octant://share`. */
+  readonly pendingShareSignal?: number | undefined;
+  readonly onShareSignalConsumed?: (() => void) | undefined;
 }
 
 const Places = createPlaceTabNavigator();
@@ -353,6 +357,16 @@ function LinkNotice(props: { readonly text: string; readonly onDismiss: () => vo
   );
 }
 
+function StagingNoticeBanner(props: { readonly isMock: boolean }) {
+  const { stagingNotice, dismissStagingNotice } = useMobileShare();
+  if (stagingNotice === undefined) return null;
+  return (
+    <SafeAreaView edges={props.isMock ? [] : ["top"]}>
+      <LinkNotice onDismiss={dismissStagingNotice} text={stagingNotice} />
+    </SafeAreaView>
+  );
+}
+
 export function RootNavigator(props: RootNavigatorProps) {
   const { colors, scheme } = useTheme();
   const [navigation] = useState(() => createNavigationContainerRef<ParamListBase>());
@@ -537,16 +551,31 @@ export function RootNavigator(props: RootNavigatorProps) {
       <ShellContext.Provider value={shell}>
         <MobileThreadsProvider>
           <OutboxProvider>
-            <NewThreadProvider
-              onOpenThread={(row) => navigation.dispatch(StackActions.push("thread", { row }))}
-              onTodoLinked={recordTodoLink}
-              onTodoStartOpened={() => setTodoStart(undefined)}
-              todoStart={todoStart}
+            <ShareProvider
+              onOpenThread={(row) => {
+                if (navigation.isReady()) {
+                  navigation.navigate("threads", {
+                    state: {
+                      routes: [{ name: "threadsRoot" }, { name: "thread", params: { row } }],
+                    },
+                  });
+                }
+              }}
+              onShareSignalConsumed={props.onShareSignalConsumed}
+              pendingShareSignal={props.pendingShareSignal}
             >
-              <NavigationContainer onReady={() => setReady(true)} ref={navigation} theme={theme}>
-                <PlacesShell />
-              </NavigationContainer>
-            </NewThreadProvider>
+              <StagingNoticeBanner isMock={environment.kind === "mock"} />
+              <NewThreadProvider
+                onOpenThread={(row) => navigation.dispatch(StackActions.push("thread", { row }))}
+                onTodoLinked={recordTodoLink}
+                onTodoStartOpened={() => setTodoStart(undefined)}
+                todoStart={todoStart}
+              >
+                <NavigationContainer onReady={() => setReady(true)} ref={navigation} theme={theme}>
+                  <PlacesShell />
+                </NavigationContainer>
+              </NewThreadProvider>
+            </ShareProvider>
           </OutboxProvider>
         </MobileThreadsProvider>
       </ShellContext.Provider>
