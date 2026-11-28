@@ -812,7 +812,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             }
           >
             Restarting stops this shell and any command running in it. Its current process state
-            does not transfer. The task's working folder does not change.
+            does not transfer. The thread's working folder does not change.
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>

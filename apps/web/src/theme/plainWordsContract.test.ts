@@ -116,11 +116,62 @@ const COMPARED_NEVER_SHOWN: ReadonlyArray<string> = [
   "Managed AgentRun turn exceeded its runtime deadline.",
 ];
 
-function sentencesSaying(word: RegExp): ReadonlyArray<string> {
+// Sentences where "task" names something distinct from an Octant thread:
+// side tasks, the agent's Tasks list / task progress / plan tasks, background
+// processes ("Background task" / live tasks / background model tasks), remote
+// provider cloud jobs, benchmark tasks, or the prompt/work given to an
+// automation run, subagent, or coordinator.
+const TASK_NOT_A_THREAD: ReadonlyArray<{ readonly where: RegExp; readonly text: RegExp }> = [
+  // Side tasks keep their name (distinct from the parent thread).
+  { where: /./, text: /\bside[- ]tasks?\b/i },
+  // The agent's own Tasks list, task progress, and Canvas plan tasks.
+  { where: /^shell\/rightUtilityDockModel\.ts:/, text: /^Tasks$/ },
+  { where: /^dockModules\/TasksModule\.tsx:/, text: /\b(Tasks|task list)\b/i },
+  { where: /^transcript\/ThreadTasksPanel\.tsx:/, text: /\btasks?\b/i },
+  { where: /^plan\/ThreadTaskViewer\.tsx:/, text: /^Task progress$/ },
+  { where: /^providers\/providerSettingsPresentation\.ts:/, text: /^Task progress$/ },
+  { where: /^harness\/NativeHarnessSessionCard\.tsx:/, text: /^(Tasks|Lead tasks)$/ },
+  { where: /^code\/CodeThreadBoard\.tsx:/, text: /^… of … tasks$/ },
+  { where: /^canvas\/(blocks\/PlanBlock|CanvasWorkspaceTab)\.tsx:/, text: /\btasks?\b/i },
+  // Background processes / live tasks inside a thread and internal background jobs.
+  { where: /^code\/ThreadBackgroundWork(Details)?\.tsx:/, text: /\btasks?\b/i },
+  { where: /^(code\/codeSessionClient|work\/workSessionClient)\.ts:/, text: /\blive tasks\b/i },
+  { where: /^shell\/SettingsView\.tsx:/, text: /Background work is something like a dev server/ },
+  { where: /^settings\/AutomaticModelSettings\.tsx:/, text: /background tasks/ },
+  // Remote provider cloud jobs (explicitly separate from the local Code thread).
+  {
+    where: /^(code\/ProviderCloudSessions|settings\/harness\/ProviderCloudOptIn)\.tsx:/,
+    text: /\btasks?\b/i,
+  },
+  // Benchmark suite cases.
+  { where: /^usage\/benchmarks\/BenchmarkRunBuilder\.tsx:/, text: /after each Code task\.$/ },
+  // The prompt/assignment text for an automation run, subagent, coordinator, or new thread.
+  { where: /^automation\//, text: /\btask\b/i },
+  { where: /^environment\/EnvironmentRoutineForm\.tsx:/, text: /\btask\b/i },
+  {
+    where: /^agents\/(subagentRows\.ts|ObservedChildActivity\.tsx|AgentsCenter\.tsx):/,
+    text: /\btasks?\b/i,
+  },
+  { where: /^continuity\/ConversationInputs\.tsx:/, text: /task briefing/ },
+  { where: /^settings\/OctantInstructionsSettings\.tsx:/, text: /suits which task/ },
+  { where: /^remote\/RemoteThreadStart\.tsx:/, text: /^Describe the task$/ },
+  // Template interpolation identifier `task.runTime` in DockThreadOverview.tsx.
+  { where: /^shell\/DockThreadOverview\.tsx:/, text: /\$\{task\.runTime/ },
+];
+
+function sentencesSaying(
+  word: RegExp,
+  allowed: ReadonlyArray<{ readonly where: RegExp; readonly text: RegExp }> = [],
+): ReadonlyArray<string> {
   return [
     ...new Set(
       sentences
-        .filter(({ text }) => word.test(text) && !COMPARED_NEVER_SHOWN.includes(text))
+        .filter(
+          ({ where, text }) =>
+            word.test(text) &&
+            !COMPARED_NEVER_SHOWN.includes(text) &&
+            !allowed.some((rule) => rule.where.test(where) && rule.text.test(text)),
+        )
         .map(({ where, text }) => `${where} ${text}`),
     ),
   ];
@@ -176,6 +227,11 @@ describe("the interface says things in plain words", () => {
   // DESIGN.md, Voice: Automations, never "routine".
   it("calls automations Automations, never routine", () => {
     expect(sentencesSaying(/\broutines?\b/i)).toEqual([]);
+  });
+
+  // DESIGN.md, Voice: thread, never "task" when it means a thread.
+  it("calls threads thread, never task", () => {
+    expect(sentencesSaying(/\btasks?\b/i, TASK_NOT_A_THREAD)).toEqual([]);
   });
 
   // DESIGN.md, Plain words: a loading state is its title alone. A message

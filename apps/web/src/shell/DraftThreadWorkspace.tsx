@@ -1062,7 +1062,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         projectSetup={
           selectedProjectId === undefined && compatibleProjects.length === 0 ? (
             <div aria-label="Set up a Code project" className="code-home__project-setup">
-              <p>Add a folder to choose where this task will work.</p>
+              <p>Add a folder to choose where this thread will work.</p>
               {props.onCreateProject === undefined && props.onAttachFolder === undefined ? null : (
                 <OctantButton
                   onClick={addFolder}

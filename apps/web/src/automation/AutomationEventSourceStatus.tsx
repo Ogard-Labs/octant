@@ -80,7 +80,7 @@ export function AutomationEventSourceStatus(props: {
           {source.reason === "busy-input"
             ? "Events arrived during automation activity and need review."
             : source.reason === "activity-history-limit"
-              ? "This automation may still be active. Finish and review its tasks and helpers. If its history is full, archive it and make a new one."
+              ? "This automation may still be active. Finish and review its threads and helpers. If its history is full, archive it and make a new one."
               : source.reason === "routine-output"
                 ? "Events may come from automation output and need review."
                 : source.reason === "automatic-start-limit"
@@ -143,9 +143,9 @@ export function AutomationEventSourceStatus(props: {
               <p>{automationAuthoritySummary(review.authorityProfile)}</p>
             )}
             <p>
-              Finish and review existing tasks and their output. Re-arming skips all held events,
-              establishes a new baseline and restores the automatic allowance. It starts no task for
-              existing events.
+              Finish and review existing threads and their output. Re-arming skips all held events,
+              establishes a new baseline and restores the automatic allowance. It starts no thread
+              for existing events.
             </p>
             {message === undefined && !stale ? null : (
               <OctantAlert tone="warning">

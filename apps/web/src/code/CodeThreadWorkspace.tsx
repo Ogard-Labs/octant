@@ -2127,7 +2127,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   type="button"
                   variant="secondary"
                 >
-                  New task in this Project
+                  New thread in this Project
                 </OctantButton>
               ) : null}
             </div>
@@ -2783,7 +2783,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                                 }
                               : {
                                   reviewUnavailable:
-                                    "This captured comparison belongs to another task or checkout binding. Open its original task to review it.",
+                                    "This captured comparison belongs to another thread or checkout binding. Open its original thread to review it.",
                                 })}
                           />
                         ) : message.role === "assistant" && message.changedFiles !== undefined ? (
@@ -2814,7 +2814,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                               : {
                                   reviewUnavailable:
                                     message.checkoutId === undefined
-                                      ? "This older receipt did not record its checkout. Open the task’s current Review separately."
+                                      ? "This older receipt did not record its checkout. Open the thread’s current Review separately."
                                       : message.sourceThreadId !== undefined &&
                                           message.sourceThreadId !== props.threadId
                                         ? "This receipt belongs to the original source thread. Open that thread to review its files."

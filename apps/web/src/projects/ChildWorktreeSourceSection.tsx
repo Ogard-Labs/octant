@@ -78,8 +78,8 @@ export function ChildWorktreeSourceSection(props: {
     <section className="worktree-child-source">
       <h2>Child worktree source</h2>
       <p>
-        Choose the source for helpers prepared from this task. Existing helpers keep their own copy.
-        Committed revision is the default.
+        Choose the source for helpers prepared from this thread. Existing helpers keep their own
+        copy. Committed revision is the default.
       </p>
       {review === undefined ? (
         <p role="status">

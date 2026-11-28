@@ -90,7 +90,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
             ? "Provider has no supported Browser transport"
             : "Not reported",
       description:
-        "Read and interact with pages in the task's isolated Browser. Site approvals still apply.",
+        "Read and interact with pages in the thread's isolated Browser. Site approvals still apply.",
       preview: "Read a page → Summarize the findings",
       settings: { section: "providers" },
       action: "Review Browser provider",
@@ -100,7 +100,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
       Icon: Monitor,
       state: computerState,
       description:
-        "Work with supported apps when the task needs them. Enabling this does not approve an app or install a driver.",
+        "Work with supported apps when the thread needs them. Enabling this does not approve an app or install a driver.",
       preview: "Find a control → Click and check the result",
       settings: { section: "computer-use", setting: "computer-use-enabled" },
       action: "Review computer use settings",
@@ -117,8 +117,8 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
               ? "Ask first"
               : "Not reported",
       description:
-        "The task's agent can delegate bounded work when its provider and current policy allow it.",
-      preview: "Main task → Research helper → Findings",
+        "The thread's agent can delegate bounded work when its provider and current policy allow it.",
+      preview: "Main thread → Research helper → Findings",
       settings: { section: "harness", setting: "subagent-creation-posture" },
       action: "Review helper agent settings",
     },
@@ -143,7 +143,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
       <OctantCardHeader>
         <OctantCardTitle>Explore capabilities</OctantCardTitle>
         <p className="text-sm text-muted-foreground">
-          Optional. These are current settings, not new permissions. You can start a task without
+          Optional. These are current settings, not new permissions. You can start a thread without
           changing them.
         </p>
       </OctantCardHeader>
@@ -203,7 +203,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
           </section>
         ))}
         <p className="text-xs text-muted-foreground">
-          Nothing runs in these previews. Installation, package trust and task access remain
+          Nothing runs in these previews. Installation, package trust and thread access remain
           separate.
         </p>
         <OctantButton type="button" size="sm" variant="ghost" onClick={props.onDismiss}>

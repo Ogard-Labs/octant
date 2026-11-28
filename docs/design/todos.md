@@ -61,7 +61,7 @@ and reminders, and any Octant-operated service.
 | List host | The one host whose journal holds the person's to-dos. Every device and window reads and changes the list there        |
 | Started   | A to-do with at least one linked thread that the person has not yet ticked off                                        |
 
-"Task" already names a thread in Work and Code (New task), the agent's own
+"Task" already names the agent's own
 list in a thread's Tasks panel, and side tasks an agent offers. The person's
 list is called **To-dos** everywhere, in copy, routes, events and code, so the
 two never meet in one word.

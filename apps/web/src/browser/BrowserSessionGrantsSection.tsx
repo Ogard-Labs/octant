@@ -248,8 +248,8 @@ export function BrowserSessionGrantsSection(props: {
             details={
               <>
                 <p>
-                  Permissions end at the displayed expiry or on revocation. Granting starts no task
-                  or automation.
+                  Permissions end at the displayed expiry or on revocation. Granting starts no
+                  thread or automation.
                 </p>
                 {review === undefined ? null : (
                   <p>
@@ -343,7 +343,7 @@ export function BrowserSessionGrantsSection(props: {
             }
           >
             This caller can act as the account already signed in to this profile on the listed
-            sites. Grant only the intended task. Other sites, callers, login actions and file
+            sites. Grant only the intended thread. Other sites, callers, login actions and file
             transfers are not authorized.
           </OctantConfirmDialog>
         )}

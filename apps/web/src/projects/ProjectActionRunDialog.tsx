@@ -208,7 +208,7 @@ export function ProjectActionRunDialog(props: {
                 Authority:{" "}
                 {action.server.taskExecutionPolicy === undefined
                   ? "Local person run"
-                  : `Task policy ${action.server.taskExecutionPolicy}`}{" "}
+                  : `Thread policy ${action.server.taskExecutionPolicy}`}{" "}
                 · No OS confinement on the server.
               </p>
             </>

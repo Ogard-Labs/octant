@@ -48,7 +48,7 @@ export function ServerProjectsSidebarGroup(props: {
               data-folder-state={threads.length > 0 ? "open" : "closed"}
             >
               <OctantButton
-                aria-label={`${project.name} on ${project.location}. New task`}
+                aria-label={`${project.name} on ${project.location}. New thread`}
                 className="project-row__select justify-start window-no-drag"
                 onClick={() => props.onOpenProject(project.projectId)}
                 title={project.location}
@@ -64,11 +64,11 @@ export function ServerProjectsSidebarGroup(props: {
                 </span>
               </OctantButton>
               <OctantButton
-                aria-label={`New task in ${project.name}`}
+                aria-label={`New thread in ${project.name}`}
                 className="project-row__action project-row__action--icon project-row__new-thread window-no-drag"
                 onClick={() => props.onOpenProject(project.projectId)}
                 size="icon-sm"
-                title="New task"
+                title="New thread"
                 type="button"
                 variant="ghost"
               >

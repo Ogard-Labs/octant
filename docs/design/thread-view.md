@@ -825,12 +825,12 @@ the full list.
 A reply's suggested follow-ups sit as cards at the foot of the thread, just
 above the composer, so the next task reads as the last thing the agent offered.
 Each card is the radius-md bordered card on the surface fill: a small meta line
-naming where it would run ("New task", "New task · own worktree", "Next step
+naming where it would run ("New thread", "New thread · own worktree", "Next step
 here"), a dismiss control, the title at medium weight, two clamped lines of the
 prompt in secondary ink, and one outline **Start…** (or **Use here…**) button.
 Start… expands that card into a preview sentence of exactly what it would
 create, with Cancel and **Start** (or **Use prompt**); nothing is created
-before that. The same open suggestions also stand in a "Suggested tasks" card
+before that. The same open suggestions also stand in a "Suggested threads" card
 at the top of the thread's Environment panel, without a second border, so an
 offer the conversation has scrolled past stays in reach; it shows only while a
 suggestion is open. A thread started from a suggested task nests one step in
@@ -1573,7 +1573,7 @@ silently clipped.
 ## Draft continuity and composer notices
 
 A new-task composer keeps its identity while its Project binding changes.
-Message text and local input state reset only for an explicit New task action.
+Message text and local input state reset only for an explicit New thread action.
 A refused binding keeps the prior authorized Project and draft. A new Chat's
 first-run composer stages chosen or captured files as removable chips before the
 thread exists; they upload to the thread once it is created and leave with the

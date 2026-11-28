@@ -126,7 +126,7 @@ describe("WorkspaceRailLayers", () => {
     expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
-    await user.click(screen.getAllByRole("button", { name: "New task" })[0] as HTMLElement);
+    await user.click(screen.getAllByRole("button", { name: "New thread" })[0] as HTMLElement);
     // The new-thread draft loads on demand, and on a loaded CI runner that cold
     // import outlasted findBy's one-second wait. Wait for the import itself.
     await act(() => vi.dynamicImportSettled());

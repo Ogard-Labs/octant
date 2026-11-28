@@ -62,12 +62,12 @@ export function ApprovedWorkingFolderControl(props: {
           ? "Shared folder, outside the helper's worktree. Git, changed files and Review cover the Code checkout only."
           : props.inline === true
             ? "Use . for the whole folder, or a path inside it."
-            : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new task.";
+            : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new thread.";
   const fields = (
     <div className="working-directory-control">
       {props.inline === true && props.folders.length < 2 ? null : (
         <OctantSelectField
-          aria-label="Task working folder"
+          aria-label="Thread working folder"
           value={props.value.workingFolderId}
           options={props.folders.map((folder) => ({ id: folder.id, label: folder.label }))}
           onValueChange={(value) => {

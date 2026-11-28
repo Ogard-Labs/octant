@@ -303,7 +303,7 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                   <div key={grant.grantId}>
                     <p className="break-all">
                       {grant.metadata.title} · {grant.target.topOrigin} ·{" "}
-                      {grant.scope.kind === "project" ? "This Project" : "This task"}
+                      {grant.scope.kind === "project" ? "This Project" : "This thread"}
                     </p>
                     <OctantButton
                       size="sm"
@@ -417,10 +417,10 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
                       disabled={pending}
                       options={
                         props.profile.kind === "private"
-                          ? [{ id: "task", label: "This task and page only" }]
+                          ? [{ id: "task", label: "This thread and page only" }]
                           : [
                               { id: "project", label: "This Project's eligible threads" },
-                              { id: "task", label: "This task and page only" },
+                              { id: "task", label: "This thread and page only" },
                             ]
                       }
                       onValueChange={(value) => setScope(value === "project" ? "project" : "task")}

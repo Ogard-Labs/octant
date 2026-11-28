@@ -357,7 +357,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       .call(props.client, { threadId, mode }, controller.signal)
       .then((selection) => {
         if (selection.threadId !== threadId || selection.mode !== mode)
-          throw new Error("Task Browser profile scope changed.");
+          throw new Error("Thread Browser profile scope changed.");
         if (!controller.signal.aborted) {
           setTaskProfileReadState({ ...scope, status: "ready", selection });
         }
@@ -873,8 +873,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     ) {
       setMessage(
         taskProfileRead === "error"
-          ? "The task’s default could not be loaded. Retry, or explicitly open a Private page below."
-          : "The task’s Browser profile is loading. Try again shortly.",
+          ? "The thread’s default could not be loaded. Retry, or explicitly open a Private page below."
+          : "The thread’s Browser profile is loading. Try again shortly.",
       );
       return;
     }
@@ -1370,7 +1370,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           props.onContextCreated?.(result.browser.context.contextId);
       }
       setMessage(
-        "Default Browser profile saved for this task. Agents still need permission to use a signed-in profile.",
+        "Default Browser profile saved for this thread. Agents still need permission to use a signed-in profile.",
       );
     } catch (error) {
       if (!sameScope()) return;
@@ -1378,7 +1378,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       setMessage(
         error instanceof Error
           ? error.message
-          : "The task’s Browser profile could not be changed. The original page was kept.",
+          : "The thread’s Browser profile could not be changed. The original page was kept.",
       );
       // A version conflict must be retryable without replacing the held page.
       try {
@@ -2016,14 +2016,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       <OctantDialogPresence>
         {pendingTaskProfile === undefined ? null : (
           <OctantConfirmDialog
-            title="Change this task’s default Browser profile?"
+            title="Change this thread’s default Browser profile?"
             confirmLabel="Change profile"
             pending={selectingTaskProfile}
             onCancel={() => setPendingTaskProfile(undefined)}
             onConfirm={() => void selectTaskProfile(pendingTaskProfile)}
           >
             The current address opens in a fresh page in the chosen profile. Unsaved form entries on
-            this page will be lost. Your task, conversation, and message draft stay open. The
+            this page will be lost. Your thread, conversation, and message draft stay open. The
             original page stays open if the switch fails.
           </OctantConfirmDialog>
         )}
@@ -2163,7 +2163,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           disabled={profileDisabled}
           folded={folded.has("profile")}
           iconOnly
-          {...(taskProfileApplies ? { label: "Default browser profile for this task" } : {})}
+          {...(taskProfileApplies ? { label: "Default browser profile for this thread" } : {})}
           onChange={(choice) => void chooseProfile(choice)}
           profile={shownProfile}
           projectProfileAvailable
@@ -2208,7 +2208,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
         <OctantAlert layout="row" tone="warning">
-          The task’s default could not be loaded. Its saved choice has not changed.
+          The thread’s default could not be loaded. Its saved choice has not changed.
           <OctantButton
             type="button"
             size="sm"
@@ -2218,7 +2218,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               setTaskProfileRetry((value) => value + 1);
             }}
           >
-            Retry task default
+            Retry thread default
           </OctantButton>
           {!activeContext ? (
             <OctantButton

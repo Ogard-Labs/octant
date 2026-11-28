@@ -1005,10 +1005,10 @@ export function ProjectOverview(props: ProjectOverviewProps) {
 }
 
 const STATUS_FILE_RULE =
-  "Keep a STATUS.md in this folder. Tasks read it and update it, and dated follow-ups become reminders. Off: Octant writes nothing to the folder.";
+  "Keep a STATUS.md in this folder. Threads read it and update it, and dated follow-ups become reminders. Off: Octant writes nothing to the folder.";
 
 const DEVELOPER_TOOLS_RULE =
-  "Show this Project's terminal and its Run, Test and Dev actions. Tasks can still run commands and Git either way; this only changes what you see.";
+  "Show this Project's terminal and its Run, Test and Dev actions. Threads can still run commands and Git either way; this only changes what you see.";
 
 /**
  * The opt-in for the STATUS.md Octant keeps in a Work folder. Not offered for
@@ -1192,8 +1192,8 @@ function LinkedIssueSettings(props: {
         <div>
           <h3>Keep linked issues up to date</h3>
           <p id={keepId}>
-            Octant moves each task's linked GitHub and Linear issues to In Progress, In Review and
-            Done as the task goes.
+            Octant moves each thread's linked GitHub and Linear issues to In Progress, In Review and
+            Done as the thread goes.
           </p>
         </div>
         <OctantSwitch
@@ -1208,7 +1208,7 @@ function LinkedIssueSettings(props: {
         <div>
           <h3>Agents may update linked issues</h3>
           <p id={agentsId}>
-            Below Full access, an agent moves or comments on its task's linked issues without
+            Below Full access, an agent moves or comments on its thread's linked issues without
             asking.
           </p>
         </div>

@@ -69,7 +69,7 @@ export function ComputerUseSettingsView(props: {
     idle: "Not checked yet",
     checking: "Checking for updates…",
     downloading: "Downloading update…",
-    staged: "Update ready when computer-use tasks finish",
+    staged: "Update ready when computer-use threads finish",
     current: "Up to date",
     failed: "Update unavailable",
   };
@@ -83,7 +83,7 @@ export function ComputerUseSettingsView(props: {
           <SettingRow
             settingId="computer-use-enabled"
             label="Computer use"
-            description={`Allow tasks to request access to applications on ${computer}.`}
+            description={`Allow threads to request access to applications on ${computer}.`}
             scope="host"
           >
             <OctantSwitch
@@ -122,7 +122,7 @@ export function ComputerUseSettingsView(props: {
           <SettingRow
             settingId="computer-use-automatic-updates"
             label="Automatic updates"
-            description="Check daily and upgrade after computer-use tasks finish."
+            description="Check daily and upgrade after computer-use threads finish."
             scope="host"
           >
             <OctantSwitch
@@ -165,7 +165,7 @@ export function ComputerUseSettingsView(props: {
         </div>
         {status?.activeSessions ? (
           <p className="provider-settings__field-guidance">
-            {status.activeSessions} computer-use task{status.activeSessions === 1 ? "" : "s"}{" "}
+            {status.activeSessions} computer-use thread{status.activeSessions === 1 ? "" : "s"}{" "}
             active.
           </p>
         ) : null}

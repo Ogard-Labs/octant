@@ -143,23 +143,23 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
               close();
             }
           }}
-          aria-label="Task access details"
+          aria-label="Thread access details"
           className="task-access-details__report flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain"
         >
           <p>
             These are the host&apos;s reported limits. Every action is checked again when it runs.
           </p>
           {read.status === "loading" ? (
-            <p role="status">Reading task access from the host…</p>
+            <p role="status">Reading thread access from the host…</p>
           ) : facts === undefined ? (
             <OctantAlert tone="warning">
-              The host has not reported current task access. Reconnect or refresh before relying on
-              a previous report.
+              The host has not reported current thread access. Reconnect or refresh before relying
+              on a previous report.
             </OctantAlert>
           ) : (
             <>
               <dl className="task-access-details__facts">
-                <dt>Task state</dt>
+                <dt>Thread state</dt>
                 <dd>
                   {facts.standing === "active"
                     ? "Active"
@@ -249,8 +249,8 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                   {facts.outsideContent.effect === "recorded"
                     ? "Outside content is recorded at Full access; the mark does not add approval prompts."
                     : facts.outsideContent.effect === "gates"
-                      ? "This task read outside content, so some actions ask each time. Review it from the Outside content row in Environment when the task is idle."
-                      : "This task read outside content. Its current effect has not been reported."}
+                      ? "This thread read outside content, so some actions ask each time. Review it from the Outside content row in Environment when the thread is idle."
+                      : "This thread read outside content. Its current effect has not been reported."}
                 </p>
               ) : null}
               <ul>
@@ -293,13 +293,14 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
               {facts.browser?.status === "omitted" &&
               facts.browser.reason === "excluded-by-thread-constraints" ? (
                 <p>
-                  This task's saved tool constraints exclude Browser. Changing its access level does
-                  not remove those constraints. Start a task with a profile that permits Browser.
+                  This thread's saved tool constraints exclude Browser. Changing its access level
+                  does not remove those constraints. Start a thread with a profile that permits
+                  Browser.
                 </p>
               ) : null}
               <p className="text-xs">
                 Reported {absoluteTimeFormatter.format(new Date(facts.observedAt))}. Current
-                defaults do not prove which setting originally created this task.
+                defaults do not prove which setting originally created this thread.
               </p>
             </>
           )}

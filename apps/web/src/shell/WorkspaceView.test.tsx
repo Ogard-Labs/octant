@@ -160,8 +160,8 @@ describe("WorkspaceView welcome", () => {
       />,
     );
     await act(() => vi.dynamicImportSettled());
-    await userEvent.click(await screen.findByRole("button", { name: "Open created task" }));
-    expect(onOpenCodeThread).toHaveBeenCalledWith(createdThreadId, "Code task", project.id);
+    await userEvent.click(await screen.findByRole("button", { name: "Open created thread" }));
+    expect(onOpenCodeThread).toHaveBeenCalledWith(createdThreadId, "Code thread", project.id);
   });
 
   it("uses the shared Code composer when the only Code Project is archived", async () => {
@@ -2491,7 +2491,7 @@ describe("WorkspaceView Work overview", () => {
     );
 
     const composer = await screen.findByRole("region", { name: "Work quick start" });
-    expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
+    expect(within(composer).getByRole("textbox", { name: "Start a new thread" })).toBeDisabled();
   });
 
   it("creates from the exact Project tab instead of ambient active Project state", async () => {
@@ -2530,10 +2530,10 @@ describe("WorkspaceView Work overview", () => {
 
     const composer = await screen.findByRole("region", { name: "Work quick start" });
     await user.type(
-      within(composer).getByRole("textbox", { name: "Start a new task" }),
+      within(composer).getByRole("textbox", { name: "Start a new thread" }),
       "Prepare the brief",
     );
-    await user.click(within(composer).getByRole("button", { name: "Start task" }));
+    await user.click(within(composer).getByRole("button", { name: "Start thread" }));
 
     await waitFor(() => {
       expect(onCreateWorkThread).toHaveBeenCalledWith(projectId, "Prepare the brief");

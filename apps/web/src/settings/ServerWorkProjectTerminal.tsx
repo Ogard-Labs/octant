@@ -118,7 +118,7 @@ export function ServerWorkProjectTerminal(props: {
               Close terminal
             </OctantButton>
           </div>
-          <p>Full remote SSH shell, operated by you. It does not change any task's access.</p>
+          <p>Full remote SSH shell, operated by you. It does not change any thread's access.</p>
           {terminalId === undefined ? (
             <p role="status">Opening SSH session…</p>
           ) : (

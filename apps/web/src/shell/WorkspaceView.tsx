@@ -2679,7 +2679,7 @@ function renderNonCodeTab(
     if (workThreadClient === undefined) {
       return (
         <OctantEmpty
-          eyebrow="Task"
+          eyebrow="Thread"
           message="Work is unavailable in this window."
           state="warning"
           title={tab.title}
@@ -2923,7 +2923,7 @@ function renderNonCodeTab(
               );
               props.onOpenCodeThread(
                 decodeCodeThreadId(String(tab.threadId)),
-                thread?.title ?? "Code task",
+                thread?.title ?? "Code thread",
                 thread?.projectId,
               );
             } else if (tab.mode === "work") {
@@ -3115,7 +3115,7 @@ function renderNonCodeTab(
                       );
                       // A planner result can precede the navigation refresh.
                       // The host still resolves this id and its Project on open.
-                      props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+                      props.onOpenCodeThread(threadId, thread?.title ?? "Code thread", project.id);
                     }}
                     projectId={project.id}
                     projectName={project.name}
@@ -3485,7 +3485,7 @@ function coordinatorProposalsFor(
           const thread = codeController.bootstrap?.threads.find(
             (candidate) => candidate.id === threadId,
           );
-          props.onOpenCodeThread(threadId, thread?.title ?? "Code task", project.id);
+          props.onOpenCodeThread(threadId, thread?.title ?? "Code thread", project.id);
         }}
         projectId={project.id}
         projectName={project.name}
@@ -4165,9 +4165,9 @@ function issueLinkRefusalMessage(reason: CodeThreadIssueLinkRefusal): string {
     case "not-found":
       return "Linear has no issue with that identifier.";
     case "too-many":
-      return "A task links at most ten issues. Unlink one first.";
+      return "A thread links at most ten issues. Unlink one first.";
     case "not-linked":
-      return "That issue is not linked to this task.";
+      return "That issue is not linked to this thread.";
     case "linear-unavailable":
       return "Linear could not be reached. Check Settings › Integrations.";
   }
@@ -4182,17 +4182,17 @@ export function worktreeMoveRefusalMessage(
 ): string {
   switch (reason) {
     case "already-own-worktree":
-      return "This task already works in a worktree of its own.";
+      return "This thread already works in a worktree of its own.";
     case "not-a-repository":
       return "This folder is not a Git repository, so it has no worktrees.";
     case "server-project":
-      return "A task in a Project on a server cannot move into a worktree here.";
+      return "A thread in a Project on a server cannot move into a worktree here.";
     case "plan":
       return "Plan mode is read-only. Change the access level first.";
     case "turn-running":
       return "Wait until the current turn finishes.";
     case "checkout-in-use":
-      return "Another task is working in this checkout right now. Try again when it finishes.";
+      return "Another thread is working in this checkout right now. Try again when it finishes.";
     case "capture-failed":
       return "This checkout's changes could not be read, so nothing was moved.";
     case "nested-changes": {
@@ -4212,7 +4212,7 @@ export function worktreeMoveRefusalMessage(
     case "apply-failed":
       return "The changes could not be copied into the new worktree, so nothing was moved.";
     case "working-folder":
-      return "This task works in another of the Project's folders, which a worktree of the main folder does not hold. Start a new task there instead; nothing was moved.";
+      return "This thread works in another of the Project's folders, which a worktree of the main folder does not hold. Start a new thread there instead; nothing was moved.";
     case "unavailable":
       return "The worktree could not be created. Nothing was moved.";
   }

@@ -442,7 +442,7 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
             <span>
               Last reported permissions: {view.account?.grantedScopes?.join(", ") ?? "Not reported"}
             </span>
-            <span>Tools are checked when selected for an authorized task.</span>
+            <span>Tools are checked when selected for an authorized thread.</span>
           </span>
         ) : null}
         <OctantButton

@@ -74,7 +74,7 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
       triggerLabel="Delivers"
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >
-      <p className="code-composer-choice__caption">This task delivers</p>
+      <p className="code-composer-choice__caption">This thread delivers</p>
       <OctantListbox
         aria-label="Delivers"
         className="code-composer-choice__list"

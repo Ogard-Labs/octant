@@ -39,13 +39,13 @@ export function agentAvailabilityNote(
       };
     case "excluded-by-thread-constraints":
       return {
-        message: "The agent cannot use this Browser: the task's tool constraints exclude it.",
+        message: "The agent cannot use this Browser: the thread's tool constraints exclude it.",
         omission: reason,
-        remedy: "Review task access",
+        remedy: "Review thread access",
       };
     case "host-lends-no-browser":
       return {
-        message: "The agent cannot use this Browser: the host does not lend it to this task.",
+        message: "The agent cannot use this Browser: the host does not lend it to this thread.",
         omission: reason,
         remedy: "Check host settings",
       };

@@ -116,8 +116,8 @@ export function AutomationFileSourceStatus(props: {
       {source?.reason === "activity-history-limit" ? (
         <p>
           This automation started more runs than its activity history holds, so it cannot tell when
-          its input is quiet. Finish its Project tasks and cleanup, then clear its activity history
-          below; it watches again after one quiet check.
+          its input is quiet. Finish its Project threads and cleanup, then clear its activity
+          history below; it watches again after one quiet check.
         </p>
       ) : null}
       {source !== undefined && automation.lifecycle !== "archived" ? (
@@ -154,7 +154,7 @@ export function AutomationFileSourceStatus(props: {
         the input.
       </p>
       {source?.phase === "held" ? (
-        <p>Run now starts a separate task. It does not clear or re-arm this held input.</p>
+        <p>Run now starts a separate thread. It does not clear or re-arm this held input.</p>
       ) : null}
       <div className="automation-detail__actions">
         <OctantButton type="button" variant="secondary" onClick={props.refresh}>
@@ -241,7 +241,7 @@ export function AutomationFileSourceStatus(props: {
               </dl>
             )}
             <p>
-              Run once starts one new Work task with the current profile, level and confirmed
+              Run once starts one new Work thread with the current profile, level and confirmed
               delivery. Skip records these files as the new baseline without a run. Either starts a
               new allowance of {automation.trigger.automaticStartLimit} automatic runs.
             </p>
@@ -271,7 +271,7 @@ export function AutomationFileSourceStatus(props: {
             {busy ? (
               <p role="status">
                 Checking and committing your choice. Closing this review does not undo an admitted
-                task.
+                thread.
               </p>
             ) : null}
             <div className="automation-detail__actions">

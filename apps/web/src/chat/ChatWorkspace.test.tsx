@@ -2580,7 +2580,7 @@ describe("ChatWorkspace", () => {
         <Harness />
       </ThreadNotesProvider>,
     );
-    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
+    await user.click(screen.getByRole("button", { name: "Add attachment or thread action" }));
     await user.click(await screen.findByRole("menuitem", { name: /^Thread info/ }));
     await user.click(screen.getByText("Notes", { exact: true }));
     await user.click(await screen.findByRole("button", { name: "Insert in message" }));

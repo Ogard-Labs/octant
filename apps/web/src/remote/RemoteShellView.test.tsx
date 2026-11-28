@@ -770,14 +770,14 @@ describe("RemoteShellView", () => {
     // first open's own late reads under load.
     const workspace = await screen.findByRole(
       "region",
-      { name: "Task workspace" },
+      { name: "Thread workspace" },
       { timeout: 10_000 },
     );
     await openFromActiveWork();
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Active work" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole("region", { name: "Task workspace" })).toBe(workspace);
+    expect(screen.getByRole("region", { name: "Thread workspace" })).toBe(workspace);
     expect(screen.getByRole("button", { name: "Remote Work" })).toHaveAttribute(
       "aria-current",
       "true",

@@ -247,7 +247,7 @@ export function ZenProjectTerminalCard(props: ZenProjectTerminalCardProps) {
       {props.providerProgramName === undefined ? null : (
         <OctantAlert layout="row" className="code-terminal-pane__provider" tone="neutral">
           {props.providerProgramName} runs here on its own, with its own approvals. What you do in
-          it stays outside this task's record and usage.
+          it stays outside this thread's record and usage.
         </OctantAlert>
       )}
       {terminal.state === "running" ? (

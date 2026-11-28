@@ -59,7 +59,7 @@ describe("WorkOverview", () => {
 
     expect(screen.getByRole("region", { name: "Work overview" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Produced by Octant" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Recent tasks" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Recent threads" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Approvals" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Versions and recent changes" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Validation" })).toBeVisible();
@@ -152,7 +152,7 @@ describe("WorkOverview", () => {
       />,
     );
 
-    const section = screen.getByRole("region", { name: "Recent tasks" });
+    const section = screen.getByRole("region", { name: "Recent threads" });
     expect(within(section).getByText("Active workflow")).toBeVisible();
     expect(within(section).getByText("Active thread")).toBeVisible();
 
@@ -211,9 +211,9 @@ describe("WorkOverview", () => {
     render(<WorkOverview model={emptyModel()} onCreateThread={onCreateThread} />);
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const input = within(composer).getByRole("textbox", { name: "Start a new task" });
+    const input = within(composer).getByRole("textbox", { name: "Start a new thread" });
     fireEvent.change(input, { target: { value: "Summarize the brief" } });
-    fireEvent.click(within(composer).getByRole("button", { name: "Start task" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
 
     await waitFor(() => {
       expect(onCreateThread).toHaveBeenCalledWith("Summarize the brief");
@@ -226,9 +226,9 @@ describe("WorkOverview", () => {
     render(<WorkOverview model={emptyModel()} onCreateThread={onCreateThread} />);
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const input = within(composer).getByRole("textbox", { name: "Start a new task" });
+    const input = within(composer).getByRole("textbox", { name: "Start a new thread" });
     fireEvent.change(input, { target: { value: "Open the quarterly notes" } });
-    fireEvent.click(within(composer).getByRole("button", { name: "Start task" }));
+    fireEvent.click(within(composer).getByRole("button", { name: "Start thread" }));
 
     await waitFor(() => {
       expect(onCreateThread).toHaveBeenCalledWith("Open the quarterly notes");
@@ -344,10 +344,10 @@ describe("WorkOverview", () => {
     await user.click(within(level).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(
-      within(composer).getByRole("textbox", { name: "Start a new task" }),
+      within(composer).getByRole("textbox", { name: "Start a new thread" }),
       "Prepare brief",
     );
-    await user.click(within(composer).getByRole("button", { name: "Start task" }));
+    await user.click(within(composer).getByRole("button", { name: "Start thread" }));
     await waitFor(() =>
       expect(onCreateThread).toHaveBeenCalledWith("Prepare brief", undefined, { effort: "high" }),
     );
@@ -363,8 +363,8 @@ describe("WorkOverview", () => {
     );
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    expect(within(composer).getByRole("textbox", { name: "Start a new task" })).toBeDisabled();
-    expect(within(composer).getByRole("button", { name: "Start task" })).toBeDisabled();
+    expect(within(composer).getByRole("textbox", { name: "Start a new thread" })).toBeDisabled();
+    expect(within(composer).getByRole("button", { name: "Start thread" })).toBeDisabled();
     expect(
       within(composer).getByText("Thread creation is unavailable for this Project."),
     ).toBeVisible();
@@ -384,7 +384,7 @@ describe("WorkOverview", () => {
     }
 
     const rendered = render(view());
-    await user.type(screen.getByRole("textbox", { name: "Start a new task" }), "Keep this draft");
+    await user.type(screen.getByRole("textbox", { name: "Start a new thread" }), "Keep this draft");
     await user.upload(
       screen.getByLabelText("Choose attachment file"),
       new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
@@ -393,7 +393,7 @@ describe("WorkOverview", () => {
     rendered.unmount();
     render(view());
 
-    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: "Start a new thread" })).toHaveValue(
       "Keep this draft",
     );
     expect(screen.getByText("brief.png")).toBeVisible();
@@ -419,16 +419,16 @@ describe("WorkOverview", () => {
     }
 
     rendered = render(view());
-    fireEvent.change(screen.getByRole("textbox", { name: "Start a new task" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new thread" }), {
       target: { value: "Open the quarterly notes" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
     await waitFor(() => {
-      expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+      expect(screen.queryByRole("textbox", { name: "Start a new thread" })).toBeNull();
     });
     render(view());
 
-    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Start a new thread" })).toHaveValue("");
   });
 
   it("does not restore a refused quick-start draft over a newer prompt in the same Project", async () => {
@@ -446,8 +446,8 @@ describe("WorkOverview", () => {
       </NewTaskDraftsContext.Provider>,
     );
 
-    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
-    const starts = screen.getAllByRole("button", { name: "Start task" });
+    const inputs = screen.getAllByPlaceholderText("Start a new thread…");
+    const starts = screen.getAllByRole("button", { name: "Start thread" });
     fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
     fireEvent.click(starts[0]!);
     await waitFor(() => expect(inputs[0]).toHaveValue(""));
@@ -473,8 +473,8 @@ describe("WorkOverview", () => {
       </NewTaskDraftsContext.Provider>,
     );
 
-    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
-    const starts = screen.getAllByRole("button", { name: "Start task" });
+    const inputs = screen.getAllByPlaceholderText("Start a new thread…");
+    const starts = screen.getAllByRole("button", { name: "Start thread" });
     const choosers = screen.getAllByLabelText("Choose attachment file");
     fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
     await user.upload(
@@ -514,7 +514,7 @@ describe("WorkOverview", () => {
 
     await user.click(providerSetup);
     expect(onOpenSettings).toHaveBeenCalledOnce();
-    expect(within(composer).getByRole("button", { name: "Start task" })).toBeDisabled();
+    expect(within(composer).getByRole("button", { name: "Start thread" })).toBeDisabled();
   });
 
   it("creates a starter artifact with the default markdown path and preserves content on failure", async () => {

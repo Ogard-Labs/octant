@@ -132,8 +132,8 @@ export function CommandCredentialRequests(props: {
       summary={<>Credential commands{requests.length > 0 ? " · Review required" : ""}</>}
     >
       <p>
-        Saved commands for this Code Project. Each run follows the task’s ordinary command approvals
-        and needs a separate human approval for credential use. Plan refuses runs.
+        Saved commands for this Code Project. Each run follows the thread’s ordinary command
+        approvals and needs a separate human approval for credential use. Plan refuses runs.
       </p>
       {view?.bindings.length === 0 ? (
         <p>Save a fixed binding in Settings → Secret stores.</p>
@@ -191,12 +191,12 @@ export function CommandCredentialRequests(props: {
           </ul>
           <p>
             {request.legacySandbox === true
-              ? "Legacy sandbox: the credential tool authenticates outside the sandbox; this executable and its descendants retain the task's existing file and network boundary."
+              ? "Legacy sandbox: the credential tool authenticates outside the sandbox; this executable and its descendants retain the thread's existing file and network boundary."
               : request.strict === true
-                ? "Strict: the credential tool authenticates outside the sandbox; this executable and its descendants remain confined under the task's file and network rules, including at Full access."
+                ? "Strict: the credential tool authenticates outside the sandbox; this executable and its descendants remain confined under the thread's file and network rules, including at Full access."
                 : request.executionPolicy === "full-access"
                   ? "Full access: this executable and its descendants receive the credentials with ordinary Full access, including network access."
-                  : `${request.executionPolicy === "approval-gated" ? "Ask for approvals" : "Auto-accept edits"}: the credential tool authenticates outside the sandbox; this executable and its descendants remain OS-confined under the task’s file and network rules. Network access uses the approved per-command proxy.`}{" "}
+                  : `${request.executionPolicy === "approval-gated" ? "Ask for approvals" : "Auto-accept edits"}: the credential tool authenticates outside the sandbox; this executable and its descendants remain OS-confined under the thread’s file and network rules. Network access uses the approved per-command proxy.`}{" "}
             Output masking cannot prevent deliberate disclosure to an allowed destination. Approval
             expires at {new Date(request.expiresAt).toLocaleTimeString()} if the process has not
             started. A fresh request does not mean an earlier process stopped.
