@@ -2700,31 +2700,43 @@ deleting, and reconciles after restart without re-running work.
 Code also has a host-scoped Linear issues workspace contributed by the
 bundled Linear plugin (enabled by default) as `sidebar.destination` `linear-issues`, Code mode
 only. The sidebar row is shown only when that contribution is effective, its
-action is wired, and the Linear authentication snapshot reports `list-issues`
+action is wired, and at least one connected Linear account reports `list-issues`
 available. Browse goes through the Integration port
 ([operations](host-reads-and-commands.md#linear-issues)) with bounded page size
 and description bytes. Issue bodies are a live projection, not Octant source of
 truth; credentials and raw API payloads never enter prompts or tool output.
 Open in Linear is an external `linear.app` URL. Disabled, untrusted,
-unauthorized, expired, or rate-limited Linear contributes no sidebar item,
-catalogue rows, or thread context. Chat/Work browse and Linear writes are not
-this surface.
+unauthorized, expired, or rate-limited Linear accounts contribute no sidebar
+item, catalogue rows, or thread context. Chat/Work browse and Linear writes are
+not this surface.
 
-Composer `Create from…` also exposes a Linear tab when the Settings-owned
-connection reports `list-issues` available and the Linear plugin is effective.
-When the active Project is bound to a Linear team (and optional Linear
-project), the Linear tab and the Code Linear issue browser default to that
-binding while letting the person switch back to the whole Linear workspace;
+Composer `Create from…` also exposes a Linear tab when at least one Settings-owned
+Linear account reports `list-issues` available and the Linear plugin is effective.
+When more than one Linear account is ready, both `Create from…` and the Code
+Linear issue browser show a workspace switcher; when the active Project is bound
+to a Linear account, team, and optional Linear project, both default to that
+binding while letting the person switch back to the whole workspace or another
+connected workspace. Inbox and Start merge Linear issues across ready accounts
+and show the workspace name on each row when more than one account is connected;
 picking a Linear issue on Start automatically selects the uniquely matching
-bound Octant Project. Project-to-Linear bindings are edited on the host from
-Settings › Integrations (Linear projects matrix, alongside connected user, workspace,
-linked-project count, and personal API key controls with a direct creation
-link) and from each Project's Overview page.
-Selecting a row attaches only `{ id }`. At creation the server reauthorizes
-through the Integration port, frames redacted issue text
-(`identifier`, status, description, comments, links) as external content and
-journals that ingestion ([details](host-reads-and-commands.md#linear-issues)).
-Refusal fails creation visibly. A Code thread made this way is linked to the issue.
+bound Octant Project by account first so identical team keys across workspaces
+never cross-bind. Inline issue-key chips resolve through the active Project's
+bound account when bound, or through the sole ready account when unbound; on an
+unbound thread with multiple ready accounts, issue keys stay plain text rather
+than probing workspaces in turn.
+
+Multiple Linear accounts and Project-to-Linear bindings are managed on the host
+from Settings › Integrations (each connected account with workspace, user,
+state, linked-project count, Reconnect/Disconnect, Connect another account,
+personal API key controls with a direct creation link, **Add as account** when
+an unused legacy personal API key sits beside OAuth, and an Account → Team →
+Project bindings matrix, falling back to the single-account view against older
+hosts) and from each Project's Overview page. Selecting a row attaches
+`{ id, accountRef? }`. At creation the server reauthorizes through the
+Integration port on that account, frames redacted issue text (`identifier`,
+status, description, comments, links) as external content and journals that
+ingestion ([details](host-reads-and-commands.md#linear-issues)). Refusal fails
+creation visibly. A Code thread made this way is linked to the issue.
 
 <a id="linked-issues-kept-current"></a>
 **Linked issues kept current.** A Code thread works on up to ten linked

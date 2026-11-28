@@ -353,23 +353,63 @@ Octant](provider-runtimes.md#sessions-started-outside-octant)).
 
 ## Linear issues
 
+A host may connect more than one Linear account (OAuth or personal API key).
+Connected accounts are tracked in a host-local index
+(`integrations/linear-accounts.json`, mode `0600`, written atomically) that maps
+each account's deterministic `accountRef` (derived from Linear's viewer id and
+workspace id) to its own vault secret id, granted scopes, and metadata; tokens
+stay in the host vault and never enter the index, journal, renderer, plugin, or
+logs. On first run after upgrade, an existing single-account connection
+(`integrations/linear-connection.json` or legacy vault keys) is lazily indexed
+with `legacyRef` pointing to that account without moving tokens or making
+startup network calls. An unused legacy personal API key stored beside OAuth is
+not auto-migrated; Settings offers **Add as account** to adopt it explicitly.
+
+Each connected account runs in its own isolated plugin runtime and OAuth host
+whose credential lookup answers `missing` for any other ref and whose
+`authorizedFetch` attaches the bearer token only to `https://api.linear.app`
+(refusing off-origin requests before resolving tokens). Failed identity lookup
+or failed index persistence deletes any newly stored vault secret and refuses
+Connect; a damaged index fails closed, lists no accounts, reads nothing, and
+leaves vault secrets untouched.
+
+`GET /api/integrations/linear/accounts` returns the non-secret account list
+(with its own remote-access allowlist entry capped at 16 KiB, keeping
+`/authentication` at 4 KiB). `IntegrationCommand`,
+`IntegrationAuthenticationCommand`, `ProjectLinearTarget`, and
+`LinearIssueContextRequest` accept an optional `accountRef`. Omitting
+`accountRef` resolves only to `legacyRef` (or the sole account on a fresh
+single-account host) and never falls back to a different account if the legacy
+account was removed; reconnecting the legacy account restores its bindings.
+Pagination cursors are bound to their `accountRef`, and cross-account cursors
+are refused.
+
 Browse goes through the Integration port operations `list-issues`, `get-issue`,
 `get-issue-by-identifier`, and `list-issue-filters` over Linear GraphQL.
 Inline tracker-key chips resolve public identifiers (`TEAM-123`) through
 `get-issue-by-identifier` rather than scanning a multi-row search page. Create
 from a Linear issue frames redacted issue text through the same
-`externalContentFraming.ts` and appends `thread.external-content-ingested@1`.
+`externalContentFraming.ts` and appends `thread.external-content-ingested@1`
+recording the account reference.
 
-Work and Code Projects may bind a Linear team (and optional Linear project) via
-the host-person `change-project-linear-target` command, journaled as
-`project.linear-target-changed@1`. For a Code Project with a binding and an
-effective Linear integration, Code agents are offered `octant_linear`
-(`list`, `get`, `search`, `help`, and on linked issues `set-state` and
-`comment`) pinned server-side to that team and optional
-Linear project. Every call rechecks thread authority, profile allowlists, and
-live Linear readiness, withholds issues outside the bound scope identically to
-missing issues, redacts secret shapes before returning text, and records
-`thread.external-content-ingested@1`.
+Work and Code Projects may bind a Linear team (and optional Linear project, plus
+optional `accountRef` when more than one account is in play) via the host-person
+`change-project-linear-target` command, journaled as
+`project.linear-target-changed@1`. Single-account legacy bindings omit
+`accountRef` so journals remain readable by older builds. For a Code Project
+with a binding and an effective Linear integration, Code agents are offered
+`octant_linear` (`list`, `get`, `search`, `help`, and on linked issues
+`set-state` and `comment`) pinned server-side to that Project's bound account,
+team, and optional Linear project; a model-supplied account selector is refused.
+Every call rechecks thread authority, profile allowlists, and live readiness on
+the bound account, withholds issues outside the bound account or scope
+identically to missing issues, redacts secret shapes before returning text, and
+records `thread.external-content-ingested@1`.
+
+Linear routine assignment sources emit one choice per ready account, bind stored
+`(viewerId, workspaceId)` identity locally without probing other accounts, and
+track per-account `connectionRevision` so signing out of one account never
+interrupts a routine running against another.
 
 The behavior rules for both integrations are in
 [Workspace: boards and integrations](workspace.md#boards-and-integrations).
