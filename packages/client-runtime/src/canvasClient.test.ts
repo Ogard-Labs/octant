@@ -138,6 +138,90 @@ describe("createCanvasClient", () => {
     );
   });
 
+  it("sends marks to the host and retries without it on 400 only for the newest version", async () => {
+    const versionId = "22222222-2222-4222-8222-222222222222";
+    const ready = {
+      kind: "ready",
+      canvasId: String(canvasId),
+      versionId,
+      blockId: "phone",
+      assets: [{ assetId: "shot", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" }],
+    };
+
+    // Older host refuses the fourth query key with 400.
+    const newestFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "Canvas design assets request is invalid." }), {
+          status: 400,
+        }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(ready), { status: 200 }));
+    const newestClient = createCanvasClient({
+      baseUrl: "http://127.0.0.1:3000",
+      fetch: newestFetch as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    expect(
+      await newestClient.designAssets?.({
+        canvasId,
+        versionId,
+        blockId: "phone",
+        marks: "labelled",
+        isCurrentVersion: true,
+      }),
+    ).toEqual(ready);
+    expect(newestFetch.mock.calls.map((call) => call[0])).toEqual([
+      `http://127.0.0.1:3000/api/canvas/design-assets?canvasId=${String(canvasId)}&versionId=${versionId}&blockId=phone&marks=labelled`,
+      `http://127.0.0.1:3000/api/canvas/design-assets?canvasId=${String(canvasId)}&versionId=${versionId}&blockId=phone`,
+    ]);
+
+    // Older version does not retry without marks, so placeholders show instead of live replacements.
+    const olderFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Canvas design assets request is invalid." }), {
+        status: 400,
+      }),
+    );
+    const olderClient = createCanvasClient({
+      baseUrl: "http://127.0.0.1:3000",
+      fetch: olderFetch as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    await expect(
+      olderClient.designAssets?.({
+        canvasId,
+        versionId,
+        blockId: "phone",
+        marks: "labelled",
+        isCurrentVersion: false,
+      }),
+    ).rejects.toThrow();
+    expect(olderFetch).toHaveBeenCalledTimes(1);
+
+    // Preview miniature (`marks=recorded`) never retries without marks.
+    const miniatureFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: "Canvas design assets request is invalid." }), {
+        status: 400,
+      }),
+    );
+    const miniatureClient = createCanvasClient({
+      baseUrl: "http://127.0.0.1:3000",
+      fetch: miniatureFetch as unknown as typeof fetch,
+      windowCapability: "capability",
+    });
+    await expect(
+      miniatureClient.designAssets?.({
+        canvasId,
+        versionId,
+        blockId: "phone",
+        marks: "recorded",
+        isCurrentVersion: true,
+      }),
+    ).rejects.toThrow();
+    expect(miniatureFetch).toHaveBeenCalledTimes(1);
+    expect(miniatureFetch.mock.calls[0]?.[0]).toContain("marks=recorded");
+  });
+
   it("asks for a running design's page with the window capability and resolves it on this host", async () => {
     const ticket = "a".repeat(43);
     const fetchImpl = vi.fn(

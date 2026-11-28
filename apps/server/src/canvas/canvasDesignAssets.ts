@@ -1,13 +1,17 @@
 import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
+  type CanvasDesignAssetMarks,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
   type BrowserCaptureId,
   type CanvasDefinition,
   type CanvasDesignAsset,
   type CanvasDesignBlock,
+  type CanvasId,
   type CanvasProvenance,
+  type CanvasVersionId,
+  type CanvasVersionImageDigest,
   type ImageArtifactId,
 } from "@octant/contracts";
 import { createHash } from "node:crypto";
@@ -138,12 +142,45 @@ async function readCanvasDesignAssetSource(
  * XML or HTML text, and a design that wants vector art can already write it
  * inline, where the markup policy reads it.
  */
+/**
+ * Version context handed to the host's design-asset resolver so superseded
+ * versions (and preview miniatures, even on the newest version) compare
+ * Project image files against recorded SHA-256 digests.
+ */
+export interface CanvasDesignAssetVersionContext {
+  readonly canvasId: CanvasId;
+  readonly versionId: CanvasVersionId;
+  readonly marks?: CanvasDesignAssetMarks;
+  /**
+   * Older clients omit `marks` and cannot decode `changed` or `mark`; downgrade
+   * `changed` to `missing` and omit `mark` for them.
+   */
+  readonly legacyClient?: boolean;
+}
+
+export interface ResolveCanvasDesignAssetsOptions {
+  /**
+   * `live` (default): draw Project files as they stand now.
+   * `compare`: compare Project files against `recorded` digests, withholding
+   * changed files as `changed` (or `missing` for legacy clients) and marking
+   * unrecorded versions with `mark: "unrecorded"`.
+   */
+  readonly mode?: "live" | "compare";
+  /** Recorded digests for this block's Project images, keyed by `assetId`. */
+  readonly recorded?: ReadonlyMap<string, CanvasVersionImageDigest>;
+  /** Whether the caller decodes `changed` and `mark: "unrecorded"`. Defaults to `true`. */
+  readonly clientSupportsMarks?: boolean;
+}
+
 export async function resolveCanvasDesignAssets(
   block: Pick<CanvasDesignBlock, "assets">,
   provenance: Pick<CanvasProvenance, "mode" | "projectId" | "threadId">,
   ports: CanvasDesignAssetPorts,
+  options?: ResolveCanvasDesignAssetsOptions,
 ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> {
   const resolutions: CanvasDesignAssetResolution[] = [];
+  const compare = options?.mode === "compare";
+  const clientSupportsMarks = options?.clientSupportsMarks ?? true;
   let spent = 0;
   for (const asset of block.assets ?? []) {
     const unavailable = (reason: CanvasDesignAssetUnavailableReason) => {
@@ -170,6 +207,26 @@ export async function resolveCanvasDesignAssets(
     if (mediaType === undefined) {
       unavailable("not-an-image");
       continue;
+    }
+    if (compare && asset.source.kind === "project-file") {
+      if (options?.recorded !== undefined) {
+        const expected = options.recorded.get(String(asset.assetId));
+        const actualSha256 = createHash("sha256").update(read.bytes).digest("hex");
+        if (expected?.status !== "recorded" || expected.sha256 !== actualSha256) {
+          unavailable(clientSupportsMarks ? "changed" : "missing");
+          continue;
+        }
+      } else {
+        spent += read.bytes.byteLength;
+        resolutions.push({
+          assetId: asset.assetId,
+          status: "resolved",
+          mediaType,
+          data: Buffer.from(read.bytes).toString("base64"),
+          ...(clientSupportsMarks ? { mark: "unrecorded" as const } : {}),
+        });
+        continue;
+      }
     }
     spent += read.bytes.byteLength;
     resolutions.push({

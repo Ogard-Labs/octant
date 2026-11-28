@@ -659,6 +659,52 @@ describe("canvas export service", () => {
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "cover" }),
       provenance,
+      { canvasId, versionId: doc.versionId, marks: "labelled" },
+    );
+    connection.close();
+  });
+
+  it("withholds a changed Project image when exporting a picture of a superseded version", async () => {
+    const requests: CanvasExportPictureRequest[] = [];
+    const design = {
+      blockId: "brief",
+      schemaVersion: 30,
+      kind: "design",
+      title: "Brief",
+      size: "document",
+      runsScript: true,
+      assets: [{ assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } }],
+      frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' }],
+    };
+    const provenance = { mode: "work", projectId: "p", threadId: "t" };
+    const doc = {
+      ...document(),
+      blocks: [design] as unknown as ReadonlyArray<CanvasBlock>,
+      definition: { title: "Launch plan", blocks: [design], provenance } as never,
+    };
+    const resolveDesignAssets = vi.fn(async () => [
+      { assetId: "shot" as never, status: "unavailable" as const, reason: "changed" as const },
+    ]);
+    const { registration } = exportFolder();
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc, renderer: fakeRenderer(requests), resolveDesignAssets },
+    );
+    const prepared = await service.prepare(pictureRequest("png"), true);
+    expect(prepared).toMatchObject({ kind: "approval" });
+    const subject = requests[0]?.subject;
+    if (subject?.kind !== "document") throw new Error("expected a document subject");
+    expect(subject.designAssets?.[0]).toEqual({
+      blockId: "brief",
+      assets: [{ assetId: "shot", status: "unavailable", reason: "changed" }],
+    });
+    // The prototype page draws the placeholder instead of any replaced bytes.
+    expect(subject.designPages?.[0]?.html).toContain("data:image/svg+xml;base64,");
+    expect(subject.designPages?.[0]?.html).not.toContain("data:image/png;base64,");
+    expect(resolveDesignAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ blockId: "brief" }),
+      provenance,
+      { canvasId, versionId: doc.versionId, marks: "labelled" },
     );
     connection.close();
   });

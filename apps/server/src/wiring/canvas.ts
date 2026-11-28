@@ -74,6 +74,7 @@ import {
 } from "../designSystems/designSystemContext";
 import {
   type CanvasDesignAssetPorts,
+  type CanvasDesignAssetVersionContext,
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
   resolveCanvasShareImages,
@@ -469,11 +470,32 @@ export function wireCanvas(deps: CanvasDependencies) {
     uuid: randomUUID,
     actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
-  const resolveDesignAssets = (
+  const resolveDesignAssets = async (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
-  ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
-    resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    version?: CanvasDesignAssetVersionContext,
+  ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> => {
+    if (version === undefined) {
+      return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    }
+    const entry = persistence.canvasProjection.getById(version.canvasId);
+    const isCurrent =
+      entry !== undefined && String(entry.currentVersion.versionId) === String(version.versionId);
+    const shouldCompare = !isCurrent || version.marks === "recorded";
+    if (!shouldCompare) {
+      return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    }
+    const recorded = await canvasVersionImages.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      String(block.blockId),
+    );
+    return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts, {
+      mode: "compare",
+      ...(recorded === undefined ? {} : { recorded }),
+      clientSupportsMarks: version.legacyClient !== true,
+    });
+  };
   const resolveShareImages = (definition: Pick<CanvasDefinition, "blocks" | "provenance">) =>
     resolveCanvasShareImages(definition, canvasDesignAssetPorts);
 

@@ -270,6 +270,141 @@ describe("resolveCanvasDesignAssets", () => {
     expect(resolved.map((entry) => entry.status)).toEqual(["resolved", "unavailable", "resolved"]);
     expect(resolved[1]).toEqual({ assetId: "b", status: "unavailable", reason: "design-budget" });
   });
+
+  it("compares Project files against recorded digests, withholds changed bytes, and leaves generated images and captures untouched", async () => {
+    const pngB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7, 6]);
+    const shaA = createHash("sha256").update(PNG).digest("hex");
+    const captureId = decodeBrowserCaptureId("55555555-5555-4555-8555-555555555555");
+    const block = design([
+      file("kept", "screens/home.png"),
+      file("changed", "screens/changed.png"),
+      file("appeared", "screens/appeared.png"),
+      {
+        assetId: decodeCanvasDesignAssetId("hero"),
+        source: { kind: "generated-image", imageId },
+      },
+      {
+        assetId: decodeCanvasDesignAssetId("before"),
+        source: { kind: "browser-capture", captureId },
+      },
+    ]);
+    await writeFile(join(root, "screens", "changed.png"), pngB);
+    await writeFile(join(root, "screens", "appeared.png"), pngB);
+    const ports = filePorts(
+      async () => ({ status: "read", bytes: PNG }),
+      async () => ({ status: "read", bytes: PNG }),
+    );
+    const recorded = new Map([
+      [
+        "kept",
+        {
+          blockId: "phone" as never,
+          assetId: "kept" as never,
+          status: "recorded" as const,
+          sha256: shaA,
+        },
+      ],
+      [
+        "changed",
+        {
+          blockId: "phone" as never,
+          assetId: "changed" as never,
+          status: "recorded" as const,
+          sha256: shaA,
+        },
+      ],
+      [
+        "appeared",
+        {
+          blockId: "phone" as never,
+          assetId: "appeared" as never,
+          status: "unavailable" as const,
+        },
+      ],
+    ]);
+
+    const compared = await resolveCanvasDesignAssets(
+      block,
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+      { mode: "compare", recorded },
+    );
+    expect(compared).toEqual([
+      {
+        assetId: "kept",
+        status: "resolved",
+        mediaType: "image/png",
+        data: Buffer.from(PNG).toString("base64"),
+      },
+      { assetId: "changed", status: "unavailable", reason: "changed" },
+      { assetId: "appeared", status: "unavailable", reason: "changed" },
+      {
+        assetId: "hero",
+        status: "resolved",
+        mediaType: "image/png",
+        data: Buffer.from(PNG).toString("base64"),
+      },
+      {
+        assetId: "before",
+        status: "resolved",
+        mediaType: "image/png",
+        data: Buffer.from(PNG).toString("base64"),
+      },
+    ]);
+    expect(JSON.stringify(compared)).not.toContain(Buffer.from(pngB).toString("base64"));
+
+    // Restoring identical bytes draws the image again.
+    await writeFile(join(root, "screens", "changed.png"), PNG);
+    const restored = await resolveCanvasDesignAssets(
+      design([file("changed", "screens/changed.png")]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+      { mode: "compare", recorded },
+    );
+    expect(restored[0]).toMatchObject({ assetId: "changed", status: "resolved" });
+
+    // Older clients that do not ask for marks get `missing` instead of `changed`.
+    await writeFile(join(root, "screens", "changed.png"), pngB);
+    const legacy = await resolveCanvasDesignAssets(
+      design([file("changed", "screens/changed.png")]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+      { mode: "compare", recorded, clientSupportsMarks: false },
+    );
+    expect(legacy).toEqual([{ assetId: "changed", status: "unavailable", reason: "missing" }]);
+
+    // Unrecorded versions draw live Project files with `mark: "unrecorded"`,
+    // while leaving generated images and Browser captures unmarked, and omit
+    // the mark for older clients.
+    const unrecorded = await resolveCanvasDesignAssets(
+      design([
+        file("kept", "screens/home.png"),
+        {
+          assetId: decodeCanvasDesignAssetId("hero"),
+          source: { kind: "generated-image", imageId },
+        },
+        {
+          assetId: decodeCanvasDesignAssetId("before"),
+          source: { kind: "browser-capture", captureId },
+        },
+      ]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+      { mode: "compare" },
+    );
+    expect(unrecorded[0]).toMatchObject({ assetId: "kept", status: "resolved", mark: "unrecorded" });
+    expect(unrecorded[1]).not.toHaveProperty("mark");
+    expect(unrecorded[2]).not.toHaveProperty("mark");
+
+    const unrecordedLegacy = await resolveCanvasDesignAssets(
+      design([file("kept", "screens/home.png")]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+      { mode: "compare", clientSupportsMarks: false },
+    );
+    expect(unrecordedLegacy[0]).toMatchObject({ assetId: "kept", status: "resolved" });
+    expect(unrecordedLegacy[0]).not.toHaveProperty("mark");
+  });
 });
 
 describe("resolveCanvasShareImages", () => {
