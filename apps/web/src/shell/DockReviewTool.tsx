@@ -102,7 +102,18 @@ export function DockReviewTool(props: DockReviewToolProps) {
     selectedCheckoutId !== undefined && isReachable(selectedCheckoutId)
       ? selectedCheckoutId
       : undefined;
-  const checkoutId = activeSelected ?? props.checkoutId ?? defaultCheckout;
+  // ReviewWorkspace always passes `checkoutId` defaulting to `view.checkout.id`.
+  // When that primary checkout is a plain folder holding linked Git repositories,
+  // treat it as the default rather than an explicit override so Diff opens the
+  // first linked Git checkout instead of observing the non-Git parent folder.
+  const explicitPropCheckout =
+    props.checkoutId !== undefined &&
+    (view === undefined ||
+      String(props.checkoutId) !== String(view.checkout.id) ||
+      view.checkout.kind !== "plain-folder")
+      ? props.checkoutId
+      : undefined;
+  const checkoutId = activeSelected ?? explicitPropCheckout ?? defaultCheckout;
   if (props.client === undefined || view === undefined || checkoutId === undefined) {
     return <OctantEmpty state="loading" title="Loading review" />;
   }

@@ -548,7 +548,10 @@ export class GitService {
     return this.#serialized(input.checkoutId, async () => {
       const executionPolicy = resolvedPolicy();
       if (executionPolicy === "plan") return { status: "unavailable" as const };
-      if (input.includeDiff === true && !(await captureCurrent()))
+      if (
+        (input.includeDiff === true || input.captureCurrent !== undefined) &&
+        !(await captureCurrent())
+      )
         return { status: "unavailable" as const };
       const now = await this.#mutation.snapshotWorkingTree(
         {
@@ -565,7 +568,10 @@ export class GitService {
           from: input.from,
           to: now.snapshot.worktree,
         };
-        if (input.includeDiff === true && !(await captureCurrent()))
+        if (
+          (input.includeDiff === true || input.captureCurrent !== undefined) &&
+          !(await captureCurrent())
+        )
           return { status: "unavailable" };
         const changes = await read(comparison, signal);
         if (input.includeDiff !== true) return changes;

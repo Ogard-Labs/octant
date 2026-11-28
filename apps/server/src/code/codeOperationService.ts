@@ -6650,7 +6650,9 @@ export class CodeOperationService {
         state: "unavailable",
         ...(result.code === "invalid-base" ? { failureCode: "invalid-base" } : {}),
       });
-    await this.#recordPullRequestLink(thread, result.pullRequest);
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, result.pullRequest);
+    }
     return pullRequestState(command.operationId, result.status, result.pullRequest, result.draft);
   }
 
@@ -6684,7 +6686,9 @@ export class CodeOperationService {
         linkedCheckoutId,
       );
       if (located.status !== "found") return located.result(command.operationId);
-      await this.#recordPullRequestLink(thread, located.pullRequest);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, located.pullRequest);
+      }
       const done = await pullRequests.actions?.setState(
         { ...located.target, state: command.state },
         new AbortController().signal,
@@ -6711,12 +6715,16 @@ export class CodeOperationService {
         return unavailable(result.status === "none" ? "not-found" : undefined);
       draft = result.draft;
       identity = result.pullRequest;
-      await this.#recordPullRequestLink(thread, identity);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, identity);
+      }
     }
     if (changesLabels) {
       const located = await this.#locatePullRequest(command.threadId, "open", linkedCheckoutId);
       if (located.status !== "found") return located.result(command.operationId);
-      await this.#recordPullRequestLink(thread, located.pullRequest);
+      if (linkedCheckoutId === undefined) {
+        await this.#recordPullRequestLink(thread, located.pullRequest);
+      }
       const done = await pullRequests.actions?.editLabels(
         {
           ...located.target,
@@ -6764,13 +6772,13 @@ export class CodeOperationService {
     }
     if ((await this.#hasGitHubRemote(checkoutRoot, git)) === false)
       return this.#pullRequestUnavailable(command.operationId, "no-remote");
-    const located = await this.#locatePullRequest(
-      command.threadId,
-      "open",
-      String(command.checkoutId) === String(thread.checkoutId) ? undefined : command.checkoutId,
-    );
+    const linkedCheckoutId =
+      String(command.checkoutId) === String(thread.checkoutId) ? undefined : command.checkoutId;
+    const located = await this.#locatePullRequest(command.threadId, "open", linkedCheckoutId);
     if (located.status !== "found") return located.result(command.operationId);
-    await this.#recordPullRequestLink(thread, located.pullRequest);
+    if (linkedCheckoutId === undefined) {
+      await this.#recordPullRequestLink(thread, located.pullRequest);
+    }
     const already = await this.#settleEarlierComment(command, thread, located.target);
     if (already.status === "posted")
       return pullRequestState(command.operationId, "existing", located.pullRequest, undefined);
@@ -6908,7 +6916,9 @@ export class CodeOperationService {
     ) {
       return this.#pullRequestUnavailable(command.operationId, "sha-mismatch");
     }
-    await this.#recordPullRequestLink(thread, located.pullRequest);
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, located.pullRequest);
+    }
     if (actions === undefined) return this.#pullRequestUnavailable(command.operationId);
     const signal = new AbortController().signal;
     const summary = await actions.summary(located.target, signal);
@@ -7090,21 +7100,23 @@ export class CodeOperationService {
         freshness: "fresh",
       });
     const pr = result.pullRequest;
-    await this.#recordPullRequestLink(thread, {
-      number: pr.number,
-      url: pr.url,
-      baseRepository: pr.baseRepository,
-      ...(pr.canonicalBaseRepository === undefined
-        ? {}
-        : { canonicalBaseRepository: pr.canonicalBaseRepository }),
-      baseBranch: pr.baseBranch,
-      headOwner: pr.headRepository,
-      headBranch: pr.headBranch,
-      ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
-      ...(pr.baseRepositoryNodeId === undefined
-        ? {}
-        : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
-    });
+    if (String(command.checkoutId) === String(thread.checkoutId)) {
+      await this.#recordPullRequestLink(thread, {
+        number: pr.number,
+        url: pr.url,
+        baseRepository: pr.baseRepository,
+        ...(pr.canonicalBaseRepository === undefined
+          ? {}
+          : { canonicalBaseRepository: pr.canonicalBaseRepository }),
+        baseBranch: pr.baseBranch,
+        headOwner: pr.headRepository,
+        headBranch: pr.headBranch,
+        ...(pr.pullRequestNodeId === undefined ? {} : { pullRequestNodeId: pr.pullRequestNodeId }),
+        ...(pr.baseRepositoryNodeId === undefined
+          ? {}
+          : { baseRepositoryNodeId: pr.baseRepositoryNodeId }),
+      });
+    }
     return decodeCodeOperationResult({
       kind: "pull-request-review",
       operationId: command.operationId,

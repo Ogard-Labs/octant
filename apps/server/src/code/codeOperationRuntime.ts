@@ -8210,12 +8210,28 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             active.thread.executionPolicy;
           const groups: RepositoryTreeChanges[] = [];
           for (const entry of active.linkedCheckpoints) {
+            const resolveAuthorizedRoot = async (): Promise<string | undefined> => {
+              const liveThread = this.#effectiveThread(active.windowId, active.thread.id);
+              if (liveThread === undefined) return undefined;
+              const liveCheckout = this.#options.persistence.readCodeCheckout(entry.checkoutId);
+              if (liveCheckout === undefined || liveCheckout.availability !== "available")
+                return undefined;
+              const resolved = await this.#options.resolveCheckoutRoot(
+                active.windowId,
+                liveThread,
+                liveCheckout,
+              );
+              return resolved?.checkoutRoot;
+            };
+            const currentRoot = await resolveAuthorizedRoot();
+            if (currentRoot === undefined || currentRoot !== entry.checkoutRoot) continue;
             const result = await this.#git.changesSince({
               checkoutId: String(entry.checkoutId),
-              checkoutRoot: entry.checkoutRoot,
+              checkoutRoot: currentRoot,
               from: entry.from,
               executionPolicy: resolveExecutionPolicy(),
               resolveExecutionPolicy,
+              captureCurrent: async () => (await resolveAuthorizedRoot()) === currentRoot,
             });
             if (result.status !== "ready" || result.changes.length === 0) continue;
             groups.push({

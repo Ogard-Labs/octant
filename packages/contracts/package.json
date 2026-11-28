@@ -30,7 +30,6 @@
     "./workspace-presets": "./src/workspacePresets.ts",
     "./chat": "./src/chat.ts",
     "./code": "./src/code.ts",
-    "./project-repositories": "./src/projectRepositories.ts",
     "./code-home-activity": "./src/codeHomeActivity.ts",
     "./code-operations": "./src/codeOperations.ts",
     "./code-debug": "./src/codeDebug.ts",

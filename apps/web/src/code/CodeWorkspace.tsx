@@ -1175,7 +1175,9 @@ function GitWorkspaceSurface(
   );
   const [observation, setObservation] = useState<GitObservation>();
   const [failure, setFailure] = useState<string>();
+  const observationRequestRef = useRef(0);
   const observe = useCallback(async () => {
+    const requestId = (observationRequestRef.current += 1);
     setFailure(undefined);
     try {
       const result = await props.client.executeOperation({
@@ -1185,10 +1187,12 @@ function GitWorkspaceSurface(
         maxDiffBytes: 1024 * 1024,
         ...effectiveScope,
       });
+      if (observationRequestRef.current !== requestId) return;
       if (result.kind === "git-observed") setObservation(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
       else setFailure("Git status could not be read.");
     } catch {
+      if (observationRequestRef.current !== requestId) return;
       setFailure("Git status is unavailable. Reconnect and retry.");
     }
   }, [props.client, props.nextUuid, effectiveScope]);
@@ -1196,6 +1200,9 @@ function GitWorkspaceSurface(
   useEffect(() => {
     setObservation(undefined);
     void observe();
+    return () => {
+      observationRequestRef.current += 1;
+    };
   }, [observe]);
 
   const refreshingClient = useMemo(
@@ -1300,7 +1307,9 @@ function PullRequestWorkspaceSurface(
   );
   const [review, setReview] = useState<CodePullRequestReview>();
   const [failure, setFailure] = useState<string>();
+  const reviewRequestRef = useRef(0);
   const observe = useCallback(async () => {
+    const requestId = (reviewRequestRef.current += 1);
     setFailure(undefined);
     try {
       const result = await props.client.executeOperation({
@@ -1309,10 +1318,12 @@ function PullRequestWorkspaceSurface(
         maxDiffBytes: 1024 * 1024,
         ...effectiveScope,
       });
+      if (reviewRequestRef.current !== requestId) return;
       if (result.kind === "pull-request-review") setReview(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
       else setFailure("The pull request could not be read.");
     } catch {
+      if (reviewRequestRef.current !== requestId) return;
       setFailure("The pull request is unavailable. Reconnect and retry.");
     }
   }, [props.client, props.nextUuid, effectiveScope]);
@@ -1320,6 +1331,9 @@ function PullRequestWorkspaceSurface(
   useEffect(() => {
     setReview(undefined);
     void observe();
+    return () => {
+      reviewRequestRef.current += 1;
+    };
   }, [observe]);
 
   const picker =
