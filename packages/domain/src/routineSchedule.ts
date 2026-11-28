@@ -24,6 +24,10 @@ export function routineScheduleLabel(
       return trigger.sourceLabel ?? "Integration events";
     case "file-arrival":
       return `File arrivals in ${trigger.directory}`;
+    case "thread-finished":
+      return trigger.condition === "done"
+        ? "When waited-on thread is marked done"
+        : "When waited-on thread finishes";
     case "once":
       return `Once on ${routineDayLabel(trigger.scheduledAt, options)} at ${routineClockTime(trigger.scheduledAt, options)}`;
     case "interval": {

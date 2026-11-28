@@ -45,7 +45,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 18        | 14      | 4            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 6         | 4       | 2            | 0                   |
 | [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 8         | 5       | 3            | 0                   |
-| [Routines and timed turns](#routines-and-timed-turns)                                 | 5         | 4       | 1            | 0                   |
+| [Routines and timed turns](#routines-and-timed-turns)                                 | 6         | 4       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 7       | 5            | 0                   |
 | [Providers](#providers)                                                               | 12        | 9       | 3            | 0                   |
@@ -73,7 +73,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 1       | 0            | 0                   |
-| **All areas**                                                                         | **325**   | **216** | **105**      | **4**               |
+| **All areas**                                                                         | **326**   | **216** | **106**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1392,6 +1392,22 @@ A follow-up is a one-shot routine that sends one scheduled turn into the thread 
 - A Chat thread may have one, created only on the person's confirmation, with Chat's authority. (maintainer decision, 2026-11-21)
 
 Status: Built. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+
+### Follow-ups when another thread finishes
+
+A person may arm a one-shot `thread-finished` follow-up or routine wait that resumes a thread, starts a new Work or Code thread, or runs an existing Work or Code routine once more when another thread finishes (maintainer decision, 2026-11-28).
+
+- Closed finish conditions are `turn-finished` (default: a post-arming turn completed and the thread is idle with no open approval/question, pending decision, or queued message) and `done` (settled or completed unambiguously or by a person); failed, stopped, and interrupted turns never count.
+- Only a person at a local window or a device they paired at Full access on the follow-up's host can arm a wait; agents may only propose one, and an agent proposal always waits on the person's confirmation card at every access level.
+- Self-waits and waits on a thread's own child runs or coordinator workers are refused; armed waits are bounded to 8 per thread and 32 per host, expire after 7 days by default, and hold finishes noticed past the lateness limit as missed for Run now or Cancel.
+- Every triggered run stays at the routine ceiling (ask first, no unattended Full access), revalidates thread, Project, and arming-device authority, fires at most once under a deterministic occurrence key across replay and crash recovery, and opens with a host sentence naming the watched thread only by reference (no title or reply text).
+- Older clients that do not pass `?reads=thread-finished` do not receive `thread-finished` rows or proposals, and the store migration version advances so older builds refuse downgrade.
+
+Not built yet:
+
+- Waiting on a thread on another connected host: depends on the hub peer thread-state route and signed peer receipts.
+
+Status: Partly built. Since: 2026-11-28. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Usage limits and stalled turns
 

@@ -1,5 +1,9 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import type { RoutineAgentRequest, RoutineChangeRequest } from "@octant/contracts/automation";
+import type {
+  RoutineAgentRequest,
+  RoutineChangeRequest,
+  RoutineFinishWaitProposal,
+} from "@octant/contracts/automation";
 import { useCallback, useEffect, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
@@ -125,6 +129,17 @@ export function RoutineProposalPrompt(props: {
   }
 
   if ("kind" in pending) {
+    if (pending.kind === "routine-finish-wait-proposal") {
+      return (
+        <section
+          aria-label="Suggested by the agent"
+          className={`follow-up-cards ${props.className}`}
+        >
+          <RoutineFinishWaitCard busy={busy} decide={decide} proposal={pending} />
+          {note}
+        </section>
+      );
+    }
     return (
       <section aria-label="Asked by the agent" className={`follow-up-cards ${props.className}`}>
         <RoutineChangeCard busy={busy} decide={decide} request={pending} />
@@ -178,6 +193,68 @@ export function RoutineProposalPrompt(props: {
       </article>
       {note}
     </section>
+  );
+}
+
+/**
+ * The agent proposing to wait on another thread before resuming here, starting
+ * a new thread, or running an existing routine once more. Always waits for the
+ * person's click regardless of access level.
+ */
+function RoutineFinishWaitCard(props: {
+  readonly proposal: RoutineFinishWaitProposal;
+  readonly busy: boolean;
+  readonly decide: (decision: "confirm" | "decline") => Promise<void>;
+}) {
+  const { proposal, busy, decide } = props;
+  const targetRef = `thread ${String(proposal.targetThreadId).slice(0, 8)}`;
+  const conditionText = proposal.condition === "done" ? "is marked done" : "finishes its turn";
+  const kindLabel =
+    proposal.action === "same-thread"
+      ? "Follow-up when thread finishes · suggested"
+      : proposal.action === "run-routine"
+        ? "Run automation when thread finishes · suggested"
+        : "New thread when thread finishes · suggested";
+  const effectText =
+    proposal.action === "same-thread"
+      ? proposal.mode === "chat"
+        ? "It sends this prompt as a new turn in this thread."
+        : "It sends this prompt as a new turn in this thread, and asks before it changes anything."
+      : proposal.action === "run-routine"
+        ? "It runs that automation once more, asking before it changes anything."
+        : `It starts a new ${automationModeLabel(proposal.mode)} thread in this Project with this prompt, and asks before it changes anything.`;
+  return (
+    <article aria-label="Thread-finish follow-up proposal" className="follow-up-card">
+      <div className="follow-up-card__head">
+        <span className="follow-up-card__kind">{kindLabel}</span>
+        <OctantIconButton
+          disabled={busy}
+          label={`Dismiss ${proposal.displayName}`}
+          onClick={() => void decide("decline")}
+          size="icon-xs"
+          type="button"
+        >
+          <X aria-hidden="true" size={12} />
+        </OctantIconButton>
+      </div>
+      <p className="follow-up-card__title">{proposal.displayName}</p>
+      <p className="follow-up-card__summary">
+        {`Once, when ${targetRef} ${conditionText}. ${effectText}`}
+      </p>
+      {proposal.taskPrompt === undefined ? null : (
+        <p className="follow-up-card__prompt">{proposal.taskPrompt}</p>
+      )}
+      <div className="follow-up-card__actions">
+        <OctantButton
+          disabled={busy}
+          onClick={() => void decide("confirm")}
+          size="xs"
+          type="button"
+        >
+          {proposal.action === "run-routine" ? "Arm wait" : "Arm follow-up"}
+        </OctantButton>
+      </div>
+    </article>
   );
 }
 

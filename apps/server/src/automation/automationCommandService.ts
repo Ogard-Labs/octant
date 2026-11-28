@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeAutomationCancelRunRequestId,
   decodeAutomationCommand,
+  decodeAutomationFinishWaitId,
+  decodeAutomationFinishWaitRecord,
   automationFileActivityWindowLimit,
   decodeAutomationDefinition,
   deriveAutomationOccurrenceKey,
@@ -10,8 +13,11 @@ import {
   type AutomationClientPrincipal,
   type AutomationDefinition,
   type AutomationFileSourceCheckpoint,
+  type AutomationFinishWaitRecord,
   type AutomationId,
+  type AutomationMode,
   type AutomationRunId,
+  type AutomationThreadFinishedOccurrence,
   type AutomationThreadId,
   type AutomationTrigger,
   type AutomationWeeklyResolution,
@@ -26,6 +32,7 @@ import {
   AutomationPolicyRejected,
   automationFileSourceReviewedBy,
   buildAutomationWeeklyResolution,
+  decideThreadFinishWaitArming,
   isAgentRunActiveStatus,
   isAutomationMutationAllowed,
   isAutomationRunLifecycleActive,
@@ -68,6 +75,15 @@ export interface AutomationCommandServiceOptions {
    * run that has a thread, since its children cannot be checked.
    */
   readonly readChildren?: AutomationFileActivityPorts["readChildren"];
+  readonly uuid?: () => string;
+  /** Checks whether a waited-on local thread exists and belongs to the named Project/mode. */
+  readonly isTargetThreadAvailable?: (input: {
+    readonly mode: AutomationMode;
+    readonly threadId: string;
+    readonly projectId: string;
+  }) => boolean;
+  /** True when `candidateThreadId` is a delegated child run of `parentThreadId`. */
+  readonly isChildThreadOf?: (parentThreadId: string, candidateThreadId: string) => boolean;
 }
 
 /** Facts about a create that only the host can vouch for. */
@@ -97,6 +113,9 @@ export class AutomationCommandService {
   readonly #hostId: string;
   readonly #clock: () => string;
   readonly #readChildren: AutomationCommandServiceOptions["readChildren"];
+  readonly #uuid: () => string;
+  readonly #isTargetThreadAvailable: AutomationCommandServiceOptions["isTargetThreadAvailable"];
+  readonly #isChildThreadOf: AutomationCommandServiceOptions["isChildThreadOf"];
 
   constructor(options: AutomationCommandServiceOptions) {
     this.#store = options.store;
@@ -104,6 +123,9 @@ export class AutomationCommandService {
     this.#hostId = options.hostId;
     this.#clock = options.clock;
     this.#readChildren = options.readChildren;
+    this.#uuid = options.uuid ?? randomUUID;
+    this.#isTargetThreadAvailable = options.isTargetThreadAvailable;
+    this.#isChildThreadOf = options.isChildThreadOf;
   }
 
   /**
@@ -176,6 +198,12 @@ export class AutomationCommandService {
           return this.#confirmRun(command);
         case "cancel-current-automation-run":
           return this.#cancelCurrentRun(command);
+        case "arm-finish-wait":
+          return this.#armFinishWait(command);
+        case "cancel-finish-wait":
+          return this.#cancelFinishWait(command);
+        case "run-missed-finish-wait":
+          return this.#runMissedFinishWait(command);
       }
     } catch (error) {
       return mapCommandError(error, command.automationId);
@@ -392,6 +420,67 @@ export class AutomationCommandService {
         "blocked",
         "Choose an available local Work input folder before saving this file routine.",
       );
+    let initialFinishWait: AutomationFinishWaitRecord | undefined;
+    if (command.definition.trigger.kind === "thread-finished") {
+      if (!actsAsHostPerson(command.principal)) {
+        return failure(
+          "unauthorized",
+          "Arm a thread-finished trigger from a local window or a device you paired at Full access.",
+          { automationId: command.automationId },
+        );
+      }
+      const trigger = command.definition.trigger;
+      const originThreadId =
+        provenance?.originThreadId === undefined ? undefined : String(provenance.originThreadId);
+      const counts = this.#projection.countActiveFinishWaits(originThreadId);
+      const targetAvailable =
+        this.#isTargetThreadAvailable === undefined
+          ? true
+          : this.#isTargetThreadAvailable({
+              mode: trigger.targetMode,
+              threadId: String(trigger.targetThreadId),
+              projectId: String(trigger.targetProjectId),
+            });
+      const isChild =
+        originThreadId !== undefined && this.#isChildThreadOf !== undefined
+          ? this.#isChildThreadOf(originThreadId, String(trigger.targetThreadId))
+          : false;
+      const arming = decideThreadFinishWaitArming({
+        ...(originThreadId === undefined ? {} : { originThreadId }),
+        targetThreadId: String(trigger.targetThreadId),
+        ...(trigger.targetMemberId === undefined
+          ? {}
+          : { targetMemberId: String(trigger.targetMemberId) }),
+        isTargetChildOfOrigin: isChild,
+        targetAvailable,
+        activeWaitsForOriginThread: counts.thread,
+        activeWaitsForHost: counts.host,
+        armedAt: trigger.armedAt,
+        expiresAt: trigger.expiresAt,
+      });
+      if (arming.kind === "refused") {
+        return failure(
+          arming.reason === "cross-host-unsupported" ? "unsupported" : "blocked",
+          arming.message,
+          { automationId: command.automationId },
+        );
+      }
+      const now = this.#now();
+      initialFinishWait = decodeAutomationFinishWaitRecord({
+        waitId: decodeAutomationFinishWaitId(this.#uuid()),
+        targetThreadId: trigger.targetThreadId,
+        targetMode: trigger.targetMode,
+        targetProjectId: trigger.targetProjectId,
+        ...(trigger.targetMemberId === undefined ? {} : { targetMemberId: trigger.targetMemberId }),
+        condition: trigger.condition,
+        armedAt: trigger.armedAt,
+        expiresAt: trigger.expiresAt,
+        ...(trigger.baselineTurnId === undefined ? {} : { baselineTurnId: trigger.baselineTurnId }),
+        state: "armed",
+        updatedAt: now,
+        armedBy: command.principal,
+      });
+    }
     const now = this.#now();
     const paused = command.initialLifecycle === "paused";
     const definition = validateAutomationDefinition(
@@ -416,6 +505,7 @@ export class AutomationCommandService {
       ...(command.definition.trigger.kind === "file-arrival" && source !== undefined
         ? { fileSource: source.checkpoint }
         : {}),
+      ...(initialFinishWait === undefined ? {} : { finishWait: initialFinishWait }),
     });
     return { kind: "automation-created", automation: definition };
   }
@@ -589,7 +679,28 @@ export class AutomationCommandService {
         });
       }
     }
-    return { kind: resultKind, automation: changed };
+    // Archiving a routine with an armed or missed finish wait cancels that wait.
+    if (lifecycle === "archived") {
+      const wait = this.#projection.getFinishWait(current.id);
+      if (wait !== undefined && (wait.state === "armed" || wait.state === "missed")) {
+        const afterArchive = this.#projection.getDefinition(current.id) ?? changed;
+        this.#store.appendOccurrenceLedger({
+          ...personActor(command.principal),
+          automationId: current.id,
+          expectedVersion: afterArchive.version,
+          events: [
+            {
+              kind: "finish-wait-changed",
+              definitionRevision: afterArchive.definitionRevision,
+              wait: { ...wait, state: "cancelled", updatedAt: now },
+              previousState: wait.state,
+              at: now,
+            },
+          ],
+        });
+      }
+    }
+    return { kind: resultKind, automation: this.#projection.getDefinition(current.id) ?? changed };
   }
 
   #runNow(
@@ -804,6 +915,212 @@ export class AutomationCommandService {
     return { kind: "automation-run-cancelled", run: cancelled };
   }
 
+  #armFinishWait(
+    command: Extract<AutomationCommand, { readonly kind: "arm-finish-wait" }>,
+  ): AutomationCommandResult {
+    if (!actsAsHostPerson(command.principal)) {
+      return failure(
+        "unauthorized",
+        "Arm a thread-finished wait from a local window or a device you paired at Full access.",
+        { automationId: command.automationId },
+      );
+    }
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    const current = definition as AutomationDefinition;
+    if (current.targetPolicy === "same-thread" || current.trigger.kind === "thread-finished") {
+      return failure(
+        "unsupported",
+        "Attach a one-shot finish wait to an existing scheduled, file, or event routine.",
+        { automationId: current.id },
+      );
+    }
+    const existingWait = this.#projection.getFinishWait(current.id);
+    if (existingWait !== undefined && existingWait.state === "armed") {
+      return failure("active-occurrence", "This routine already has an armed finish wait.", {
+        automationId: current.id,
+      });
+    }
+    const originThreadId =
+      current.originThreadId === undefined ? undefined : String(current.originThreadId);
+    const counts = this.#projection.countActiveFinishWaits(originThreadId);
+    const targetAvailable =
+      this.#isTargetThreadAvailable === undefined
+        ? true
+        : this.#isTargetThreadAvailable({
+            mode: command.wait.targetMode,
+            threadId: String(command.wait.targetThreadId),
+            projectId: String(command.wait.targetProjectId),
+          });
+    const isChild =
+      originThreadId !== undefined && this.#isChildThreadOf !== undefined
+        ? this.#isChildThreadOf(originThreadId, String(command.wait.targetThreadId))
+        : false;
+    const arming = decideThreadFinishWaitArming({
+      ...(originThreadId === undefined ? {} : { originThreadId }),
+      targetThreadId: String(command.wait.targetThreadId),
+      ...(command.wait.targetMemberId === undefined
+        ? {}
+        : { targetMemberId: String(command.wait.targetMemberId) }),
+      isTargetChildOfOrigin: isChild,
+      targetAvailable,
+      activeWaitsForOriginThread: counts.thread,
+      activeWaitsForHost: counts.host,
+      armedAt: command.wait.armedAt,
+      expiresAt: command.wait.expiresAt,
+    });
+    if (arming.kind === "refused") {
+      return failure(
+        arming.reason === "cross-host-unsupported" ? "unsupported" : "blocked",
+        arming.message,
+        { automationId: current.id },
+      );
+    }
+    const now = this.#now();
+    const record = decodeAutomationFinishWaitRecord({
+      ...command.wait,
+      state: "armed",
+      updatedAt: now,
+      armedBy: command.principal,
+    });
+    this.#store.appendOccurrenceLedger({
+      ...personActor(command.principal),
+      automationId: current.id,
+      expectedVersion: current.version,
+      events: [
+        {
+          kind: "finish-wait-changed",
+          definitionRevision: current.definitionRevision,
+          wait: record,
+          ...(existingWait === undefined ? {} : { previousState: existingWait.state }),
+          at: now,
+        },
+      ],
+    });
+    return {
+      kind: "automation-updated",
+      automation: this.#projection.getDefinition(current.id) ?? current,
+    };
+  }
+
+  #cancelFinishWait(
+    command: Extract<AutomationCommand, { readonly kind: "cancel-finish-wait" }>,
+  ): AutomationCommandResult {
+    if (!actsAsHostPerson(command.principal)) {
+      return failure(
+        "unauthorized",
+        "Cancel a thread-finished wait from a local window or a device you paired at Full access.",
+        { automationId: command.automationId },
+      );
+    }
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    const current = definition as AutomationDefinition;
+    const wait = this.#projection.getFinishWait(current.id);
+    if (wait === undefined || String(wait.waitId) !== String(command.waitId)) {
+      return failure("not-found", "That finish wait does not exist on this routine.", {
+        automationId: current.id,
+      });
+    }
+    if (wait.state !== "armed" && wait.state !== "missed") {
+      return failure("terminal", "That finish wait is no longer active.", {
+        automationId: current.id,
+      });
+    }
+    const now = this.#now();
+    this.#store.appendOccurrenceLedger({
+      ...personActor(command.principal),
+      automationId: current.id,
+      expectedVersion: current.version,
+      events: [
+        {
+          kind: "finish-wait-changed",
+          definitionRevision: current.definitionRevision,
+          wait: { ...wait, state: "cancelled", updatedAt: now },
+          previousState: wait.state,
+          at: now,
+        },
+      ],
+    });
+    return {
+      kind: "automation-updated",
+      automation: this.#projection.getDefinition(current.id) ?? current,
+    };
+  }
+
+  #runMissedFinishWait(
+    command: Extract<AutomationCommand, { readonly kind: "run-missed-finish-wait" }>,
+  ): AutomationCommandResult {
+    if (!actsAsHostPerson(command.principal)) {
+      return failure(
+        "unauthorized",
+        "Run a missed finish wait from a local window or a device you paired at Full access.",
+        { automationId: command.automationId },
+      );
+    }
+    const definition = this.#projection.getDefinition(command.automationId);
+    const gate = this.#gateDefinitionMutation(definition, command);
+    if (gate !== undefined) return gate;
+    const current = definition as AutomationDefinition;
+    const wait = this.#projection.getFinishWait(current.id);
+    if (
+      wait === undefined ||
+      String(wait.waitId) !== String(command.waitId) ||
+      wait.state !== "missed" ||
+      wait.attestedTurnId === undefined ||
+      wait.finishedAt === undefined
+    ) {
+      return failure("invalid", "Only a missed finish wait can be run now.", {
+        automationId: current.id,
+      });
+    }
+    const occurrence: AutomationThreadFinishedOccurrence = {
+      kind: "thread-finished",
+      automationId: current.id,
+      definitionRevision: current.definitionRevision,
+      targetThreadId: wait.targetThreadId,
+      attestedTurnId: wait.attestedTurnId,
+      finishedAt: wait.finishedAt,
+      waitId: wait.waitId,
+    };
+    const occurrenceKey = deriveAutomationOccurrenceKey(occurrence);
+    const runId = automationRunIdForOccurrence(occurrenceKey);
+    const existingRun = this.#projection.getRun(runId);
+    if (existingRun !== undefined) {
+      return { kind: "automation-run-accepted", run: existingRun };
+    }
+    const active = this.#projection.activeRun(current.id);
+    if (active !== undefined) {
+      return {
+        kind: "automation-run-active-conflict",
+        automationId: current.id,
+        runId: active.id,
+        lifecycle: active.lifecycle,
+      };
+    }
+    const now = this.#now();
+    const run = buildAutomationRunForOccurrence({ definition: current, occurrence, now });
+    this.#store.appendRunCreated({ ...personActor(command.principal), run });
+    this.#store.appendOccurrenceLedger({
+      ...personActor(command.principal),
+      automationId: current.id,
+      expectedVersion: current.version,
+      events: [
+        {
+          kind: "finish-wait-changed",
+          definitionRevision: current.definitionRevision,
+          wait: { ...wait, state: "fired", runId: run.id, updatedAt: now },
+          previousState: "missed",
+          at: now,
+        },
+        { kind: "occurrence-claimed", occurrence, runId: run.id, at: now },
+      ],
+    });
+    return { kind: "automation-run-accepted", run: this.#projection.getRun(run.id) ?? run };
+  }
+
   /** Shared existence/host/terminal/version gates for definition mutations. */
   #gateDefinitionMutation(
     definition: AutomationDefinition | undefined,
@@ -851,7 +1168,11 @@ export class AutomationCommandService {
   }
 
   #dueState(trigger: AutomationTrigger): DueState {
-    if (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+    if (
+      trigger.kind === "file-arrival" ||
+      trigger.kind === "integration-event" ||
+      trigger.kind === "thread-finished"
+    )
       return { nextDueAt: null };
     if (trigger.kind === "once") return { nextDueAt: trigger.scheduledAt };
     const now = this.#now();

@@ -27,6 +27,8 @@ export interface AutomationAuthorityLiveFacts {
   readonly executionProfileMatches: boolean;
   readonly authorityDigestMatches: boolean;
   readonly extensionTrustMatches: boolean;
+  /** False when the paired device that armed/saved this routine was later revoked or narrowed. */
+  readonly authorAuthorized?: boolean;
   /** Code checkout/worktree still available at the bound revision. */
   readonly codeBindingMatches: boolean;
   /** Work binding receipt still matches the Project root revision. */
@@ -48,7 +50,9 @@ export type AutomationAuthorityRevalidationResult =
  */
 export function revalidateAutomationAuthority(input: {
   readonly definition: Pick<AutomationDefinition, "hostId">;
-  readonly run: Pick<AutomationRun, "definitionSnapshot" | "authoritySnapshot">;
+  readonly run: Pick<AutomationRun, "definitionSnapshot" | "authoritySnapshot"> & {
+    readonly occurrence?: AutomationRun["occurrence"];
+  };
   readonly facts: AutomationAuthorityLiveFacts;
 }): AutomationAuthorityRevalidationResult {
   const snapshot = input.run.definitionSnapshot;
@@ -58,13 +62,26 @@ export function revalidateAutomationAuthority(input: {
   if (String(input.definition.hostId) !== input.facts.hostId) {
     return blocked("host-mismatch", "Automation definition host identity no longer matches.");
   }
+  if (input.facts.authorAuthorized === false) {
+    return blocked(
+      "authority-mismatch",
+      "The device that armed this routine is no longer authorized on this host.",
+    );
+  }
   if (
     snapshot.executionProfile.executionPolicy === "full-access" ||
     snapshot.authorityProfile.requested.executionPolicy === "full-access" ||
     snapshot.authorityProfile.effective.executionPolicy === "full-access" ||
     input.run.authoritySnapshot.effective.executionPolicy === "full-access" ||
     input.run.authoritySnapshot.requested.executionPolicy === "full-access" ||
-    !automationLevelFitsTrigger(snapshot)
+    !automationLevelFitsTrigger(snapshot) ||
+    (input.run.occurrence?.kind === "thread-finished" &&
+      (snapshot.projectLevel !== undefined ||
+        (snapshot.runLevel !== undefined && snapshot.runLevel !== "ask-first") ||
+        (snapshot.mode === "work" &&
+          snapshot.runLevel === undefined &&
+          (snapshot.authorityProfile.effective.executionPolicy === "auto-accept-edits" ||
+            input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"))))
   ) {
     return blocked(
       "full-access-ineligible",
@@ -253,6 +270,7 @@ export function buildAutomationAuthorityFactsFromHost(input: {
   readonly executionProfileMatches: boolean;
   readonly authorityDigestMatches: boolean;
   readonly extensionTrustMatches?: boolean;
+  readonly authorAuthorized?: boolean;
   readonly codeBindingMatches?: boolean;
   readonly workBindingMatches?: boolean;
 }): AutomationAuthorityLiveFacts {
@@ -265,6 +283,7 @@ export function buildAutomationAuthorityFactsFromHost(input: {
     executionProfileMatches: input.executionProfileMatches,
     authorityDigestMatches: input.authorityDigestMatches,
     extensionTrustMatches: input.extensionTrustMatches ?? true,
+    ...(input.authorAuthorized === undefined ? {} : { authorAuthorized: input.authorAuthorized }),
     codeBindingMatches: input.codeBindingMatches ?? true,
     workBindingMatches: input.workBindingMatches ?? true,
   };

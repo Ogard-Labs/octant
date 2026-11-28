@@ -23,7 +23,7 @@ export type RoutineCadence = "one-time" | "recurring";
 
 /** Whether this routine fires once or keeps going. */
 export function routineCadence(trigger: AutomationTrigger): RoutineCadence {
-  return trigger.kind === "once" ? "one-time" : "recurring";
+  return trigger.kind === "once" || trigger.kind === "thread-finished" ? "one-time" : "recurring";
 }
 
 export function routineCadenceLabel(cadence: RoutineCadence): string {
@@ -89,7 +89,11 @@ export function routineScheduleLine(
   now: string,
   options: AutomationFormatOptions = {},
 ): string {
-  if (trigger.kind === "file-arrival" || trigger.kind === "integration-event")
+  if (
+    trigger.kind === "file-arrival" ||
+    trigger.kind === "integration-event" ||
+    trigger.kind === "thread-finished"
+  )
     return routineScheduleLabel(trigger, options);
   return `${routineScheduleLabel(trigger, options)} · ${routineNextRunLabel(nextDueAt, now, options)}`;
 }

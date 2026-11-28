@@ -3,6 +3,7 @@ import { automationPromptDigest } from "./automationAuthorityRevalidation";
 import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
+  automationThreadFinishedTurnPrompt,
   type AutomationRun,
   type WorkThreadId,
   type UtcTimestamp,
@@ -215,7 +216,15 @@ async function startOrRecover(
     requestId: decodeWorkTurnRequestId(String(input.firstTurnRequestId)),
     threadId: input.threadId,
     turnId,
-    prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+    prompt:
+      input.run.occurrence.kind === "thread-finished"
+        ? automationThreadFinishedTurnPrompt(
+            snapshot.taskPrompt,
+            String(input.run.occurrence.targetThreadId),
+          )
+        : followUp
+          ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+          : snapshot.taskPrompt,
     authority: {
       hostId: LOCAL_HOST_ID,
       projectId: snapshot.projectId,
@@ -287,15 +296,17 @@ async function startOrRecover(
             externalData: fileContext,
             admissionCurrent: () => fileCurrent?.() === true,
           }),
-      ...(snapshot.projectLevel === "opted-in"
-        ? {}
-        : {
-            accessCeiling:
-              snapshot.runLevel ??
-              (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
-                ? "auto-accept-edits"
-                : "ask-first"),
-          }),
+      ...(input.run.occurrence.kind === "thread-finished"
+        ? { accessCeiling: "ask-first" as const }
+        : snapshot.projectLevel === "opted-in"
+          ? {}
+          : {
+              accessCeiling:
+                snapshot.runLevel ??
+                (input.run.authoritySnapshot.effective.executionPolicy === "auto-accept-edits"
+                  ? "auto-accept-edits"
+                  : "ask-first"),
+            }),
     });
     if (
       fileContext !== undefined &&

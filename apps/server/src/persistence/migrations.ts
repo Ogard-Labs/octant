@@ -2965,6 +2965,14 @@ CREATE INDEX validation_evidence_authority_idx
       AND event_name = 'thread.finished-receipt-recorded@1'
       AND json_extract(payload_json, '$.mode') = 'code';`,
   },
+  {
+    version: 116,
+    name: "add_automation_thread_finished_trigger",
+    sql: `CREATE INDEX event_journal_automation_finish_wait ON event_journal (
+      aggregate_id, global_sequence
+    ) WHERE aggregate_type = 'automation-definition'
+      AND event_name = 'automation-finish-wait-changed@1';`,
+  },
 ];
 
 interface AppliedMigrationRow {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   automationFollowUpTurnPrompt,
+  automationThreadFinishedTurnPrompt,
   decodeCodeDeliveryTarget,
   type AutomationRun,
   type AutomationRunLevel,
@@ -225,9 +226,14 @@ async function startOrRecover(
       message: "The retained Code routine input does not match its dispatch intent.",
     };
   const prompt = options.evidence.put(
-    followUp
-      ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
-      : automationDispatchPromptText(input.run),
+    input.run.occurrence.kind === "thread-finished"
+      ? automationThreadFinishedTurnPrompt(
+          snapshot.taskPrompt,
+          String(input.run.occurrence.targetThreadId),
+        )
+      : followUp
+        ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+        : automationDispatchPromptText(input.run),
   );
   const operationId = automationCodeOperationId(input.run);
   const sessionId = input.firstTurnRequestId;

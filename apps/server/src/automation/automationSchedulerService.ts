@@ -45,7 +45,11 @@ import type { AutomationFileObservationDecision } from "./automationFileSourceSt
 import type { AutomationEventObservation } from "./automationEventSourceState";
 import { automationChatSubmissionId, automationCodeOperationId } from "./automationRunIdentity";
 import { automationDispatchPromptText } from "./automationFileContext";
-import { automationFollowUpTurnPrompt } from "@octant/contracts";
+import {
+  automationFollowUpTurnPrompt,
+  automationThreadFinishedTurnPrompt,
+  decodeAutomationFinishWaitRecord,
+} from "@octant/contracts";
 import { eventActorForPrincipal } from "../principalEventActor";
 
 export interface AutomationSchedulerConfig {
@@ -540,9 +544,14 @@ export class AutomationSchedulerService {
     if (observed === undefined) return;
     const { thread, turn } = observed;
     const prompt =
-      snapshot.targetPolicy === "same-thread"
-        ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
-        : automationDispatchPromptText(run);
+      run.occurrence.kind === "thread-finished"
+        ? automationThreadFinishedTurnPrompt(
+            snapshot.taskPrompt,
+            String(run.occurrence.targetThreadId),
+          )
+        : snapshot.targetPolicy === "same-thread"
+          ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+          : automationDispatchPromptText(run);
     if (
       String(thread.id) !== String(run.threadId) ||
       String(thread.projectId) !== String(snapshot.projectId) ||
@@ -786,6 +795,28 @@ export class AutomationSchedulerService {
         });
       }
     }
+    if (
+      run.occurrence.kind === "thread-finished" &&
+      run.occurrence.definitionRevision === definition.definitionRevision
+    ) {
+      const wait = this.#projection.getFinishWait(definition.id);
+      if (wait !== undefined && (wait.state === "armed" || wait.state === "missed")) {
+        events.push({
+          kind: "finish-wait-changed",
+          definitionRevision: definition.definitionRevision,
+          wait: decodeAutomationFinishWaitRecord({
+            ...wait,
+            state: "fired",
+            updatedAt: out.now,
+            attestedTurnId: run.occurrence.attestedTurnId,
+            finishedAt: run.occurrence.finishedAt,
+            runId: run.id,
+          }),
+          previousState: wait.state,
+          at: out.now,
+        });
+      }
+    }
     events.push({
       kind: "occurrence-claimed",
       occurrence: run.occurrence,
@@ -864,7 +895,24 @@ export class AutomationSchedulerService {
   }
 
   #exhaustConsumedOnce(definition: AutomationDefinition, out: PassCollector): void {
-    if (definition.trigger.kind !== "once" || definition.lifecycle !== "enabled") return;
+    if (definition.lifecycle !== "enabled") return;
+    if (definition.trigger.kind === "thread-finished") {
+      const wait = this.#projection.getFinishWait(definition.id);
+      if (wait === undefined || wait.state !== "fired" || wait.runId === undefined) return;
+      const run = this.#projection.getRun(wait.runId);
+      if (run === undefined || isAutomationRunLifecycleActive(run.lifecycle)) return;
+      this.#appendLedger(definition.id, [
+        {
+          kind: "exhausted",
+          definitionRevision: definition.definitionRevision,
+          consumedScheduledAt: wait.finishedAt ?? out.now,
+          at: out.now,
+        },
+      ]);
+      out.exhaustedAutomationIds.push(definition.id);
+      return;
+    }
+    if (definition.trigger.kind !== "once") return;
     const scheduledAt = definition.trigger.scheduledAt;
     if (!this.#isConsumed(definition, scheduledAt)) return;
     const run = this.#projection.getRun(
@@ -1104,6 +1152,8 @@ export class AutomationSchedulerService {
             automationId,
             deriveAutomationOccurrenceKey(event.occurrence),
           );
+        case "finish-wait-changed":
+          return this.#projection.getFinishWait(automationId)?.state !== event.wait.state;
         case "blocked":
           return refreshed.blockedReason === undefined;
         case "exhausted":

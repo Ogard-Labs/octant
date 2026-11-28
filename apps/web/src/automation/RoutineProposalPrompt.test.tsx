@@ -203,4 +203,34 @@ describe("RoutineProposalPrompt", () => {
     await Promise.resolve();
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("shows an agent-proposed thread-finish wait card and arms only when confirmed", async () => {
+    const finishWaitProposal = {
+      kind: "routine-finish-wait-proposal",
+      proposalId,
+      threadId: thisThread,
+      mode: "work",
+      projectId: "bb000000-0000-4000-8000-000000000020",
+      displayName: "Continue after build",
+      action: "same-thread",
+      taskPrompt: "Review the generated output.",
+      targetThreadId: otherThread,
+      targetMode: "code",
+      targetProjectId: "bb000000-0000-4000-8000-000000000021",
+      condition: "turn-finished",
+      expiresAt: "2026-11-07T10:00:00.000Z",
+      requestedAt: "2026-10-31T10:00:00.000Z",
+    } as unknown as RoutineAgentRequest;
+    const fake = client([finishWaitProposal]);
+    renderPrompt(fake);
+
+    const card = await screen.findByRole("article", { name: "Thread-finish follow-up proposal" });
+    expect(card).toHaveTextContent("Continue after build");
+    expect(card).toHaveTextContent("thread bb000000");
+    expect(card).toHaveTextContent("Review the generated output.");
+    expect(fake.decideProposal).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Arm follow-up" }));
+    expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
+  });
 });

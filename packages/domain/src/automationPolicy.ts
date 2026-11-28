@@ -394,6 +394,10 @@ export function resolveNextAutomationOccurrence(
     }
     case "weekly-local":
       return resolveWeeklyLocalOccurrence(trigger, input.after, inclusive);
+    case "file-arrival":
+    case "integration-event":
+    case "thread-finished":
+      return undefined;
   }
 }
 
@@ -1161,7 +1165,9 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
   }
   if (
     definition.lifecycle === "enabled" &&
-    (definition.trigger.kind === "file-arrival" || definition.trigger.kind === "integration-event"
+    (definition.trigger.kind === "file-arrival" ||
+    definition.trigger.kind === "integration-event" ||
+    definition.trigger.kind === "thread-finished"
       ? definition.nextDueAt !== null
       : definition.trigger.kind === "once"
         ? definition.nextDueAt !== definition.trigger.scheduledAt
@@ -1258,6 +1264,8 @@ export function validateAutomationDefinition(input: AutomationDefinition): Autom
 export function decideRoutineFromAgent(input: {
   readonly requestedByPerson: boolean;
   readonly followUp: boolean;
+  /** A wait-on-thread proposal always waits on the person's card at every level. */
+  readonly finishWait?: boolean;
   /** The posture the turn runs at when the call is made, not the thread's stored level. */
   readonly posture: "full-access" | "auto-accept-edits" | "approval-gated" | "plan" | undefined;
   /**
@@ -1271,7 +1279,7 @@ export function decideRoutineFromAgent(input: {
   /** The thread is marked as having read outside content; a caller that cannot tell passes true. */
   readonly readOutsideContent: boolean;
 }): "create-active" | "create-paused" | "ask-on-card" {
-  if (input.followUp || input.posture === "plan") return "ask-on-card";
+  if (input.followUp || input.finishWait === true || input.posture === "plan") return "ask-on-card";
   const startsActive = input.posture === "full-access" && input.startActiveAtFullAccess === true;
   if (input.strict) {
     if (startsActive) return "create-active";

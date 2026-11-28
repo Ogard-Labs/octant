@@ -1,4 +1,5 @@
 import type {
+  AutomationAuthorPrincipal,
   AutomationDefinition,
   AutomationRun,
   Project,
@@ -52,6 +53,13 @@ export interface ResolveAutomationAuthorityLiveFactsDeps {
     readonly repositoryId: string;
     readonly checkoutId: string;
   }) => boolean;
+  /**
+   * Revalidates a remote-device author (e.g. a paired phone that armed a
+   * finish wait). Returns false once the device is revoked or narrowed.
+   */
+  readonly isAuthorDeviceAuthorized?: (
+    author: Extract<AutomationAuthorPrincipal, { readonly kind: "remote-device" }>,
+  ) => boolean;
 }
 
 /**
@@ -61,8 +69,10 @@ export interface ResolveAutomationAuthorityLiveFactsDeps {
 export function resolveAutomationAuthorityLiveFacts(
   deps: ResolveAutomationAuthorityLiveFactsDeps,
   input: {
-    readonly definition: Pick<AutomationDefinition, "hostId">;
-    readonly run: Pick<AutomationRun, "definitionSnapshot">;
+    readonly definition: Pick<AutomationDefinition, "hostId"> &
+      Partial<Pick<AutomationDefinition, "createdBy" | "updatedBy">>;
+    readonly run: Pick<AutomationRun, "definitionSnapshot"> &
+      Partial<Pick<AutomationRun, "occurrence">>;
   },
 ): AutomationAuthorityLiveFacts {
   const snapshot = input.run.definitionSnapshot;
@@ -105,6 +115,19 @@ export function resolveAutomationAuthorityLiveFacts(
     snapshot.authorityProfile.effective.executionPolicy !== "full-access" &&
     snapshot.authorityProfile.requested.executionPolicy !== "full-access";
 
+  const author = input.definition.updatedBy ?? input.definition.createdBy;
+  const definitionAuthorAuthorized =
+    author?.kind === "remote-device" && deps.isAuthorDeviceAuthorized !== undefined
+      ? deps.isAuthorDeviceAuthorized(author)
+      : true;
+  const armedBy =
+    input.run.occurrence?.kind === "thread-finished" ? input.run.occurrence.armedBy : undefined;
+  const armedByAuthorized =
+    armedBy?.kind === "remote-device" && deps.isAuthorDeviceAuthorized !== undefined
+      ? deps.isAuthorDeviceAuthorized(armedBy)
+      : true;
+  const authorAuthorized = definitionAuthorAuthorized && armedByAuthorized;
+
   return buildAutomationAuthorityFactsFromHost({
     hostId: deps.hostId,
     project,
@@ -115,6 +138,7 @@ export function resolveAutomationAuthorityLiveFacts(
     ),
     executionProfileMatches,
     authorityDigestMatches,
+    authorAuthorized,
     ...(server === undefined
       ? { codeBindingMatches, workBindingMatches }
       : {

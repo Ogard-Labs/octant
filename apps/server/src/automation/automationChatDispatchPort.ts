@@ -1,5 +1,6 @@
 import {
   automationFollowUpTurnPrompt,
+  automationThreadFinishedTurnPrompt,
   type AggregateVersion,
   type AutomationRun,
   type ChatThreadId,
@@ -158,7 +159,15 @@ async function startOrRecover(
         kind: "send-chat-turn",
         threadId: input.threadId,
         expectedVersion: thread.version,
-        prompt: followUp ? automationFollowUpTurnPrompt(snapshot.taskPrompt) : snapshot.taskPrompt,
+        prompt:
+          input.run.occurrence.kind === "thread-finished"
+            ? automationThreadFinishedTurnPrompt(
+                snapshot.taskPrompt,
+                String(input.run.occurrence.targetThreadId),
+              )
+            : followUp
+              ? automationFollowUpTurnPrompt(snapshot.taskPrompt)
+              : snapshot.taskPrompt,
         submissionId: automationChatSubmissionId(input.run),
       },
       // A run a person explicitly confirmed carries their window alongside

@@ -35,14 +35,16 @@ import type { HarnessWiring } from "./harness";
 import {
   AutomationDefinitionSnapshot,
   type AutomationDefinition,
+  type AutomationFinishWaitTargetCandidate,
+  type AutomationMode,
   decodeAutomationCommand,
   decodeAutomationId,
   decodeAutomationRunId,
   decodeAgentRunParentThreadId,
+  decodeThreadMessageQueueScope,
   type CapacityReservationId,
   type AutomationRun,
   type CodeThreadId,
-  type RoutineProposal,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
@@ -51,6 +53,14 @@ import {
   type UtcTimestamp,
   type WorkThreadId,
 } from "@octant/contracts";
+import { AutomationThreadFinishWatcher } from "../automation/automationThreadFinishWatcher";
+import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
+import type { CoordinatorService } from "../coordinator/coordinatorService";
+import type { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
+import type { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
+import { workTurnDecision } from "../turnDecisions/workTurnDecisions";
+import type { WorkRequestService } from "../work/workRequestService";
+import type { ThreadRoutineDraftInput } from "../automation/threadRoutineDraft";
 import {
   type CompletedThreadArchiveInput,
   CompletedThreadArchiveSweep,
@@ -99,10 +109,13 @@ import { createHostPersonScopes } from "../hostPersonScope";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import {
   clampTurnAccessPosture,
+  coordinatorBoundsFor,
   defaultPermissionModeFor,
   defaultShellSettings,
   isAutomationRunLifecycleActive,
   isAgentRunActiveStatus,
+  isThreadFinishConditionMetNow,
+  type ThreadFinishTargetFacts,
 } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -124,6 +137,12 @@ import type { AutomationSourceBranch } from "../automation/automationCodeDispatc
 
 export type AutomationDependencies = {
   readonly integrationEventSources: IntegrationEventSourceProvider;
+  readonly workRequestService?: Pick<WorkRequestService, "listForThread">;
+  readonly codeTurnDecisions?: Pick<CodeTurnDecisions, "forThread">;
+  readonly threadMessageQueue?: Pick<ThreadMessageQueueService, "hasQueued">;
+  readonly codeTurnAwaitsPerson?: (threadId: string) => boolean;
+  readonly threadAwaitsHarnessApproval?: (threadId: string) => boolean;
+  readonly coordinatorService?: Pick<CoordinatorService, "isCoordinator">;
 } & Pick<ServerStart, "persistence" | "options"> &
   Pick<
     AuthorityWiring,
@@ -294,6 +313,238 @@ export function wireAutomation(deps: AutomationDependencies) {
     delivery: automationNotificationDelivery,
     pushGateway: pushGatewaySetting,
   });
+  const readFinishWaitTarget = (input: {
+    readonly threadId: string;
+    readonly mode: AutomationMode;
+    readonly projectId: string;
+  }): ThreadFinishTargetFacts => {
+    const queued =
+      deps.threadMessageQueue?.hasQueued(
+        decodeThreadMessageQueueScope({ mode: input.mode, threadId: input.threadId }),
+      ) === true;
+    const harnessWaiting = deps.threadAwaitsHarnessApproval?.(input.threadId) === true;
+    if (input.mode === "chat") {
+      let view;
+      try {
+        view = chatService.read(decodeChatThreadId(input.threadId));
+      } catch {
+        return { kind: "unavailable", reason: "missing" };
+      }
+      const thread = view.thread;
+      if (thread.lifecycle === "deleting" || thread.lifecycle === "deleted") {
+        return { kind: "unavailable", reason: "deleted" };
+      }
+      if (thread.lifecycle === "archived") {
+        return { kind: "unavailable", reason: "archived" };
+      }
+      if (thread.projectId === undefined || String(thread.projectId) !== input.projectId) {
+        return { kind: "unavailable", reason: "moved" };
+      }
+      let latestCompletedTurn:
+        | { readonly turnId: string; readonly completedAt: UtcTimestamp }
+        | undefined;
+      let hasOpenQuestion = false;
+      for (const turn of view.turns) {
+        const attempt = turn.attempts.at(-1);
+        if (attempt === undefined) continue;
+        if (attempt.pendingQuestion !== undefined) hasOpenQuestion = true;
+        if (attempt.outcome === "completed") {
+          if (
+            latestCompletedTurn === undefined ||
+            attempt.updatedAt >= latestCompletedTurn.completedAt
+          ) {
+            latestCompletedTurn = {
+              turnId: String(attempt.turnId),
+              completedAt: attempt.updatedAt,
+            };
+          }
+        }
+      }
+      return {
+        kind: "present",
+        threadId: String(thread.id),
+        mode: "chat",
+        projectId: String(thread.projectId),
+        working: chatService.isTurnActive(thread.id),
+        hasOpenRequest: hasOpenQuestion || harnessWaiting,
+        hasPendingDecision: false,
+        hasQueuedMessage: queued,
+        done: thread.completedAt !== undefined,
+        ...(thread.completedAt === undefined ? {} : { doneAt: thread.completedAt }),
+        ...(latestCompletedTurn === undefined ? {} : { latestCompletedTurn }),
+      };
+    }
+    if (input.mode === "work") {
+      const thread = workThreadProjection.read(decodeWorkThreadId(input.threadId));
+      if (thread === undefined) return { kind: "unavailable", reason: "missing" };
+      if (thread.lifecycle === "deleting" || thread.lifecycle === "deleted") {
+        return { kind: "unavailable", reason: "deleted" };
+      }
+      if (thread.lifecycle === "archived") {
+        return { kind: "unavailable", reason: "archived" };
+      }
+      if (String(thread.projectId) !== input.projectId) {
+        return { kind: "unavailable", reason: "moved" };
+      }
+      const turns = workTurnProjection.listForThread(thread.id);
+      let latestCompletedTurn:
+        | { readonly turnId: string; readonly completedAt: UtcTimestamp }
+        | undefined;
+      for (const turn of turns) {
+        if (turn.status !== "completed") continue;
+        if (
+          latestCompletedTurn === undefined ||
+          turn.updatedAt >= latestCompletedTurn.completedAt
+        ) {
+          latestCompletedTurn = { turnId: String(turn.turnId), completedAt: turn.updatedAt };
+        }
+      }
+      const pendingRequest =
+        deps.workRequestService
+          ?.listForThread(thread.projectId, thread.id)
+          .some((request) => request.status === "pending") === true;
+      const pendingDecision = workTurnDecision(thread, turns) !== undefined;
+      return {
+        kind: "present",
+        threadId: String(thread.id),
+        mode: "work",
+        projectId: String(thread.projectId),
+        working:
+          liveTurns.read(String(thread.id)) !== undefined ||
+          workTurnService.isTurnStarting(thread.id),
+        hasOpenRequest: pendingRequest || harnessWaiting,
+        hasPendingDecision: pendingDecision,
+        hasQueuedMessage: queued,
+        done: thread.completionConfirmed === true || thread.completedAt !== undefined,
+        ...(thread.completedAt === undefined ? {} : { doneAt: thread.completedAt }),
+        ...(latestCompletedTurn === undefined ? {} : { latestCompletedTurn }),
+      };
+    }
+    const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
+    if (thread === undefined) return { kind: "unavailable", reason: "missing" };
+    if (thread.lifecycle === "archived") {
+      return { kind: "unavailable", reason: "archived" };
+    }
+    if (String(thread.projectId) !== input.projectId) {
+      return { kind: "unavailable", reason: "moved" };
+    }
+    const windowRead = codeBoardEventStore.conversationWindow({
+      threadId: thread.id,
+      limit: 20,
+    });
+    let latestCompletedTurn:
+      | { readonly turnId: string; readonly completedAt: UtcTimestamp }
+      | undefined;
+    if (windowRead.status === "ok") {
+      for (const turn of windowRead.window.turns) {
+        if (turn.status !== "completed") continue;
+        if (
+          latestCompletedTurn === undefined ||
+          turn.updatedAt >= latestCompletedTurn.completedAt
+        ) {
+          latestCompletedTurn = {
+            turnId: String(turn.operationId),
+            completedAt: turn.updatedAt,
+          };
+        }
+      }
+    }
+    const doneAt = thread.markedDoneAt ?? thread.completedAt;
+    return {
+      kind: "present",
+      threadId: String(thread.id),
+      mode: "code",
+      projectId: String(thread.projectId),
+      working: liveTurns.read(String(thread.id)) !== undefined,
+      hasOpenRequest: deps.codeTurnAwaitsPerson?.(String(thread.id)) === true || harnessWaiting,
+      hasPendingDecision: deps.codeTurnDecisions?.forThread(thread) !== undefined,
+      hasQueuedMessage: queued,
+      done: doneAt !== undefined,
+      ...(doneAt === undefined ? {} : { doneAt }),
+      ...(latestCompletedTurn === undefined ? {} : { latestCompletedTurn }),
+    };
+  };
+
+  const listFinishWaitTargets = (input: {
+    readonly accessible: ReadonlyMap<string, "chat" | "work" | "code">;
+  }): ReadonlyArray<AutomationFinishWaitTargetCandidate> => {
+    const candidates: Array<AutomationFinishWaitTargetCandidate> = [];
+    const projectName = (projectId: string): string =>
+      persistence.readProject(projectId as never)?.name ??
+      serverProjectStore.project(projectId)?.name ??
+      "Project";
+    const statusOf = (
+      facts: ThreadFinishTargetFacts,
+    ): AutomationFinishWaitTargetCandidate["status"] => {
+      if (facts.kind !== "present") return "unavailable";
+      if (facts.done) return "done";
+      if (facts.working) return "working";
+      if (facts.hasOpenRequest || facts.hasPendingDecision) return "waiting";
+      return "idle";
+    };
+    for (const thread of persistence.readCodeThreads()) {
+      if (thread.lifecycle === "archived") continue;
+      if (input.accessible.get(String(thread.projectId)) !== "code") continue;
+      const facts = readFinishWaitTarget({
+        threadId: String(thread.id),
+        mode: "code",
+        projectId: String(thread.projectId),
+      });
+      candidates.push({
+        threadId: String(thread.id),
+        mode: "code",
+        projectId: thread.projectId,
+        projectName: projectName(String(thread.projectId)),
+        title: thread.title,
+        status: statusOf(facts),
+        alreadyTurnFinished: isThreadFinishConditionMetNow(facts, "turn-finished"),
+        alreadyDone: isThreadFinishConditionMetNow(facts, "done"),
+        hostId: LOCAL_HOST_ID,
+      });
+    }
+    for (const thread of workThreadProjection.list()) {
+      if (thread.lifecycle !== "active") continue;
+      if (input.accessible.get(String(thread.projectId)) !== "work") continue;
+      const facts = readFinishWaitTarget({
+        threadId: String(thread.id),
+        mode: "work",
+        projectId: String(thread.projectId),
+      });
+      candidates.push({
+        threadId: String(thread.id),
+        mode: "work",
+        projectId: thread.projectId,
+        projectName: projectName(String(thread.projectId)),
+        title: thread.title,
+        status: statusOf(facts),
+        alreadyTurnFinished: isThreadFinishConditionMetNow(facts, "turn-finished"),
+        alreadyDone: isThreadFinishConditionMetNow(facts, "done"),
+        hostId: LOCAL_HOST_ID,
+      });
+    }
+    for (const thread of persistence.readChatThreads()) {
+      if (thread.lifecycle !== "active" || thread.projectId === undefined) continue;
+      if (input.accessible.get(String(thread.projectId)) !== "chat") continue;
+      const facts = readFinishWaitTarget({
+        threadId: String(thread.id),
+        mode: "chat",
+        projectId: String(thread.projectId),
+      });
+      candidates.push({
+        threadId: String(thread.id),
+        mode: "chat",
+        projectId: thread.projectId,
+        projectName: projectName(String(thread.projectId)),
+        title: thread.title,
+        status: statusOf(facts),
+        alreadyTurnFinished: isThreadFinishConditionMetNow(facts, "turn-finished"),
+        alreadyDone: isThreadFinishConditionMetNow(facts, "done"),
+        hostId: LOCAL_HOST_ID,
+      });
+    }
+    return candidates.slice(0, 200);
+  };
+
   const automationCommandService = new AutomationCommandService({
     store: automationEventStore,
     projection: persistence.automationProjection,
@@ -301,6 +552,25 @@ export function wireAutomation(deps: AutomationDependencies) {
     clock: () => new Date().toISOString(),
     readChildren: (threadId) =>
       agentRunOrchestration.parentSummary(decodeAgentRunParentThreadId(threadId)),
+    isTargetThreadAvailable: (target) => readFinishWaitTarget(target).kind === "present",
+    isChildThreadOf: (parentThreadId, candidateThreadId) => {
+      if (
+        agentRunOrchestration
+          .parentSummary(decodeAgentRunParentThreadId(parentThreadId))
+          .some((child) => String(child.runId) === candidateThreadId)
+      ) {
+        return true;
+      }
+      try {
+        const code = persistence.readCodeThread(decodeCodeThreadId(candidateThreadId));
+        return (
+          code?.coordinatorThreadId !== undefined &&
+          String(code.coordinatorThreadId) === parentThreadId
+        );
+      } catch {
+        return false;
+      }
+    },
   });
   // The one host-local durable scheduler (A3) plus the ordinary-thread
   // dispatcher (A4). Claims stay journaled; the dispatcher revalidates
@@ -530,6 +800,20 @@ export function wireAutomation(deps: AutomationDependencies) {
         checkout !== undefined &&
         checkout.availability === "available" &&
         String(checkout.repositoryId) === input.repositoryId
+      );
+    },
+    isAuthorDeviceAuthorized: (author) => {
+      const devices = readDeviceRegistrations(persistence.connection);
+      const matching = devices.find(
+        (device) =>
+          device.device_id === String(author.deviceId) &&
+          device.state === "active" &&
+          device.credential_generation === author.credentialGeneration,
+      );
+      if (matching === undefined) return false;
+      return (
+        readDeviceApprovedByPerson(persistence.connection, matching.device_id) &&
+        readDeviceAccessLevel(persistence.connection, matching.device_id) === "full"
       );
     },
   };
@@ -792,6 +1076,26 @@ export function wireAutomation(deps: AutomationDependencies) {
       };
     },
     resolveFacts: (input) => resolveAutomationAuthorityLiveFacts(automationAuthorityDeps, input),
+    admitCoordinatorWake: (threadId, nowMs) => {
+      if (deps.coordinatorService?.isCoordinator(threadId) !== true) {
+        return { allowed: true };
+      }
+      const counts = createCoordinatorCountStore(persistence.connection);
+      const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+      const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+      const bounds = coordinatorBoundsFor(thread?.coordinatorBounds, {
+        wakesPerHour: settings.messageWakesPerHour,
+        rounds: settings.messageWakeRounds,
+      });
+      if (counts.wakesSince(threadId, nowMs - 60 * 60_000) >= bounds.wakesPerHour) {
+        return {
+          allowed: false,
+          message: "The coordinator reached its hourly wake bound, so the follow-up did not start.",
+        };
+      }
+      counts.recordWake(threadId, nowMs);
+      return { allowed: true };
+    },
     isConfirmedScopeCurrent: (scopeId) =>
       windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)) ||
       createHostPersonScopes({
@@ -805,11 +1109,29 @@ export function wireAutomation(deps: AutomationDependencies) {
     now: () => new Date().toISOString() as UtcTimestamp,
     onRunStatusChanged: observeRunStatusChanged,
   });
+  const automationThreadFinishWatcher = new AutomationThreadFinishWatcher({
+    store: automationEventStore,
+    projection: persistence.automationProjection,
+    dispatch: automationDispatch,
+    readTarget: readFinishWaitTarget,
+    now: () => new Date().toISOString() as UtcTimestamp,
+    latenessLimitHours: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+        .followUpLatenessLimitHours,
+    wake: () => automationScheduler.poke(),
+  });
+  let unsubscribeThreadFinishWatcher: (() => void) | undefined;
   const automationScheduler = new AutomationSchedulerService({
     reconcileFileSources: () => {
       void automationFileSources.reconcile().catch(() => undefined);
       automationEventSources.reconcile();
-      return persistence.automationProjection
+      try {
+        automationThreadFinishWatcher.reconcile();
+      } catch {
+        /* Finish-wait failure cannot stop timed routines. */
+      }
+      const finishDelay = automationThreadFinishWatcher.nextCheckDelayMs();
+      const sourceDelay = persistence.automationProjection
         .listDefinitions()
         .some(
           (definition) =>
@@ -819,8 +1141,13 @@ export function wireAutomation(deps: AutomationDependencies) {
         )
         ? 2_000
         : undefined;
+      if (sourceDelay === undefined) return finishDelay;
+      if (finishDelay === undefined) return sourceDelay;
+      return Math.min(sourceDelay, finishDelay);
     },
     stopFileSources: () => {
+      unsubscribeThreadFinishWatcher?.();
+      unsubscribeThreadFinishWatcher = undefined;
       automationFileSources.close();
       automationEventSources.stop();
     },
@@ -891,7 +1218,12 @@ export function wireAutomation(deps: AutomationDependencies) {
     monotonic: () => performance.now(),
     wake: () => automationScheduler.poke(),
   });
-  if (automationHistoryAvailable) automationScheduler.start();
+  if (automationHistoryAvailable) {
+    unsubscribeThreadFinishWatcher = persistence.journal.subscribeCommitted((append) =>
+      automationThreadFinishWatcher.onCommittedAppend(append),
+    );
+    automationScheduler.start();
+  }
   // The host's own timer for completed threads, fed by every mode's service
   // that can archive on the host's behalf.
   const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
@@ -988,7 +1320,7 @@ export function wireAutomation(deps: AutomationDependencies) {
           }),
     { results: "host-answers" },
   );
-  const draftThreadRoutine = (proposal: RoutineProposal) =>
+  const draftThreadRoutine = (proposal: ThreadRoutineDraftInput) =>
     buildThreadRoutineDraft(
       {
         hostId: String(LOCAL_HOST_ID),
@@ -1207,6 +1539,8 @@ export function wireAutomation(deps: AutomationDependencies) {
       service: routineProposalService,
       draft: draftThreadRoutine,
     },
+    readFinishWaitTarget,
+    listFinishWaitTargets,
   });
   // A routine the person asked a thread for is created at once, paused, as
   // that window's principal through the same draft and command path a

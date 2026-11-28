@@ -319,8 +319,25 @@ function routineWords(request: RoutineAgentRequest): {
   readonly allowLabel: string;
   readonly denyLabel: string;
 } {
-  const followUp = request.targetPolicy === "same-thread";
   if ("kind" in request) {
+    if (request.kind === "routine-finish-wait-proposal") {
+      const targetRef = `thread ${String(request.targetThreadId).slice(0, 8)}`;
+      const conditionText = request.condition === "done" ? "is marked done" : "finishes its turn";
+      const effectText =
+        request.action === "same-thread"
+          ? "It sends this prompt as a new turn in this thread, asking before it changes anything."
+          : request.action === "run-routine"
+            ? "It runs that routine once more, asking before it changes anything."
+            : "It starts a new thread in this Project with this prompt, asking before it changes anything.";
+      return {
+        summary: `Wait for ${targetRef}? The agent asks.`,
+        body: request.taskPrompt,
+        detail: `Once, when ${targetRef} ${conditionText}. ${effectText}`,
+        allowLabel: request.action === "run-routine" ? "Arm wait" : "Arm follow-up",
+        denyLabel: "Decline",
+      };
+    }
+    const followUp = request.targetPolicy === "same-thread";
     const allowLabel =
       request.change === "pause"
         ? "Pause routine"
@@ -340,6 +357,7 @@ function routineWords(request: RoutineAgentRequest): {
       denyLabel: "Keep it",
     };
   }
+  const followUp = request.targetPolicy === "same-thread";
   const firstRunAt = new Date(request.firstRunAt);
   const firstRun = firstRunAt.toLocaleString();
   // A weekly routine repeats in its trigger's zone, which can be a country

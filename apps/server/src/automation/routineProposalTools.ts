@@ -1,4 +1,5 @@
 import {
+  decodeAutomationId,
   decodeAutomationThreadId,
   decodeAutomationScheduledTrigger,
   decodeProjectId,
@@ -7,6 +8,7 @@ import {
   ROUTINE_PROPOSAL_TOOL_NAME,
   type AutomationId,
   type AutomationMissedRunPolicy,
+  type AutomationThreadFinishCondition,
   type OctantMode,
   type AutomationScheduledTrigger,
   type ProviderExecutionPolicy,
@@ -15,7 +17,11 @@ import {
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import { decideRoutineFromAgent, resolveNextAutomationOccurrence } from "@octant/domain";
+import {
+  decideRoutineFromAgent,
+  defaultThreadFinishWaitExpiry,
+  resolveNextAutomationOccurrence,
+} from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { RoutineProposalService } from "./routineProposalService";
 
@@ -31,6 +37,7 @@ export const routineProposalDefinition: ProviderToolDefinition = {
     "Each run is a fresh thread in this Project with the same kind of access as a thread the person starts, always asking before effects; you cannot choose another Project or wider access.",
     'trigger "once" runs at `at` (an ISO time with Z or an offset); "interval" runs every `everyMinutes` (15 to 43200), first at `startAt` or one interval from now; "weekly" runs on `weekdays` (1 = Monday … 7 = Sunday) at `localTime` (HH:MM) in `timeZone` (an IANA zone such as Europe/Oslo).',
     'trigger "follow-up" is the exception: once, at `at`, it sends the prompt as a new turn in this same thread, so you will have this conversation then (for example "check whether the reply arrived and summarise"). It does not run if the thread is busy, done, archived, or changed by then.',
+    'trigger "thread-finished" proposes waiting on another thread (`targetThreadId`, `targetMode`, `targetProjectId`, optional `condition`: "turn-finished" default or "done", optional `action`: "same-thread" default, "new-thread", or "run-routine" with `targetRoutineId`). It always waits on the person\'s card at every level and never arms itself.',
     "Otherwise the prompt must stand alone: a run has none of this conversation.",
   ].join(" "),
   inputSchema: {
@@ -38,7 +45,10 @@ export const routineProposalDefinition: ProviderToolDefinition = {
     properties: {
       name: { type: "string", maxLength: MAX_AUTOMATION_DISPLAY_NAME_LENGTH },
       prompt: { type: "string", maxLength: MAX_AUTOMATION_TASK_PROMPT_LENGTH },
-      trigger: { type: "string", enum: ["once", "interval", "weekly", "follow-up"] },
+      trigger: {
+        type: "string",
+        enum: ["once", "interval", "weekly", "follow-up", "thread-finished"],
+      },
       at: { type: "string" },
       everyMinutes: { type: "integer", minimum: 15, maximum: 43_200 },
       startAt: { type: "string" },
@@ -50,6 +60,12 @@ export const routineProposalDefinition: ProviderToolDefinition = {
       },
       localTime: { type: "string" },
       timeZone: { type: "string" },
+      targetThreadId: { type: "string" },
+      targetMode: { type: "string", enum: ["chat", "work", "code"] },
+      targetProjectId: { type: "string" },
+      condition: { type: "string", enum: ["turn-finished", "done"] },
+      action: { type: "string", enum: ["same-thread", "new-thread", "run-routine"] },
+      targetRoutineId: { type: "string" },
       requestedByPerson: { type: "boolean" },
       missedRuns: {
         type: "string",
@@ -81,10 +97,14 @@ export const chatRoutineProposalDefinition: ProviderToolDefinition = {
     properties: {
       name: { type: "string", maxLength: MAX_AUTOMATION_DISPLAY_NAME_LENGTH },
       prompt: { type: "string", maxLength: MAX_AUTOMATION_TASK_PROMPT_LENGTH },
-      trigger: { type: "string", enum: ["follow-up"] },
+      trigger: { type: "string", enum: ["follow-up", "thread-finished"] },
       at: { type: "string" },
+      targetThreadId: { type: "string" },
+      targetMode: { type: "string", enum: ["chat", "work", "code"] },
+      targetProjectId: { type: "string" },
+      condition: { type: "string", enum: ["turn-finished", "done"] },
     },
-    required: ["name", "prompt", "trigger", "at"],
+    required: ["name", "prompt", "trigger"],
     additionalProperties: false,
   },
 };
@@ -116,7 +136,9 @@ export function createRoutineProposalTools(input: {
    * run, or a usage-limit resume the host replays. Nobody is there to confirm.
    */
   readonly isAutomationOrigin: boolean;
-  readonly proposals: Pick<RoutineProposalService, "propose" | "createRequested">;
+  readonly proposals: Pick<RoutineProposalService, "propose" | "createRequested"> & {
+    readonly proposeFinishWait?: RoutineProposalService["proposeFinishWait"];
+  };
   /**
    * The posture the turn runs at when a call is made. A turn in Plan changes
    * nothing, so it asks even when the person asked; a turn at Full access
@@ -154,6 +176,71 @@ export function createRoutineProposalTools(input: {
       }
       const parsed = parseInput(inputJson, input.now());
       if (parsed.kind === "invalid") return refused("invalid-routine-input", parsed.message);
+      if (parsed.kind === "finish-wait") {
+        if (mode === "chat" && parsed.action !== "same-thread") {
+          return refused(
+            "chat-follow-up-only",
+            "A Chat thread can only propose a follow-up in this same thread.",
+          );
+        }
+        if (input.proposals.proposeFinishWait === undefined) {
+          return refused(
+            "unsupported",
+            "Thread-finished follow-up proposals are unavailable on this host.",
+          );
+        }
+        // A wait-on-thread proposal always waits on the person's card at every level.
+        const outcome = await input.proposals.proposeFinishWait({
+          windowId: input.windowId,
+          proposal: {
+            threadId: decodeAutomationThreadId(input.thread.id),
+            mode,
+            projectId: decodeProjectId(input.thread.projectId),
+            action: parsed.action,
+            displayName: parsed.name,
+            ...(parsed.prompt === undefined ? {} : { taskPrompt: parsed.prompt }),
+            ...(parsed.targetRoutineId === undefined
+              ? {}
+              : { targetRoutineId: parsed.targetRoutineId }),
+            targetThreadId: parsed.targetThreadId,
+            targetMode: parsed.targetMode,
+            targetProjectId: parsed.targetProjectId,
+            condition: parsed.condition,
+            expiresAt: parsed.expiresAt,
+          },
+          ...(signal === undefined ? {} : { signal }),
+        });
+        switch (outcome.status) {
+          case "confirmed":
+            return {
+              result: {
+                status: "confirmed",
+                routineId: String(outcome.automationId),
+                message:
+                  "The person confirmed the wait-on-thread follow-up. It is armed and shown in this thread and Automation Center.",
+              },
+            };
+          case "declined":
+            return {
+              result: { status: "declined", message: "The person declined. Nothing was armed." },
+            };
+          case "cancelled":
+            return {
+              result: {
+                status: "cancelled",
+                message: "The proposal was withdrawn. Nothing was armed.",
+              },
+              isError: true,
+            };
+          case "not-created":
+            return refused("not-created", `The host refused to arm it: ${outcome.message}`);
+          case "too-many-waiting":
+            return refused(
+              "too-many-waiting",
+              "Too many proposals are already waiting on the person. Mention this one in your reply instead.",
+            );
+        }
+      }
       // The schema offers Chat only a follow-up, but a model may send what it
       // likes; the draft refuses it again when the person confirms.
       if (mode === "chat" && !parsed.followUp) {
@@ -295,6 +382,18 @@ type ParsedInput =
       readonly requestedByPerson: boolean;
       readonly firstRunAt: UtcTimestamp;
     }
+  | {
+      readonly kind: "finish-wait";
+      readonly name: string;
+      readonly action: "same-thread" | "new-thread" | "run-routine";
+      readonly prompt?: string;
+      readonly targetRoutineId?: AutomationId;
+      readonly targetThreadId: ReturnType<typeof decodeAutomationThreadId>;
+      readonly targetMode: OctantMode;
+      readonly targetProjectId: ReturnType<typeof decodeProjectId>;
+      readonly condition: AutomationThreadFinishCondition;
+      readonly expiresAt: UtcTimestamp;
+    }
   | { readonly kind: "invalid"; readonly message: string };
 
 function parseInput(inputJson: string, nowMs: number): ParsedInput {
@@ -309,13 +408,72 @@ function parseInput(inputJson: string, nowMs: number): ParsedInput {
   }
   const fields = new Map<string, unknown>(Object.entries(raw));
   const name = text(fields, "name");
-  const prompt = text(fields, "prompt");
   if (name === "" || name.length > MAX_AUTOMATION_DISPLAY_NAME_LENGTH) {
     return {
       kind: "invalid",
       message: `A name of 1 to ${MAX_AUTOMATION_DISPLAY_NAME_LENGTH} characters is required.`,
     };
   }
+  if (fields.get("trigger") === "thread-finished") {
+    const rawAction = fields.get("action") ?? "same-thread";
+    if (rawAction !== "same-thread" && rawAction !== "new-thread" && rawAction !== "run-routine") {
+      return {
+        kind: "invalid",
+        message: 'action is "same-thread", "new-thread", or "run-routine".',
+      };
+    }
+    const rawCondition = fields.get("condition") ?? "turn-finished";
+    if (rawCondition !== "turn-finished" && rawCondition !== "done") {
+      return { kind: "invalid", message: 'condition is "turn-finished" or "done".' };
+    }
+    const rawTargetMode = fields.get("targetMode");
+    if (rawTargetMode !== "chat" && rawTargetMode !== "work" && rawTargetMode !== "code") {
+      return { kind: "invalid", message: 'targetMode is "chat", "work", or "code".' };
+    }
+    let targetThreadId: ReturnType<typeof decodeAutomationThreadId>;
+    let targetProjectId: ReturnType<typeof decodeProjectId>;
+    try {
+      targetThreadId = decodeAutomationThreadId(fields.get("targetThreadId"));
+      targetProjectId = decodeProjectId(fields.get("targetProjectId"));
+    } catch {
+      return {
+        kind: "invalid",
+        message: "thread-finished requires valid targetThreadId and targetProjectId UUIDs.",
+      };
+    }
+    let targetRoutineId: AutomationId | undefined;
+    const prompt = text(fields, "prompt");
+    if (rawAction === "run-routine") {
+      try {
+        targetRoutineId = decodeAutomationId(fields.get("targetRoutineId"));
+      } catch {
+        return {
+          kind: "invalid",
+          message: 'action "run-routine" requires a valid targetRoutineId UUID.',
+        };
+      }
+    } else if (prompt === "" || prompt.length > MAX_AUTOMATION_TASK_PROMPT_LENGTH) {
+      return {
+        kind: "invalid",
+        message: `A prompt of 1 to ${MAX_AUTOMATION_TASK_PROMPT_LENGTH} characters is required.`,
+      };
+    }
+    const armedAt = new Date(nowMs).toISOString() as UtcTimestamp;
+    return {
+      kind: "finish-wait",
+      name,
+      action: rawAction,
+      ...(rawAction === "run-routine" && targetRoutineId !== undefined
+        ? { targetRoutineId }
+        : { prompt }),
+      targetThreadId,
+      targetMode: rawTargetMode,
+      targetProjectId,
+      condition: rawCondition,
+      expiresAt: defaultThreadFinishWaitExpiry(armedAt),
+    };
+  }
+  const prompt = text(fields, "prompt");
   if (prompt === "" || prompt.length > MAX_AUTOMATION_TASK_PROMPT_LENGTH) {
     return {
       kind: "invalid",

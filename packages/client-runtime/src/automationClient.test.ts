@@ -376,4 +376,47 @@ describe("createAutomationClient", () => {
       category: "contract",
     });
   });
+
+  it("advertises thread-finished reads on list, get, and proposals and lists local wait targets", async () => {
+    const requestedUrls: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("/api/automations/list")) {
+        return jsonResponse({ kind: "automation-list", items: [summary] });
+      }
+      if (url.includes("/api/automations/get")) {
+        return jsonResponse({ kind: "automation-detail", automation: definition, runs: [] });
+      }
+      if (url.includes("/api/automations/proposals")) {
+        return jsonResponse({ kind: "routine-proposal-list", proposals: [] });
+      }
+      return jsonResponse({
+        kind: "automation-finish-wait-targets",
+        targets: [
+          {
+            threadId: "aa000000-0000-4000-8000-000000000099",
+            mode: "work",
+            projectId,
+            projectName: "Reports",
+            title: "Build report",
+            status: "working",
+            alreadyTurnFinished: false,
+            alreadyDone: false,
+            hostId: "local",
+          },
+        ],
+      });
+    });
+    const api = client(fetchImpl as never);
+    await api.list();
+    await api.get(automationId as never);
+    await api.listProposals();
+    const targets = await api.listFinishWaitTargets?.();
+    expect(targets?.targets).toHaveLength(1);
+    expect(new URL(requestedUrls[0]!).searchParams.get("reads")).toBe("thread-finished");
+    expect(new URL(requestedUrls[1]!).searchParams.get("reads")).toBe("thread-finished");
+    expect(new URL(requestedUrls[2]!).searchParams.get("reads")).toBe("thread-finished");
+    expect(new URL(requestedUrls[3]!).pathname).toBe("/api/automations/finish-wait-targets");
+  });
 });

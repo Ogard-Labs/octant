@@ -51,6 +51,7 @@ export type AutomationDetailState =
       readonly automation: AutomationDefinition;
       readonly fileSource?: AutomationDetailResponse["fileSource"];
       readonly eventSource?: AutomationDetailResponse["eventSource"];
+      readonly finishWait?: AutomationDetailResponse["finishWait"];
       readonly runs: readonly AutomationRun[];
     }
   | { readonly status: "unavailable"; readonly automationId: string; readonly message: string };
@@ -216,6 +217,7 @@ export function useAutomationCenterController(
           automation: response.automation,
           ...(response.fileSource === undefined ? {} : { fileSource: response.fileSource }),
           ...(response.eventSource === undefined ? {} : { eventSource: response.eventSource }),
+          ...(response.finishWait === undefined ? {} : { finishWait: response.finishWait }),
           runs: response.runs,
         });
       })
