@@ -93,6 +93,7 @@ const config: ExpoConfig = {
     // an EAS variable set once the push accounts exist), so a build made
     // before then signs as it does today.
     ["./plugins/withOctantPush", { enabled: process.env.OCTANT_MOBILE_PUSH === "1" }],
+    "./plugins/withOctantShare",
     "expo-secure-store",
     "expo-local-authentication",
     "expo-font",
