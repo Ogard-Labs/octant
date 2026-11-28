@@ -143,6 +143,12 @@ function byText(container: ParentNode, role: string, text: string): HTMLElement 
   return match;
 }
 
+function byLabel(container: ParentNode, role: string, label: string): HTMLElement {
+  const match = container.querySelector(`[role="${role}"][aria-label="${label}"]`);
+  if (!(match instanceof HTMLElement)) throw new Error(`No ${role} is labelled "${label}".`);
+  return match;
+}
+
 async function press(element: HTMLElement) {
   await act(async () => {
     element.click();
@@ -242,9 +248,9 @@ describe("a provider question on the phone", () => {
     });
     const container = await render(transport, authenticator(), true);
     expect(container.textContent).toContain("Which venue?");
-    expect(byText(container, "radio", "Hall B").getAttribute("aria-disabled")).toBe("true");
-    expect(container.querySelector('[data-testid="mobile-work-question-submit"]')).toBeNull();
-    expect(container.querySelector("input")).toBeNull();
+    expect(byLabel(container, "radio", "Hall B").getAttribute("aria-disabled")).toBe("true");
+    expect(container.querySelector('[data-testid="mobile-questionnaire-submit"]')).toBeNull();
+    expect(container.querySelector("input, textarea")).toBeNull();
     expect(commands).toEqual([]);
   });
 
@@ -256,9 +262,9 @@ describe("a provider question on the phone", () => {
     });
     const auth = authenticator();
     const container = await render(transport, auth);
-    expect(byText(container, "button", "Submit").getAttribute("aria-disabled")).toBe("true");
-    await press(byText(container, "radio", "Hall B"));
-    await press(byText(container, "button", "Submit"));
+    expect(byLabel(container, "button", "Send answer").getAttribute("aria-disabled")).toBe("true");
+    await press(byLabel(container, "radio", "Hall B"));
+    await press(byLabel(container, "button", "Send answer"));
     expect(auth.authenticate).not.toHaveBeenCalled();
     expect(commands).toEqual([
       {
@@ -270,16 +276,15 @@ describe("a provider question on the phone", () => {
     ]);
   });
 
-  it("sends the person's own answer when no option fits", async () => {
+  it("sends the person's own answer from the field that is always under the question", async () => {
     const { transport, commands } = hostWith({
       kind: "user-input",
       prompt: "Which venue?",
       options: ["Hall A"],
     });
     const container = await render(transport, authenticator());
-    await press(byText(container, "radio", "Type your own answer"));
-    await type(container, "Your answer", "The rooftop");
-    await press(byText(container, "button", "Submit"));
+    await type(container, "Your own answer", "The rooftop");
+    await press(byLabel(container, "button", "Send answer"));
     expect(commands).toEqual([
       expect.objectContaining({ resolution: { kind: "user-input", answer: "The rooftop" } }),
     ]);
@@ -306,13 +311,45 @@ describe("a provider questionnaire on the phone", () => {
     },
   };
 
+  const several = {
+    kind: "user-input",
+    prompt: "Venue · Extras",
+    options: [],
+    questionnaire: {
+      allowComment: false,
+      questions: [
+        {
+          id: "q0",
+          header: "Venue",
+          prompt: "Which venue?",
+          selection: "single",
+          options: [
+            { id: "o0", label: "Hall A", description: "Seats forty" },
+            { id: "o1", label: "Hall B", recommended: true },
+          ],
+        },
+        {
+          id: "q1",
+          header: "Extras",
+          prompt: "Which extras?",
+          selection: "multiple",
+          minSelections: 0,
+          options: [
+            { id: "o0", label: "Coffee" },
+            { id: "o1", label: "Lunch" },
+          ],
+        },
+      ],
+    },
+  };
+
   it("sends the whole response once every question is answered", async () => {
     const { transport, commands } = hostWith(detail);
     const container = await render(transport, authenticator());
-    expect(byText(container, "button", "Send answers").getAttribute("aria-disabled")).toBe("true");
-    await press(byText(container, "radio", "Hall B (Recommended)"));
+    expect(byLabel(container, "button", "Send answer").getAttribute("aria-disabled")).toBe("true");
+    await press(byLabel(container, "radio", "Hall B, recommended"));
     await type(container, "Anything to add?", "Thanks");
-    await press(byText(container, "button", "Send answers"));
+    await press(byLabel(container, "button", "Send answer"));
     expect(commands).toEqual([
       {
         kind: "resolve-work-request",
@@ -327,6 +364,70 @@ describe("a provider questionnaire on the phone", () => {
           },
         },
       },
+    ]);
+  });
+
+  it("shows every question under its header on one card and answers them all with one Send", async () => {
+    const { transport, commands } = hostWith(several);
+    const container = await render(transport, authenticator());
+    expect(container.querySelectorAll('[data-testid="mobile-work-questionnaire"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-testid="mobile-questionnaire-submit"]')).toHaveLength(
+      1,
+    );
+    expect(container.textContent).toContain("Waiting for 2 answers");
+    expect(container.textContent).toContain("Venue");
+    expect(container.textContent).toContain("Extras");
+    expect(container.textContent).toContain("Seats forty");
+    expect(container.textContent).toContain("Recommended");
+    // No comment field where the provider cannot take one.
+    expect(container.querySelector('[aria-label="Anything to add?"]')).toBeNull();
+    await press(byLabel(container, "checkbox", "Lunch"));
+    await type(container, "Your own answer for Venue", "The rooftop");
+    await press(byLabel(container, "button", "Send answers"));
+    expect(commands).toEqual([
+      expect.objectContaining({
+        resolution: {
+          kind: "user-input",
+          answer: {
+            version: 1,
+            answers: [
+              { questionId: "q0", selectedOptionIds: [], customAnswer: "The rooftop" },
+              { questionId: "q1", selectedOptionIds: ["o1"] },
+            ],
+          },
+        },
+      }),
+    ]);
+  });
+
+  it("keeps the unsent answers after leaving the thread and coming back", async () => {
+    const { transport, commands } = hostWith(several);
+    const first = await render(transport, authenticator());
+    await press(byLabel(first, "radio", "Hall A"));
+    await type(first, "Your own answer for Extras", "Cake");
+    const root = roots.pop();
+    act(() => {
+      root?.unmount();
+    });
+
+    const again = await render(transport, authenticator());
+    expect(byLabel(again, "radio", "Hall A").getAttribute("aria-checked")).toBe("true");
+    const field = again.querySelector('[aria-label="Your own answer for Extras"]');
+    expect(field instanceof HTMLTextAreaElement ? field.value : undefined).toBe("Cake");
+    await press(byLabel(again, "button", "Send answers"));
+    expect(commands).toEqual([
+      expect.objectContaining({
+        resolution: {
+          kind: "user-input",
+          answer: {
+            version: 1,
+            answers: [
+              { questionId: "q0", selectedOptionIds: ["o0"] },
+              { questionId: "q1", selectedOptionIds: [], customAnswer: "Cake" },
+            ],
+          },
+        },
+      }),
     ]);
   });
 

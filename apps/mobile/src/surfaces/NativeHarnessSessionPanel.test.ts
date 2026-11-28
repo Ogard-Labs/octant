@@ -22,6 +22,7 @@ vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
   ...(await import("../../design-system/GlassChip")),
+  ...(await import("../../design-system/tone")),
 }));
 vi.mock("@octant/client-runtime", async () => {
   const actual =
@@ -152,6 +153,7 @@ async function renderPanel(
   panelTransport: MobileRemoteTransport = transport,
   authenticator: BiometricAuthenticator = confirming(),
   watchingOnly = false,
+  mode?: "chat" | "work" | "code",
 ): Promise<HTMLElement> {
   vi.mocked(loadMobileNativeHarnessSession).mockResolvedValue(view);
   const container = document.createElement("div");
@@ -169,6 +171,7 @@ async function renderPanel(
           threadId,
           refreshIntervalMs: 60_000,
           watchingOnly,
+          ...(mode === undefined ? {} : { mode }),
         }),
       }),
     );
@@ -207,21 +210,115 @@ describe("phone harness approvals", () => {
       Response.json({ error: "Refused" }, { status: 403 }),
     );
     const container = await renderPanel(questionView(), { ...transport, authenticatedFetch });
-    const field = container.querySelector<HTMLInputElement>('[aria-label="Answer"]');
+    const field = container.querySelector<HTMLTextAreaElement>('[aria-label="Your own answer"]');
     if (field === null) throw new Error("Expected an answer field.");
     await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
         field,
         "Keep this",
       );
       field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () =>
-      container.querySelector<HTMLElement>('[data-testid="mobile-native-harness-answer"]')?.click(),
+      container.querySelector<HTMLElement>('[data-testid="mobile-questionnaire-submit"]')?.click(),
     );
     expect(authenticatedFetch).toHaveBeenCalledOnce();
     expect(field.value).toBe("Keep this");
     expect(container.textContent).toContain("The answer was refused.");
+  });
+
+  const questionnaireView = (source?: { readonly runId: string }) =>
+    decodeNativeHarnessSessionView({
+      ...pendingLeadApproval(),
+      approvals: [],
+      questions: [
+        {
+          id: "00000000-0000-4000-8000-000000000093",
+          prompt: "Layout · Tests",
+          options: [],
+          questionnaire: {
+            allowComment: false,
+            questions: [
+              {
+                id: "q0",
+                header: "Layout",
+                prompt: "Which layout?",
+                selection: "single",
+                options: [
+                  { id: "o0", label: "Grid" },
+                  { id: "o1", label: "List", recommended: true },
+                ],
+              },
+              {
+                id: "q1",
+                header: "Tests",
+                prompt: "Add tests?",
+                selection: "single",
+                options: [
+                  { id: "o0", label: "Yes" },
+                  { id: "o1", label: "No" },
+                ],
+              },
+            ],
+          },
+          status: "pending",
+          askedAt: "2026-09-05T12:06:00.000Z",
+          ...(source === undefined
+            ? {}
+            : {
+                source: {
+                  runId: source.runId,
+                  providerInstanceId: "00000000-0000-4000-8000-000000000001",
+                  modelId: "child-model",
+                },
+              }),
+        },
+      ],
+    });
+
+  it("answers a questionnaire with the JSON response the host checks", async () => {
+    const sent: Array<{ readonly path: string; readonly body: unknown }> = [];
+    const authenticatedFetch = vi.fn(async (input: { path: string; body?: unknown }) => {
+      sent.push({ path: input.path, body: JSON.parse(String(input.body)) });
+      return Response.json({ kind: "question-answered" });
+    });
+    const container = await renderPanel(questionnaireView(), {
+      ...transport,
+      authenticatedFetch,
+    } as MobileRemoteTransport);
+    const choose = (label: string) =>
+      act(async () =>
+        container.querySelector<HTMLElement>(`[role="radio"][aria-label="${label}"]`)?.click(),
+      );
+    await choose("List, recommended");
+    await choose("Yes");
+    await act(async () =>
+      container.querySelector<HTMLElement>('[data-testid="mobile-questionnaire-submit"]')?.click(),
+    );
+    const [answer] = sent;
+    expect(answer?.path).toBe(`/api/native-harness/sessions/${threadId}/questions`);
+    const body = answer?.body as { questionId: string; answer: string };
+    expect(body.questionId).toBe("00000000-0000-4000-8000-000000000093");
+    expect(JSON.parse(body.answer)).toEqual({
+      version: 1,
+      answers: [
+        { questionId: "q0", selectedOptionIds: ["o1"] },
+        { questionId: "q1", selectedOptionIds: ["o0"] },
+      ],
+    });
+  });
+
+  it("leaves a Chat or Code lead's question to the thread's question card, but answers a subagent's", async () => {
+    const lead = await renderPanel(questionnaireView(), transport, confirming(), false, "chat");
+    expect(lead.querySelector('[data-testid="mobile-native-harness-question"]')).toBeNull();
+    const child = await renderPanel(
+      questionnaireView({ runId: "00000000-0000-4000-8000-000000000094" }),
+      transport,
+      confirming(),
+      false,
+      "code",
+    );
+    expect(child.querySelector('[data-testid="mobile-native-harness-question"]')).not.toBeNull();
   });
 
   it("offers Allow and Deny only when a child asks", async () => {

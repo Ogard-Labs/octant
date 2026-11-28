@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   answerMobileWorkQuestion,
   dismissMobileWorkQuestion,
@@ -8,20 +8,15 @@ import {
   type MobileRemoteTransport,
   type MobileWorkRequestAnswer,
 } from "@octant/client-runtime";
-import type { Questionnaire, WorkRequest } from "@octant/contracts";
-import { Icon } from "../ui/Icon";
-import { useTheme, withAlpha } from "../../design-system";
+import type { WorkRequest } from "@octant/contracts";
+import { useTheme } from "../../design-system";
 import { ApprovalDecisionButtons } from "../approvals/ApprovalDecisionButtons";
 import type { LevelChangePresentation } from "../approvals/levelChangePresentation";
 import {
-  chooseQuestionnaireOption,
-  emptyQuestionnaireDraft,
-  pendingWorkRequestsInOrder,
-  questionnaireResponseOf,
-  toggleQuestionnaireCustom,
-  workRequestCard,
-  writeQuestionnaireCustom,
-} from "../approvals/workRequestPresentation";
+  forgetSettledQuestionnaireDrafts,
+  questionnaireDraftKey,
+} from "../approvals/questionnaireDraft";
+import { pendingWorkRequestsInOrder, workRequestCard } from "../approvals/workRequestPresentation";
 import { MOBILE_COPY } from "../copy";
 import { usePolledResource } from "../runtime/usePolledResource";
 import {
@@ -31,9 +26,24 @@ import {
 } from "../security/BiometricGate";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
+import { QuestionnaireCard, type QuestionCardAsk } from "./QuestionnaireCard";
 
 /** The plan scrolls inside the card past this height so the answers stay in reach. */
 const PLAN_MAX_HEIGHT = 288;
+
+function workDraftScope(transport: MobileRemoteTransport, threadId: string): string {
+  return questionnaireDraftKey(transport.hostId, "work", threadId);
+}
+
+function workDraftKey(
+  transport: MobileRemoteTransport,
+  request: Pick<WorkRequest, "threadId" | "requestId">,
+): string {
+  return questionnaireDraftKey(
+    workDraftScope(transport, String(request.threadId)),
+    String(request.requestId),
+  );
+}
 
 export interface WorkRequestCardsProps {
   readonly transport: MobileRemoteTransport;
@@ -51,7 +61,8 @@ export interface WorkRequestCardsProps {
  * tool call, and the provider question, one question or a questionnaire. The
  * phone reads the thread's pending requests from the host and sends only the
  * answer and the version it read; the host applies it and journals it as
- * this device. A Code thread's asks stay with the desktop.
+ * this device. A Chat or Code thread's questions come through
+ * `PendingQuestionCards`.
  */
 export function WorkRequestCards(props: WorkRequestCardsProps) {
   const { colors } = useTheme();
@@ -68,6 +79,16 @@ export function WorkRequestCards(props: WorkRequestCardsProps) {
   // A waiting ask holds the turn, so it is read often while the screen is open.
   const resource = usePolledResource(load, { intervalMs: props.refreshIntervalMs ?? 2_000 });
   const requests = pendingWorkRequestsInOrder(resource.value ?? []);
+  const loaded = resource.value !== undefined;
+  const waitingKeys = requests.map((request) => workDraftKey(props.transport, request)).join("\n");
+  // A request no longer waiting takes its unsent answers with it.
+  useEffect(() => {
+    if (!loaded) return;
+    forgetSettledQuestionnaireDrafts(
+      workDraftScope(props.transport, props.threadId),
+      waitingKeys === "" ? [] : waitingKeys.split("\n"),
+    );
+  }, [loaded, waitingKeys, props.transport, props.threadId]);
   if (requests.length === 0) return null;
 
   return (
@@ -148,10 +169,20 @@ function WorkRequestCard(props: CardProps) {
     case "tool-approval":
       return <ToolApprovalCard {...props} label={card.label} summary={card.summary} />;
     case "question":
-      return <QuestionCard {...props} options={card.options} prompt={card.prompt} />;
+      return (
+        <WorkQuestionCard
+          {...props}
+          ask={{ kind: "plain", prompt: card.prompt, options: card.options }}
+          prompt={card.prompt}
+        />
+      );
     case "questionnaire":
       return (
-        <QuestionnaireCard {...props} prompt={card.prompt} questionnaire={card.questionnaire} />
+        <WorkQuestionCard
+          {...props}
+          ask={{ kind: "questionnaire", questionnaire: card.questionnaire }}
+          prompt={card.prompt}
+        />
       );
   }
 }
@@ -264,303 +295,48 @@ function ToolApprovalCard(props: CardProps & { readonly label: string; readonly 
   );
 }
 
-function Choice(props: {
-  readonly label: string;
-  readonly description?: string | undefined;
-  readonly checked: boolean;
-  readonly role: "radio" | "checkbox";
-  readonly disabled?: boolean;
-  readonly onPress: () => void;
-  readonly testID?: string;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      accessibilityRole={props.role}
-      accessibilityState={{ checked: props.checked, disabled: props.disabled === true }}
-      disabled={props.disabled}
-      onPress={props.onPress}
-      style={[
-        styles.choice,
-        {
-          borderColor: props.checked ? colors.accent : colors.hairlineStrong,
-          backgroundColor: props.checked ? withAlpha(colors.accent, 0.1) : "transparent",
-          opacity: props.disabled === true ? 0.5 : 1,
-        },
-      ]}
-      {...(props.testID === undefined ? {} : { testID: props.testID })}
-    >
-      {/* The mark says chosen in shape as well as colour. */}
-      <Icon
-        color={props.checked ? colors.accent : colors.textSecondary}
-        name={
-          props.role === "radio"
-            ? props.checked
-              ? "radio-button-on"
-              : "radio-button-off"
-            : props.checked
-              ? "checkbox"
-              : "square-outline"
-        }
-        size={20}
-      />
-      <View style={styles.choiceText}>
-        <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>{props.label}</Text>
-        {props.description === undefined ? null : (
-          <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-            {props.description}
-          </Text>
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function PrimaryButton(props: {
-  readonly label: string;
-  readonly disabled: boolean;
-  readonly onPress: () => void;
-  readonly testID: string;
-}) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      accessibilityLabel={props.label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: props.disabled }}
-      disabled={props.disabled}
-      onPress={props.onPress}
-      style={[styles.primary, { backgroundColor: colors.send, opacity: props.disabled ? 0.5 : 1 }]}
-      testID={props.testID}
-    >
-      <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>{props.label}</Text>
-    </Pressable>
-  );
-}
-
-const CUSTOM = "octant-question-custom";
-
 /**
- * One question the provider asked and the turn is blocked on: each offered
- * answer, and the person's own words for an answer no option covers.
- * Answering grants nothing, so it asks for no confirmation.
+ * The provider's question, one or a questionnaire, on the shared card. The
+ * unsent draft is held per request in memory, so leaving the thread and
+ * coming back keeps it. Answering grants nothing, so it asks for no
+ * confirmation; Dismiss ends a questionnaire's ask without an answer.
  */
-function QuestionCard(
-  props: CardProps & { readonly prompt: string; readonly options: ReadonlyArray<string> },
+function WorkQuestionCard(
+  props: CardProps & { readonly prompt: string; readonly ask: QuestionCardAsk },
 ) {
-  const { colors } = useTheme();
-  const { busy, note, run } = useWorkAnswer(props.onSettled, props.watchingOnly);
-  const [selected, setSelected] = useState<string>();
-  const [written, setWritten] = useState("");
-  const custom = selected === CUSTOM;
-  const answer = custom ? written.trim() : (props.options.find((o) => o === selected) ?? "");
+  const settle = async (send: () => Promise<MobileWorkRequestAnswer>) => {
+    try {
+      const outcome = await send();
+      return outcome.status === "refused" ? outcome.message : undefined;
+    } finally {
+      props.onSettled();
+    }
+  };
   return (
-    <View
-      accessibilityLabel="Provider question"
-      style={[styles.card, { borderColor: colors.border }]}
-      testID="mobile-work-question"
-    >
-      <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>{props.prompt}</Text>
-      <View accessibilityRole="radiogroup" style={styles.choices}>
-        {props.options.map((option) => (
-          <Choice
-            checked={selected === option}
-            disabled={props.watchingOnly}
-            key={option}
-            label={option}
-            onPress={() => setSelected(option)}
-            role="radio"
-          />
-        ))}
-        {props.watchingOnly ? null : (
-          <Choice
-            checked={custom}
-            label={MOBILE_COPY.workQuestionOwnAnswer}
-            onPress={() => setSelected(CUSTOM)}
-            role="radio"
-          />
-        )}
-        {custom && !props.watchingOnly ? (
-          <TextInput
-            accessibilityLabel={MOBILE_COPY.workQuestionYourAnswer}
-            onChangeText={setWritten}
-            placeholder={MOBILE_COPY.workQuestionYourAnswerPlaceholder}
-            placeholderTextColor={colors.textSecondary}
-            style={[
-              styles.input,
-              { color: colors.textPrimary, borderColor: colors.hairlineStrong },
-            ]}
-            value={written}
-          />
-        ) : null}
-      </View>
-      {props.watchingOnly ? null : (
-        <PrimaryButton
-          disabled={busy || answer.length === 0}
-          label={MOBILE_COPY.workQuestionSubmit}
-          onPress={() =>
-            void run(() =>
-              unconfirmed(() =>
-                answerMobileWorkQuestion({
-                  transport: props.transport,
-                  request: props.request,
-                  answer,
-                }),
-              ),
-            )
-          }
-          testID="mobile-work-question-submit"
-        />
-      )}
-      <CardNote note={note} />
-    </View>
-  );
-}
-
-/**
- * A provider's questionnaire: every question with its limits, an answer in
- * the person's own words where a question takes one, an optional comment,
- * and Dismiss, which ends the turn's question without an answer.
- */
-function QuestionnaireCard(
-  props: CardProps & { readonly prompt: string; readonly questionnaire: Questionnaire },
-) {
-  const { colors } = useTheme();
-  const { busy, note, run } = useWorkAnswer(props.onSettled, props.watchingOnly);
-  const [draft, setDraft] = useState(() => emptyQuestionnaireDraft(props.questionnaire));
-  const response = questionnaireResponseOf(props.questionnaire, draft);
-  return (
-    <View
-      accessibilityLabel="Questionnaire"
-      style={[styles.card, { borderColor: colors.border }]}
-      testID="mobile-work-questionnaire"
-    >
-      <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>{props.prompt}</Text>
-      {props.questionnaire.questions.map((question) => {
-        const answer = draft.answers.find((entry) => entry.questionId === question.id);
-        const selected = answer?.selectedOptionIds ?? [];
-        const custom = draft.customIds.includes(question.id);
-        const max = question.maxSelections ?? question.options.length;
-        const role = question.selection === "single" ? "radio" : "checkbox";
-        return (
-          <View key={question.id} style={styles.question}>
-            <Text style={[mobileTypography.section, { color: colors.textPrimary }]}>
-              {question.prompt}
-            </Text>
-            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-              {question.selection === "single"
-                ? MOBILE_COPY.workQuestionChooseOne
-                : MOBILE_COPY.workQuestionChooseSeveral(question.minSelections ?? 1, max)}
-            </Text>
-            <View
-              accessibilityLabel={question.prompt}
-              accessibilityRole={question.selection === "single" ? "radiogroup" : undefined}
-              style={styles.choices}
-            >
-              {question.options.map((option) => {
-                const checked = !custom && selected.includes(option.id);
-                return (
-                  <Choice
-                    checked={checked}
-                    description={option.description}
-                    disabled={
-                      props.watchingOnly ||
-                      busy ||
-                      (role === "checkbox" && !checked && !custom && selected.length >= max)
-                    }
-                    key={option.id}
-                    label={`${option.label}${option.recommended === true ? " (Recommended)" : ""}`}
-                    onPress={() =>
-                      setDraft((current) => chooseQuestionnaireOption(current, question, option.id))
-                    }
-                    role={role}
-                  />
-                );
-              })}
-              {props.watchingOnly || question.allowCustom === false ? null : (
-                <Choice
-                  checked={custom}
-                  disabled={busy}
-                  label={MOBILE_COPY.workQuestionWriteAnother}
-                  onPress={() =>
-                    setDraft((current) => toggleQuestionnaireCustom(current, question))
-                  }
-                  role={role}
-                />
-              )}
-              {custom && !props.watchingOnly ? (
-                <TextInput
-                  accessibilityLabel={MOBILE_COPY.workQuestionYourAnswer}
-                  maxLength={2_000}
-                  multiline
-                  onChangeText={(text) =>
-                    setDraft((current) => writeQuestionnaireCustom(current, question, text))
-                  }
-                  placeholderTextColor={colors.textSecondary}
-                  style={[
-                    styles.input,
-                    { color: colors.textPrimary, borderColor: colors.hairlineStrong },
-                  ]}
-                  value={answer?.customAnswer ?? ""}
-                />
-              ) : null}
-            </View>
-          </View>
-        );
-      })}
-      {props.watchingOnly || props.questionnaire.allowComment === false ? null : (
-        <TextInput
-          accessibilityLabel={MOBILE_COPY.workQuestionComment}
-          maxLength={2_000}
-          multiline
-          onChangeText={(comment) => setDraft((current) => ({ ...current, comment }))}
-          placeholder={MOBILE_COPY.workQuestionComment}
-          placeholderTextColor={colors.textSecondary}
-          style={[styles.input, { color: colors.textPrimary, borderColor: colors.hairlineStrong }]}
-          value={draft.comment}
-        />
-      )}
-      {props.watchingOnly ? null : (
-        <>
-          <PrimaryButton
-            disabled={busy || response === undefined}
-            label={busy ? MOBILE_COPY.workQuestionSending : MOBILE_COPY.workQuestionSendAnswers}
-            onPress={() => {
-              if (response === undefined) return;
-              void run(() =>
-                unconfirmed(() =>
-                  answerMobileWorkQuestion({
-                    transport: props.transport,
-                    request: props.request,
-                    answer: response,
-                  }),
-                ),
-              );
-            }}
-            testID="mobile-work-questionnaire-submit"
-          />
-          <Pressable
-            accessibilityRole="button"
-            disabled={busy}
-            hitSlop={8}
-            onPress={() =>
-              void run(() =>
-                unconfirmed(() =>
-                  dismissMobileWorkQuestion({ transport: props.transport, request: props.request }),
-                ),
+    <QuestionnaireCard
+      ask={props.ask}
+      draftKey={workDraftKey(props.transport, props.request)}
+      onDismiss={
+        props.ask.kind === "questionnaire"
+          ? () =>
+              settle(() =>
+                dismissMobileWorkQuestion({ transport: props.transport, request: props.request }),
               )
-            }
-            style={styles.quiet}
-            testID="mobile-work-questionnaire-dismiss"
-          >
-            <Text style={[mobileTypography.body, { color: colors.textSecondary }]}>
-              {MOBILE_COPY.workQuestionDismiss}
-            </Text>
-          </Pressable>
-        </>
-      )}
-      <CardNote note={note} />
-    </View>
+          : undefined
+      }
+      onSend={(answer) =>
+        settle(() =>
+          answerMobileWorkQuestion({
+            transport: props.transport,
+            request: props.request,
+            answer: answer.kind === "plain" ? answer.words : answer.response,
+          }),
+        )
+      }
+      testID={props.ask.kind === "plain" ? "mobile-work-question" : "mobile-work-questionnaire"}
+      title={props.prompt}
+      watchingOnly={props.watchingOnly}
+    />
   );
 }
 
@@ -579,32 +355,4 @@ const styles = StyleSheet.create({
     borderRadius: mobileRadii.bubble,
     padding: mobileSpacing.sm,
   },
-  question: { gap: mobileSpacing.xs, marginTop: mobileSpacing.xs },
-  choices: { gap: mobileSpacing.xs },
-  choice: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: mobileSpacing.sm,
-    paddingHorizontal: mobileSpacing.sm,
-    paddingVertical: mobileSpacing.xs,
-    borderWidth: 1,
-    borderRadius: 10,
-  },
-  choiceText: { flex: 1, gap: 2 },
-  input: {
-    minHeight: 44,
-    paddingHorizontal: mobileSpacing.sm,
-    paddingVertical: mobileSpacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-  },
-  primary: {
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 999,
-    marginTop: mobileSpacing.xs,
-  },
-  quiet: { minHeight: 44, alignItems: "center", justifyContent: "center" },
 });

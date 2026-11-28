@@ -40,6 +40,7 @@ import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard
 import { ThreadSecretCards } from "../surfaces/ThreadSecretCard";
 import { ServiceOfferCard } from "../surfaces/ServiceOfferCard";
 import { ThreadVideoClips } from "../surfaces/ThreadVideoClips";
+import { PendingQuestionCards } from "../surfaces/PendingQuestionCards";
 import { WorkRequestCards } from "../surfaces/WorkRequestCards";
 import {
   conversationComposerAccess,
@@ -992,6 +993,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 )}
                 {offlineDemo || transport === undefined ? null : (
                   <NativeHarnessSessionPanel
+                    mode={selected.mode}
                     threadId={selected.threadId}
                     transport={transport}
                     watchingOnly={watchingOnly}
@@ -1013,6 +1015,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
                   <WorkRequestCards
                     projectId={String(work.thread.projectId)}
                     threadId={String(work.thread.id)}
+                    transport={transport}
+                    watchingOnly={watchingOnly}
+                  />
+                )}
+                {offlineDemo ||
+                transport === undefined ||
+                (selected.mode !== "chat" && selected.mode !== "code") ? null : (
+                  <PendingQuestionCards
+                    key={`questions:${selected.hostId}:${selected.mode}:${selected.threadId}`}
+                    mode={selected.mode}
+                    threadId={selected.threadId}
                     transport={transport}
                     watchingOnly={watchingOnly}
                   />

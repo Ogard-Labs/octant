@@ -8,7 +8,7 @@ import {
   threadStatsLine,
 } from "@octant/domain";
 import * as Clipboard from "expo-clipboard";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
   answerMobileNativeHarnessQuestion,
@@ -30,11 +30,27 @@ import {
 } from "../security/BiometricGate";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { OutsideContentNote } from "./OutsideContentNote";
+import {
+  QuestionnaireCard,
+  questionCardAnswerText,
+  type QuestionCardAnswer,
+} from "./QuestionnaireCard";
+import { questionnaireDraftKey } from "../approvals/questionnaireDraft";
+
+function harnessDraftKey(
+  transport: MobileRemoteTransport,
+  threadId: string,
+  questionId: string,
+): string {
+  return questionnaireDraftKey(transport.hostId, "harness", threadId, questionId);
+}
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 export interface NativeHarnessSessionPanelProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
+  /** The thread's mode, which decides whose questions this panel answers. */
+  readonly mode?: "chat" | "work" | "code";
   readonly watchingOnly?: boolean;
   readonly refreshIntervalMs?: number;
   /** Confirms Allow on this phone; the device's own biometrics when absent. */
@@ -54,7 +70,6 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   const authenticator = props.authenticator ?? deviceAuthenticator;
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [note, setNote] = useState<string>();
-  const [answer, setAnswer] = useState("");
   const [approvalSelection, setApprovalSelection] = useState<string>();
   const [questionSelection, setQuestionSelection] = useState<string>();
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -115,7 +130,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   }, [sessionView?.retrying]);
 
   if (view === undefined || view === null) return null;
-  const questions = view.questions.filter((question) => question.status === "pending");
+  // In Chat and Code the lead's own question is that mode's question, with its
+  // own answer handle, and is answered on the thread's question card; only a
+  // subagent's question is answered here.
+  const questions = view.questions.filter(
+    (question) =>
+      question.status === "pending" &&
+      (props.mode === undefined || props.mode === "work" || question.source !== undefined),
+  );
   const approvals = view.approvals?.filter((approval) => approval.status === "pending") ?? [];
   const pendingQuestion =
     questions.find((item) => String(item.id) === questionSelection) ?? questions[0];
@@ -165,21 +187,22 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         : (result?.message ?? "The decision was refused.");
     });
   };
-  const sendAnswer = (text: string) => {
-    if (pendingQuestion === undefined || text.trim().length === 0) return;
-    void run(async () => {
+  // The host takes a questionnaire's answer only as its JSON response, and a
+  // plain question's as the words; either way it settles the question once.
+  const sendAnswer = async (questionId: string, reply: QuestionCardAnswer) => {
+    try {
       const result = await answerMobileNativeHarnessQuestion({
         transport: props.transport,
         threadId: props.threadId,
-        questionId: String(pendingQuestion.id),
-        answer: text.trim(),
+        questionId,
+        answer: questionCardAnswerText(reply),
       });
-      if (result?.kind === "question-answered") {
-        setAnswer((current) => (current === answer ? "" : current));
-        return undefined;
-      }
-      return result?.message ?? "The answer was refused.";
-    });
+      return result?.kind === "question-answered"
+        ? undefined
+        : (result?.message ?? "The answer was refused.");
+    } finally {
+      void resource.reload();
+    }
   };
   // The same words the desktop composer and the terminal footer use, read-only.
   const stats = sessionView === undefined ? "" : threadStatsLine(sessionStatsInputOf(sessionView));
@@ -351,75 +374,34 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               key={String(item.id)}
               active={item.id === pendingQuestion?.id}
               label={`Question ${index + 1}`}
-              onPress={() => {
-                setQuestionSelection(String(item.id));
-                setAnswer("");
-              }}
+              onPress={() => setQuestionSelection(String(item.id))}
             />
           ))}
         </View>
       )}
       {pendingQuestion === undefined ? null : (
-        <View
-          style={[styles.question, { borderColor: colors.border }]}
+        <QuestionnaireCard
+          ask={
+            pendingQuestion.questionnaire === undefined
+              ? { kind: "plain", prompt: pendingQuestion.prompt, options: pendingQuestion.options }
+              : { kind: "questionnaire", questionnaire: pendingQuestion.questionnaire }
+          }
+          draftKey={harnessDraftKey(props.transport, props.threadId, String(pendingQuestion.id))}
+          embedded
+          key={String(pendingQuestion.id)}
+          onSend={(reply) => sendAnswer(String(pendingQuestion.id), reply)}
+          source={
+            pendingQuestion.source === undefined
+              ? undefined
+              : `Child ${String(pendingQuestion.source.runId).slice(0, 8)} · ${
+                  pendingQuestion.source.providerName ??
+                  String(pendingQuestion.source.providerInstanceId)
+                } · ${pendingQuestion.source.targetFolder ?? "No folder reported"}`
+          }
           testID="mobile-native-harness-question"
-        >
-          <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
-            {pendingQuestion.prompt}
-          </Text>
-          {pendingQuestion.source === undefined ? null : (
-            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-              Child {String(pendingQuestion.source.runId).slice(0, 8)} ·{" "}
-              {pendingQuestion.source.providerName ??
-                String(pendingQuestion.source.providerInstanceId)}{" "}
-              · {pendingQuestion.source.targetFolder ?? "No folder reported"}
-            </Text>
-          )}
-          {pendingQuestion.options.length === 0 ? null : (
-            <View style={styles.chips}>
-              {pendingQuestion.options.map((option) =>
-                props.watchingOnly === true ? (
-                  <Text
-                    key={option}
-                    style={[mobileTypography.caption, { color: colors.textSecondary }]}
-                  >
-                    {option}
-                  </Text>
-                ) : (
-                  <GlassChip
-                    active={false}
-                    key={option}
-                    label={option}
-                    onPress={() => sendAnswer(option)}
-                  />
-                ),
-              )}
-            </View>
-          )}
-          {props.watchingOnly === true ? null : (
-            <View style={styles.row}>
-              <TextInput
-                accessibilityLabel="Answer"
-                onChangeText={setAnswer}
-                onSubmitEditing={() => sendAnswer(answer)}
-                placeholder="Type an answer"
-                placeholderTextColor={colors.textSecondary}
-                style={[styles.input, { color: colors.textPrimary, borderColor: colors.border }]}
-                value={answer}
-              />
-              <Pressable
-                accessibilityRole="button"
-                disabled={busy}
-                hitSlop={8}
-                onPress={() => sendAnswer(answer)}
-                style={[styles.button, { backgroundColor: colors.send }]}
-                testID="mobile-native-harness-answer"
-              >
-                <Text style={[mobileTypography.section, { color: colors.sendLabel }]}>Send</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+          title={pendingQuestion.prompt}
+          watchingOnly={props.watchingOnly === true || resource.error !== undefined}
+        />
       )}
       {sessionView === undefined ? null : (
         <>
@@ -594,12 +576,5 @@ const styles = StyleSheet.create({
     padding: mobileSpacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,
-  },
-  input: {
-    flex: 1,
-    paddingHorizontal: mobileSpacing.sm,
-    paddingVertical: mobileSpacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
   },
 });

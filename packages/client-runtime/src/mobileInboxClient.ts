@@ -54,6 +54,8 @@ export interface MobileWaitingAsk {
   readonly text?: string;
   /** A choice the person makes (a decision or a proposal); any other wait is absent here. */
   readonly decision?: true;
+  /** The agent, or one of its subagents, waits on the person's answer to a question. */
+  readonly question?: true;
   /** The agent marked the decision urgent. */
   readonly urgent?: true;
 }
@@ -573,6 +575,11 @@ function pendingRequestAsk(item: unknown): MobileListedAsk | undefined {
       text: request.text,
       ...(request.kind === "decision" ? { decision: true } : {}),
       ...(request.kind === "decision" && request.urgent === true ? { urgent: true } : {}),
+      ...(request.kind === "question" ||
+      request.kind === "child-question" ||
+      request.kind === "lead-question"
+        ? { question: true }
+        : {}),
     });
   } catch {
     return unknownAsk(item);

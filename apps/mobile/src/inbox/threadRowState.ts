@@ -1,7 +1,9 @@
 import type { MobileInboxRow, MobileRowPullRequests } from "@octant/client-runtime";
+import { MOBILE_COPY } from "../copy";
 import { inboxWorkStatus } from "./inboxWorkPresentation";
 
 export type ThreadRowKind =
+  | "input"
   | "waiting"
   | "failed"
   | "finished"
@@ -38,6 +40,15 @@ export function threadRowState(row: MobileInboxRow, now: Date): ThreadRowState {
   if (row.completedAt !== undefined) {
     const age = compactAge(row.completedAt, now);
     return { kind: "settled", word: age, spoken: `Settled ${age} ago` };
+  }
+  // A question, the thread's own or a subagent's, says Input; every other ask
+  // (an approval, a decision, a proposal) keeps its own word.
+  if (row.waitingAsk?.question === true) {
+    return {
+      kind: "input",
+      word: MOBILE_COPY.rowWaitingInput,
+      spoken: MOBILE_COPY.rowWaitingInputSpoken,
+    };
   }
   if (row.waitingAsk !== undefined) return said("waiting", row.waitingAsk.label);
   if (row.live === "needs-input") return said("waiting", "Needs you");

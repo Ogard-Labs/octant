@@ -33,6 +33,23 @@ describe("a thread row's state", () => {
     });
   });
 
+  it("says Input when the thread waits on a question, its own or a subagent's", () => {
+    for (const label of ["Question", "Subagent question"]) {
+      expect(
+        threadRowState(
+          row({
+            live: "needs-input",
+            waitingAsk: { label, text: "Which layout?", question: true },
+          }),
+          now,
+        ),
+      ).toEqual({ kind: "input", word: "Input", spoken: "Waiting for your input" });
+    }
+    expect(
+      threadRowState(row({ waitingAsk: { label: "Decision", decision: true } }), now),
+    ).toMatchObject({ kind: "waiting", word: "Decision" });
+  });
+
   it("names a failure, a requested change and a review in words", () => {
     expect(threadRowState(row({ status: "failed" }), now)).toMatchObject({ word: "Failed" });
     expect(threadRowState(row({ reviewState: "changes-requested" }), now)).toMatchObject({
