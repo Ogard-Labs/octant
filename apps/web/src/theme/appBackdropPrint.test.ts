@@ -173,6 +173,56 @@ describe("the pixel ground's lifecycle", () => {
     expect(canvas.dataset["ready"]).toBeUndefined();
   });
 
+  it("draws the same still frame however long its setup waited for idle time", () => {
+    const stillFrame = (idleWait: number) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+      const frames: Uint8ClampedArray[] = [];
+      const context: Partial<CanvasRenderingContext2D> = {
+        setTransform: vi.fn(),
+        clearRect: vi.fn(),
+        drawImage: vi.fn(),
+        putImageData: (image: ImageData) => {
+          frames.push(new Uint8ClampedArray(image.data));
+        },
+        createImageData: ((width: number, height: number) => ({
+          data: new Uint8ClampedArray(width * height * 4),
+          width,
+          height,
+        })) as CanvasRenderingContext2D["createImageData"],
+      };
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+        context as CanvasRenderingContext2D,
+      );
+      // Idle time comes when the page is ready, sooner on one run than another.
+      vi.stubGlobal("requestIdleCallback", (callback: IdleRequestCallback) =>
+        window.setTimeout(() => callback({} as IdleDeadline), idleWait),
+      );
+      vi.stubGlobal("cancelIdleCallback", (id: number) => window.clearTimeout(id));
+      const canvas = document.createElement("canvas");
+      vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(
+        DOMRect.fromRect({ width: 240, height: 120 }),
+      );
+      document.body.append(canvas);
+      const stop = runMovingPrint(
+        canvas,
+        { scene: "drift" },
+        { kind: "dither", cell: 3, levels: 4 },
+        false,
+      );
+      vi.advanceTimersByTime(idleWait + 10);
+      stop();
+      canvas.remove();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      return frames;
+    };
+    const soon = stillFrame(1);
+    const late = stillFrame(600);
+    expect(soon).toHaveLength(1);
+    expect(late).toEqual(soon);
+  });
+
   it("stops drawing while the document is hidden and resumes when it returns", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
     const { draws, canvas } = stubCanvas();

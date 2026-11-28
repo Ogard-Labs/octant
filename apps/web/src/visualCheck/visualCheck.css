@@ -58,3 +58,14 @@ body,
   width: 100%;
   flex-direction: column;
 }
+
+/* The desktop behind a Glass window. The native material would show the
+   person's own desktop through the window's coat; a fixed picture stands in
+   for it, so the coat's strength and colour show in the picture. */
+.visual-check--desktop {
+  background: url("/zen-backgrounds/soft-sunset.jpg") center / cover no-repeat;
+}
+
+:root[data-octant-theme-mode="light"] .visual-check--desktop {
+  background-image: url("/zen-backgrounds/soft-sunset-light.jpg");
+}

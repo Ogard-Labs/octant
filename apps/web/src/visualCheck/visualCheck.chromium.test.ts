@@ -6,7 +6,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { createServer } from "vite";
 import { expect, it } from "vitest";
 import { verifyPairedDraftPurge } from "./pairedDraftPurge.test-support";
-import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
+import { updateMode, visualShard, visualShots, WIDE } from "./sceneList";
 
 /**
  * Draws the key screens in a pinned Chromium and compares each picture with
@@ -20,10 +20,9 @@ import { NARROW, SCENE_LIST, updateMode, WIDE } from "./sceneList";
  *   OCTANT_VISUAL_UPDATE=all     write every baseline
  *   OCTANT_QA_ARTIFACTS          where actual, baseline and diff pictures go
  *   OCTANT_BROWSER_EXECUTABLE    a browser to use instead of playwright's own Chromium
+ *   OCTANT_VISUAL_SHARD          draw only one part of the pictures, e.g. "1/2"
  */
 
-/** A pixel differs when any colour channel is off by more than this. */
-const CHANNEL_TOLERANCE = 24;
 /**
  * How many pixels may differ before the picture counts as changed. A one-word
  * or one-icon change moves far more; the logged noise of an unchanged screen
@@ -38,26 +37,6 @@ const VISUAL_CONCURRENCY = 4;
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const baselineDir = resolve(webRoot, "visual-baselines");
 
-interface Shot {
-  readonly name: string;
-  readonly scene: string;
-  readonly scheme: "light" | "dark";
-  readonly size: { readonly width: number; readonly height: number };
-}
-
-function shots(): ReadonlyArray<Shot> {
-  return SCENE_LIST.flatMap((scene) =>
-    (["light", "dark"] as const).flatMap((scheme) =>
-      [WIDE, ...(scene.narrow === true ? [NARROW] : [])].map((size) => ({
-        name: `${scene.id}-${scheme}-${String(size.width)}`,
-        scene: scene.id,
-        scheme,
-        size,
-      })),
-    ),
-  );
-}
-
 interface Comparison {
   readonly sizesMatch: boolean;
   readonly actualSize: string;
@@ -68,7 +47,12 @@ interface Comparison {
 }
 
 /** Draws both pictures on canvases and counts the pixels that differ visibly. */
-async function compare(page: Page, actual: Buffer, baseline: Buffer): Promise<Comparison> {
+async function compare(
+  page: Page,
+  actual: Buffer,
+  baseline: Buffer,
+  tolerance: number,
+): Promise<Comparison> {
   return page.evaluate(
     async ({ actualUrl, baselineUrl, tolerance }) => {
       const load = (url: string) =>
@@ -141,14 +125,14 @@ async function compare(page: Page, actual: Buffer, baseline: Buffer): Promise<Co
     {
       actualUrl: `data:image/png;base64,${actual.toString("base64")}`,
       baselineUrl: `data:image/png;base64,${baseline.toString("base64")}`,
-      tolerance: CHANNEL_TOLERANCE,
+      tolerance,
     },
   );
 }
 
 it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
   "draws the key screens the way their baselines say",
-  { timeout: 430_000 },
+  { timeout: 610_000 },
   async () => {
     const mode = updateMode(process.env.OCTANT_VISUAL_UPDATE);
     const update = mode !== "off";
@@ -187,7 +171,9 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
     process.once("SIGINT", stop);
     // Bounds a hung run, so it has to stay ahead of the full draw: a scene
     // list that outgrows it dies mid-shot as a closed browser, not a timeout.
-    const lifetime = setTimeout(stop, 420_000);
+    // The 74 pictures before the ground scenes took about 260 s on the CI
+    // runner, and the ground scenes add 50 more; 600 s leaves room for both.
+    const lifetime = setTimeout(stop, 600_000);
     const changed: string[] = [];
     const missing: string[] = [];
     const written: string[] = [];
@@ -229,7 +215,9 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         readonly noise?: string;
         readonly failures: ReadonlyArray<string>;
       }
-      const allShots = shots();
+      const allShots = visualShots(visualShard(process.env.OCTANT_VISUAL_SHARD));
+      // A shard past the end of the list would pass having compared nothing.
+      expect(allShots.length, "This shard holds no pictures to compare.").toBeGreaterThan(0);
       const outcomes: Array<ShotOutcome | undefined> = Array.from({ length: allShots.length });
       let nextIndex = 0;
       const ownedBrowser = browser;
@@ -287,7 +275,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
                 outcomes[index] = { failures: shotFailures };
                 continue;
               }
-              const result = await compare(comparer, actual, baseline);
+              const result = await compare(comparer, actual, baseline, shot.tolerance);
               if (result.sizesMatch && result.differing <= PIXEL_LIMIT) {
                 outcomes[index] = {
                   noise: `${shot.name}=${String(result.differing)}`,

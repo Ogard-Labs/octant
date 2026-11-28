@@ -94,6 +94,7 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
           throw new Error(`The bundled face for ${font} did not load.`);
       }
       await document.fonts.ready;
+      await scene?.settled?.();
       // Let effects, popups and polled fixtures settle before the picture.
       for (let frame = 0; frame < 3; frame += 1) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -124,7 +125,7 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
   if (scene === undefined) {
     return <p>{`Unknown scene "${props.id}". Scenes: ${SCENES.map((s) => s.id).join(", ")}`}</p>;
   }
-  const settings: ThemeSettings = {
+  const plain: ThemeSettings = {
     ...DEFAULT_THEME_SETTINGS,
     mode: props.scheme,
     // The plain ground: no glass washes and no background picture.
@@ -136,16 +137,37 @@ function Scene(props: { readonly id: string; readonly scheme: "light" | "dark" }
       ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: GEIST_UI_FAMILY },
     },
   };
+  const settings = scene.theme?.(plain) ?? plain;
   return (
     <ThemeSettingsProvider rememberMode={false} settings={settings}>
       <style>{STILL}</style>
       <IconDefaults>
         <ThemeTypographyProvider typography={settings.typography}>
-          <div className="visual-check">{scene.render()}</div>
+          <div
+            className={
+              scene.desktop === "glass" ? "visual-check visual-check--desktop" : "visual-check"
+            }
+          >
+            {scene.render()}
+          </div>
         </ThemeTypographyProvider>
       </IconDefaults>
     </ThemeSettingsProvider>
   );
+}
+
+/**
+ * A fixed stand-in for `Math.random` (mulberry32), so a scene that asks for it
+ * draws the same random choices on every run.
+ */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), state | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
 }
 
 // Reached only through the dev server's `visual-check.html`, which the
@@ -155,13 +177,18 @@ if (import.meta.env.DEV) {
   const root = document.getElementById("root");
   if (!root) throw new Error("Octant root element is missing");
   const query = new URLSearchParams(window.location.search);
+  const id = query.get("scene") ?? "";
+  const scene = sceneById(id);
+  if (scene?.seededRandom === true) Math.random = seededRandom(20_260_818);
+  // What the desktop app writes on the root: that a native host holds the
+  // window, and, once the host reports its glass applied, that too. The
+  // shell's glass rules key off these and nothing else.
+  if (scene?.desktop !== undefined) document.documentElement.dataset.octantNativeHost = "true";
+  if (scene?.desktop === "glass") document.documentElement.dataset.octantHostVibrancy = "active";
   followInputModality();
   createRoot(root).render(
     <StrictMode>
-      <Scene
-        id={query.get("scene") ?? ""}
-        scheme={query.get("scheme") === "light" ? "light" : "dark"}
-      />
+      <Scene id={id} scheme={query.get("scheme") === "light" ? "light" : "dark"} />
     </StrictMode>,
   );
 }
