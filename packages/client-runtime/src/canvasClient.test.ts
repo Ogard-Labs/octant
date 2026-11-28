@@ -145,7 +145,9 @@ describe("createCanvasClient", () => {
       canvasId: String(canvasId),
       versionId,
       blockId: "phone",
-      assets: [{ assetId: "shot", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" }],
+      assets: [
+        { assetId: "shot", status: "resolved", mediaType: "image/png", data: "iVBORw0KGgo=" },
+      ],
     };
 
     // Older host refuses the fourth query key with 400.

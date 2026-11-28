@@ -2678,9 +2678,7 @@ async function resolveDesignAssetsForReader(
       : await resolve(block, definition.provenance, {
           canvasId: input.canvasId,
           versionId: read.version.versionId,
-          ...(input.marks === undefined
-            ? { legacyClient: true as const }
-            : { marks: input.marks }),
+          ...(input.marks === undefined ? { legacyClient: true as const } : { marks: input.marks }),
         });
   return {
     kind: "ready",

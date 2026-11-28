@@ -1315,8 +1315,14 @@ describe("canvas routes", () => {
           title: "Screen",
           size: "phone" as const,
           assets: [
-            { assetId: "kept" as never, source: { kind: "project-file" as const, path: "kept.png" } },
-            { assetId: "hero" as never, source: { kind: "project-file" as const, path: "hero.png" } },
+            {
+              assetId: "kept" as never,
+              source: { kind: "project-file" as const, path: "kept.png" },
+            },
+            {
+              assetId: "hero" as never,
+              source: { kind: "project-file" as const, path: "hero.png" },
+            },
           ],
           frames: [
             {
@@ -1334,7 +1340,10 @@ describe("canvas routes", () => {
           size: "phone" as const,
           runsScript: true as const,
           assets: [
-            { assetId: "hero" as never, source: { kind: "project-file" as const, path: "hero.png" } },
+            {
+              assetId: "hero" as never,
+              source: { kind: "project-file" as const, path: "hero.png" },
+            },
           ],
           frames: [
             {
@@ -1360,13 +1369,19 @@ describe("canvas routes", () => {
             mode: "work" as const,
             projectId: workProjectId,
             threadId: workThreadId as never,
-            actor: { kind: "local-user" as const, actorId: "00000000-0000-4000-8000-000000000002" as never },
+            actor: {
+              kind: "local-user" as const,
+              actorId: "00000000-0000-4000-8000-000000000002" as never,
+            },
             providerInstanceId: "00000000-0000-4000-8000-000000000003" as never,
             modelId: "octant-local" as never,
             createdAt: future as never,
           },
         },
-        createdBy: { kind: "local-user" as const, actorId: "00000000-0000-4000-8000-000000000002" as never },
+        createdBy: {
+          kind: "local-user" as const,
+          actorId: "00000000-0000-4000-8000-000000000002" as never,
+        },
         createdAt: future as never,
       });
 
@@ -1458,7 +1473,7 @@ describe("canvas routes", () => {
                 version: 1 as never,
                 createdAt: now as never,
                 updatedAt: now as never,
-              },
+              } as never,
             ],
             archived: [],
             availability: [],
@@ -1500,8 +1515,20 @@ describe("canvas routes", () => {
       // 3. Unrecorded superseded version draws live with `mark: "unrecorded"` for marked clients, and no mark for legacy.
       const vUnrecLabelled = await askAssets(vUnrecordedId, "screen", "labelled");
       expect(vUnrecLabelled.body.assets).toEqual([
-        { assetId: "kept", status: "resolved", mediaType: "image/png", data: b64A, mark: "unrecorded" },
-        { assetId: "hero", status: "resolved", mediaType: "image/png", data: b64C, mark: "unrecorded" },
+        {
+          assetId: "kept",
+          status: "resolved",
+          mediaType: "image/png",
+          data: b64A,
+          mark: "unrecorded",
+        },
+        {
+          assetId: "hero",
+          status: "resolved",
+          mediaType: "image/png",
+          data: b64C,
+          mark: "unrecorded",
+        },
       ]);
       const vUnrecLegacy = await askAssets(vUnrecordedId, "screen");
       expect(vUnrecLegacy.body.assets[1]).not.toHaveProperty("mark");

@@ -392,7 +392,11 @@ describe("resolveCanvasDesignAssets", () => {
       ports,
       { mode: "compare" },
     );
-    expect(unrecorded[0]).toMatchObject({ assetId: "kept", status: "resolved", mark: "unrecorded" });
+    expect(unrecorded[0]).toMatchObject({
+      assetId: "kept",
+      status: "resolved",
+      mark: "unrecorded",
+    });
     expect(unrecorded[1]).not.toHaveProperty("mark");
     expect(unrecorded[2]).not.toHaveProperty("mark");
 

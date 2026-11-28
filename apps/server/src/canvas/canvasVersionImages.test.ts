@@ -3,10 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Schema } from "effect";
 import {
   CANVAS_SCHEMA_VERSION,
   CANVAS_VERSION_IMAGES_AGGREGATE_TYPE,
   CANVAS_VERSION_IMAGES_RECORDED,
+  EventActor,
   LOCAL_HOST_ID,
   decodeCanvasBlock,
   decodeCanvasId,
@@ -34,7 +36,14 @@ const SHA_B = createHash("sha256").update(PNG_B).digest("hex");
 
 const projectId = decodeProjectId("22222222-2222-4222-8222-222222222222");
 const threadId = decodeWorkThreadId("33333333-3333-4333-8333-333333333333");
-const actor = { kind: "system" as const, actorId: "00000000-0000-4000-8000-000000000001" };
+const actor = Schema.decodeUnknownSync(EventActor)({
+  kind: "system",
+  actorId: "00000000-0000-4000-8000-000000000001",
+});
+const localUserActor = Schema.decodeUnknownSync(EventActor)({
+  kind: "local-user",
+  actorId: "00000000-0000-4000-8000-000000000002",
+});
 
 let connection: SqliteConnection | undefined;
 let journal: Journal;
@@ -240,7 +249,11 @@ describe("Canvas version Project image digests", () => {
 
     await store.record(version);
 
-    const record = await store.forBlock(String(version.canvasId), String(version.versionId), "screen");
+    const record = await store.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      "screen",
+    );
     expect(record?.get("kept")).toEqual({
       blockId: "screen",
       assetId: "kept",
@@ -259,7 +272,7 @@ describe("Canvas version Project image digests", () => {
     const eventStore = new CanvasEventStore({
       journal,
       uuid: randomUUID,
-      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      actor: localUserActor,
     });
     const imageStore = new CanvasVersionImageStore({
       journal,

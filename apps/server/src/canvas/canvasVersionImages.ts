@@ -71,7 +71,9 @@ export class CanvasVersionImageStore {
    */
   record(version: CanvasVersion): Promise<void> {
     const designs = version.definition.blocks.filter(
-      (block) =>
+      (
+        block,
+      ): block is Extract<CanvasVersion["definition"]["blocks"][number], { kind: "design" }> =>
         block.kind === "design" &&
         (block.assets ?? []).some((asset) => asset.source.kind === "project-file"),
     );
@@ -151,7 +153,9 @@ export class CanvasVersionImageStore {
 
   async #recordDesigns(
     version: CanvasVersion,
-    designs: ReadonlyArray<Extract<CanvasVersion["definition"]["blocks"][number], { kind: "design" }>>,
+    designs: ReadonlyArray<
+      Extract<CanvasVersion["definition"]["blocks"][number], { kind: "design" }>
+    >,
   ): Promise<void> {
     const provenance = version.definition.provenance;
     const createdAtMs = Date.parse(version.createdAt);
@@ -164,11 +168,7 @@ export class CanvasVersionImageStore {
           if (asset.source.kind !== "project-file") continue;
           const remaining = CANVAS_DESIGN_ASSETS_MAX_BYTES - spent;
           const maximumBytes = Math.min(CANVAS_DESIGN_ASSET_MAX_BYTES, remaining);
-          if (
-            provenance.mode === "chat" ||
-            provenance.projectId === null ||
-            maximumBytes <= 0
-          ) {
+          if (provenance.mode === "chat" || provenance.projectId === null || maximumBytes <= 0) {
             images.push({
               blockId: block.blockId,
               assetId: asset.assetId,
@@ -231,10 +231,7 @@ export class CanvasVersionImageStore {
     }
   }
 
-  #appendRecord(
-    version: CanvasVersion,
-    images: ReadonlyArray<CanvasVersionImageDigest>,
-  ): void {
+  #appendRecord(version: CanvasVersion, images: ReadonlyArray<CanvasVersionImageDigest>): void {
     const canvasId = String(version.canvasId);
     const versionId = String(version.versionId);
     let headVersion = 0;
