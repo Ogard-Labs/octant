@@ -4922,7 +4922,13 @@ third-party reviewer plugin could not take.
   own person paired); hub-introduced and restricted devices are refused 403
   server-side. Every setting change and run record is journaled with
   `eventActorForPrincipal` on `pull-request-review-*` aggregates and rebuilt by
-  replay on restart.
+  replay on restart. Per-PR hand-back settings, review runs, and review guides
+  are keyed by the linked pull request's GitHub node ID when known (with safe
+  replay fallback for pre-node-ID coordinate keys and live adoption of merged
+  duplicate links), so repository renames and owner transfers preserve them
+  while distinct pull requests reusing an old repository name never share them;
+  client requests never supply an authoritative node ID, and live GitHub head
+  and diff reads fail closed when GitHub reports a different node ID.
 - **Trigger, read-only gate, and staleness.** Runs at most once per pushed PR
   head SHA (deduplicated across repeated pushes, refreshes, and restarts) after
   the linked Code thread's worker turn settles. Executes as a host-scope
@@ -14913,9 +14919,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
-  A host lists E2B, and Cua on Linux, from its first start; a recipe can
-  name either, and a provider whose setup is missing (no credential store, or
-  no Cua daemon running) is listed as needing setup and refuses every start
+  A host lists E2B, and Cua on Linux and macOS, from its first start; a recipe
+  can name either, and a provider whose setup is missing (no credential store,
+  or no Cua daemon running) is listed as needing setup and refuses every start
   ([Disposable desktops: offering E2B and Cua](design/disposable-desktops.md#built-offering-e2b-and-cua)).
 
 **Canvas export.** A destination plugin contributes an export target through
@@ -16052,7 +16058,24 @@ application asks once and the grant lasts the thread, and the card offers
 forgettable in Settings › Computer use; maintainer decisions, 2026-11-12 and
 2026-11-19; built). Outside Strict, and at Full access, outside content does
 not make later actions ask again; below Full access under Strict that one-time
-re-ask stays and withholds Project remembering. Stop, cancellation, changed
+re-ask stays and withholds Project remembering. Computer use registers on this
+Mac as a [thread-secret](#thread-secrets) handle consumer and exposes
+`type-secret` (`{ handle, elementIndex, observationId }`) through
+`ComputerUseHostPort.typeSecret` (maintainer decisions, 2026-11-24 and
+2026-11-28). The plugin never sees the secret value: the host verifies in a
+fresh accessibility snapshot that the exact observed element is an `AXTextField`
+with `subrole === "AXSecureTextField"` (refusing any other field, including a
+visible text box labeled "Password", with `not-a-password-field` and no
+override), redeems the one-use handle in host memory, delivers the value only
+over the authenticated loopback broker and the driver's private Unix socket
+(never a CLI argument, environment variable, or file), and returns only `typed`,
+`refused`, or `cancelled` with no screenshot or value. Below Full access, and
+under Strict at Full access, each `type-secret` call waits for a one-time
+approval naming the app, the window title, and the secret's label, without
+reusing app grants or offering **Remember for this Project**; at Full access
+outside Strict, no approval is asked. Disposable desktops do not yet support
+`type-secret` and refuse it cleanly (deferred to a separate follow-up), and
+`reservedApps` remain blocked. Stop, cancellation, changed
 authority, or disable revokes
 control. Observations carry window and element identities, with screenshots
 for image-capable models. Application content remains untrusted.
@@ -21366,8 +21389,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
 
 - **Thread secrets.** An agent in a Code or Work thread may ask the person for a
   secret its work needs: an API key, a token, or an account password for `sudo`
-  (maintainer decision, 2026-11-24). Built. Computer use filling a password
-  prompt from a handle is not part of this; it is a separate, later decision.
+  (maintainer decision, 2026-11-24). Built. On this Mac, Computer use registers
+  as a handle consumer for `type-secret` into verified password fields
+  ([Computer use plugin](#extensions-and-skills); maintainer decisions,
+  2026-11-24 and 2026-11-28); disposable desktops are deferred.
   - **Request.** The agent names the secret, a label, a kind (`token` or
     `account-password`), a reason, an optional setup page, up to eight fields and
     a delivery. It can never pass a value: the person enters it in the card every
@@ -22408,6 +22433,31 @@ approval-gated` command that undoes it. The terminal shows no one-time
   build must then hash to its digest and pass its own release signature
   check before it is kept. The listing's signature, not the host, is the
   trust root, so this adds no host and no key beyond the updater's.
+- **Fleet updates across connected computers** (maintainer decision,
+  2026-11-28; partly built). From one confirmation in Settings › Updates
+  (**Update all computers…**), a person sees every connected computer's Octant
+  and provider CLI versions — desktop apps and headless servers alike — or a
+  concrete skip reason. Headless is never a skip reason; valid reasons are
+  offline, connecting, incompatible, already updating, no permission,
+  hub-introduced (**Pair this computer to update it.**), a release ring that
+  publishes no headless build, a remote desktop app until remote desktop
+  updates land (**Update on that machine.**), or a host that needs a one-time
+  manual update (**Update this computer once by hand, then it can update from
+  here.**). One drain choice (**Wait up to N minutes for running work** or
+  **Stop now**) governs remote server updates in the run. Execution runs in
+  strict order: outdated provider CLIs first via each host's existing
+  `update-provider-cli` command (never arbitrary shell commands; the desktop
+  paired-computer channel allows `POST /api/providers/commands` with a
+  150-second timeout for person-paired hosts, and a channel timeout re-reads
+  observed provider state rather than re-posting), then remote Octant servers,
+  then this local desktop app last (with **Later** deferring only this local
+  app). One host's failure never stops another, and a failed remote server
+  holds automatic local relaunch so the person can review and retry the failed
+  host. Servers this hub installed over SSH update through the existing
+  `/api/shield/servers/member-install` path with no new authority. Not built
+  yet: standalone headless remote update via `/api/host-control/update` with
+  offline store backup restore, detached runner, and `host-update.*` journal
+  events, and remote desktop app updates.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

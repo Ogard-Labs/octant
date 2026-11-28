@@ -99,7 +99,7 @@ const JOB_LABELS: Readonly<Record<EditableJob, string>> = {
   implementer: "Implementing",
   reviewer: "Reviewing finished work",
   "image-understanding": "Reading images",
-  custom: "Custom helper agents",
+  custom: "Custom agents",
 };
 
 const STALE_MESSAGE = "Changed elsewhere. Reloaded; make your change again.";
@@ -359,7 +359,7 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   return (
     <section aria-label="Model roles" className="native-harness-panel">
       <SettingsSection
-        description="Coordinator workers and helper agents use these roles. A thread you start yourself runs on the model you pick in its composer."
+        description="Coordinator workers and agents use these roles. A thread you start yourself runs on the model you pick in its composer."
         title="Model roles"
       >
         {props.providers.length === 0 && !hasSavedRouting ? (

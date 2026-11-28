@@ -85,10 +85,10 @@ describe("server-reported task access details", () => {
     const trigger = screen.getByRole("button", { name: "Access details" });
     trigger.focus();
     await user.keyboard("{Enter}");
-    const panel = await screen.findByRole("region", { name: "Task access details" });
+    const panel = await screen.findByRole("region", { name: "Thread access details" });
     expect(panel).toHaveFocus();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Task access details" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Thread access details" })).toBeNull();
     expect(trigger).toHaveFocus();
   });
 
@@ -97,7 +97,7 @@ describe("server-reported task access details", () => {
     expect(await screen.findByText("Plan", { selector: ".guardrail-level__mode" })).toBeVisible();
     expect(screen.getByText("Matches this Project’s default")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Access details" }));
-    expect(await screen.findByRole("region", { name: "Task access details" })).toHaveTextContent(
+    expect(await screen.findByRole("region", { name: "Thread access details" })).toHaveTextContent(
       "Current turn/session limit",
     );
     expect(await screen.findByText(/Task account · main-model/)).toBeVisible();
@@ -241,7 +241,7 @@ describe("server-reported task access details", () => {
     await screen.findByText(/Task account · main-model/);
     down = true;
     fireEvent.click(screen.getByRole("button", { name: "Refresh access report" }));
-    expect(await screen.findByText(/host has not reported current task access/)).toBeVisible();
+    expect(await screen.findByText(/host has not reported current thread access/)).toBeVisible();
     expect(screen.queryByText(/Task account · main-model/)).toBeNull();
     expect(screen.queryByText(/private transport detail/)).toBeNull();
     expect(

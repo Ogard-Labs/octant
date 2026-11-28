@@ -823,7 +823,7 @@ function LibraryDetail(props: LibraryDetailProps) {
           </p>
           <p className="library__note">
             The Paper CLI is optional for this local-address setup. If Desktop is closed or no file
-            is open, open both and retry in your task. Restart the agent session if it needs to
+            is open, open both and retry in your thread. Restart the agent session if it needs to
             reload its tools.
           </p>
           <a href={PAPER_LOCAL_SETUP.documentationUrl} target="_blank" rel="noreferrer">
@@ -1092,7 +1092,7 @@ function LibraryDetail(props: LibraryDetailProps) {
       <p className="library-detail__foot oct-meta">
         {localSetup
           ? props.localHost
-            ? "Adds this local server, trusts it and turns it on after this confirmation. Tool calls still follow the task's approval policy."
+            ? "Adds this local server, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
             : "Add the local server from the Octant window on this host."
           : connector
             ? props.localHost

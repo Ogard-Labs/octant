@@ -182,7 +182,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Subagents could not be stopped. They are still running.",
+        "Agents could not be stopped. They are still running.",
       ),
     );
     expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
@@ -208,7 +208,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Subagents could not be stopped. They are still running.",
+        "Agents could not be stopped. They are still running.",
       ),
     );
     expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
@@ -224,7 +224,7 @@ describe("useChildRunStatus", () => {
 
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Subagents could not be stopped. They are still running.",
+        "Agents could not be stopped. They are still running.",
       ),
     );
   });
@@ -300,7 +300,7 @@ describe("useChildRunStatus", () => {
     await user.click(screen.getByRole("button", { name: "stop" }));
     await waitFor(() =>
       expect(screen.getByLabelText("error")).toHaveTextContent(
-        "Subagents could not be stopped. They are still running.",
+        "Agents could not be stopped. They are still running.",
       ),
     );
 

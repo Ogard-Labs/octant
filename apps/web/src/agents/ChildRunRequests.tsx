@@ -113,7 +113,7 @@ export function ChildRunRequests(props: {
   return (
     <section aria-label="Child requests" className="composer-child-requests">
       <div className="composer-subagents__head">
-        <strong>A subagent needs your input</strong>
+        <strong>An agent needs your input</strong>
         {props.onOpenSubagent === undefined ? null : (
           <OctantButton
             size="xs"

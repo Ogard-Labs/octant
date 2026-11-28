@@ -200,7 +200,7 @@ function projectFact(
     id: "project",
     label: "Project",
     ready: false,
-    detail: `No ${MODE_LABEL[mode]} folder yet. A task starts in a Project.`,
+    detail: `No ${MODE_LABEL[mode]} folder yet. A thread starts in a Project.`,
   };
 }
 
@@ -242,7 +242,7 @@ function primaryAction(
     // being there is a provider-setup problem the model step cannot answer.
     return { kind: "setup", target: "providers", label: "Set up a provider" };
   }
-  return { kind: "start-thread", label: "Start a task", projectId: project.id };
+  return { kind: "start-thread", label: "Start a thread", projectId: project.id };
 }
 
 export function resolveFirstRunHandoff(input: FirstRunHandoffInput): FirstRunHandoff {

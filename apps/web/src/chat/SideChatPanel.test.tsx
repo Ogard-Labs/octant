@@ -79,7 +79,7 @@ describe("SideChatPanel", () => {
     // that source offers.
     expect(renderSidecar).toHaveBeenCalled();
     expect(panel).toHaveTextContent(
-      "Ask about this thread: its conversation, folder, files, and subagent results. It can read them but can’t change, steer, or approve anything.",
+      "Ask about this thread: its conversation, folder, files, and agent results. It can read them but can’t change, steer, or approve anything.",
     );
   });
 

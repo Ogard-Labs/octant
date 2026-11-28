@@ -25,7 +25,7 @@ export interface ProviderNativeSetupSettingProps {
 }
 
 const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
-  subagents: "its own subagents",
+  subagents: "its own agents",
   webTools: "web search and fetch",
   skills: "skills",
   toolServers: "the MCP servers in its home folder",
@@ -61,18 +61,18 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
       description={`Lets this account’s threads use ${name}’s own setup, as in ${name} itself.`}
       more={
         <>
-          Its own subagents, web search and fetch, skills, and the MCP servers, plugins, settings,
-          and hooks in its home folder. On by default; each call still follows the thread’s level.
-          Octant still shows each subagent and marks each web read. Turned off, web search and fetch
+          Its own agents, web search and fetch, skills, and the MCP servers, plugins, settings, and
+          hooks in its home folder. On by default; each call still follows the thread’s level.
+          Octant still shows each agent and marks each web read. Turned off, web search and fetch
           stay off in every mode, and Full access still turns the rest on. {chatBoundaryClause} A
           Project’s own hooks, MCP servers, and plugins load only in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}
-              Vibe’s subagents, and your own Vibe agents they run as, work in Work and Code outside
-              Plan, at every level there. Vibe doesn’t say which tool its subagents ask to run, so
-              their approvals show no tool name, and a subagent running as one of your own Vibe
-              agents may approve its own tools, as in Vibe.
+              Vibe’s own agents, and custom Vibe agents they run as, work in Work and Code outside
+              Plan, at every level there. Vibe doesn’t say which tool its agents ask to run, so
+              their approvals show no tool name, and an agent running as one of your own Vibe agents
+              may approve its own tools, as in Vibe.
             </>
           ) : null}
           {unsupported.length === 0 ? null : (

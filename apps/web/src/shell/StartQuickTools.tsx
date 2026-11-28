@@ -295,7 +295,7 @@ export function StartQuickTools(props: {
             </OctantAlert>
           )}
           <p className="oct-row-detail start-quick-tools__note">
-            {props.note ?? "Other tools open once the task starts"}
+            {props.note ?? "Other tools open once the thread starts"}
           </p>
         </div>
       </aside>

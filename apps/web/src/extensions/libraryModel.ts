@@ -201,7 +201,7 @@ const CAPABILITY_FACTS: Readonly<Record<Capability, CapabilityFact>> = {
     level: "medium",
   },
   agents: {
-    ability: "Adds helper agents",
+    ability: "Adds agents",
     cost: "Starts agents that run under the same mode",
     level: "medium",
   },
@@ -358,7 +358,7 @@ function packageItem(pkg: InstalledPackage, connectors: ReadonlyArray<ConnectorC
           authority: {
             level: "high" as const,
             lines: [
-              "Reaches Paper Desktop on this host; tool calls follow the task's approval policy",
+              "Reaches Paper Desktop on this host; tool calls follow the thread's approval policy",
             ],
           },
           localSetupId: "paper" as const,
@@ -595,7 +595,7 @@ function paperSetupItem(): LibraryItem {
     abilities: ["Read and edit the open design through Paper's local tools"],
     authority: {
       level: "high",
-      lines: ["Reaches Paper Desktop on this host; tool calls follow the task's approval policy"],
+      lines: ["Reaches Paper Desktop on this host; tool calls follow the thread's approval policy"],
     },
     handoff: "installed",
     localSetupId: "paper",

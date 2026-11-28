@@ -408,7 +408,7 @@ describe("buildSidebarNavigation", () => {
       { id: "projects", label: "Projects" },
     ]);
     expect(buildSidebarNavigation({ activeMode: "code", ...availableBaseCapabilities })).toEqual([
-      { id: "new-code-thread", label: "New task" },
+      { id: "new-code-thread", label: "New thread" },
       { id: "projects", label: "Projects" },
     ]);
   });

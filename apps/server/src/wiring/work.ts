@@ -1246,6 +1246,7 @@ export function wireWork(deps: WorkDependencies) {
           computerOwner,
           undefined,
           appToolThreadLevel(input.thread, resolveThreadStrict(String(input.thread.id))),
+          String(input.turnId),
         );
         const pastThreads = !browserSupported
           ? undefined
@@ -1436,6 +1437,8 @@ export function wireWork(deps: WorkDependencies) {
                   workTurnToolLevel(
                     runningWorkTurns.get(String(input.thread.id))?.access ?? input.thread.access,
                   ).posture,
+                hasHandleConsumer: () =>
+                  threadSecretFacts.service.hasConsumer() && computer !== undefined,
               }),
             });
         if (

@@ -82,7 +82,7 @@ export function ContinueElsewhere(props: {
   async function copyTaskLink(destination: string) {
     if (link === undefined || navigator.clipboard === undefined) {
       setNotice(
-        "The link could not be copied. Use the task link or select the task in the paired app.",
+        "The link could not be copied. Use the thread link or select the thread in the paired app.",
       );
       return;
     }
@@ -90,10 +90,10 @@ export function ContinueElsewhere(props: {
       await navigator.clipboard.writeText(link);
       setDestinationScreen(destination);
       setNotice(
-        `Task link copied for ${destination}. Open it there; execution remains on this host and no writer was cloned.`,
+        `Thread link copied for ${destination}. Open it there; execution remains on this host and no writer was cloned.`,
       );
     } catch {
-      setNotice("The link could not be copied. Use the task link above.");
+      setNotice("The link could not be copied. Use the thread link above.");
     }
   }
   return (
@@ -134,8 +134,8 @@ export function ContinueElsewhere(props: {
           <dd>{providerModelLabel(props.groups, props.selected)}</dd>
         </dl>
         <p>
-          The same task keeps its conversation, task state, checkout and pending feedback on this
-          host. Nothing sends automatically.
+          The same thread keeps its conversation, thread state, checkout and pending feedback on
+          this host. Nothing sends automatically.
         </p>
         <h3>Another provider</h3>
         <p>
@@ -199,9 +199,9 @@ export function ContinueElsewhere(props: {
           </p>
         )}
         <p>
-          Open this exact task from an already paired screen. Execution and the native writer stay
+          Open this exact thread from an already paired screen. Execution and the native writer stay
           on this host. Unsent drafts and local view state stay on this screen; host-held inputs and
-          pending feedback remain with the task.
+          pending feedback remain with the thread.
         </p>
         {screens.length === 0 ? (
           <p>No paired screens are listed here.</p>
@@ -216,7 +216,7 @@ export function ContinueElsewhere(props: {
                   disabled={link === undefined}
                   onClick={() => void copyTaskLink(label)}
                 >
-                  Copy task link for {label}
+                  Copy thread link for {label}
                 </OctantButton>
               </li>
             ))}
@@ -224,20 +224,20 @@ export function ContinueElsewhere(props: {
         )}
         {link === undefined ? (
           <p>
-            A browser task link is unavailable for this connection. Use the existing paired app and
-            select this {props.mode} task: {props.threadId}.
+            A browser thread link is unavailable for this connection. Use the existing paired app
+            and select this {props.mode} thread: {props.threadId}.
           </p>
         ) : (
           <>
             <a className="continuation-dialog__link" href={link} target="_blank" rel="noreferrer">
-              Open task link
+              Open thread link
             </a>
             <OctantButton
               variant="secondary"
               size="sm"
               onClick={() => void copyTaskLink("another paired screen")}
             >
-              Copy task link
+              Copy thread link
             </OctantButton>
           </>
         )}

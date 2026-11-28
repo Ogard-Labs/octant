@@ -74,7 +74,7 @@ export function CoordinatorProposalCards(
             {attempt.status === "none" ? null : (
               <p className="oct-row-detail" role="status">
                 {attempt.status === "blocked"
-                  ? "The submitted approval is unresolved. Inspect its task; another approval or decline stays blocked until the host records its outcome."
+                  ? "The submitted approval is unresolved. Inspect its thread; another approval or decline stays blocked until the host records its outcome."
                   : "This window cannot retain approval identity. Session storage is required before approving."}
               </p>
             )}
@@ -93,7 +93,7 @@ export function CoordinatorProposalCards(
                   size="xs"
                   onClick={() => props.onOpenThread(attempt.threadId)}
                 >
-                  Inspect submitted task
+                  Inspect submitted thread
                 </OctantButton>
               ) : null}
               <OctantButton

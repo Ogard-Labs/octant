@@ -42,7 +42,7 @@ export const capabilityLabels: ReadonlyArray<
   ["fileChanges", "File changes"],
   ["diffs", "Diffs"],
   ["taskProgress", "Task progress"],
-  ["nativeChildAgents", "Native child agents"],
+  ["nativeChildAgents", "Native agents"],
 ];
 /**
  * What a runtime's own reviewer reports per call at Reviewed, in plain words,

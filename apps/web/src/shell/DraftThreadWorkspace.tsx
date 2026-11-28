@@ -824,13 +824,22 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         : `Review pull request ${reference}: ${item.title}`,
     );
   };
-  const pickLinearWork = (row: LinearIssueRow) => {
+  const pickLinearWork = (
+    row: LinearIssueRow & {
+      readonly accountRef?: string;
+      readonly workspaceLabel?: string;
+      readonly isLegacyAccount?: boolean;
+    },
+  ) => {
     const matchedProject = matchProjectForLinearIssue(
       compatibleProjects.filter(
         (project): project is Extract<ProjectSummary, { readonly type: "code" }> =>
           project.type === "code",
       ),
       row,
+      row.isLegacyAccount === true && row.accountRef !== undefined
+        ? { legacyAccountRef: row.accountRef }
+        : {},
     );
     if (
       matchedProject !== undefined &&
@@ -840,7 +849,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
     setCreateFromSelection({
       kind: "linear",
-      request: { id: row.id },
+      request: {
+        id: row.id,
+        ...(row.accountRef === undefined ? {} : { accountRef: row.accountRef }),
+      },
       label: row.identifier,
     });
     fillPromptRequest(`Work on ${row.identifier}: ${row.title}`);
@@ -1062,7 +1074,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         projectSetup={
           selectedProjectId === undefined && compatibleProjects.length === 0 ? (
             <div aria-label="Set up a Code project" className="code-home__project-setup">
-              <p>Add a folder to choose where this task will work.</p>
+              <p>Add a folder to choose where this thread will work.</p>
               {props.onCreateProject === undefined && props.onAttachFolder === undefined ? null : (
                 <OctantButton
                   onClick={addFolder}

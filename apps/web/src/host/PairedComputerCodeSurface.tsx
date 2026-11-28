@@ -4,6 +4,7 @@ import {
   canExecuteRemoteProductMutation,
   readRemoteSessionStanding,
   RESTRICTED_REMOTE_SESSION,
+  type RemotePairingClient,
   type RemoteSessionBridge,
   type RemoteSessionStanding,
 } from "@octant/client-runtime";
@@ -16,9 +17,13 @@ import { useProviderController } from "../providers/useProviderController";
 import { createRemoteExtensionClient, remoteProductPort } from "../remote/remoteProductClients";
 import { RemoteCodeSurface } from "../remote/RemoteWorkspace";
 import { HostSelector } from "../shell/HostSelector";
+import type { PairedComputersBridge } from "../shell/hostBridge";
+import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { VideoClientContext } from "../video/ThreadVideoClips";
 import { createPairedComputerCodeClients } from "./pairedComputerCodeClients";
+import { PairedComputerConnectDialog } from "./PairedComputerConnectDialog";
 import { PairedComputerThreadServers } from "./PairedComputerThreadServers";
+import { useHostFederationStack } from "./useHostFederationLifecycle";
 import type { RemoteServerGrantSource } from "@octant/contracts";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
 import { ComposerStashScopeContext } from "../composer/ComposerStashControls";
@@ -35,6 +40,14 @@ export interface PairedComputerCodeSurfaceProps {
   readonly initialThreadId?: CodeThreadId;
   /** Counts each request to open `initialThreadId`, so the same thread can be reopened. */
   readonly initialThreadRequest?: number;
+  /** Desktop pairing bridge, used by "Connect to reply" on a Watching thread. */
+  readonly pairedComputers?: PairedComputersBridge;
+  /** Registered origin of the computer currently shown. */
+  readonly origin?: string;
+  /** Expected listener pin of the computer currently shown. */
+  readonly expectedPin?: string;
+  /** Replaces the transport-backed pairing client; only tests do. */
+  readonly pairingClient?: RemotePairingClient;
   /**
    * Opens one of a thread's servers on that computer, in Octant's own window or
    * the default browser. Absent where this window cannot show such a page.
@@ -74,6 +87,34 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
     "that computer";
   const { openServer } = props;
   const openBootstrap = useContext(AddRepositoryToComputerContext);
+  const federation = useHostFederationStack();
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [registeredTarget, setRegisteredTarget] = useState<{
+    readonly origin?: string | undefined;
+    readonly pin?: string | undefined;
+  }>({});
+  useEffect(() => {
+    if (federation === undefined) return;
+    let cancelled = false;
+    void federation.registry
+      .get(props.selectedHostId)
+      .then((entry) => {
+        if (cancelled) return;
+        const trust = entry?.credential?.listenerTrust?.current;
+        setRegisteredTarget({
+          origin: entry?.origin,
+          pin: trust?.kind === "pinned" ? trust.pin : undefined,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [federation, props.selectedHostId]);
+  const connectOrigin = props.origin ?? registeredTarget.origin;
+  const connectPin = props.expectedPin ?? registeredTarget.pin;
+  const canOpenConnect =
+    props.pairedComputers !== undefined && federation !== undefined && connectOrigin !== undefined;
   const state = useSyncExternalStore(
     (onChange) => bridge.subscribe(onChange),
     () => bridge.getState(),
@@ -159,6 +200,8 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
             clients={clients}
             actsAsHostPerson={standing.actsAsHostPerson}
             extensionClient={extensionClient}
+            hostName={hostName}
+            {...(canOpenConnect ? { onConnectToReply: () => setConnectOpen(true) } : {})}
             {...(worktreePort === undefined ? {} : { worktreePort })}
             connected={connected}
             providerGroups={providerGroups}
@@ -199,6 +242,24 @@ export function PairedComputerCodeSurface(props: PairedComputerCodeSurfaceProps)
             onNavigate={() => undefined}
             onOpenCanvas={() => undefined}
           />
+          <OctantDialogPresence>
+            {connectOpen &&
+            props.pairedComputers !== undefined &&
+            federation !== undefined &&
+            connectOrigin !== undefined ? (
+              <PairedComputerConnectDialog
+                bridge={props.pairedComputers}
+                expectedPin={connectPin}
+                federation={federation}
+                hostName={hostName}
+                onClose={() => setConnectOpen(false)}
+                onConnected={() => setConnectOpen(false)}
+                open={connectOpen}
+                origin={connectOrigin}
+                pairingClient={props.pairingClient}
+              />
+            ) : null}
+          </OctantDialogPresence>
         </ComposerStashScopeContext.Provider>
       </VideoClientContext.Provider>
     </div>

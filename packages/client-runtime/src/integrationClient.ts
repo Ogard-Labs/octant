@@ -1,5 +1,7 @@
 import {
   decodeIntegrationAuthenticationCommand,
+  IntegrationAccountsSnapshot,
+  type IntegrationAccountRef,
   type IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
   IntegrationExecutionResult,
@@ -31,16 +33,31 @@ export interface IntegrationClientOptions {
 
 export interface IntegrationClient {
   authenticationSnapshot(): Promise<IntegrationAuthenticationSnapshot>;
+  accountsSnapshot?(): Promise<IntegrationAccountsSnapshot>;
   executeAuthenticationCommand(
     command: IntegrationAuthenticationCommand,
   ): Promise<IntegrationAuthenticationSnapshot>;
-  executeOperation(operationId: string, input: unknown): Promise<IntegrationExecutionResult>;
-  listIssues(input?: LinearIssueListInput): Promise<LinearIssueListPage>;
-  getIssue(input: LinearIssueGetInput): Promise<LinearIssueDetail>;
-  getIssueByIdentifier?(input: LinearIssueGetByIdentifierInput): Promise<LinearIssueDetail>;
-  listIssueFilters(): Promise<LinearIssueFilterOptions>;
-  storePersonalCredential(credential: string): Promise<void>;
-  deletePersonalCredential(): Promise<void>;
+  executeOperation(
+    operationId: string,
+    input: unknown,
+    accountRef?: IntegrationAccountRef,
+  ): Promise<IntegrationExecutionResult>;
+  listIssues(
+    input?: LinearIssueListInput,
+    accountRef?: IntegrationAccountRef,
+  ): Promise<LinearIssueListPage>;
+  getIssue(
+    input: LinearIssueGetInput,
+    accountRef?: IntegrationAccountRef,
+  ): Promise<LinearIssueDetail>;
+  getIssueByIdentifier?(
+    input: LinearIssueGetByIdentifierInput,
+    accountRef?: IntegrationAccountRef,
+  ): Promise<LinearIssueDetail>;
+  listIssueFilters(accountRef?: IntegrationAccountRef): Promise<LinearIssueFilterOptions>;
+  storePersonalCredential(credential: string, accountRef?: IntegrationAccountRef): Promise<void>;
+  deletePersonalCredential(accountRef?: IntegrationAccountRef): Promise<void>;
+  adoptLegacyPersonalCredential?(): Promise<void>;
 }
 
 export class IntegrationClientFailure extends Error {
@@ -65,6 +82,7 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
     "x-octant-window-capability": options.windowCapability,
   } as const;
   const snapshotPath = linearAuthenticationPath(options.slug);
+  const accountsPath = linearAccountsPath(options.slug);
   const commandsPath = linearAuthenticationCommandsPath(options.slug);
   const operationsPath = linearOperationsPath(options.slug);
   const secretsPath = `/api/integrations/${encodeURIComponent(options.slug)}/secrets`;
@@ -101,11 +119,13 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
   async function executeOperation(
     operationId: string,
     input: unknown,
+    accountRef?: IntegrationAccountRef,
   ): Promise<IntegrationExecutionResult> {
     const body = await post(operationsPath, {
       kind: "operation",
       operationId,
       input,
+      ...(accountRef === undefined ? {} : { accountRef }),
     });
     return decodeResponse(body, decodeHostAnswer(IntegrationExecutionResult));
   }
@@ -115,48 +135,63 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
       const body = await send(snapshotPath, { method: "GET", headers });
       return decodeResponse(body, decodeHostAnswer(IntegrationAuthenticationSnapshot));
     },
+    async accountsSnapshot() {
+      const body = await send(accountsPath, { method: "GET", headers });
+      return decodeResponse(body, decodeHostAnswer(IntegrationAccountsSnapshot));
+    },
     async executeAuthenticationCommand(command) {
       const validated = decodeRequest(command, decodeIntegrationAuthenticationCommand);
       const body = await post(commandsPath, validated);
       return decodeResponse(body, decodeHostAnswer(IntegrationAuthenticationSnapshot));
     },
     executeOperation,
-    async listIssues(input = {}) {
+    async listIssues(input = {}, accountRef) {
       const validated = decodeRequest(input, decodeLinearIssueListInput);
       return readOperationValue(
-        await executeOperation(LINEAR_ISSUE_LIST_OPERATION, validated),
+        await executeOperation(LINEAR_ISSUE_LIST_OPERATION, validated, accountRef),
         decodeHostAnswer(LinearIssueListPage),
       );
     },
-    async getIssue(input) {
+    async getIssue(input, accountRef) {
       const validated = decodeRequest(input, decodeLinearIssueGetInput);
       return readOperationValue(
-        await executeOperation(LINEAR_ISSUE_GET_OPERATION, validated),
+        await executeOperation(LINEAR_ISSUE_GET_OPERATION, validated, accountRef),
         decodeHostAnswer(LinearIssueDetail),
       );
     },
-    async getIssueByIdentifier(input) {
+    async getIssueByIdentifier(input, accountRef) {
       const validated = decodeRequest(input, decodeLinearIssueGetByIdentifierInput);
       return readOperationValue(
-        await executeOperation(LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, validated),
+        await executeOperation(LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, validated, accountRef),
         decodeHostAnswer(LinearIssueDetail),
       );
     },
-    async listIssueFilters() {
+    async listIssueFilters(accountRef) {
       return readOperationValue(
-        await executeOperation(LINEAR_ISSUE_FILTERS_OPERATION, {}),
+        await executeOperation(LINEAR_ISSUE_FILTERS_OPERATION, {}, accountRef),
         decodeHostAnswer(LinearIssueFilterOptions),
       );
     },
-    async storePersonalCredential(credential) {
+    async storePersonalCredential(credential, accountRef) {
       await post(secretsPath, {
         kind: "put",
         scope: "personal-api-key",
         credential,
+        ...(accountRef === undefined ? {} : { accountRef }),
       });
     },
-    async deletePersonalCredential() {
-      await post(secretsPath, { kind: "delete", scope: "personal-api-key" });
+    async deletePersonalCredential(accountRef) {
+      await post(secretsPath, {
+        kind: "delete",
+        scope: "personal-api-key",
+        ...(accountRef === undefined ? {} : { accountRef }),
+      });
+    },
+    async adoptLegacyPersonalCredential() {
+      await post(secretsPath, {
+        kind: "adopt-legacy",
+        scope: "personal-api-key",
+      });
     },
   };
 }
@@ -186,6 +221,12 @@ function linearAuthenticationPath(slug: string): string {
   return slug === "linear"
     ? "/api/integrations/linear/authentication"
     : `/api/integrations/${encodeURIComponent(slug)}/authentication`;
+}
+
+function linearAccountsPath(slug: string): string {
+  return slug === "linear"
+    ? "/api/integrations/linear/accounts"
+    : `/api/integrations/${encodeURIComponent(slug)}/accounts`;
 }
 
 function linearAuthenticationCommandsPath(slug: string): string {

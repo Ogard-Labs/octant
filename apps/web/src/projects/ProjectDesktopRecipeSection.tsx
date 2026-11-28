@@ -10,8 +10,15 @@ import {
 } from "@octant/contracts/desktop-lease";
 import type { ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useRef, useState } from "react";
-import { providerCapability, setupMessage } from "../desktop/desktopPaneModel";
+import {
+  CUA_SPACES_URL,
+  isCuaDaemonMissing,
+  providerCapability,
+  setupMessage,
+} from "../desktop/desktopPaneModel";
 import { hostCredentialStore, useHostPlatform } from "../platform";
+import { SettingsSetupLink } from "../settings/SettingsSetupLink";
+import type { ExternalUrlHost } from "../shell/openExternalUrl";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -33,6 +40,7 @@ export interface ProjectDesktopRecipeSectionProps {
     recipe: DesktopRecipe | null,
     key?: DesktopRecipeKeyChange,
   ) => Promise<boolean>;
+  readonly externalUrlHost?: ExternalUrlHost | undefined;
   readonly disabled?: boolean;
 }
 
@@ -650,6 +658,14 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
                 provider.needsSetup === undefined ? null : (
                   <li key={String(provider.providerId)}>
                     {setupMessage(provider.needsSetup, provider.displayName)}
+                    {isCuaDaemonMissing(provider) ? (
+                      <>
+                        {" "}
+                        <SettingsSetupLink host={props.externalUrlHost} href={CUA_SPACES_URL}>
+                          Get Cua Spaces
+                        </SettingsSetupLink>
+                      </>
+                    ) : null}
                   </li>
                 ),
               )}
@@ -661,6 +677,14 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
               {draftProvider.needsSetup === undefined
                 ? ""
                 : ` ${setupMessage(draftProvider.needsSetup, draftProvider.displayName)}`}
+              {isCuaDaemonMissing(draftProvider) ? (
+                <>
+                  {" "}
+                  <SettingsSetupLink host={props.externalUrlHost} href={CUA_SPACES_URL}>
+                    Get Cua Spaces
+                  </SettingsSetupLink>
+                </>
+              ) : null}
             </p>
           )}
           {placementOptions.length === 0 ? null : (

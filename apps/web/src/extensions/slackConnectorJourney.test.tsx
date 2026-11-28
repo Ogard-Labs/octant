@@ -352,7 +352,7 @@ describe.each(["slack", "github-oauth", "github-repositories"] as const)(
           ),
         ).toBeInTheDocument();
         expect(
-          screen.getByText("Tools are checked when selected for an authorized task."),
+          screen.getByText("Tools are checked when selected for an authorized thread."),
         ).toBeInTheDocument();
         expect(mcpServerSignIn).toHaveBeenCalledTimes(1);
       },

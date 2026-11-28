@@ -989,12 +989,12 @@ describe("CodeThreadEnvironment", () => {
     it("keeps New task in this Project in a menu on the title row that does not fold the section", async () => {
       const user = userEvent.setup();
       await renderChanges(readyObservation());
-      expect(screen.queryByRole("button", { name: "New task in this Project" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "New thread in this Project" })).toBeNull();
       const section = screen.getByRole("button", { name: /^Changes/ });
       expect(section).toHaveAttribute("aria-expanded", "true");
       await user.click(screen.getByRole("button", { name: "More for changes" }));
       expect(
-        await screen.findByRole("menuitem", { name: "New task in this Project" }),
+        await screen.findByRole("menuitem", { name: "New thread in this Project" }),
       ).toBeVisible();
       // The branch entries moved to the Branch row itself; nothing else may
       // be hidden behind this menu.
@@ -1119,7 +1119,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
 
   it("opens the branch menu from the Branch row itself", async () => {
     const { user } = await openBranchMenuClicked();
-    for (const name of ["Switch branch…", "New task on another branch…", "Worktrees"]) {
+    for (const name of ["Switch branch…", "New thread on another branch…", "Worktrees"]) {
       expect(await screen.findByRole("menuitem", { name })).toBeEnabled();
     }
     await user.keyboard("{Escape}");
@@ -1128,7 +1128,9 @@ describe("CodeThreadEnvironment branch and move actions", () => {
   it("starts a new task on another branch from the Branch row", async () => {
     const onNewTaskOnBranch = vi.fn();
     const { user } = await openBranchMenuClicked({ onNewTaskOnBranch });
-    await user.click(await screen.findByRole("menuitem", { name: "New task on another branch…" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "New thread on another branch…" }),
+    );
     expect(onNewTaskOnBranch).toHaveBeenCalledOnce();
   });
 
@@ -1138,7 +1140,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
       "aria-disabled",
       "true",
     );
-    expect(screen.getByRole("menuitem", { name: "New task on another branch…" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "New thread on another branch…" })).toBeEnabled();
     expect(screen.getByRole("menuitem", { name: "Worktrees" })).toBeEnabled();
     await user.keyboard("{Escape}");
   });
@@ -1149,7 +1151,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
       "aria-disabled",
       "true",
     );
-    expect(screen.getByRole("menuitem", { name: "New task on another branch…" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "New thread on another branch…" })).toBeEnabled();
     await user.keyboard("{Escape}");
   });
 
@@ -1157,7 +1159,7 @@ describe("CodeThreadEnvironment branch and move actions", () => {
     for (const checkoutKind of ["remote-root", "plain-folder"] as const) {
       const { unmount, user } = await openBranchMenuClicked({ checkoutKind });
       expect(
-        await screen.findByRole("menuitem", { name: "New task on another branch…" }),
+        await screen.findByRole("menuitem", { name: "New thread on another branch…" }),
       ).toBeEnabled();
       expect(screen.queryByRole("menuitem", { name: "Switch branch…" })).toBeNull();
       // Neither kind has a local worktree set to manage, so Worktrees stays

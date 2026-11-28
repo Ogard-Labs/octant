@@ -667,4 +667,21 @@ describe("AppUpdateSettings", () => {
       expect(screen.queryByRole("group", { name: "Data" })).toBeNull();
     });
   });
+
+  it("opens the fleet update confirmation from Settings when fleet sources are provided", async () => {
+    render(
+      <AppUpdateSettings
+        automaticChecks
+        fleetUpdate={{ localDisplayName: "This Mac" }}
+        hostBridge={bridge()}
+        onAutomaticChecksChange={vi.fn()}
+        onUpdateChannelChange={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Update all computers…" }));
+
+    expect(await screen.findByRole("heading", { name: "Update all computers" })).toBeTruthy();
+    expect(await screen.findByText("This app, restarts last")).toBeTruthy();
+  });
 });

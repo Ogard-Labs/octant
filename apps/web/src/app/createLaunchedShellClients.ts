@@ -12,16 +12,18 @@ import {
   createAgentGrantClient,
   createAgentProfileClient,
   createBenchmarksClient,
-  createAutomationClient,
   createUsageDashboardClient,
   createPullRequestReviewClient,
   createSpendCeilingClient,
   createLocalUsageHistoryClient,
   createRequestCoordinator,
   type AgentProfileClient,
-  type AutomationClient,
   type BenchmarksClient,
 } from "@octant/client-runtime";
+import type {
+  AutomationClient,
+  AutomationClientOptions,
+} from "@octant/client-runtime/automation-client";
 import { createAgentRunClient, type AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import {
   createProtectedFilesClient,
@@ -405,7 +407,7 @@ export function createLaunchedShellClients(
     agentMessageClient: createAgentMessageClient(port),
     appleToolchainClient: options.appleToolchainClient ?? createAppleToolchainClient(port),
     androidToolchainClient: options.androidToolchainClient ?? createAndroidToolchainClient(port),
-    automationClient: options.automationClient ?? createAutomationClient(port),
+    automationClient: options.automationClient ?? createLazyAutomationClient(port),
     automationNotificationClient: createAutomationNotificationClient(port),
     browserAutomationClient: options.browserAutomationClient ?? createBrowserAutomationClient(port),
     canvasClient: options.canvasClient ?? createCanvasClient(port),
@@ -481,5 +483,62 @@ export function createLaunchedShellClients(
     workResearchClient: createWorkResearchClient(port),
     workThreadClient: options.workThreadClient ?? createWorkThreadClient(port),
     workTurnClient: options.workTurnClient ?? createWorkTurnClient(port),
+  };
+}
+
+/**
+ * Loads the automation wire client and its schemas on first automation call so
+ * the initial shell chunk does not pay for automation codecs until needed.
+ */
+function createLazyAutomationClient(options: AutomationClientOptions): AutomationClient {
+  let clientPromise: Promise<AutomationClient> | undefined;
+  const load = (): Promise<AutomationClient> => {
+    clientPromise ??= import("@octant/client-runtime/automation-client")
+      .then(({ createAutomationClient }) => createAutomationClient(options))
+      .catch((error: unknown) => {
+        clientPromise = undefined;
+        throw error;
+      });
+    return clientPromise;
+  };
+  return {
+    eventSources(signal) {
+      return load().then((client) => {
+        if (client.eventSources === undefined) return [];
+        return client.eventSources(signal);
+      });
+    },
+    listFinishWaitTargets(signal) {
+      return load().then((client) => {
+        if (client.listFinishWaitTargets === undefined) {
+          throw new Error("Finish-wait threads are unavailable.");
+        }
+        return client.listFinishWaitTargets(signal);
+      });
+    },
+    list(input, signal) {
+      return load().then((client) => client.list(input, signal));
+    },
+    get(automationId, signal, context) {
+      return load().then((client) => client.get(automationId, signal, context));
+    },
+    history(input, signal) {
+      return load().then((client) => client.history(input, signal));
+    },
+    execute(command, signal) {
+      return load().then((client) => client.execute(command, signal));
+    },
+    followUp(request, signal) {
+      return load().then((client) => client.followUp(request, signal));
+    },
+    createThreadRoutine(request, signal) {
+      return load().then((client) => client.createThreadRoutine(request, signal));
+    },
+    listProposals(signal) {
+      return load().then((client) => client.listProposals(signal));
+    },
+    decideProposal(decision, signal) {
+      return load().then((client) => client.decideProposal(decision, signal));
+    },
   };
 }

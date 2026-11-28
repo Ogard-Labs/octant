@@ -351,7 +351,7 @@ describe("SplitWorkspace", () => {
         renderSurface={() => <p>Composer</p>}
       />,
     );
-    expect(screen.getByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Workspace pane: New thread" })).toBeVisible();
     expect(screen.queryByText("Welcome to Code")).not.toBeInTheDocument();
   });
 

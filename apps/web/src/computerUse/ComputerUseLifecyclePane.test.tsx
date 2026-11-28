@@ -181,4 +181,38 @@ describe("ComputerUseLifecyclePane", () => {
     expect(screen.getByText("Fresh host observation recorded.")).toBeVisible();
     expect(screen.queryByText(/password|credential|secret value/i)).not.toBeInTheDocument();
   });
+
+  it("shows a one-time approval naming the app, window, and secret label without offering Project remembering", () => {
+    const approve = vi.fn();
+    const secretApproval = decodeComputerUseSessionView({
+      ...waiting,
+      pendingApproval: {
+        approvalId: "80000000-0000-4000-8000-000000000002",
+        actionId: "90000000-0000-4000-8000-000000000002",
+        expiresAt: "2026-07-27T21:01:00.000Z",
+        summary:
+          'Type secret "Admin password" into com.example.AuthPrompt (window "Privacy & Security") for "Configure Mac".',
+      },
+    });
+    render(
+      <ComputerUseLifecyclePane
+        onApprove={approve}
+        onRememberForProject={vi.fn()}
+        onDeny={vi.fn()}
+        onStop={vi.fn()}
+        view={secretApproval}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Computer-use approval" });
+    expect(group).toHaveTextContent("Octant is waiting for a one-time approval.");
+    expect(group).toHaveTextContent("Admin password");
+    expect(group).toHaveTextContent("com.example.AuthPrompt");
+    expect(group).toHaveTextContent("Privacy & Security");
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Allow app for this thread" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remember for this Project" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Approve once" }));
+    expect(approve).toHaveBeenCalledOnce();
+  });
 });

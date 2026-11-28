@@ -74,7 +74,7 @@ describe("RoutineProposalPrompt", () => {
   it("shows the routine's name, schedule, and prompt for this thread", async () => {
     renderPrompt(client([proposal()]));
 
-    const card = await screen.findByRole("article", { name: "Routine proposal" });
+    const card = await screen.findByRole("article", { name: "Automation proposal" });
     expect(card).toHaveTextContent("Friday digest");
     expect(card).toHaveTextContent("(UTC)");
     expect(card).toHaveTextContent("Summarize this week's changes.");
@@ -84,7 +84,7 @@ describe("RoutineProposalPrompt", () => {
     const fake = client([proposal()]);
     renderPrompt(fake);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Create automation" }));
 
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
     await waitFor(() => expect(screen.queryByRole("article")).not.toBeInTheDocument());
@@ -126,12 +126,12 @@ describe("RoutineProposalPrompt", () => {
     const fake = client([changeRequest()]);
     renderPrompt(fake);
 
-    const card = await screen.findByRole("article", { name: "Pause routine request" });
+    const card = await screen.findByRole("article", { name: "Pause automation request" });
     expect(card).toHaveTextContent("Friday digest");
     expect(card).toHaveTextContent("until you resume it");
     expect(card).toHaveTextContent("The reports folder moved.");
     expect(fake.decideProposal).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Pause routine" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pause automation" }));
     expect(fake.decideProposal).toHaveBeenCalledWith({ proposalId, decision: "confirm" });
   });
 
@@ -156,16 +156,18 @@ describe("RoutineProposalPrompt", () => {
       .mockResolvedValueOnce({ kind: "routine-proposal-gone" });
     renderPrompt(fake);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
-    expect(await screen.findByRole("article", { name: "Routine proposal" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Create automation" }));
+    expect(await screen.findByRole("article", { name: "Automation proposal" })).toBeInTheDocument();
     expect(
       screen.getByText("The answer could not be saved; nothing was changed. Try again."),
     ).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Create routine" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create automation" }));
     expect(fake.decideProposal).toHaveBeenCalledTimes(2);
     await waitFor(() =>
-      expect(screen.queryByRole("article", { name: "Routine proposal" })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("article", { name: "Automation proposal" }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -180,14 +182,16 @@ describe("RoutineProposalPrompt", () => {
       .mockResolvedValueOnce({ kind: "routine-proposal-gone" });
     renderPrompt(fake);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Create routine" }));
-    expect(await screen.findByRole("article", { name: "Routine proposal" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Create automation" }));
+    expect(await screen.findByRole("article", { name: "Automation proposal" })).toBeInTheDocument();
     expect(screen.getByText("The routine could not be created.")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Create routine" }));
+    await userEvent.click(screen.getByRole("button", { name: "Create automation" }));
     expect(fake.decideProposal).toHaveBeenCalledTimes(2);
     await waitFor(() =>
-      expect(screen.queryByRole("article", { name: "Routine proposal" })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("article", { name: "Automation proposal" }),
+      ).not.toBeInTheDocument(),
     );
   });
 

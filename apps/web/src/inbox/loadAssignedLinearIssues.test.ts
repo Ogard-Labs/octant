@@ -4,6 +4,7 @@ import {
   ASSIGNED_LINEAR_MAX_PAGES,
   ASSIGNED_LINEAR_PAGE_SIZE,
   loadAssignedLinearIssues,
+  loadAssignedLinearIssuesAcrossAccounts,
 } from "./loadAssignedLinearIssues";
 
 const row = (id: string): LinearIssueRow => ({
@@ -62,5 +63,28 @@ describe("loadAssignedLinearIssues", () => {
     expect(page.truncated).toBe(true);
     expect(page.endCursor).toBe("next");
     expect(listIssues).toHaveBeenCalledTimes(ASSIGNED_LINEAR_MAX_PAGES);
+  });
+
+  it("merges assigned issues across multiple accounts with workspace labels", async () => {
+    const listIssues = vi.fn(
+      async (
+        _input: { readonly cursor?: string },
+        accountRef: string,
+      ): Promise<LinearIssueListPage> => ({
+        rows: [row(accountRef === "acct-a" ? "1" : "2")],
+        hasNextPage: false,
+      }),
+    );
+    const merged = await loadAssignedLinearIssuesAcrossAccounts(
+      [
+        { accountRef: "acct-a", workspaceLabel: "Personal" },
+        { accountRef: "acct-b", workspaceLabel: "Company" },
+      ],
+      listIssues,
+    );
+    expect(merged.rows).toEqual([
+      { ...row("1"), accountRef: "acct-a", workspaceLabel: "Personal" },
+      { ...row("2"), accountRef: "acct-b", workspaceLabel: "Company" },
+    ]);
   });
 });

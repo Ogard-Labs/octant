@@ -705,7 +705,7 @@ export interface WorkThreadWorkspaceProps {
  */
 function workForkTitle(sourceTitle: string): string {
   const base = sourceTitle.replace(/ \(fork(?: \d+)?\)$/, "").trim();
-  return `${base.length === 0 ? "Task" : base} (fork)`;
+  return `${base.length === 0 ? "Thread" : base} (fork)`;
 }
 
 function artifactNameFromPrompt(prompt: string): string {
@@ -1153,13 +1153,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         ...(strict === undefined ? {} : { strict: strict === "inherit" ? null : strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
-        setErrorMessage("This task’s mode could not be saved.");
+        setErrorMessage("This thread’s mode could not be saved.");
         return;
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
     } catch {
-      setErrorMessage("This task’s mode could not be saved.");
+      setErrorMessage("This thread’s mode could not be saved.");
     } finally {
       setAccessChanging(false);
     }
@@ -1184,13 +1184,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         documentDelivery,
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
-        setErrorMessage("This task’s document choice could not be saved.");
+        setErrorMessage("This thread’s document choice could not be saved.");
         return;
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
     } catch {
-      setErrorMessage("This task’s document choice could not be saved.");
+      setErrorMessage("This thread’s document choice could not be saved.");
     } finally {
       setDeliveryChanging(false);
       setConfirmArtifacts(false);
@@ -1911,7 +1911,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               );
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
-          setErrorMessage("This task is no longer available.");
+          setErrorMessage("This thread is no longer available.");
           return;
         }
         setThread(thread);
@@ -1982,7 +1982,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         };
         await Promise.all([transcriptRead(), requestRead()]);
       } catch {
-        if (!cancelled) setErrorMessage("This task could not be loaded.");
+        if (!cancelled) setErrorMessage("This thread could not be loaded.");
       }
     })();
     return () => {
@@ -2359,7 +2359,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         props.turnClient !== undefined
       ) {
         setErrorMessage(
-          "The Project folder is no longer approved. Rebind this task before sending.",
+          "The Project folder is no longer approved. Rebind this thread before sending.",
         );
         return false;
       }
@@ -2637,13 +2637,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         deliveryTarget: thread.title,
       });
       if (!("kind" in result) || result.kind !== "thread-completion-confirmed") {
-        setErrorMessage("This task could not be marked Done.");
+        setErrorMessage("This thread could not be marked Done.");
         return;
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
     } catch {
-      setErrorMessage("This task could not be marked Done. Try again.");
+      setErrorMessage("This thread could not be marked Done. Try again.");
     } finally {
       setCompleting(false);
     }
@@ -2662,13 +2662,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         expectedVersion: thread.version,
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
-        setErrorMessage("This task could not be reopened.");
+        setErrorMessage("This thread could not be reopened.");
         return;
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
     } catch {
-      setErrorMessage("This task could not be reopened. Try again.");
+      setErrorMessage("This thread could not be reopened. Try again.");
     } finally {
       setCompleting(false);
     }
@@ -3041,7 +3041,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
 
   return (
     <ThreadTranscriptScope thread={{ mode: "work", threadId: String(props.threadId) }}>
-      <section aria-label="Task workspace" className="work-thread-workspace">
+      <section aria-label="Thread workspace" className="work-thread-workspace">
         <h1 className="sr-only">{props.title}</h1>
         <OctantDialogPresence>
           {!readOnly && confirmArtifacts ? (
@@ -3168,7 +3168,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               if (row.kind === "empty") {
                 return (
                   <p className="work-thread-workspace__opening">
-                    Describe what to make. Files stay in this task’s folder.
+                    Describe what to make. Files stay in this thread’s folder.
                   </p>
                 );
               }
@@ -3179,7 +3179,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     return withRowHandoff(
                       row.handoff,
                       <article
-                        aria-label={reportDelivery ? "Report from side task" : "Subagent results"}
+                        aria-label={reportDelivery ? "Report from side task" : "Agent results"}
                         className="turn-child-result"
                       >
                         {reportDelivery ? (
@@ -4181,7 +4181,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   {
                     key: "locked",
                     tone: "neutral" as const,
-                    text: "This task is marked Done.",
+                    text: "This thread is marked Done.",
                     action: (
                       <OctantButton
                         disabled={completing}

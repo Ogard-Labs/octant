@@ -523,6 +523,7 @@ export function startOctantServer(
       desktopLeases,
       installDesktopPreviewRequest,
       installRememberComputerUseApp,
+      installThreadSecrets,
       desktopRecipeKeys,
       launchSessionRoutes,
       machineChangeRoutes,
@@ -776,6 +777,7 @@ export function startOctantServer(
       browse: commandBroker?.browse,
     });
     yield* Effect.addFinalizer(() => Effect.sync(() => threadSecrets.close()));
+    installThreadSecrets(threadSecrets);
     const {
       threadKeepsSandbox,
       isHarnessProvider,
@@ -966,6 +968,7 @@ export function startOctantServer(
       canvasPublicShareService,
       canvasRoutes,
       canvasService,
+      canvasVersionImages,
       forgetCanvasShareImages,
       replicaArtifactSync,
       resolveCanvasWorkspace,
@@ -2045,6 +2048,13 @@ export function startOctantServer(
           folders,
           operationId,
           routineRun: routineRun !== undefined,
+          hasHandleConsumer: () =>
+            threadSecretFacts.service.hasConsumer() &&
+            threadDesktopDestination(thread) === undefined &&
+            isToolAllowedByAllowlist(
+              readThread()?.toolConstraints ?? thread.toolConstraints ?? [],
+              "octant_computer",
+            ),
         }),
         registered: registeredCredentialOperations({
           service: credentialRequests,
@@ -2395,6 +2405,7 @@ export function startOctantServer(
       browserProfileService,
       canvasNetworkAccess,
       canvasPublicShareService,
+      canvasVersionImages,
       forgetCanvasShareImages,
       threadExportService,
       threadHandOffProvider,

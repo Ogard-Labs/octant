@@ -348,7 +348,7 @@ function PublicationChoices(props: {
         <p className="oct-row-detail">
           {preview.deletionPending
             ? "Deletion is queued. It is sent when this computer can reach the store."
-            : "Turn sync on and check this task’s write access to publish."}
+            : "Turn sync on and check this thread’s write access to publish."}
         </p>
       ) : null}
       <ul className="synced-artifact__versions">

@@ -236,7 +236,7 @@ export function EnvironmentFinishWaitPicker(props: {
               { id: "same-thread", label: "Resume this thread" },
               { id: "new-thread", label: "Start a new thread in this Project" },
               ...(selectableRoutines.length > 0
-                ? [{ id: "run-routine", label: "Run an existing routine once more" }]
+                ? [{ id: "run-routine", label: "Run an existing automation once more" }]
                 : []),
             ]}
             value={action}
@@ -246,9 +246,9 @@ export function EnvironmentFinishWaitPicker(props: {
 
       {action === "run-routine" ? (
         <div className="environment-follow-up-picker__field">
-          <label htmlFor={ids.routine}>Routine</label>
+          <label htmlFor={ids.routine}>Automation</label>
           <OctantSelectField
-            aria-label="Routine"
+            aria-label="Automation"
             disabled={props.busy}
             id={ids.routine}
             onValueChange={setRoutineId}

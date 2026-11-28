@@ -649,7 +649,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   delivery !== undefined
                     ? turn.delivery?.kind === "side-task-report"
                       ? "Report from side task"
-                      : "Subagent results"
+                      : "Agent results"
                     : sentBy === undefined
                       ? "Your message"
                       : `Message from ${sentBy}`

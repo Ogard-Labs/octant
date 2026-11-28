@@ -376,11 +376,11 @@ describe("WorkThreadBoard", () => {
     const loadBoard = vi.fn(async () => view([]));
     render(<WorkThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
-    const message = await screen.findByText("No tasks yet");
+    const message = await screen.findByText("No threads yet");
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
     expect(empty).not.toHaveAttribute("data-slot");
-    expect(empty).toHaveTextContent("Create a task to see it here.");
+    expect(empty).toHaveTextContent("Create a thread to see it here.");
     expect(empty).not.toHaveTextContent("adjust the filters");
     for (const column of ["Ready (0)", "In progress (0)", "Waiting (0)", "Done (0)"]) {
       const region = screen.getByRole("region", { name: column });

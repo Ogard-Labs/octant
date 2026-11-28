@@ -257,7 +257,7 @@ function withoutSchedulePhrase(text: string): string {
 function nameFrom(prompt: string): string {
   const firstClause = prompt.split(/[.;\n]/)[0] ?? prompt;
   const trimmed = firstClause.trim().slice(0, 80);
-  return trimmed.length === 0 ? "New routine" : trimmed[0]?.toUpperCase() + trimmed.slice(1);
+  return trimmed.length === 0 ? "New automation" : trimmed[0]?.toUpperCase() + trimmed.slice(1);
 }
 
 function describe(trigger: AutomationScheduledTrigger): string {

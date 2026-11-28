@@ -269,7 +269,12 @@ import {
 } from "./shell/firstPartyPluginsEffective";
 import { isSettingsSectionAvailable, isThreadBoardAvailable } from "./shell/contributionRegistry";
 import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
-import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
+import {
+  hubAdministrationOf,
+  pairedComputersOf,
+  type CodeDeepLink,
+  type OctantHostBridge,
+} from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
 import {
@@ -279,7 +284,10 @@ import {
 import { MarkdownLinkActionsContext } from "./markdown/markdownLinkActions";
 import { useDesktopWindowAuthority } from "./shell/useDesktopWindowAuthority";
 import { buildInboxAttentionItems, inboxWaitingThreadIds } from "./inbox/inboxModel";
-import { loadAssignedLinearIssues as fetchAssignedLinearIssues } from "./inbox/loadAssignedLinearIssues";
+import {
+  loadAssignedLinearIssues as fetchAssignedLinearIssues,
+  loadAssignedLinearIssuesAcrossAccounts,
+} from "./inbox/loadAssignedLinearIssues";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { nextWaitingThread } from "./notifications/nextWaitingThread";
 import { evaluateThreadAttention } from "./notifications/threadAttention";
@@ -307,8 +315,13 @@ import {
   githubIssuesReadAvailable as snapshotAllowsGithubIssuesRead,
   withGithubIssuesReadSync,
 } from "./github/githubIssuesReadAvailable";
+import type { IntegrationAccountEntry } from "@octant/contracts/integration";
 import {
+  linearAccountDisplayLabel,
+  linearAccountsReadAvailable,
   linearIssuesReadAvailable,
+  readyLinearAccounts,
+  resolveLinearChipAccount,
   shouldProbeLinearAuthentication,
   withLinearIssuesReadSync,
 } from "./linear/linearIssuesReadAvailable";
@@ -1334,6 +1347,7 @@ function LaunchedShell(
     useState<PullRequestCardCapability>({ readable: false });
   const [linearIssuesOpen, setLinearIssuesOpen] = useState(false);
   const [linearIssuesRead, setLinearIssuesRead] = useState(false);
+  const [linearAccounts, setLinearAccounts] = useState<ReadonlyArray<IntegrationAccountEntry>>([]);
   const linearAvailabilityGenerationRef = useRef(0);
   const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
     CodeProjectPullRequestDetailQuery | undefined
@@ -2315,21 +2329,40 @@ function LaunchedShell(
   }, [githubTransport]);
   const linearClient = useMemo(
     () =>
-      withLinearIssuesReadSync(linearTransport, (available) => {
-        linearAvailabilityGenerationRef.current += 1;
-        setLinearIssuesRead(available);
-        if (!available) setLinearIssuesOpen(false);
-      }),
+      withLinearIssuesReadSync(
+        linearTransport,
+        (available) => {
+          linearAvailabilityGenerationRef.current += 1;
+          setLinearIssuesRead(available);
+          if (!available) setLinearIssuesOpen(false);
+        },
+        (snapshot) => {
+          setLinearAccounts(snapshot.accounts);
+        },
+      ),
     [linearTransport],
   );
   const loadAssignedGithubWork = useCallback(
     () => githubClient.readCatalogue({ kind: "assigned-work" }),
     [githubClient],
   );
-  const loadAssignedLinearIssues = useCallback(
-    () => fetchAssignedLinearIssues((input) => linearClient.listIssues(input)),
-    [linearClient],
+  const readyLinearAccountList = useMemo(
+    () => readyLinearAccounts(linearAccounts),
+    [linearAccounts],
   );
+  const loadAssignedLinearIssues = useCallback(() => {
+    if (readyLinearAccountList.length > 0) {
+      return loadAssignedLinearIssuesAcrossAccounts(
+        readyLinearAccountList.map((entry) => ({
+          accountRef: entry.accountRef,
+          workspaceLabel: linearAccountDisplayLabel(entry),
+          ...(entry.isLegacy === true ? { isLegacy: true } : {}),
+        })),
+        (input, accountRef) => linearClient.listIssues(input, accountRef),
+      );
+    }
+    return fetchAssignedLinearIssues((input) => linearClient.listIssues(input));
+  }, [linearClient, readyLinearAccountList]);
   // The Code home reads the board when this identity changes. An inline
   // callback changes on every App render, and a streaming turn renders often,
   // so the board would be re-queried for reasons that have nothing to do with
@@ -2349,10 +2382,47 @@ function LaunchedShell(
   // a read held down there began again — and emptied the section — on every
   // New task. The board is re-read on the same signal the thread list follows.
   const continueCards = useContinueCards(loadCodeBoard, machineChanges.codeNavigation);
-  const loadOpenLinearIssues = useCallback(
-    () => linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 }),
-    [linearClient],
-  );
+  const loadOpenLinearIssues = useCallback(async () => {
+    if (readyLinearAccountList.length > 1) {
+      const settled = await Promise.allSettled(
+        readyLinearAccountList.map(async (entry) => {
+          const page = await linearClient.listIssues(
+            { filter: { assigneeId: "unassigned" }, pageSize: 20 },
+            entry.accountRef,
+          );
+          const workspaceLabel = linearAccountDisplayLabel(entry);
+          return page.rows.map((row) => ({
+            ...row,
+            accountRef: entry.accountRef,
+            workspaceLabel,
+            ...(entry.isLegacy === true ? { isLegacyAccount: true } : {}),
+          }));
+        }),
+      );
+      return {
+        rows: settled.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
+      };
+    }
+    const singleAccount = readyLinearAccountList[0];
+    const singleAccountRef = singleAccount?.accountRef;
+    const page =
+      singleAccountRef === undefined
+        ? await linearClient.listIssues({ filter: { assigneeId: "unassigned" }, pageSize: 20 })
+        : await linearClient.listIssues(
+            { filter: { assigneeId: "unassigned" }, pageSize: 20 },
+            singleAccountRef,
+          );
+    return {
+      rows:
+        singleAccountRef === undefined
+          ? page.rows
+          : page.rows.map((row) => ({
+              ...row,
+              accountRef: singleAccountRef,
+              ...(singleAccount?.isLegacy === true ? { isLegacyAccount: true } : {}),
+            })),
+    };
+  }, [linearClient, readyLinearAccountList]);
   const githubPluginEffective = firstPartyPluginsEffective.get("github-integration") === true;
   useEffect(() => {
     if (!githubPluginEffective) {
@@ -2387,53 +2457,53 @@ function LaunchedShell(
   useEffect(() => {
     if (!probeLinearAuthentication) {
       setLinearIssuesRead(false);
+      setLinearAccounts([]);
       setLinearIssuesOpen(false);
       return;
     }
     const generation = linearAvailabilityGenerationRef.current + 1;
     linearAvailabilityGenerationRef.current = generation;
     let cancelled = false;
-    void linearTransport.authenticationSnapshot().then(
-      (snapshot) => {
-        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
-        const available = linearIssuesReadAvailable(snapshot);
-        setLinearIssuesRead(available);
-        if (!available) setLinearIssuesOpen(false);
-      },
-      () => {
-        if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
-        setLinearIssuesRead(false);
-        setLinearIssuesOpen(false);
-      },
-    );
+    const readAccounts = linearTransport.accountsSnapshot;
+    const probeFallback = () => {
+      void linearTransport.authenticationSnapshot().then(
+        (snapshot) => {
+          if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
+          const available = linearIssuesReadAvailable(snapshot);
+          setLinearAccounts([]);
+          setLinearIssuesRead(available);
+          if (!available) setLinearIssuesOpen(false);
+        },
+        () => {
+          if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
+          setLinearAccounts([]);
+          setLinearIssuesRead(false);
+          setLinearIssuesOpen(false);
+        },
+      );
+    };
+    if (typeof readAccounts === "function") {
+      void readAccounts.call(linearTransport).then(
+        (snapshot) => {
+          if (cancelled || generation !== linearAvailabilityGenerationRef.current) return;
+          setLinearAccounts(snapshot.accounts);
+          const available = linearAccountsReadAvailable(snapshot.accounts);
+          setLinearIssuesRead(available);
+          if (!available) setLinearIssuesOpen(false);
+        },
+        () => {
+          if (!cancelled && generation === linearAvailabilityGenerationRef.current) {
+            probeFallback();
+          }
+        },
+      );
+    } else {
+      probeFallback();
+    }
     return () => {
       cancelled = true;
     };
   }, [probeLinearAuthentication, linearTransport]);
-  const trackerReferencePorts = useMemo(
-    () =>
-      createTrackerReferenceClientPorts({
-        ...(githubPluginEffective
-          ? { github: { available: githubIssuesReadAvailable, client: githubClient } }
-          : {}),
-        ...(probeLinearAuthentication
-          ? {
-              linear: {
-                available: linearIssuesRead,
-                client: linearClient,
-              },
-            }
-          : {}),
-      }),
-    [
-      githubPluginEffective,
-      githubIssuesReadAvailable,
-      githubClient,
-      probeLinearAuthentication,
-      linearIssuesRead,
-      linearClient,
-    ],
-  );
   const observedHosts = useHostObservation(hostClient);
   const federation = useHostFederationLifecycle(props.hostBridge);
   const hostFederationLifecycle = federation?.lifecycle;
@@ -2769,16 +2839,15 @@ function LaunchedShell(
     pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.bridge : undefined;
   const pairedComputerSlotReady =
     pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready";
-  const [pairedComputerOpenedBridge, setPairedComputerOpenedBridge] =
-    useState<typeof pairedComputerSlotBridge>(undefined);
+  const [pairedComputerOpenedHostId, setPairedComputerOpenedHostId] = useState<string>();
   useEffect(() => {
     if (pairedComputerSlotReady && pairedComputerSlotBridge !== undefined) {
-      setPairedComputerOpenedBridge(pairedComputerSlotBridge);
+      setPairedComputerOpenedHostId(String(createHostId));
     }
-  }, [pairedComputerSlotBridge, pairedComputerSlotReady]);
+  }, [createHostId, pairedComputerSlotBridge, pairedComputerSlotReady]);
   const pairedComputerCodeBridge =
     pairedComputerSlotBridge !== undefined &&
-    (pairedComputerSlotReady || pairedComputerSlotBridge === pairedComputerOpenedBridge)
+    (pairedComputerSlotReady || pairedComputerOpenedHostId === String(createHostId))
       ? pairedComputerSlotBridge
       : undefined;
   // Every paired computer's Code threads and asks, listed in this window and
@@ -2854,6 +2923,7 @@ function LaunchedShell(
             source,
             mode,
           );
+  const pairedComputersBridge = pairedComputersOf(props.hostBridge);
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
       ? undefined
@@ -2867,6 +2937,10 @@ function LaunchedShell(
                 selectedHostId={createHostId}
                 onSelectHost={handleSelectCreateHost}
                 viewScope={createHostViewScope}
+                {...(pairedComputerOrigin === undefined ? {} : { origin: pairedComputerOrigin })}
+                {...(pairedComputersBridge === undefined
+                  ? {}
+                  : { pairedComputers: pairedComputersBridge })}
                 {...(pairedThreadToOpenHere === undefined
                   ? {}
                   : {
@@ -3269,6 +3343,51 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  const activeProjectLinearTarget = useMemo(() => {
+    if (activeProjectId === undefined) return undefined;
+    const project = projectController.projects.find(
+      (candidate) => candidate.id === activeProjectId,
+    );
+    return project !== undefined && project.type !== "chat" ? project.linearTarget : undefined;
+  }, [projectController.projects, activeProjectId]);
+  const trackerReferencePorts = useMemo(() => {
+    const chipLinear =
+      linearAccounts.length > 0
+        ? resolveLinearChipAccount({
+            accounts: linearAccounts,
+            projectAccountRef: activeProjectLinearTarget?.accountRef,
+            hasProjectLinearTarget: activeProjectLinearTarget !== undefined,
+          })
+        : {
+            available: linearIssuesRead,
+            ...(activeProjectLinearTarget?.accountRef === undefined
+              ? {}
+              : { accountRef: activeProjectLinearTarget.accountRef }),
+          };
+    return createTrackerReferenceClientPorts({
+      ...(githubPluginEffective
+        ? { github: { available: githubIssuesReadAvailable, client: githubClient } }
+        : {}),
+      ...(probeLinearAuthentication
+        ? {
+            linear: {
+              available: chipLinear.available,
+              ...(chipLinear.accountRef === undefined ? {} : { accountRef: chipLinear.accountRef }),
+              client: linearClient,
+            },
+          }
+        : {}),
+    });
+  }, [
+    githubPluginEffective,
+    githubIssuesReadAvailable,
+    githubClient,
+    probeLinearAuthentication,
+    linearIssuesRead,
+    linearAccounts,
+    activeProjectLinearTarget,
+    linearClient,
+  ]);
   // Where the list lives: this host by default, or another computer the
   // person chose in Settings › Data & storage, reached through this window's own
   // pairing with it. No to-do is sent anywhere else, and nothing is queued
@@ -8971,7 +9090,7 @@ function LaunchedShell(
         const providerInstanceId = workProviderChoice?.instanceId;
         const modelId = workProviderChoice?.modelId;
         if (providerInstanceId === undefined || modelId === undefined) {
-          setDraftError("No provider is available. Configure a provider before starting a task.");
+          setDraftError("No provider is available. Configure a provider before starting a thread.");
           return false;
         }
         const onServer = serverWorkProject !== undefined;
@@ -8992,7 +9111,7 @@ function LaunchedShell(
           ...(terminalSession === undefined || onServer ? {} : { terminalSession }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
-          setDraftError("The task could not be created.");
+          setDraftError("The thread could not be created.");
           return false;
         }
         await linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
@@ -9494,6 +9613,7 @@ function LaunchedShell(
           githubClient={githubClient}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+          {...(hostFederationTransports === undefined ? {} : { hostFederationTransports })}
           hostReservesTitlebarInset={
             (presentation === "page" || isNarrow) && hostReservesTitlebarInset
           }
@@ -9768,6 +9888,7 @@ function LaunchedShell(
                           pairedRefreshTicks={pairedRefreshTicks}
                           environmentSelection={environmentSelection}
                           linearClient={linearClient}
+                          linearAccounts={linearAccounts}
                           linearIssuesOpen={linearIssuesOpen}
                           linearIssuesRead={linearIssuesRead}
                           loadAssignedGithubWork={loadAssignedGithubWork}
@@ -10650,7 +10771,7 @@ function LaunchedShell(
                                   ? {}
                                   : { mainFolder: serverActionsProject.folder })}
                                 defaultFolderLabel={
-                                  activeMode === "work" ? "Task folder" : "Active server checkout"
+                                  activeMode === "work" ? "Thread folder" : "Active server checkout"
                                 }
                                 onRun={(action, folder) =>
                                   void runProjectAction(

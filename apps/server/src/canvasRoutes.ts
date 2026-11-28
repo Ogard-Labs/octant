@@ -15,6 +15,7 @@ import {
   type CanvasId,
   decodeCanvasActionResult,
   decodeCanvasBlockId,
+  decodeCanvasDesignAssetMarks,
   decodeCanvasDesignAssetsOutcome,
   decodeCanvasDesignRunOutcome,
   decodeCanvasDesignRunRequest,
@@ -54,6 +55,7 @@ import {
   decodeCanvasShareResult,
   decodeCanvasVersionId,
   decodeProjectId,
+  type CanvasDesignAssetMarks,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetsOutcome,
   type CanvasDefinition,
@@ -89,6 +91,7 @@ import {
   projectInventoryEntryFromProjection,
 } from "@octant/domain";
 import { readableMockup, renderCanvasHtmlFile } from "./canvas/artifactDocumentRender";
+import type { CanvasDesignAssetVersionContext } from "./canvas/canvasDesignAssets";
 import type { CanvasService } from "./canvas/canvasService";
 import type { CanvasChoiceAnswerService } from "./canvas/canvasChoiceAnswerService";
 import type { CanvasCommentService } from "./canvas/canvasCommentService";
@@ -210,6 +213,7 @@ export interface CanvasRouteDependencies {
   readonly resolveDesignAssets?: (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
+    version?: CanvasDesignAssetVersionContext,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /**
    * Where a shared snapshot's image bytes are kept, apart from the journal.
@@ -463,18 +467,32 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
 
       if (route === "design-assets" && request.method === "GET") {
         const keys = [...url.searchParams.keys()];
+        const uniqueKeys = new Set(keys);
         if (
-          keys.length !== 3 ||
-          !keys.every((key) => key === "canvasId" || key === "versionId" || key === "blockId")
+          uniqueKeys.size !== keys.length ||
+          !keys.every(
+            (key) =>
+              key === "canvasId" || key === "versionId" || key === "blockId" || key === "marks",
+          ) ||
+          !url.searchParams.has("canvasId") ||
+          !url.searchParams.has("versionId") ||
+          !url.searchParams.has("blockId")
         ) {
           return failureResponse("Canvas design assets request is invalid.", 400, origin);
         }
-        let parsed;
+        let parsed: {
+          readonly canvasId: CanvasId;
+          readonly versionId: ReturnType<typeof decodeCanvasVersionId>;
+          readonly blockId: ReturnType<typeof decodeCanvasBlockId>;
+          readonly marks?: CanvasDesignAssetMarks;
+        };
         try {
+          const marksParam = url.searchParams.get("marks");
           parsed = {
             canvasId: decodeCanvasId(url.searchParams.get("canvasId") ?? ""),
             versionId: decodeCanvasVersionId(url.searchParams.get("versionId") ?? ""),
             blockId: decodeCanvasBlockId(url.searchParams.get("blockId") ?? ""),
+            ...(marksParam === null ? {} : { marks: decodeCanvasDesignAssetMarks(marksParam) }),
           };
         } catch {
           return failureResponse("Canvas design assets request is invalid.", 400, origin);
@@ -2618,6 +2636,7 @@ async function resolveDesignAssetsForReader(
     readonly canvasId: CanvasId;
     readonly versionId: ReturnType<typeof decodeCanvasVersionId>;
     readonly blockId: ReturnType<typeof decodeCanvasBlockId>;
+    readonly marks?: CanvasDesignAssetMarks;
   },
 ): Promise<CanvasDesignAssetsOutcome> {
   const read = await resolveCanvasGet(dependencies, reader, input.canvasId, input.versionId);
@@ -2656,7 +2675,11 @@ async function resolveDesignAssetsForReader(
           status: "unavailable" as const,
           reason: "refused" as const,
         }))
-      : await resolve(block, definition.provenance);
+      : await resolve(block, definition.provenance, {
+          canvasId: input.canvasId,
+          versionId: read.version.versionId,
+          ...(input.marks === undefined ? { legacyClient: true as const } : { marks: input.marks }),
+        });
   return {
     kind: "ready",
     canvasId: input.canvasId,
@@ -2735,7 +2758,14 @@ async function renderCanvasHtmlFileForReader(
             ? { blockId: block.blockId, assets: canvasImageBlockAssets(block) }
             : undefined;
       if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
-      designAssets.set(String(block.blockId), await resolve(declaring, definition.provenance));
+      designAssets.set(
+        String(block.blockId),
+        await resolve(declaring, definition.provenance, {
+          canvasId: input.canvasId,
+          versionId: read.version.versionId,
+          marks: "labelled",
+        }),
+      );
     }
   }
   const rendered = renderCanvasHtmlFile(definition, {
@@ -2903,7 +2933,13 @@ async function serveDesignPage(
     grant.provenance === undefined ||
     dependencies.resolveDesignAssets === undefined
       ? []
-      : await dependencies.resolveDesignAssets(grant.block, grant.provenance));
+      : await dependencies.resolveDesignAssets(
+          grant.block,
+          grant.provenance,
+          grant.canvasId !== undefined && grant.versionId !== undefined
+            ? { canvasId: grant.canvasId, versionId: grant.versionId, marks: "labelled" }
+            : undefined,
+        ));
   // A token is minted for a frame a browser on this machine is loading, and
   // for a page the desktop's main process asks for its prototype host. The
   // switch is read again here, since it may have gone off after the ticket

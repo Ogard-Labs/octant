@@ -16,6 +16,7 @@ import {
   continueListRow,
   openIssueListRow,
   openLinearListRow,
+  type HomeLinearIssueRow,
 } from "./homeListRows";
 import {
   DEFAULT_ISSUE_SORT,
@@ -37,16 +38,16 @@ type AssignedRead =
   | {
       readonly kind: "ready";
       readonly github: ReadonlyArray<GithubAssignedWorkItem>;
-      readonly linear: ReadonlyArray<LinearIssueRow>;
+      readonly linear: ReadonlyArray<HomeLinearIssueRow>;
     };
 
 export interface AssignedWorkSource {
   readonly githubClient?: GithubClient | undefined;
   readonly loadAssignedLinearIssues?:
-    | (() => Promise<{ readonly rows: ReadonlyArray<LinearIssueRow> }>)
+    | (() => Promise<{ readonly rows: ReadonlyArray<HomeLinearIssueRow> }>)
     | undefined;
   readonly onPickGithub: (item: GithubAssignedWorkItem) => void;
-  readonly onPickLinear?: ((row: LinearIssueRow) => void) | undefined;
+  readonly onPickLinear?: ((row: HomeLinearIssueRow) => void) | undefined;
   readonly onOpenInbox?: (() => void) | undefined;
 }
 
@@ -201,7 +202,7 @@ async function readAssignedGithub(
 
 async function readAssignedLinear(
   load: AssignedWorkSource["loadAssignedLinearIssues"],
-): Promise<ReadonlyArray<LinearIssueRow>> {
+): Promise<ReadonlyArray<HomeLinearIssueRow>> {
   if (load === undefined) return [];
   try {
     return (await load()).rows;
@@ -215,10 +216,10 @@ const FRESH_ISSUE_LIMIT = 5;
 export interface OpenIssuesSource {
   readonly githubClient?: GithubClient | undefined;
   readonly loadOpenLinearIssues?:
-    | (() => Promise<{ readonly rows: ReadonlyArray<LinearIssueRow> }>)
+    | (() => Promise<{ readonly rows: ReadonlyArray<HomeLinearIssueRow> }>)
     | undefined;
   readonly onPickIssue: (row: RepositoryIssueRow) => void;
-  readonly onPickLinear?: ((row: LinearIssueRow) => void) | undefined;
+  readonly onPickLinear?: ((row: HomeLinearIssueRow) => void) | undefined;
   readonly onOpenIssues?: (() => void) | undefined;
 }
 
@@ -236,7 +237,7 @@ export function useOpenIssueRows(source: OpenIssuesSource): HomeListRead {
     | {
         readonly kind: "ready";
         readonly rows: ReadonlyArray<RepositoryIssueRow>;
-        readonly linear: ReadonlyArray<LinearIssueRow>;
+        readonly linear: ReadonlyArray<HomeLinearIssueRow>;
       }
   >({ kind: "loading" });
   useEffect(() => {
@@ -298,7 +299,7 @@ async function readOpenGithubIssues(
 
 async function readOpenLinear(
   load: OpenIssuesSource["loadOpenLinearIssues"],
-): Promise<ReadonlyArray<LinearIssueRow>> {
+): Promise<ReadonlyArray<HomeLinearIssueRow>> {
   if (load === undefined) return [];
   try {
     return (await load()).rows;

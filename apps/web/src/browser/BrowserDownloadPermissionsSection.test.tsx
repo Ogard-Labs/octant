@@ -65,7 +65,7 @@ it("reviews the exact routine, destination, complete source sites, file types an
   );
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "New download manifest…" }));
-  await user.click(screen.getByRole("combobox", { name: "Download routine" }));
+  await user.click(screen.getByRole("combobox", { name: "Download automation" }));
   await user.click(await screen.findByRole("option", { name: "Send report" }));
   await user.click(screen.getByRole("combobox", { name: "Download account profile" }));
   await user.click(await screen.findByRole("option", { name: "Personal" }));

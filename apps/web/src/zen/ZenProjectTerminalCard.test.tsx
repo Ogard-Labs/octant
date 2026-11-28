@@ -255,7 +255,7 @@ describe("ZenProjectTerminalCard", () => {
     );
     expect(
       await screen.findByText(/Gemini CLI runs here on its own, with its own approvals/),
-    ).toHaveTextContent("outside this task's record and usage");
+    ).toHaveTextContent("outside this thread's record and usage");
     unmount();
 
     render(

@@ -8,7 +8,7 @@ import type {
   AutomationThreadRoutineRequest,
 } from "@octant/contracts/automation";
 import { CalendarClock, MoreHorizontal, Plus } from "../ui/icons";
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { automationLifecycleLabel } from "../automation/automationCenterModel";
 import { followUpWhenLabel, routineScheduleLine } from "../automation/routinePresentation";
 import {
@@ -21,9 +21,14 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { EnvironmentGroup } from "./EnvironmentGroup";
-import { EnvironmentFinishWaitPicker } from "./EnvironmentFinishWaitPicker";
 import { FollowUpPicker, scheduledAtOf, type Editing } from "./EnvironmentFollowUpPicker";
 import { EnvironmentRoutineForm } from "./EnvironmentRoutineForm";
+
+const LazyEnvironmentFinishWaitPicker = lazy(() =>
+  import("./EnvironmentFinishWaitPicker").then((module) => ({
+    default: module.EnvironmentFinishWaitPicker,
+  })),
+);
 
 const IDLE_ROUTINES_POLL_MS = 5_000;
 const ROUTINE_PAGE_LIMIT = 100;
@@ -262,7 +267,7 @@ export function EnvironmentRoutines(props: {
             { value: "finish-wait", label: "Follow up when a thread finishes", disabled: busy },
             ...(mode === "chat"
               ? []
-              : [{ value: "routine", label: "New routine", disabled: busy }]),
+              : [{ value: "routine", label: "New automation", disabled: busy }]),
             ...(props.onSetGoal === undefined ? [] : [{ value: "goal", label: "Set a goal…" }]),
           ]}
           onValueChange={(value) =>
@@ -277,7 +282,7 @@ export function EnvironmentRoutines(props: {
           selectionMode="action"
           trigger={<Plus aria-hidden="true" size={16} />}
           triggerClassName="environment-menu-trigger"
-          triggerLabel="Add a routine"
+          triggerLabel="Add an automation"
           value=""
         />
       }
@@ -287,9 +292,9 @@ export function EnvironmentRoutines(props: {
       summary={
         routines.length === 0
           ? undefined
-          : `${String(routines.length)} ${routines.length === 1 ? "routine" : "routines"}`
+          : `${String(routines.length)} ${routines.length === 1 ? "automation" : "automations"}`
       }
-      title="Routines"
+      title="Automations"
     >
       {opened?.kind === "follow-up" ? (
         <FollowUpPicker
@@ -302,17 +307,19 @@ export function EnvironmentRoutines(props: {
         />
       ) : null}
       {opened?.kind === "finish-wait" ? (
-        <EnvironmentFinishWaitPicker
-          busy={busy}
-          client={client}
-          existingRoutines={routines}
-          mode={mode}
-          onClose={() => setOpened(undefined)}
-          onRunRoutineNow={(routine) => void runRoutineNow(routine)}
-          onSubmit={(request) => void submitFinishWait(request)}
-          projectId={projectId}
-          threadId={threadId}
-        />
+        <Suspense fallback={null}>
+          <LazyEnvironmentFinishWaitPicker
+            busy={busy}
+            client={client}
+            existingRoutines={routines}
+            mode={mode}
+            onClose={() => setOpened(undefined)}
+            onRunRoutineNow={(routine) => void runRoutineNow(routine)}
+            onSubmit={(request) => void submitFinishWait(request)}
+            projectId={projectId}
+            threadId={threadId}
+          />
+        </Suspense>
       ) : null}
       {opened?.kind === "new" && mode !== "chat" ? (
         <EnvironmentRoutineForm
@@ -326,7 +333,7 @@ export function EnvironmentRoutines(props: {
       ) : null}
       {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
       {shown.length === 0 ? null : (
-        <ul aria-label="Routines in this Project" className="environment-routines__list">
+        <ul aria-label="Automations in this Project" className="environment-routines__list">
           {shown.map((summary) => {
             const place = placeOf(summary, threadId);
             const label = PLACE_LABEL[place];

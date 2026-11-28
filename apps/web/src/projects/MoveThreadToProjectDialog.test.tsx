@@ -146,7 +146,7 @@ describe("moving a Work or Code thread to another Project", () => {
     expect(screen.getByRole("button", { name: /Reports/ })).toBeDisabled();
     expect(
       screen.getByText(
-        /working folder is bound to its current Project\. Start a new task in the destination Project/,
+        /working folder is bound to its current Project\. Start a new thread in the destination Project/,
       ),
     ).toBeVisible();
   });

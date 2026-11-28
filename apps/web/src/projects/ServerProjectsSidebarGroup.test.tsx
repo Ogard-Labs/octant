@@ -35,7 +35,7 @@ describe("ServerProjectsSidebarGroup", () => {
 
     const group = screen.getByRole("region", { name: "On your servers" });
     const project = within(group).getByRole("button", {
-      name: "Service on devbox:/home/build/service. New task",
+      name: "Service on devbox:/home/build/service. New thread",
     });
     expect(project).toHaveTextContent("devbox:/home/build/service");
     expect(within(group).queryByText("A local thread")).toBeNull();

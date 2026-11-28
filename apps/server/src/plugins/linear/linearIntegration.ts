@@ -32,7 +32,62 @@ export {
   LINEAR_TOKEN_URL,
 } from "./linearConstants";
 
-const IDENTITY_QUERY = "{ viewer { id name organization { name urlKey } } }";
+const IDENTITY_QUERY = "{ viewer { id name organization { id name urlKey } } }";
+
+export interface LinearVerifiedIdentity {
+  readonly viewerId: string;
+  readonly workspaceId: string;
+  readonly account: IntegrationAccount;
+}
+
+export type LinearIdentityProbeResult =
+  | { readonly kind: "ready"; readonly identity: LinearVerifiedIdentity }
+  | { readonly kind: "unauthorized"; readonly reconnect: boolean; readonly reason: string }
+  | { readonly kind: "rate-limited"; readonly reason: string }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
+/**
+ * Queries Linear for the viewer and organization ids behind a single
+ * credential reference. Fails closed unless both `viewer.id` and
+ * `viewer.organization.id` are present so account identity is never guessed.
+ */
+export async function probeLinearAccountIdentity(
+  hostPort: IntegrationHostPort,
+  reference: string,
+  source: "oauth" | "personal-api-key",
+  signal?: AbortSignal,
+  grantedScopes?: ReadonlyArray<string>,
+): Promise<LinearIdentityProbeResult> {
+  const result = await graphqlWithReference(
+    hostPort,
+    reference,
+    source,
+    IDENTITY_QUERY,
+    undefined,
+    signal,
+  );
+  if (result.kind === "unauthorized") {
+    return {
+      kind: "unauthorized",
+      reconnect: source === "oauth" || result.reconnect,
+      reason:
+        source === "personal-api-key" && !result.reconnect
+          ? "The Linear personal API key was rejected."
+          : LINEAR_RECONNECT_REASON,
+    };
+  }
+  if (result.kind === "rate-limited") {
+    return { kind: "rate-limited", reason: LINEAR_ISSUE_RATE_LIMITED };
+  }
+  if (result.kind !== "ok") {
+    return { kind: "unavailable", reason: LINEAR_ISSUE_UNAVAILABLE };
+  }
+  const verified = readVerifiedIdentity(result.body, source, grantedScopes);
+  if (verified === undefined) {
+    return { kind: "unavailable", reason: "Linear identity is unavailable." };
+  }
+  return { kind: "ready", identity: verified };
+}
 
 export interface LinearIntegrationConfig {
   readonly clientId?: string;
@@ -228,6 +283,24 @@ async function identitySnapshot(
     capabilities: [...linearIssueBrowseCapabilities()],
     ...personalFlag,
   };
+}
+
+function readVerifiedIdentity(
+  body: unknown,
+  source: "oauth" | "personal-api-key",
+  grantedScopes: ReadonlyArray<string> | undefined,
+): LinearVerifiedIdentity | undefined {
+  if (!isRecord(body) || !isRecord(body.data)) return undefined;
+  const viewer = isRecord(body.data.viewer) ? body.data.viewer : undefined;
+  const organization =
+    viewer !== undefined && isRecord(viewer.organization) ? viewer.organization : undefined;
+  const viewerId = readName(viewer?.id, 128);
+  const workspaceId = readName(organization?.id, 128);
+  const account = readIdentity(body, source, grantedScopes);
+  if (viewerId === undefined || workspaceId === undefined || account === undefined) {
+    return undefined;
+  }
+  return { viewerId, workspaceId, account };
 }
 
 function readIdentity(

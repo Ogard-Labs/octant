@@ -193,4 +193,30 @@ describe("Linear issue context", () => {
     );
     expect(context.takeFramedForFirstTurn("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")).toBeUndefined();
   });
+
+  it("forwards accountRef when preparing issue context and records it in the outside-content reference", async () => {
+    const { service: context, reader, ingestion } = service({});
+    const prepared = await context.prepare(
+      { id: "11111111-1111-4111-8111-111111111111", accountRef: "acct-company" },
+      new AbortController().signal,
+    );
+    expect(prepared.status).toBe("ready");
+    if (prepared.status !== "ready") return;
+    expect(reader.snapshot).toHaveBeenCalledWith(expect.any(AbortSignal), "acct-company");
+    expect(reader.executeGetIssue).toHaveBeenCalledWith(
+      "11111111-1111-4111-8111-111111111111",
+      expect.any(AbortSignal),
+      "acct-company",
+    );
+    context.bindCreatedThread({
+      threadId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      framed: prepared.framed,
+      request: { id: "11111111-1111-4111-8111-111111111111", accountRef: "acct-company" },
+    });
+    expect(ingestion.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contentReference: "linear-issue-acct-company-11111111-1111-4111-8111-111111111111",
+      }),
+    );
+  });
 });

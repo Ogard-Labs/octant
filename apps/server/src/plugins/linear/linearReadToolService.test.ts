@@ -286,6 +286,137 @@ describe("LinearReadToolService", () => {
       }),
     ).toEqual({ result: { error: "thread-stale" }, isError: true });
   });
+
+  it("pins reads to the Project's bound account, refuses model-supplied accountRef, and includes the account in outside-content references", async () => {
+    const accountATarget: ProjectLinearTarget = {
+      accountRef: "acct-a",
+      teamId: "team-a-eng",
+      teamKey: "ENG",
+      teamName: "Engineering",
+    };
+    const snapshot = vi.fn(async (_signal: AbortSignal, accountRef?: string) =>
+      accountRef === "acct-a"
+        ? READY_SNAPSHOT
+        : { state: "unauthorized" as const, capabilities: [], remediation: "Not connected" },
+    );
+    const executeOperation = vi.fn(
+      async (operationId: string, input: unknown, _signal: AbortSignal, accountRef?: string) => {
+        if (accountRef !== "acct-a") {
+          return { kind: "refused" as const, reason: "Wrong account" };
+        }
+        if (operationId === LINEAR_ISSUE_LIST_OPERATION) {
+          return {
+            kind: "ok" as const,
+            value: {
+              rows: [
+                {
+                  id: "issue-a-1",
+                  identifier: "ENG-1",
+                  title: "Account A task",
+                  state: { name: "Todo", type: "unstarted" },
+                  teamId: "team-a-eng",
+                  teamKey: "ENG",
+                  url: "https://linear.app/personal/issue/ENG-1",
+                },
+              ],
+              hasNextPage: false,
+            },
+          };
+        }
+        const id = (input as { readonly id?: string; readonly identifier?: string }).id;
+        if (id === "issue-b-1") {
+          return { kind: "refused" as const, reason: "That Linear issue is not available." };
+        }
+        return {
+          kind: "ok" as const,
+          value: {
+            id: "issue-a-1",
+            identifier: "ENG-1",
+            title: "Account A task",
+            state: { name: "Todo", type: "unstarted" },
+            teamId: "team-a-eng",
+            teamKey: "ENG",
+            url: "https://linear.app/personal/issue/ENG-1",
+            description: "Personal detail",
+            descriptionTruncated: false,
+            comments: [],
+          },
+        };
+      },
+    );
+    const ingestion = {
+      record: vi.fn(() => ({
+        kind: "recorded" as const,
+        taint: { externalContentIngested: true, ingestedSources: ["linear-issues"] },
+      })),
+    };
+    const thread = makeThread();
+    const service = new LinearReadToolService({
+      reader: { snapshot, executeOperation },
+      ingestion,
+      uuid: () => "55555555-5555-4555-8555-555555555555",
+    });
+    const toolSet = service.createToolSet({
+      windowId: WINDOW_ID,
+      thread,
+      readThread: () => thread,
+      readProjectLinearTarget: () => accountATarget,
+    });
+
+    // Model cannot choose or pass an accountRef.
+    const modelAccountAttempt = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "list", accountRef: "acct-b" }),
+    });
+    expect(modelAccountAttempt).toEqual({
+      result: { error: "invalid-linear-input" },
+      isError: true,
+    });
+
+    const listed = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "list" }),
+    });
+    expect(listed.isError).toBe(false);
+    expect(snapshot).toHaveBeenCalledWith(expect.any(AbortSignal), "acct-a");
+    expect(executeOperation).toHaveBeenCalledWith(
+      LINEAR_ISSUE_LIST_OPERATION,
+      expect.objectContaining({ filter: expect.objectContaining({ teamId: "team-a-eng" }) }),
+      expect.any(AbortSignal),
+      "acct-a",
+    );
+    expect(ingestion.record).toHaveBeenCalledWith(
+      expect.objectContaining({ contentReference: "linear-issues-acct-a-ENG" }),
+    );
+
+    const searched = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "search", query: "task" }),
+    });
+    expect(searched.isError).toBe(false);
+    expect(ingestion.record).toHaveBeenCalledWith(
+      expect.objectContaining({ contentReference: "linear-search-acct-a-ENG" }),
+    );
+
+    const gotOwn = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "get", identifier: "ENG-1" }),
+    });
+    expect(gotOwn.isError).toBe(false);
+    expect(ingestion.record).toHaveBeenCalledWith(
+      expect.objectContaining({ contentReference: "linear-issue-acct-a-ENG-1" }),
+    );
+
+    // An issue from account B is withheld identically to a missing issue.
+    const gotForeign = await toolSet.execute({
+      name: LINEAR_READ_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "get", identifier: "issue-b-1" }),
+    });
+    expect(gotForeign).toMatchObject({
+      isError: true,
+      result: { error: "issue-not-found" },
+    });
+  });
 });
 
 describe("LinearReadToolService issue updates", () => {

@@ -60,7 +60,7 @@ describe("reviewing a saved Browser flow", () => {
     );
     render(<BrowserFlowRunDialog client={{ manageFlows }} flow={flow} onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Review run" })).toBeDisabled();
-    await user.click(await screen.findByRole("combobox", { name: "Task to run this flow" }));
+    await user.click(await screen.findByRole("combobox", { name: "Thread to run this flow" }));
     await user.click(await screen.findByRole("option", { name: "Check form · Code" }));
     await user.click(screen.getByRole("button", { name: "Review run" }));
     const input = await screen.findByRole("textbox", { name: "Text for step 1" });
@@ -92,7 +92,7 @@ describe("reviewing a saved Browser flow", () => {
     };
     const onClose = vi.fn();
     const view = render(<BrowserFlowRunDialog client={oldClient} flow={flow} onClose={onClose} />);
-    await user.click(await screen.findByRole("combobox", { name: "Task to run this flow" }));
+    await user.click(await screen.findByRole("combobox", { name: "Thread to run this flow" }));
     await user.click(await screen.findByRole("option", { name: "Check form · Code" }));
     await user.click(screen.getByRole("button", { name: "Review run" }));
     const nextClient = {
@@ -107,7 +107,7 @@ describe("reviewing a saved Browser flow", () => {
     oldReview.resolve({ kind: "browser-flow-run", run });
     await waitFor(() => expect(screen.getByRole("button", { name: "Review run" })).toBeDisabled());
     expect(screen.queryByRole("textbox", { name: "Text for step 1" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("combobox", { name: "Task to run this flow" }));
+    await user.click(screen.getByRole("combobox", { name: "Thread to run this flow" }));
     expect(await screen.findByRole("option", { name: "New host task · Code" })).toBeInTheDocument();
   });
 
@@ -124,7 +124,7 @@ describe("reviewing a saved Browser flow", () => {
     const view = render(
       <BrowserFlowRunDialog client={{ manageFlows }} flow={flow} onClose={vi.fn()} />,
     );
-    await user.click(await screen.findByRole("combobox", { name: "Task to run this flow" }));
+    await user.click(await screen.findByRole("combobox", { name: "Thread to run this flow" }));
     await user.click(await screen.findByRole("option", { name: "Check form · Code" }));
     await user.click(screen.getByRole("button", { name: "Review run" }));
     await user.click(await screen.findByRole("button", { name: "Run fixed steps" }));

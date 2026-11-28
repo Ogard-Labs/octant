@@ -63,9 +63,9 @@ export function MoveToWorktreeDialog(props: MoveToWorktreeDialogProps) {
       {moved === undefined ? (
         <>
           <p id={descriptionId}>
-            This task gets a worktree of its own on a new branch. Its uncommitted changes are copied
-            there, and {props.sourceLabel} keeps them as they are. The current session ends; the
-            next message continues with this conversation.
+            This thread gets a worktree of its own on a new branch. Its uncommitted changes are
+            copied there, and {props.sourceLabel} keeps them as they are. The current session ends;
+            the next message continues with this conversation.
           </p>
           <label className="project-dialog__field" htmlFor={branchId}>
             Branch (optional)

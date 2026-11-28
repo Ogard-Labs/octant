@@ -124,7 +124,7 @@ describe("first-run handoff readiness", () => {
     ]);
     expect(handoff.primary).toEqual({
       kind: "start-thread",
-      label: "Start a task",
+      label: "Start a thread",
       projectId,
     });
   });
@@ -163,7 +163,7 @@ describe("first-run handoff readiness", () => {
     expect(resolve(ready).project?.name).toBe("Ada's notes");
     expect(resolve({ ...ready, preferredProjectId: pickedId }).primary).toEqual({
       kind: "start-thread",
-      label: "Start a task",
+      label: "Start a thread",
       projectId: pickedId,
     });
   });

@@ -150,10 +150,10 @@ describe("the Needs you commands", () => {
     );
 
     expect(commands.map((command) => [command.title, command.detail])).toEqual([
-      ["Quarterly report", "Work · waiting on a subagent · <1m"],
+      ["Quarterly report", "Work · waiting on an agent · <1m"],
       [
         "Review request: Quarterly report",
-        "Work · Research subagent needs your approval · shell: bun run collect",
+        "Work · Research agent needs your approval · shell: bun run collect",
       ],
     ]);
     expect(commands.some((command) => /Approve|Deny/.test(command.title))).toBe(false);
@@ -215,7 +215,7 @@ describe("the Needs you commands", () => {
     );
 
     const row = commands.find((command) => command.id.startsWith("needs-you:thread:"));
-    expect(row?.detail).toBe("Code · waiting on approval and a subagent · 3m");
+    expect(row?.detail).toBe("Code · waiting on approval and an agent · 3m");
     run(row);
     expect(onOpenThread).toHaveBeenCalledOnce();
     expect(onOpenSubagentRequest).not.toHaveBeenCalled();

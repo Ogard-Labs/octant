@@ -356,6 +356,27 @@ export function resolvePullRequestLink(
 }
 
 /**
+ * Every `merged-into` link ID whose redirect chain resolves to `linkId`.
+ */
+export function listMergedPullRequestLinkIds(
+  state: PullRequestLinkRegistryState,
+  linkId: PullRequestLinkId,
+): ReadonlyArray<PullRequestLinkId> {
+  const canonical = resolveCanonicalPullRequestLink(state, linkId);
+  if (canonical === undefined) return [];
+  const canonicalId = String(canonical.linkId);
+  const merged: PullRequestLinkId[] = [];
+  for (const link of state.byId.values()) {
+    if (link.status !== "merged-into") continue;
+    const resolved = resolveCanonicalPullRequestLink(state, link.linkId);
+    if (resolved !== undefined && String(resolved.linkId) === canonicalId) {
+      merged.push(link.linkId);
+    }
+  }
+  return merged;
+}
+
+/**
  * Every `(owner, name, number)` coordinate — current and historical, including
  * merged duplicate links — that resolves to `linkId`.
  */

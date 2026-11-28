@@ -17,11 +17,11 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 24795,
+      "firstPromptBytes": 24955,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 35760,
+      "firstPromptBytes": 35920,
       "laterTurnBytes": 0
     }
   },
@@ -43,11 +43,11 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 25065,
+      "firstPromptBytes": 25225,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 36192,
+      "firstPromptBytes": 36352,
       "laterTurnBytes": 0
     }
   },
@@ -69,11 +69,11 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 25199,
+      "firstPromptBytes": 25359,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 36549,
+      "firstPromptBytes": 36709,
       "laterTurnBytes": 0
     }
   },
@@ -95,11 +95,11 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 25199,
+      "firstPromptBytes": 25359,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 36549,
+      "firstPromptBytes": 36709,
       "laterTurnBytes": 0
     }
   },
@@ -121,11 +121,11 @@
       "laterTurnBytes": 0
     },
     "work-child": {
-      "firstPromptBytes": 25199,
+      "firstPromptBytes": 25359,
       "laterTurnBytes": 0
     },
     "code-child": {
-      "firstPromptBytes": 36549,
+      "firstPromptBytes": 36709,
       "laterTurnBytes": 0
     }
   },
@@ -147,12 +147,12 @@
       "laterTurnBytes": 5217
     },
     "work-child": {
-      "firstPromptBytes": 25245,
-      "laterTurnBytes": 25311
+      "firstPromptBytes": 25405,
+      "laterTurnBytes": 25471
     },
     "code-child": {
-      "firstPromptBytes": 36701,
-      "laterTurnBytes": 36715
+      "firstPromptBytes": 36861,
+      "laterTurnBytes": 36875
     }
   }
 }

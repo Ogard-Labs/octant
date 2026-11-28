@@ -2535,6 +2535,82 @@ html[data-octant-increased-contrast="true"]
   white-space: pre-wrap;
 }
 
+.fleet-update__dialog {
+  --octant-dialog-width: 580px;
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.fleet-update__machines {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fleet-update__machine {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+}
+
+.fleet-update__machine-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.fleet-update__machine-name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.fleet-update__machine-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-1);
+}
+
+.fleet-update__badge {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.fleet-update__machine-detail {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+}
+
+.fleet-update__machine-meta,
+.fleet-update__note {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.fleet-update__drain {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.fleet-update__drain-label {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+}
+
+.fleet-update__step-retry {
+  grid-column: 1 / -1;
+}
+
 .marketplace-fetch-settings__details {
   padding: 0 0 var(--oct-space-3);
 }

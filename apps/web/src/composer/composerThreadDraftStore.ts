@@ -291,7 +291,7 @@ export function createComposerThreadDraftStore(
       )
         return {
           status: "refused",
-          message: "The review destination changed. Open Review from its owning task again.",
+          message: "The review destination changed. Open Review from its owning thread again.",
         };
       const key = composerDraftRecordKey("code", prepared.threadId);
       let refusal: string | undefined;

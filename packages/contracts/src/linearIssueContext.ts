@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { IntegrationAccountRef } from "./integration";
 import { LinearNodeId } from "./linearIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -10,6 +11,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  */
 export const LinearIssueContextRequest = Schema.Struct({
   id: LinearNodeId,
+  accountRef: Schema.optional(IntegrationAccountRef),
 }).annotations(strict);
 export type LinearIssueContextRequest = typeof LinearIssueContextRequest.Type;
 

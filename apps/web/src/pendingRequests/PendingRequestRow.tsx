@@ -186,7 +186,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
     <div
       aria-label={
         child !== undefined
-          ? `${threadLabel} has a subagent waiting for you`
+          ? `${threadLabel} has an agent waiting for you`
           : lead !== undefined
             ? `${threadLabel} needs your approval`
             : isLeadQuestionPendingRequest(request)

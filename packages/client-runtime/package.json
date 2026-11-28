@@ -9,6 +9,7 @@
     "./agent-run-client": "./src/agentRunClient.ts",
     "./agent-run-settings-client": "./src/agentRunSettingsClient.ts",
     "./agent-message-client": "./src/agentMessageClient.ts",
+    "./automation-client": "./src/automationClient.ts",
     "./automation-notification-client": "./src/automationNotificationClient.ts",
     "./apple-toolchain-client": "./src/appleToolchainClient.ts",
     "./android-toolchain-client": "./src/androidToolchainClient.ts",

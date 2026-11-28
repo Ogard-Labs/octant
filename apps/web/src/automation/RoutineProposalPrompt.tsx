@@ -152,13 +152,13 @@ export function RoutineProposalPrompt(props: {
     pending.trigger.kind === "weekly-local"
       ? `${routineScheduleLabel(pending.trigger)} (${pending.trigger.timeZone})`
       : routineScheduleLabel(pending.trigger);
-  const label = followUp ? "Follow-up proposal" : "Routine proposal";
+  const label = followUp ? "Follow-up proposal" : "Automation proposal";
   return (
     <section aria-label="Suggested by the agent" className={`follow-up-cards ${props.className}`}>
       <article aria-label={label} className="follow-up-card">
         <div className="follow-up-card__head">
           <span className="follow-up-card__kind">
-            {followUp ? "Follow-up here · suggested" : "Routine · suggested"}
+            {followUp ? "Follow-up here · suggested" : "Automation · suggested"}
           </span>
           <OctantIconButton
             disabled={busy}
@@ -187,7 +187,7 @@ export function RoutineProposalPrompt(props: {
             size="xs"
             type="button"
           >
-            {followUp ? "Schedule follow-up" : "Create routine"}
+            {followUp ? "Schedule follow-up" : "Create automation"}
           </OctantButton>
         </div>
       </article>
@@ -213,7 +213,7 @@ function RoutineFinishWaitCard(props: {
     proposal.action === "same-thread"
       ? "Follow-up when thread finishes · suggested"
       : proposal.action === "run-routine"
-        ? "Run routine when thread finishes · suggested"
+        ? "Run automation when thread finishes · suggested"
         : "New thread when thread finishes · suggested";
   const effectText =
     proposal.action === "same-thread"
@@ -221,7 +221,7 @@ function RoutineFinishWaitCard(props: {
         ? "It sends this prompt as a new turn in this thread."
         : "It sends this prompt as a new turn in this thread, and asks before it changes anything."
       : proposal.action === "run-routine"
-        ? "It runs that routine once more, asking before it changes anything."
+        ? "It runs that automation once more, asking before it changes anything."
         : `It starts a new ${automationModeLabel(proposal.mode)} thread in this Project with this prompt, and asks before it changes anything.`;
   return (
     <article aria-label="Thread-finish follow-up proposal" className="follow-up-card">
@@ -271,10 +271,10 @@ function RoutineChangeCard(props: {
   const followUp = request.targetPolicy === "same-thread";
   const action =
     request.change === "pause"
-      ? "Pause routine"
+      ? "Pause automation"
       : followUp
         ? "Cancel follow-up"
-        : "Archive routine";
+        : "Archive automation";
   const summary =
     request.change === "pause"
       ? "It stops until you resume it in Automations."

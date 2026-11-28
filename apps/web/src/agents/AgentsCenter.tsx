@@ -455,7 +455,7 @@ function AgentsCenterListBody(props: {
         detail={
           hasActiveFilters
             ? "Clear or adjust the active filters to see other runs."
-            : "Helpers a thread starts for part of its work list here."
+            : "Agents a thread starts for part of its work list here."
         }
         icon={<Bot size={20} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}
@@ -641,7 +641,7 @@ function AgentsCenterDetail(props: {
         )}
         {stoppable ? (
           <OctantButton onClick={() => setConfirmingStop(true)} type="button" variant="secondary">
-            Stop child agents
+            Stop agents
           </OctantButton>
         ) : null}
         {canRetry ? (
@@ -713,8 +713,7 @@ function AgentsCenterDetail(props: {
           role="group"
         >
           <p>
-            Stop this run and any child agents it started? Their work is cancelled and cannot be
-            resumed.
+            Stop this run and any agents it started? Their work is cancelled and cannot be resumed.
           </p>
           <div>
             <OctantButton

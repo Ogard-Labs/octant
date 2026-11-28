@@ -76,7 +76,7 @@ export function SavedAgentReview(props: {
       <div className="git-history__toolbar">
         {props.onBack === undefined ? null : (
           <OctantButton ref={back} onClick={props.onBack} variant="ghost" size="sm">
-            Back to subagent
+            Back to agent
           </OctantButton>
         )}
         <span>Saved comparison · Read only</span>

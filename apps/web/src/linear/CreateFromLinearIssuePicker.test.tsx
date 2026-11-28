@@ -146,4 +146,59 @@ describe("Create from Linear issue picker", () => {
     await user.click(screen.getByRole("button", { name: "All workspace" }));
     await waitFor(() => expect(listIssues).toHaveBeenCalledWith({}));
   });
+
+  it("includes accountRef when selecting an issue from a multi-account workspace", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const client: IntegrationClient = {
+      ...makeClient(readySnapshot),
+      accountsSnapshot: vi.fn(async () => ({
+        accounts: [
+          {
+            accountRef: "acct-personal",
+            state: "ready" as const,
+            account: {
+              login: "personal",
+              workspace: "Personal",
+              source: "oauth",
+              scopes: ["read"],
+            },
+            capabilities: [{ operationId: "list-issues", available: true }],
+            isLegacy: true,
+          },
+          {
+            accountRef: "acct-company",
+            state: "ready" as const,
+            account: { login: "company", workspace: "Company", source: "oauth", scopes: ["read"] },
+            capabilities: [{ operationId: "list-issues", available: true }],
+          },
+        ],
+        oauthConfigured: true,
+      })),
+    };
+    render(
+      <CreateFromLinearIssuePicker
+        client={client}
+        defaultLinearTarget={{
+          accountRef: "acct-company",
+          teamId: "team-co",
+          teamKey: "ENG",
+          teamName: "Engineering",
+        }}
+        onSelect={onSelect}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Linear workspace")).toBeInTheDocument());
+    await user.click(
+      await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
+    );
+    expect(onSelect).toHaveBeenCalledWith(
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        identifier: "ENG-12",
+        accountRef: "acct-company",
+      },
+      "Browse issues in the workspace",
+    );
+  });
 });

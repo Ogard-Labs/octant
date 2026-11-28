@@ -477,7 +477,7 @@ export function buildAutomationDraft(input: AutomationDraftFormInput): Automatio
   issues.push(...crossConsistencyIssues(input));
   issues.push(...automationTriggerIssues(input.trigger));
   if (input.trigger.kind === "file-arrival" && input.mode === "chat")
-    issues.push("File arrivals start Work or Code routines, not Chat routines.");
+    issues.push("File arrivals start Work or Code automations, not Chat automations.");
   if (targetSummary.length === 0) issues.push("Describe what each run delivers.");
   if (targetSummary.length > MAX_AUTOMATION_TARGET_LENGTH) {
     issues.push(`Keep the delivery under ${MAX_AUTOMATION_TARGET_LENGTH} characters.`);

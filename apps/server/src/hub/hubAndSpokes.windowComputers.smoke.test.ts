@@ -864,6 +864,77 @@ describe("a desktop window on a hub member", () => {
     ).toEqual(["revoked"]);
   }, 60_000);
 
+  it("with Act unticked, a hub-introduced window lists and reads Code threads directly while send, answer, and Stop refuse", async () => {
+    const { network, a, b, bCode } = await startWorld();
+    const desktop = desktopWindow(a, network);
+    await desktop.sync();
+    const onStudio = await readySession(desktop, b);
+
+    const navigation = await onStudio.authenticatedFetch({
+      method: "GET",
+      path: "/api/code/navigation",
+    });
+    expect(navigation.status).toBe(200);
+
+    const threadRead = await onStudio.authenticatedFetch({
+      method: "GET",
+      path: `/api/code/threads/${thread.id}`,
+    });
+    expect(threadRead.status).toBe(200);
+    expect(await threadRead.json()).toMatchObject({
+      thread: { id: thread.id, projectId: ACT_PROJECT },
+    });
+
+    const operate = (body: Record<string, unknown>) =>
+      onStudio.authenticatedFetch({
+        method: "POST",
+        path: "/api/code/commands",
+        body: JSON.stringify({
+          operationId: crypto.randomUUID(),
+          checkoutId: thread.checkoutId,
+          ...body,
+        }),
+      });
+
+    const sendTurn = await operate({
+      kind: "start-provider-turn",
+      threadId: thread.id,
+      sessionId: "00000000-0000-4000-8000-0000000009a6",
+      prompt: {
+        contentId: "00000000-0000-4000-8000-0000000009a7",
+        digest: "d".repeat(64),
+        byteLength: 42,
+      },
+    });
+    const answerApproval = await operate({
+      kind: "answer-provider-approval",
+      threadId: thread.id,
+      approvalId: "00000000-0000-4000-8000-0000000009a3",
+      decision: "approved",
+    });
+    const stopTurn = await operate({
+      kind: "cancel-provider-turn",
+      threadId: thread.id,
+    });
+
+    expect([sendTurn.status, answerApproval.status, stopTurn.status]).toEqual([403, 403, 403]);
+    expect(await Promise.all([sendTurn.json(), answerApproval.json(), stopTurn.json()])).toEqual([
+      expect.objectContaining({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot send turns here.",
+      }),
+      expect.objectContaining({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot answer approvals or questions here.",
+      }),
+      expect.objectContaining({
+        message:
+          "This computer has not ticked Act for its hub, so a device the hub introduced cannot stop turns here.",
+      }),
+    ]);
+    expect(bCode.operated).toEqual([]);
+  }, 60_000);
+
   it("a window guest the hub removed stays off the roster when the window asks again", async () => {
     const { network, hub, a, b } = await startWorld();
     const desktop = desktopWindow(a, network);

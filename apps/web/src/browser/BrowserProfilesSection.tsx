@@ -139,7 +139,7 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
             focused={props.focusedSetting === "browser-accounts"}
             label="Named account profiles"
             description="Separate sign-ins on this host, reusable across Projects only when you choose them."
-            more="Creating a profile grants no site or task access."
+            more="Creating a profile grants no site or thread access."
             scope="host"
             settingId="browser-accounts"
           >
@@ -183,7 +183,7 @@ export function BrowserProfilesSection(props: BrowserProfilesSectionProps) {
               }
             >
               This profile keeps its own sign-ins on this host. It is not exported or synced. Select
-              it explicitly before using it in a task.
+              it explicitly before using it in a thread.
             </OctantConfirmDialog>
           )}
         </OctantDialogPresence>

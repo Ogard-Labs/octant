@@ -172,13 +172,13 @@ describe("InboxView triage", () => {
       <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
     );
 
-    await screen.findByRole("group", { name: "Quarterly report has a subagent waiting for you" });
+    await screen.findByRole("group", { name: "Quarterly report has an agent waiting for you" });
     expect(screen.getByRole("button", { name: /Decide/ })).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: /Stuck/ })).toHaveTextContent("1");
     await user.click(screen.getByRole("button", { name: /Decide/ }));
     expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
     expect(
-      screen.queryByRole("group", { name: "Quarterly report has a subagent waiting for you" }),
+      screen.queryByRole("group", { name: "Quarterly report has an agent waiting for you" }),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Finished/ }));
     expect(screen.getByRole("status")).toHaveTextContent("No finished turns waiting.");
@@ -236,9 +236,9 @@ describe("InboxView waiting subagents", () => {
     );
 
     const row = await screen.findByRole("group", {
-      name: "Quarterly report has a subagent waiting for you",
+      name: "Quarterly report has an agent waiting for you",
     });
-    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).getByText("Research agent needs your approval")).toBeInTheDocument();
     expect(within(row).getByText("octant")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
     expect(
