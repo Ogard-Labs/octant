@@ -1390,6 +1390,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "disposable desktop lease limit count host local how many",
         },
         {
+          id: settingId("desktop-cua-spaces"),
+          label: "Cua Spaces",
+          scope: "host",
+          keywords: "disposable desktop cua spaces daemon link setup",
+        },
+        {
           id: settingId("managed-tools-automatic-updates"),
           label: "Update device tools automatically",
           scope: "host",

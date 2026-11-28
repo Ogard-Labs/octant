@@ -4088,6 +4088,7 @@ A desktop holds no host credential and no checkout. Host files enter only throug
 Not built yet:
 
 - Network for a host-local desktop through the filtered egress proxy: not built, so today a host-local desktop never has network and a recipe that asks for it is refused. Only a cloud recipe without a placement may allow network.
+- Artifact transfer on macOS: reads refuse `path-unverifiable` until a macOS handle-path check is built, while screen and input ship first (maintainer decision, 2026-11-28).
 
 Status: Partly built. Since: 2026-10-26. Detail: [Disposable desktops: isolation](disposable-desktops.md#isolation), [artifact transfer](disposable-desktops.md#artifact-transfer) and [lease-bound dev-server preview](disposable-desktops.md#lease-bound-dev-server-preview).
 
@@ -4108,6 +4109,7 @@ Desktop providers are plugin contributions through the `desktop-provider` seam: 
 - A person confirms each billed or off-machine lease unless they turned off "Confirm each billed desktop", which is on by default and set only by a person at a local window or a person-paired device (maintainer decisions, 2026-11-12 and 2026-11-13).
 - Billed desktops are off until a person sets a mandatory monthly spend cap; each lease is estimated and refused over it. Agents cannot change the cap, and a hub-introduced device is refused (maintainer request and decision, 2026-11-12).
 - A billed provider must set a provider-side expiry, or the host destroys the desktop. Octant never installs, starts or stores a credential for a daemon.
+- Cua Spaces is offered on Linux and macOS hosts behind the local daemon socket; when no daemon is found, Settings shows a plain "Get Cua Spaces" link only and never bundles, installs, starts, updates, or signs it in (maintainer decisions, 2026-11-28).
 
 Not built yet:
 
