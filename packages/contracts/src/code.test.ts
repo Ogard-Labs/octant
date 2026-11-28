@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import * as codeContracts from "./code";
+import { decodeProjectRepositoriesList } from "./projectRepositories";
 import { decodeHostAnswer } from "./hostAnswer";
 import {
   decodeCodeCheckoutIdentity,
@@ -1322,18 +1323,9 @@ describe("Code managed thread creation contracts", () => {
       }),
     ).toThrow();
 
-    // Repository discovery list command and response decode cleanly.
+    // Repository discovery list response decodes cleanly.
     expect(
-      decodeCodeCommand({
-        kind: "list-project-repositories",
-        projectId: ids.project,
-      }),
-    ).toEqual({
-      kind: "list-project-repositories",
-      projectId: ids.project,
-    });
-    expect(
-      codeContracts.decodeProjectRepositoriesList({
+      decodeProjectRepositoriesList({
         kind: "project-repositories",
         projectId: ids.project,
         bindingRevisionId: ids.bindingRevision,

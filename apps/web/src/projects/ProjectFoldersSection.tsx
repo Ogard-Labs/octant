@@ -4,7 +4,7 @@ import type {
   DiscoveredProjectRepository,
   DiscoveredWorkspaceFolder,
   ProjectRepositoriesList,
-} from "@octant/contracts/code";
+} from "@octant/contracts/project-repositories";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import type { OctantHostBridge } from "../shell/hostBridge";

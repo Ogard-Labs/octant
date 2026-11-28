@@ -111,7 +111,6 @@ import {
   type CodeCommandResult,
   type CodePreparedLinkedCheckout,
   type CodeWorktreeCreationProgress,
-  type ProjectRepositoriesList,
   type ForkCodeThreadCommand,
   type CodeForkMergeBackOutcome,
   type CodeThreadCheckoutRebindRefusal,
@@ -890,11 +889,6 @@ export interface CodeServiceOptions {
   /** How many coordinators a Code Project may hold, read from Settings at each change; absent is 4. */
   readonly coordinatorsPerProject?: () => number;
   readonly access: CodeWindowAccessPort;
-  readonly listProjectRepositories?: (
-    authenticatedWindowId: WindowId,
-    projectId: ProjectId,
-    signal: AbortSignal,
-  ) => Promise<ProjectRepositoriesList>;
   readonly checkouts: CodeCheckoutObservationPort;
   readonly roots: CodeFileRootAuthorityPort;
   /**
@@ -1321,7 +1315,6 @@ export class CodeService {
   readonly #persistence: CodePersistencePort;
   readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
-  readonly #listProjectRepositories: CodeServiceOptions["listProjectRepositories"];
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
   readonly #gitHistory: CodeServiceOptions["gitHistory"];
@@ -1411,7 +1404,6 @@ export class CodeService {
     this.#persistence = options.persistence;
     this.#coordinatorsPerProject = options.coordinatorsPerProject;
     this.#access = options.access;
-    this.#listProjectRepositories = options.listProjectRepositories;
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
     this.#gitHistory = options.gitHistory;
@@ -2755,28 +2747,6 @@ export class CodeService {
             ? {}
             : { linkedCheckouts: prepared.linkedCheckouts }),
         };
-      }
-      if (command.kind === "list-project-repositories") {
-        if (!(await this.#access.canAccessProject(authenticatedWindowId, command.projectId))) {
-          throw this.#failure("unauthorized", "Code Project repositories are unauthorized.");
-        }
-        if (this.#listProjectRepositories === undefined) {
-          throw this.#failure("unavailable", "Repository discovery is unavailable.");
-        }
-        try {
-          return await this.#listProjectRepositories(
-            authenticatedWindowId,
-            command.projectId,
-            signal ?? new AbortController().signal,
-          );
-        } catch (error) {
-          throw this.#failure(
-            "unavailable",
-            error instanceof Error && error.message !== ""
-              ? error.message
-              : "Code Project repositories could not be listed.",
-          );
-        }
       }
       if (command.kind === "get-worktree-remote-facts") {
         // D3: server-authoritative remote facts. The composer uses these to

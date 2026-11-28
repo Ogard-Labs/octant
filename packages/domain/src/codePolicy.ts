@@ -70,29 +70,30 @@ export function threadReachesCheckout(
  * thread (diff, staging, commit, push, pull request). Everything else stays
  * on the primary checkout.
  */
-const GIT_AND_REVIEW_OPERATION_KINDS = new Set<string>([
-  "observe-git",
-  "prepare-git-hunks",
-  "stage-git-hunks",
-  "unstage-git-hunks",
-  "reverse-git-hunks",
-  "stage-git",
-  "unstage-git",
-  "discard-git-changes",
-  "commit-git",
-  "push-git",
-  "draft-git-text",
-  "switch-git-branch",
-  "create-pull-request",
-  "update-pull-request",
-  "comment-pull-request",
-  "merge-pull-request",
-  "observe-pull-request",
-  "prepare-review-target",
-]);
-
 export function codeOperationReachScope(commandKind: string): CodeCheckoutReachScope {
-  return GIT_AND_REVIEW_OPERATION_KINDS.has(commandKind) ? "git-and-review" : "primary-only";
+  switch (commandKind) {
+    case "observe-git":
+    case "prepare-git-hunks":
+    case "stage-git-hunks":
+    case "unstage-git-hunks":
+    case "reverse-git-hunks":
+    case "stage-git":
+    case "unstage-git":
+    case "discard-git-changes":
+    case "commit-git":
+    case "push-git":
+    case "draft-git-text":
+    case "switch-git-branch":
+    case "create-pull-request":
+    case "update-pull-request":
+    case "comment-pull-request":
+    case "merge-pull-request":
+    case "observe-pull-request":
+    case "prepare-review-target":
+      return "git-and-review";
+    default:
+      return "primary-only";
+  }
 }
 
 export type CodeActor = "local-user" | "agent" | "remote-client";

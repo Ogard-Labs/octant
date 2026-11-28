@@ -13,10 +13,10 @@ import {
   ProjectMemoryProposalDecisionResult,
   ProjectMemoryProposalList,
   ProjectMemoryView,
-  ProjectRepositoriesList,
   ProjectSummary,
   ProviderFolderScanResult,
   decodeHostAnswer,
+  type ProjectRepositoriesList,
   DesignSystemDocument,
   DesignSystemList,
   DesignSystemWriteResult,
@@ -214,17 +214,6 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           body: JSON.stringify(body),
         },
         decodeHostAnswer(DesignSystemWriteResult),
-      );
-    },
-    listRepositories(projectId, signal) {
-      return request(
-        options.fetch,
-        new URL(
-          `/api/projects/${encodeURIComponent(projectId)}/repositories`,
-          options.baseUrl,
-        ).toString(),
-        { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeHostAnswer(ProjectRepositoriesList),
       );
     },
     scanProviderFolders(signal) {

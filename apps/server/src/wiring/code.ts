@@ -1252,7 +1252,6 @@ export function wireCode(deps: CodeDependencies) {
             canBrowseProject: isCodeProject,
             canAccessProject: canAccessCodeProject,
           },
-          listProjectRepositories,
           checkouts,
           // A file in a Project's extra folder is named by absolute path and
           // opens, reads, saves and lists under the folder as its own root.

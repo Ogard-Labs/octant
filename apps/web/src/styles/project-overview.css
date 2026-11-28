@@ -528,3 +528,37 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
+
+.project-folders__repositories,
+.project-folders__workspace-folders {
+  display: grid;
+  min-width: 0;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-1);
+}
+
+.project-folders__subheading {
+  margin: 0;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.project-folders__submodules {
+  grid-column: 2 / -1;
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: var(--oct-space-1);
+  list-style: none;
+}
+
+.project-folders__submodule {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
