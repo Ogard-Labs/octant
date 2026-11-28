@@ -117,6 +117,14 @@ export interface CanvasServiceOptions {
    * that already happened.
    */
   readonly onVersionCommitted?: (version: CanvasVersion) => void;
+  /**
+   * Told about every version authored locally on this host — creates,
+   * revisions, board edits, and refreshes — never carried-in or
+   * replica-adopted versions. Used to record Project image digests without
+   * stamping today's files onto historical versions from another machine or
+   * triggering mirror/replica publication on refresh.
+   */
+  readonly onLocalVersionCommitted?: (version: CanvasVersion) => void;
 }
 
 export interface CanvasAuthorizationContext {
@@ -247,6 +255,7 @@ export class CanvasService {
   readonly #threadMayOwnCanvas: CanvasServiceDependencies["threadMayOwnCanvas"];
   readonly #promptSummaries = new Map<string, string>();
   readonly #onVersionCommitted: CanvasServiceOptions["onVersionCommitted"];
+  readonly #onLocalVersionCommitted: CanvasServiceOptions["onLocalVersionCommitted"];
   readonly #actor: CanvasActor;
   readonly #providerInstanceId: ReturnType<typeof decodeProviderInstanceId>;
   readonly #modelId: ReturnType<typeof decodeProviderModelId>;
@@ -290,6 +299,7 @@ export class CanvasService {
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#onVersionCommitted = options.onVersionCommitted;
+    this.#onLocalVersionCommitted = options.onLocalVersionCommitted;
     this.#authorize = dependencies.authorize;
     this.#threadMayOwnCanvas = dependencies.threadMayOwnCanvas;
     this.#resolveWorkspace = dependencies.resolveWorkspace;
@@ -556,6 +566,7 @@ export class CanvasService {
       this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
       this.#promptSummaries.set(String(admitted.next.versionId), request.prompt);
       this.#announceVersion(admitted.next);
+      this.#notifyLocalVersionCommitted(admitted.next);
       return decodeCanvasReviseResult({
         kind: "accepted",
         receipt: admitted.receipt,
@@ -759,6 +770,7 @@ export class CanvasService {
     }
     this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
     this.#announceVersion(admitted.next);
+    this.#notifyLocalVersionCommitted(admitted.next);
     return {
       kind: "accepted",
       canvasId,
@@ -779,6 +791,14 @@ export class CanvasService {
       this.#onVersionCommitted?.(version);
     } catch {
       // Reported by the listener's own receipt, never by the revision.
+    }
+  }
+
+  #notifyLocalVersionCommitted(version: CanvasVersion): void {
+    try {
+      this.#onLocalVersionCommitted?.(version);
+    } catch {
+      // A failed recording never undoes a committed version.
     }
   }
 
@@ -1097,6 +1117,7 @@ export class CanvasService {
       // empty. Announcing only revisions would leave a first draft with no
       // file until someone happened to edit it.
       this.#announceVersion(version);
+      this.#notifyLocalVersionCommitted(version);
       const card = projectThreadReferenceCardFromVersion({
         version,
         cardId: version.versionId,
@@ -1480,6 +1501,9 @@ export class CanvasService {
           refreshReceipt: receipt.receipt,
         });
         this.#projection.applyVersionAppended({ canvasId, version: next });
+        // Refresh does not announce to mirror/replica, so Project image
+        // digests are recorded separately for the refreshed version.
+        this.#notifyLocalVersionCommitted(next);
         this.#rememberRefreshResult(receipt);
         return receipt;
       }

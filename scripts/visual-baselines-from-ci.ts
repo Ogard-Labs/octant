@@ -41,8 +41,10 @@ try {
       runId,
       "--repo",
       "Ogard-Labs/octant",
-      "--name",
-      "visual-check",
+      // The check draws in shards, each uploading its own visual-check-<n>
+      // artifact; older runs uploaded one artifact named visual-check.
+      "--pattern",
+      "visual-check*",
       "--dir",
       download,
     ],

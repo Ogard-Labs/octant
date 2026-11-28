@@ -2472,7 +2472,9 @@ export type CanvasDesignAssetMediaType = typeof CanvasDesignAssetMediaType.Type;
  * leaves the folder, or a file asked for in Chat. `too-large`: past the
  * per-image budget. `design-budget`: the design's earlier images already
  * spent its budget. `not-an-image`: the bytes are not a PNG, JPEG, GIF, or
- * WebP.
+ * WebP. `changed`: the Project image file changed after this Canvas version
+ * was recorded, so the current bytes are withheld rather than drawn as if they
+ * belonged to that version.
  */
 export const CanvasDesignAssetUnavailableReason = Schema.Literals([
   "missing",
@@ -2480,8 +2482,27 @@ export const CanvasDesignAssetUnavailableReason = Schema.Literals([
   "too-large",
   "design-budget",
   "not-an-image",
+  "changed",
 ]);
 export type CanvasDesignAssetUnavailableReason = typeof CanvasDesignAssetUnavailableReason.Type;
+
+/**
+ * Extra reading state on a resolved image. `unrecorded`: this version holds no
+ * recorded Project image digests (made before recording existed, carried in
+ * from another computer, or adopted from a replica), so the current file is
+ * drawn and the surface labels it.
+ */
+export const CanvasDesignAssetMark = Schema.Literal("unrecorded");
+export type CanvasDesignAssetMark = typeof CanvasDesignAssetMark.Type;
+
+/**
+ * How `/api/canvas/design-assets` marks Project images for a client that knows
+ * the `changed` reason and `unrecorded` mark. `labelled`: compare superseded
+ * versions and mark unrecorded ones, keeping the newest version live.
+ * `recorded`: compare even the newest version (the preview miniature).
+ */
+export const CanvasDesignAssetMarks = Schema.Literals(["labelled", "recorded"]);
+export type CanvasDesignAssetMarks = typeof CanvasDesignAssetMarks.Type;
 
 export const CanvasDesignAssetResolution = Schema.Union([
   Schema.Struct({
@@ -2493,6 +2514,7 @@ export const CanvasDesignAssetResolution = Schema.Union([
       Schema.isMaxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
       Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
     ),
+    mark: Schema.optional(CanvasDesignAssetMark),
   }),
   Schema.Struct({
     assetId: CanvasDesignAssetId,
@@ -3468,6 +3490,10 @@ export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(
   STRICT_DECODE_OPTIONS,
 );
 export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasDesignAssetMarks = Schema.decodeUnknownSync(
+  CanvasDesignAssetMarks,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(
   CanvasDesignAssetsOutcome,
   STRICT_DECODE_OPTIONS,
@@ -3522,5 +3548,46 @@ export type CanvasEventName = (typeof CANVAS_EVENT_NAMES)[number];
 export const decodeCanvasCreated = Schema.decodeUnknownSync(CanvasCreated, STRICT_DECODE_OPTIONS);
 export const decodeCanvasVersionAppended = Schema.decodeUnknownSync(
   CanvasVersionAppended,
+  STRICT_DECODE_OPTIONS,
+);
+
+// ── Version Project image digests ───────────────────────────────────────────
+//
+// Recorded in a separate per-Canvas aggregate so older versions never present
+// a replaced Project file as the original without copying image bytes into the
+// journal or changing the strict CanvasVersion shape.
+
+const CanvasVersionImageSha256 = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+
+export const CanvasVersionImageDigest = Schema.Union([
+  Schema.Struct({
+    blockId: CanvasBlockId,
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("recorded"),
+    sha256: CanvasVersionImageSha256,
+  }),
+  Schema.Struct({
+    blockId: CanvasBlockId,
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("unavailable"),
+  }),
+]);
+export type CanvasVersionImageDigest = typeof CanvasVersionImageDigest.Type;
+
+export const CanvasVersionImagesRecorded = Schema.Struct({
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  images: Schema.Array(CanvasVersionImageDigest).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_MAX_BLOCKS * CANVAS_MAX_DESIGN_ASSETS),
+  ),
+});
+export type CanvasVersionImagesRecorded = typeof CanvasVersionImagesRecorded.Type;
+
+export const CANVAS_VERSION_IMAGES_AGGREGATE_TYPE = "canvas-version-images";
+export const CANVAS_VERSION_IMAGES_RECORDED = "canvas.version-images-recorded@1";
+
+export const decodeCanvasVersionImagesRecorded = Schema.decodeUnknownSync(
+  CanvasVersionImagesRecorded,
   STRICT_DECODE_OPTIONS,
 );

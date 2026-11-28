@@ -2,6 +2,7 @@ import {
   type CanvasActionCancelRequest,
   type CanvasActionRequest,
   CanvasActionResult,
+  type CanvasDesignAssetMarks,
   CanvasDesignAssetsOutcome,
   CanvasGetOutcome,
   CanvasHistoryOutcome,
@@ -97,6 +98,14 @@ export interface CanvasClient {
     readonly canvasId: CanvasId;
     readonly versionId: string;
     readonly blockId: string;
+    readonly marks?: CanvasDesignAssetMarks;
+    /**
+     * Whether `versionId` is the Canvas's newest version. When an older host
+     * rejects the `marks` query parameter with 400, the client retries without
+     * it only for the newest version; older versions and preview miniatures
+     * fail closed so placeholders are shown instead of replaced files.
+     */
+    readonly isCurrentVersion?: boolean;
   }): Promise<CanvasDesignAssetsOutcome>;
   /**
    * A single-use page for one running design, asked for just before it is
@@ -278,17 +287,33 @@ export function createCanvasClient(
         decodeHostAnswer(CanvasGetOutcome),
       );
     },
-    designAssets(input) {
-      const url = new URL("/api/canvas/design-assets", options.baseUrl);
-      url.searchParams.set("canvasId", String(input.canvasId));
-      url.searchParams.set("versionId", input.versionId);
-      url.searchParams.set("blockId", input.blockId);
-      return request(
-        options.fetch,
-        url.toString(),
-        { method: "GET", headers, cache: "no-store" },
-        decodeHostAnswer(CanvasDesignAssetsOutcome),
-      );
+    async designAssets(input) {
+      const fetchAssets = (marks: CanvasDesignAssetMarks | undefined) => {
+        const url = new URL("/api/canvas/design-assets", options.baseUrl);
+        url.searchParams.set("canvasId", String(input.canvasId));
+        url.searchParams.set("versionId", input.versionId);
+        url.searchParams.set("blockId", input.blockId);
+        if (marks !== undefined) url.searchParams.set("marks", marks);
+        return request(
+          options.fetch,
+          url.toString(),
+          { method: "GET", headers, cache: "no-store" },
+          decodeHostAnswer(CanvasDesignAssetsOutcome),
+        );
+      };
+      try {
+        return await fetchAssets(input.marks);
+      } catch (error) {
+        if (
+          input.marks === "labelled" &&
+          input.isCurrentVersion === true &&
+          error instanceof CanvasClientFailure &&
+          error.status === 400
+        ) {
+          return fetchAssets(undefined);
+        }
+        throw error;
+      }
     },
     async runDesign(input) {
       const outcome = await request(

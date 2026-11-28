@@ -62,6 +62,8 @@ export interface HubSettingsSectionProps {
    * item names. A saved id missing here stays listed so it can be unticked.
    */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** Called after a hub administration action refreshes status, so sibling views reload. */
+  readonly onHubStatusChanged?: () => void;
 }
 
 const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
@@ -468,6 +470,7 @@ export function HubSettingsSection({
   ownerUnlock,
   now,
   projectNames = NO_PROJECTS,
+  onHubStatusChanged,
 }: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
@@ -532,20 +535,26 @@ export function HubSettingsSection({
     [hub],
   );
 
-  const refresh = useCallback(async () => {
-    const failed = (message: string) => setState({ kind: "error", message });
-    try {
-      const reply = await request("status");
-      const status = reply.status === 200 ? readStatus(reply.body) : undefined;
-      if (status === undefined) failed("Octant could not read the hub status.");
-      else setState({ kind: "ready", status });
-    } catch (error) {
-      failed(failureMessage(error, "Octant could not read the hub status."));
-    }
-  }, [request]);
+  const refresh = useCallback(
+    async (notify = true) => {
+      const failed = (message: string) => setState({ kind: "error", message });
+      try {
+        const reply = await request("status");
+        const status = reply.status === 200 ? readStatus(reply.body) : undefined;
+        if (status === undefined) failed("Octant could not read the hub status.");
+        else {
+          setState({ kind: "ready", status });
+          if (notify) onHubStatusChanged?.();
+        }
+      } catch (error) {
+        failed(failureMessage(error, "Octant could not read the hub status."));
+      }
+    },
+    [onHubStatusChanged, request],
+  );
 
   useEffect(() => {
-    void refresh();
+    void refresh(false);
   }, [refresh]);
 
   const refreshCertificate = useCallback(async () => {

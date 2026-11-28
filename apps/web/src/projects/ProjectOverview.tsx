@@ -955,6 +955,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 <ProjectDesktopRecipeSection
                   {...(desktopPaneClient === undefined ? {} : { client: desktopPaneClient })}
                   disabled={archived || connectionStale}
+                  externalUrlHost={props.hostBridge}
                   onChange={async (recipe, key) =>
                     (await props.onDesktopRecipeChange?.(props.project.id, recipe, key)) ?? false
                   }

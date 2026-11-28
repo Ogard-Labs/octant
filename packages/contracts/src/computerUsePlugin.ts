@@ -123,6 +123,47 @@ export const ComputerExtendDesktopCommand = Schema.Struct({
 });
 export type ComputerExtendDesktopCommand = typeof ComputerExtendDesktopCommand.Type;
 
+/**
+ * An agent's request to type a thread secret by its one-use handle into an
+ * observed secure text field. It never reaches a driver as a command: the host
+ * verifies the target field, asks when policy requires it, redeems the handle
+ * once in host memory, and types the value without returning it or a screenshot.
+ */
+export const ComputerTypeSecretCommand = Schema.Struct({
+  operation: Schema.Literal("type-secret"),
+  handle: GuidString,
+  ...observedElement,
+});
+export type ComputerTypeSecretCommand = typeof ComputerTypeSecretCommand.Type;
+
+/** Private host-to-desktop check for whether an observed element is a verified password field. */
+export const ComputerSecretTargetRequest = Schema.Struct({
+  ...observedElement,
+});
+export type ComputerSecretTargetRequest = typeof ComputerSecretTargetRequest.Type;
+
+/** Private host-to-desktop delivery of a redeemed secret value into a verified password field. */
+export const ComputerHostTypeSecretRequest = Schema.Struct({
+  ...observedElement,
+  text: typedText,
+});
+export type ComputerHostTypeSecretRequest = typeof ComputerHostTypeSecretRequest.Type;
+
+export const ComputerSecretTargetInspection = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("secure-target"),
+    appId,
+    windowId: ComputerWindowId,
+    windowTitle: Schema.String.check(Schema.isMaxLength(1_024)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literals(["refused", "failed"]),
+    reason: text(128),
+    message: text(1_024),
+  }),
+]);
+export type ComputerSecretTargetInspection = typeof ComputerSecretTargetInspection.Type;
+
 export const ComputerUseImage = Schema.Struct({
   mimeType: Schema.Literals(["image/png", "image/jpeg"]),
   data: text(2_097_152).check(Schema.isPattern(/^[A-Za-z0-9+/]+={0,2}$/)),
@@ -156,6 +197,7 @@ export const ComputerControlResult = Schema.Union([
     observationId: ComputerObservationId,
     appId,
     windowId: ComputerWindowId,
+    windowTitle: Schema.optional(Schema.String.check(Schema.isMaxLength(1_024))),
     elements: Schema.Array(ComputerUseElement).check(Schema.isMaxLength(512)),
     truncated: Schema.Boolean,
     image: Schema.optional(ComputerUseImage),
@@ -163,6 +205,11 @@ export const ComputerControlResult = Schema.Union([
     imageHeight: Schema.optional(PositiveInt),
   }),
   Schema.Struct({ kind: Schema.Literal("stopped") }),
+  /** A thread secret was typed into a verified password field; no value or screenshot returns. */
+  Schema.Struct({ kind: Schema.Literal("typed") }),
+  /** The action was cancelled before completion. */
+  Schema.Struct({ kind: Schema.Literal("cancelled") }),
+  /** A file sent into the bound desktop's inbox, as the host journaled it. */
   Schema.Struct({
     kind: Schema.Literal("sent"),
     name: text(255),
@@ -224,5 +271,21 @@ export const decodeComputerExtendDesktopCommand = Schema.decodeUnknownSync(
 );
 export const decodeComputerUseStatus = Schema.decodeUnknownSync(
   ComputerUseStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerTypeSecretCommand = Schema.decodeUnknownSync(
+  ComputerTypeSecretCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerSecretTargetRequest = Schema.decodeUnknownSync(
+  ComputerSecretTargetRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerHostTypeSecretRequest = Schema.decodeUnknownSync(
+  ComputerHostTypeSecretRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeComputerSecretTargetInspection = Schema.decodeUnknownSync(
+  ComputerSecretTargetInspection,
   STRICT_DECODE_OPTIONS,
 );

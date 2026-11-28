@@ -1218,6 +1218,7 @@ function ActiveSectionContent({
               />
               <DesktopLeaseSettings
                 client={props.desktopPaneClient}
+                externalUrlHost={props.hostBridge}
                 focusedSetting={focusedSetting}
               />
             </>

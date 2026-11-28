@@ -17,10 +17,16 @@ import { threadStandingAnswerCovers } from "@octant/domain/untrusted-content-pol
 import {
   decodeComputerUseOwner,
   decodeComputerControlResult,
+  decodeComputerSecretTargetInspection,
   type ComputerControlCommand,
   type ComputerControlResult,
+  type ComputerHostTypeSecretRequest,
+  type ComputerSecretTargetRequest,
   type ComputerUseOwner,
 } from "@octant/contracts/computer-use-plugin";
+import type { ThreadSecretJournalRecord } from "@octant/contracts/thread-secrets";
+import { holdSecretValue } from "../process/secretRedaction";
+import { ThreadSecretService, type ThreadSecretCaller } from "../threadSecrets/threadSecretService";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
 import {
@@ -1967,6 +1973,776 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
       expect(f.ask).not.toHaveBeenCalled();
     } finally {
       await f.service.close();
+    }
+  });
+});
+
+describe("Typing a thread secret through Computer use", () => {
+  const codeOwner = (executionPolicy: "approval-gated" | "full-access" = "approval-gated") =>
+    decodeComputerUseOwner({
+      windowId: "11111111-1111-4111-8111-111111111111",
+      threadId: "22222222-2222-4222-8222-222222222222",
+      mode: "code",
+      providerInstanceId: "33333333-3333-4333-8333-333333333333",
+      modelId: "fixture",
+      executionPolicy,
+    });
+  const codeAuthority = decodeToolActionAuthority({
+    hostId: "44444444-4444-4444-8444-444444444444",
+    mode: "code",
+    projectId: "55555555-5555-4555-8555-555555555555",
+    providerInstanceId: "33333333-3333-4333-8333-333333333333",
+    extension: { kind: "core" },
+  });
+
+  function secretFixture(overrides?: {
+    readonly fullAccess?: boolean;
+    readonly strict?: boolean;
+    readonly secureTarget?: boolean;
+    readonly projectAppRemembered?: boolean;
+    readonly enabled?: boolean;
+    readonly destinationStatus?: "available" | "unavailable" | "leasable";
+    readonly onInspectSecretTarget?: (
+      callIndex: number,
+      signal: AbortSignal | undefined,
+    ) => Promise<void> | void;
+  }) {
+    const secretJournal: Array<ThreadSecretJournalRecord> = [];
+    const computerEvidence: Array<ComputerUseEvidenceEvent> = [];
+    const typedValues: Array<ComputerHostTypeSecretRequest> = [];
+    let enabled = overrides?.enabled ?? true;
+    let secureTarget = overrides?.secureTarget ?? true;
+    let windowTitle = "Privacy & Security";
+    let strict = overrides?.strict ?? false;
+    let fullAccess = overrides?.fullAccess ?? false;
+    let dropFullAccessAfterNextRead = false;
+    let nowMs = 1_700_000_000_000;
+    let observationSequence = 0;
+    let inspectCalls = 0;
+
+    const threadSecrets = new ThreadSecretService({
+      uuid: () => crypto.randomUUID(),
+      now: () => nowMs,
+      journal: {
+        record: (_threadId, records) => {
+          secretJournal.push(...records);
+        },
+        history: () => ({ open: [], lastLifetimes: new Map() }),
+      },
+      hold: holdSecretValue,
+    });
+
+    const execute = vi.fn(
+      async (
+        _owner: ComputerUseOwner,
+        command: ComputerControlCommand,
+      ): Promise<ComputerControlResult> => {
+        if (command.operation === "observe") {
+          observationSequence += 1;
+          return decodeComputerControlResult({
+            kind: "observation",
+            observationId: `77777777-7777-4777-8777-${String(observationSequence).padStart(12, "0")}`,
+            appId: command.appId,
+            windowId: command.windowId,
+            windowTitle: "Privacy & Security",
+            elements: [
+              { index: 0, role: "AXWindow", label: "Privacy & Security", protected: false },
+              { index: 4, role: "AXTextField", label: "Password", protected: true },
+              { index: 5, role: "AXTextField", label: "Search", protected: false },
+            ],
+            truncated: false,
+          });
+        }
+        return decodeComputerControlResult({
+          kind: "windows",
+          appId: "com.example.AuthPrompt",
+          windows: [{ windowId: 9, title: "Privacy & Security" }],
+        });
+      },
+    );
+
+    const inspectSecretTarget = vi.fn(
+      async (
+        _owner: ComputerUseOwner,
+        target: ComputerSecretTargetRequest,
+        signal?: AbortSignal,
+      ) => {
+        inspectCalls += 1;
+        await overrides?.onInspectSecretTarget?.(inspectCalls, signal);
+        if (signal?.aborted) {
+          return decodeComputerSecretTargetInspection({
+            kind: "refused",
+            reason: "cancelled",
+            message: "Cancelled.",
+          });
+        }
+        if (!secureTarget || target.elementIndex !== 4) {
+          return decodeComputerSecretTargetInspection({
+            kind: "refused",
+            reason: "not-a-password-field",
+            message: "Secrets can only be typed into a verified password field.",
+          });
+        }
+        return decodeComputerSecretTargetInspection({
+          kind: "secure-target",
+          appId: "com.example.AuthPrompt",
+          windowId: 9,
+          windowTitle,
+        });
+      },
+    );
+
+    const typeSecret = vi.fn(
+      async (_owner: ComputerUseOwner, input: ComputerHostTypeSecretRequest) => {
+        typedValues.push(input);
+        return decodeComputerControlResult({ kind: "typed" });
+      },
+    );
+
+    const toolOwner = codeOwner(fullAccess ? "full-access" : "approval-gated");
+    const service = createComputerUseToolService({
+      desktop: {
+        status: async () => ({
+          supported: true,
+          enabled,
+          automaticUpdates: true,
+          permissions: { accessibility: true, screenRecording: true },
+          driver: "ready",
+          activeSessions: 0,
+          update: "current",
+        }),
+        configure: async () => {},
+        reserve: async () => true,
+        execute,
+        inspectSecretTarget,
+        typeSecret,
+        release: async () => {},
+      },
+      threadSecrets: () => threadSecrets,
+      ...(overrides?.destinationStatus === undefined
+        ? {}
+        : {
+            destination: () =>
+              overrides.destinationStatus === "available"
+                ? { status: "available" as const, kind: "macos-host" as const }
+                : overrides.destinationStatus === "leasable"
+                  ? {
+                      status: "leasable" as const,
+                      kind: "disposable-desktop" as const,
+                      leasable: [],
+                    }
+                  : { status: "unavailable" as const, kind: "no-destination" as const },
+          }),
+      settings: () => ({ enabled, automaticUpdates: true }),
+      authority: () => codeAuthority,
+      ownerIsCurrent: () => true,
+      toolConstraints: () => [],
+      fullAccess: () => {
+        if (dropFullAccessAfterNextRead) {
+          dropFullAccessAfterNextRead = false;
+          fullAccess = false;
+          return true;
+        }
+        return fullAccess;
+      },
+      strict: () => strict,
+      externalContentIngested: () => false,
+      ...(overrides?.projectAppRemembered === true ? { projectAppRemembered: () => true } : {}),
+      threadTitle: () => "Configure Mac",
+      record: async (event) => {
+        computerEvidence.push(event);
+      },
+      now: () => nowMs,
+    });
+
+    const turnId = "turn-1";
+    const turnAbort = new AbortController();
+    const caller: ThreadSecretCaller = {
+      windowId: String(toolOwner.windowId),
+      threadId: toolOwner.threadId,
+      turnId,
+      authority: () => ({ mode: "code", strict, commandsConfined: false }),
+      signal: turnAbort.signal,
+    };
+
+    const grantHandle = async (input: {
+      readonly name: string;
+      readonly label: string;
+      readonly value: string;
+      readonly lifetime: "this-turn" | "1-hour";
+    }): Promise<string> => {
+      const requested = threadSecrets.request(caller, {
+        operation: "request-secret",
+        name: input.name,
+        label: input.label,
+        kind: "account-password",
+        reason: "Unlock the authentication prompt.",
+        delivery: "handle",
+      });
+      const card = threadSecrets
+        .view(String(toolOwner.windowId), toolOwner.threadId)
+        .requests.at(-1);
+      if (card !== undefined && card.state === "pending") {
+        const answer = await threadSecrets.answer(
+          String(toolOwner.windowId),
+          toolOwner.threadId,
+          {
+            id: card.id,
+            action: "save",
+            lifetime: input.lifetime,
+            fields: [{ name: input.name, source: "pasted", value: input.value }],
+          },
+          { paired: false },
+        );
+        expect(answer).toEqual({ status: "accepted" });
+      }
+      const result = await requested;
+      if (result.status !== "saved" || result.delivery !== "handle" || !("handle" in result))
+        throw new Error(`Expected saved handle, got ${JSON.stringify(result)}`);
+      return result.handle;
+    };
+
+    const tools = service.toolSet(toolOwner, true, undefined, turnId);
+    if (tools === undefined) throw new Error("Expected Computer use tool.");
+
+    const waitForApproval = async () => {
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const session = service.runtime
+          .list(toolOwner.windowId)
+          .find((entry) => entry.state === "waiting-for-approval");
+        if (session?.pendingApproval !== undefined) return session;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("Expected pending computer-use approval.");
+    };
+
+    const approveNext = async () => {
+      const session = await waitForApproval();
+      const pendingApproval = session.pendingApproval;
+      if (pendingApproval === undefined) throw new Error("Expected pending approval.");
+      await service.runtime.decide({
+        ownerWindowId: toolOwner.windowId,
+        threadId: session.threadId,
+        authority: session.authority,
+        sessionId: session.sessionId,
+        actionId: pendingApproval.actionId,
+        approvalId: pendingApproval.approvalId,
+        decision: "approved",
+      });
+      return pendingApproval;
+    };
+
+    return {
+      service,
+      threadSecrets,
+      tools,
+      toolOwner,
+      secretJournal,
+      computerEvidence,
+      typedValues,
+      inspectSecretTarget,
+      typeSecret,
+      grantHandle,
+      waitForApproval,
+      approveNext,
+      setSecureTarget: (value: boolean) => {
+        secureTarget = value;
+      },
+      setWindowTitle: (value: string) => {
+        windowTitle = value;
+      },
+      setFullAccess: (value: boolean) => {
+        fullAccess = value;
+      },
+      revokeFullAccessAfterNextCheck: () => {
+        dropFullAccessAfterNextRead = true;
+      },
+      setStrict: (value: boolean) => {
+        strict = value;
+      },
+      setEnabled: (value: boolean) => {
+        enabled = value;
+        service.syncSecretConsumer();
+      },
+      advanceMs: (ms: number) => {
+        nowMs += ms;
+      },
+      close: async () => {
+        turnAbort.abort();
+        await service.close();
+        threadSecrets.close();
+      },
+    };
+  }
+
+  it("types a handle's value into a verified secure field without exposing it in args, result, or journal", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false });
+    const secretValue = "Correct-Horse-Battery-99!";
+    try {
+      expect(f.threadSecrets.hasConsumer()).toBe(true);
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: secretValue,
+        lifetime: "this-turn",
+      });
+      const observed = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "observe",
+          appId: "com.example.AuthPrompt",
+          windowId: 9,
+        }),
+      });
+      const observation = observed.result as { readonly observationId: string };
+      const argsJson = JSON.stringify({
+        operation: "type-secret",
+        handle,
+        observationId: observation.observationId,
+        elementIndex: 4,
+      });
+      const reply = await f.tools.execute({ name: "octant_computer", inputJson: argsJson });
+
+      expect(reply).toEqual({ result: { kind: "typed" }, isError: false });
+      expect(f.typedValues).toHaveLength(1);
+      expect(f.typedValues[0]?.text).toBe(secretValue);
+      expect(argsJson).not.toContain(secretValue);
+      expect(JSON.stringify(reply)).not.toContain(secretValue);
+      expect(JSON.stringify(f.computerEvidence)).not.toContain(secretValue);
+      expect(JSON.stringify(f.secretJournal)).not.toContain(secretValue);
+      expect(f.secretJournal).toContainEqual(
+        expect.objectContaining({
+          name: "thread-secret.used",
+          secretName: "MAC_ADMIN_PASSWORD",
+          use: "handle",
+        }),
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses a non-secure field with not-a-password-field, types nothing, and keeps the handle unspent", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false });
+    const secretValue = "Never-Typed-Into-Search-11!";
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: secretValue,
+        lifetime: "this-turn",
+      });
+      const observed = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "observe",
+          appId: "com.example.AuthPrompt",
+          windowId: 9,
+        }),
+      });
+      const observation = observed.result as { readonly observationId: string };
+      const refused = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId: observation.observationId,
+          elementIndex: 5,
+        }),
+      });
+      expect(refused).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "not-a-password-field" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+
+      // Because the non-secure target was refused before redemption, the handle still works on the real password field.
+      const typed = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId: observation.observationId,
+          elementIndex: 4,
+        }),
+      });
+      expect(typed).toEqual({ result: { kind: "typed" }, isError: false });
+      expect(f.typedValues).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("redeems a handle once and refuses a second type-secret with the same handle", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Single-Use-Handle-42!",
+        lifetime: "this-turn",
+      });
+      const firstObs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle,
+            observationId: firstObs.observationId,
+            elementIndex: 4,
+          }),
+        }),
+      ).toEqual({ result: { kind: "typed" }, isError: false });
+
+      const secondObs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      const replay = await f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId: secondObs.observationId,
+          elementIndex: 4,
+        }),
+      });
+      expect(replay).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "expired" },
+      });
+      expect(f.typedValues).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("asks once per typing naming the app, window, and label below Full access and under Strict, even with remembered app grants", async () => {
+    for (const posture of [
+      { fullAccess: false, strict: false, projectAppRemembered: true },
+      { fullAccess: true, strict: true, projectAppRemembered: true },
+    ]) {
+      const f = secretFixture(posture);
+      const secretValue = "Approval-Gated-Secret-77!";
+      try {
+        const handle1 = await f.grantHandle({
+          name: "MAC_ADMIN_PASSWORD",
+          label: "Admin password",
+          value: secretValue,
+          lifetime: "1-hour",
+        });
+        // Remembered Project grant lets observe run without asking, yet type-secret still asks every time.
+        const obs1 = (
+          await f.tools.execute({
+            name: "octant_computer",
+            inputJson: JSON.stringify({
+              operation: "observe",
+              appId: "com.example.AuthPrompt",
+              windowId: 9,
+            }),
+          })
+        ).result as { readonly observationId: string };
+
+        const firstTyping = f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle: handle1,
+            observationId: obs1.observationId,
+            elementIndex: 4,
+          }),
+        });
+        const firstApproval = await f.approveNext();
+        expect(firstApproval.scope).toBeUndefined();
+        expect(firstApproval.canRememberForProject).toBeUndefined();
+        expect(firstApproval.summary).toContain("Admin password");
+        expect(firstApproval.summary).toContain("com.example.AuthPrompt");
+        expect(firstApproval.summary).toContain("Privacy & Security");
+        expect(firstApproval.summary).not.toContain(secretValue);
+        expect(await firstTyping).toEqual({ result: { kind: "typed" }, isError: false });
+
+        // A second typing with a fresh handle still asks again.
+        const handle2 = await f.grantHandle({
+          name: "MAC_ADMIN_PASSWORD",
+          label: "Admin password",
+          value: secretValue,
+          lifetime: "1-hour",
+        });
+        const obs2 = (
+          await f.tools.execute({
+            name: "octant_computer",
+            inputJson: JSON.stringify({
+              operation: "observe",
+              appId: "com.example.AuthPrompt",
+              windowId: 9,
+            }),
+          })
+        ).result as { readonly observationId: string };
+        const secondTyping = f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle: handle2,
+            observationId: obs2.observationId,
+            elementIndex: 4,
+          }),
+        });
+        const secondApproval = await f.approveNext();
+        expect(secondApproval.summary).toContain("Admin password");
+        expect(await secondTyping).toEqual({ result: { kind: "typed" }, isError: false });
+        expect(f.typedValues).toHaveLength(2);
+      } finally {
+        await f.close();
+      }
+    }
+  });
+
+  it("fills two prompts from a 1-hour secret with two fresh one-use handles recorded without the value", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false });
+    const secretValue = "One-Hour-Secret-88!";
+    try {
+      const handle1 = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: secretValue,
+        lifetime: "1-hour",
+      });
+      const obs1 = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle: handle1,
+            observationId: obs1.observationId,
+            elementIndex: 4,
+          }),
+        }),
+      ).toEqual({ result: { kind: "typed" }, isError: false });
+
+      // Twenty minutes later, asking again opens no card and mints a second one-use handle.
+      f.advanceMs(20 * 60_000);
+      const handle2 = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: secretValue,
+        lifetime: "1-hour",
+      });
+      expect(handle2).not.toBe(handle1);
+      const obs2 = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle: handle2,
+            observationId: obs2.observationId,
+            elementIndex: 4,
+          }),
+        }),
+      ).toEqual({ result: { kind: "typed" }, isError: false });
+
+      expect(f.typedValues.map((entry) => entry.text)).toEqual([secretValue, secretValue]);
+      expect(
+        f.secretJournal.filter(
+          (record) => record.name === "thread-secret.used" && record.use === "handle",
+        ),
+      ).toHaveLength(2);
+      expect(JSON.stringify(f.secretJournal)).not.toContain(secretValue);
+      expect(JSON.stringify(f.computerEvidence)).not.toContain(secretValue);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("unregisters Computer use as a secret handle consumer when disabled", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false });
+    try {
+      expect(f.threadSecrets.hasConsumer()).toBe(true);
+      f.setEnabled(false);
+      expect(f.threadSecrets.hasConsumer()).toBe(false);
+      f.setEnabled(true);
+      expect(f.threadSecrets.hasConsumer()).toBe(true);
+    } finally {
+      await f.close();
+    }
+    expect(f.threadSecrets.hasConsumer()).toBe(false);
+  });
+
+  it("does not register Computer use as a secret handle consumer when the native destination is unavailable", async () => {
+    const f = secretFixture({ fullAccess: true, strict: false, destinationStatus: "unavailable" });
+    try {
+      expect(f.threadSecrets.hasConsumer()).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses secret typing without spending the handle when the prompt title changes after approval", async () => {
+    const f = secretFixture({ fullAccess: false, strict: false, projectAppRemembered: true });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Changed-Title-Secret-1!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      const pendingTyping = f.tools.execute({
+        name: "octant_computer",
+        inputJson: JSON.stringify({
+          operation: "type-secret",
+          handle,
+          observationId: obs.observationId,
+          elementIndex: 4,
+        }),
+      });
+      await f.waitForApproval();
+      f.setWindowTitle("Different Admin Prompt");
+      await f.approveNext();
+      expect(await pendingTyping).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "stale-observation" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("refuses secret typing when Full access is revoked before dispatch", async () => {
+    const f = secretFixture({
+      fullAccess: true,
+      strict: false,
+    });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Revoked-FullAccess-Secret-2!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      // Admission sees Full access, then dispatch sees it withdrawn before typing.
+      f.revokeFullAccessAfterNextCheck();
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle,
+            observationId: obs.observationId,
+            elementIndex: 4,
+          }),
+        }),
+      ).toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "not-approved" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it("stops before spending the handle when the tool call is cancelled after initial target inspection", async () => {
+    const callAbort = new AbortController();
+    const f = secretFixture({
+      fullAccess: true,
+      strict: false,
+      onInspectSecretTarget: (callIndex) => {
+        if (callIndex === 1) callAbort.abort();
+      },
+    });
+    try {
+      const handle = await f.grantHandle({
+        name: "MAC_ADMIN_PASSWORD",
+        label: "Admin password",
+        value: "Cancelled-Call-Secret-3!",
+        lifetime: "this-turn",
+      });
+      const obs = (
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "observe",
+            appId: "com.example.AuthPrompt",
+            windowId: 9,
+          }),
+        })
+      ).result as { readonly observationId: string };
+      expect(
+        await f.tools.execute({
+          name: "octant_computer",
+          inputJson: JSON.stringify({
+            operation: "type-secret",
+            handle,
+            observationId: obs.observationId,
+            elementIndex: 4,
+          }),
+          signal: callAbort.signal,
+        }),
+      ).toMatchObject({
+        result: { kind: "cancelled" },
+      });
+      expect(f.typedValues).toHaveLength(0);
+      expect(f.secretJournal.some((record) => record.name === "thread-secret.used")).toBe(false);
+    } finally {
+      await f.close();
     }
   });
 });

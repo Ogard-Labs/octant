@@ -2178,4 +2178,156 @@ describe("CanvasWorkspaceTab choice blocks", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Send to/ })).not.toBeInTheDocument();
   });
+
+  it("draws the changed placeholder on an older version with a replaced Project image and labels an unrecorded older version", async () => {
+    const pixel =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const olderChangedId = "55555555-5555-4555-8555-555555555551";
+    const olderUnrecordedId = "55555555-5555-4555-8555-555555555552";
+    const designBlock = {
+      blockId: "screen",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "design" as const,
+      title: "Screen",
+      size: "document" as const,
+      assets: [{ assetId: "shot", source: { kind: "project-file" as const, path: "home.png" } }],
+      frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' }],
+    };
+    const versionWithDesign = (versionId: string, sequence: number) => ({
+      ...readyVersion,
+      version: {
+        ...readyVersion.version,
+        versionId: versionId as never,
+        sequence,
+        definition: {
+          ...canvasFixture,
+          provenance: { ...canvasFixture.provenance, mode: "work" },
+          blocks: [designBlock],
+        },
+      },
+    });
+    const entry = (versionId: string, sequence: number) => ({
+      versionId: versionId as never,
+      sequence,
+      schemaVersion: 1,
+      title: quarterlyInventoryEntry.title,
+      createdAt: "2026-08-01T21:00:00.000Z" as never,
+      createdBy: readyVersion.version.createdBy,
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+      modelId: "octant-test-model" as never,
+    });
+    const designAssets = vi.fn(async (input: { readonly versionId: string }) => {
+      if (input.versionId === olderChangedId) {
+        return {
+          kind: "ready" as const,
+          canvasId: quarterlyCanvasId,
+          versionId: input.versionId as never,
+          blockId: "screen" as never,
+          assets: [
+            {
+              assetId: "shot" as never,
+              status: "unavailable" as const,
+              reason: "changed" as const,
+            },
+          ],
+        };
+      }
+      if (input.versionId === olderUnrecordedId) {
+        return {
+          kind: "ready" as const,
+          canvasId: quarterlyCanvasId,
+          versionId: input.versionId as never,
+          blockId: "screen" as never,
+          assets: [
+            {
+              assetId: "shot" as never,
+              status: "resolved" as const,
+              mediaType: "image/png" as const,
+              data: pixel,
+              mark: "unrecorded" as const,
+            },
+          ],
+        };
+      }
+      return {
+        kind: "ready" as const,
+        canvasId: quarterlyCanvasId,
+        versionId: input.versionId as never,
+        blockId: "screen" as never,
+        assets: [
+          {
+            assetId: "shot" as never,
+            status: "resolved" as const,
+            mediaType: "image/png" as const,
+            data: pixel,
+          },
+        ],
+      };
+    });
+    const currentId = String(quarterlyInventoryEntry.currentVersionId);
+    const client = createCanvasClient(
+      versionWithDesign(currentId, 3) as never,
+      {
+        kind: "ready",
+        history: {
+          canvasId: quarterlyCanvasId,
+          currentVersionId: quarterlyInventoryEntry.currentVersionId,
+          entries: [entry(currentId, 3), entry(olderUnrecordedId, 2), entry(olderChangedId, 1)],
+        },
+      } as unknown as Awaited<ReturnType<CanvasClient["history"]>>,
+      {
+        designAssets,
+        get: vi.fn(async (_canvasId, versionId) => {
+          if (versionId === olderChangedId) return versionWithDesign(olderChangedId, 1) as never;
+          if (versionId === olderUnrecordedId)
+            return versionWithDesign(olderUnrecordedId, 2) as never;
+          return versionWithDesign(currentId, 3) as never;
+        }),
+      },
+    );
+
+    const { container } = render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
+    await waitFor(() => {
+      expect(designAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          versionId: currentId,
+          blockId: "screen",
+          marks: "labelled",
+          isCurrentVersion: true,
+        }),
+      );
+    });
+    expect(screen.queryByTestId("canvas-unrecorded-images-notice")).toBeNull();
+
+    // Select v1 whose Project image changed: placeholder text is drawn in the design frame.
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-1"));
+    await waitFor(() => {
+      expect(designAssets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          versionId: olderChangedId,
+          blockId: "screen",
+          marks: "labelled",
+          isCurrentVersion: false,
+        }),
+      );
+      const srcDoc = container.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+      const match = srcDoc.match(/data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)/);
+      expect(match?.[1]).toBeTruthy();
+      expect(atob(match?.[1] ?? "")).toContain("Image changed since this version");
+    });
+    expect(screen.queryByTestId("canvas-unrecorded-images-notice")).toBeNull();
+
+    // Select v2 which has no recorded digests: label appears.
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-2"));
+    expect(await screen.findByText("Project images are shown as they are now")).toBeInTheDocument();
+
+    // Returning to newest v3 clears the label.
+    await openVersionHistory();
+    fireEvent.click(await screen.findByTestId("canvas-version-3"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("canvas-unrecorded-images-notice")).toBeNull();
+    });
+  });
 });

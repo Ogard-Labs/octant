@@ -2,6 +2,8 @@ import { createHostDisplay, nativeHostDisplay } from "./hostDisplay";
 import { join } from "node:path";
 import type {
   ComputerControlCommand,
+  ComputerHostTypeSecretRequest,
+  ComputerSecretTargetRequest,
   ComputerUseOwner,
   ComputerUseSettings,
   ComputerUseStatus,
@@ -358,6 +360,60 @@ export function createComputerUseDesktopService(options: {
       return controls.execute(
         owner,
         command,
+        signal ? AbortSignal.any([lifetime, signal]) : lifetime,
+      );
+    },
+    inspectSecretTarget: async (
+      owner: ComputerUseOwner,
+      target: ComputerSecretTargetRequest,
+      signal?: AbortSignal,
+    ) => {
+      if (!(await reserve(owner)) || display.blocksAgent())
+        return {
+          kind: "refused" as const,
+          reason: "setup-required",
+          message:
+            "Computer use is unavailable. Open Computer use in Settings to check the plugin and macOS permissions.",
+        };
+      if (options.isWindowAvailable(String(owner.windowId)))
+        return controls.inspectSecretTarget(owner, target, signal);
+      const lifetime = display.agentLifetime(String(owner.windowId), owner.threadId);
+      if (!lifetime || owner.mode !== "code")
+        return {
+          kind: "refused" as const,
+          reason: "view-ended",
+          message: "Open the Mac desktop in this Code thread to use it.",
+        };
+      return controls.inspectSecretTarget(
+        owner,
+        target,
+        signal ? AbortSignal.any([lifetime, signal]) : lifetime,
+      );
+    },
+    typeSecret: async (
+      owner: ComputerUseOwner,
+      input: ComputerHostTypeSecretRequest,
+      signal?: AbortSignal,
+    ) => {
+      if (!(await reserve(owner)) || display.blocksAgent())
+        return {
+          kind: "refused" as const,
+          reason: "setup-required",
+          message:
+            "Computer use is unavailable. Open Computer use in Settings to check the plugin and macOS permissions.",
+        };
+      if (options.isWindowAvailable(String(owner.windowId)))
+        return controls.typeSecret(owner, input, signal);
+      const lifetime = display.agentLifetime(String(owner.windowId), owner.threadId);
+      if (!lifetime || owner.mode !== "code")
+        return {
+          kind: "refused" as const,
+          reason: "view-ended",
+          message: "Open the Mac desktop in this Code thread to use it.",
+        };
+      return controls.typeSecret(
+        owner,
+        input,
         signal ? AbortSignal.any([lifetime, signal]) : lifetime,
       );
     },

@@ -588,6 +588,7 @@ import { registerBlockedToolsEvents } from "../providers/blockedToolsService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
+import { registerCanvasVersionImagesEvents } from "../canvas/canvasVersionImages";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
 import {
@@ -1113,6 +1114,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerCanvasExportFolderEvents(events);
   registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
+  registerCanvasVersionImagesEvents(events);
   registerCanvasCommentEvents(events);
   registerCanvasChoiceAnswerEvents(events);
   registerCanvasTagEvents(events);

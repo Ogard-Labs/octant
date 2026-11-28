@@ -269,7 +269,12 @@ import {
 } from "./shell/firstPartyPluginsEffective";
 import { isSettingsSectionAvailable, isThreadBoardAvailable } from "./shell/contributionRegistry";
 import { useWhatsNewAfterUpdate } from "./settings/useWhatsNewAfterUpdate";
-import { hubAdministrationOf, type CodeDeepLink, type OctantHostBridge } from "./shell/hostBridge";
+import {
+  hubAdministrationOf,
+  pairedComputersOf,
+  type CodeDeepLink,
+  type OctantHostBridge,
+} from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
 import { openExternalUrl } from "./shell/openExternalUrl";
 import {
@@ -2769,16 +2774,15 @@ function LaunchedShell(
     pairedComputerCodeSlot?.kind === "remote" ? pairedComputerCodeSlot.bridge : undefined;
   const pairedComputerSlotReady =
     pairedComputerCodeSlot?.kind === "remote" && pairedComputerCodeSlot.state.kind === "ready";
-  const [pairedComputerOpenedBridge, setPairedComputerOpenedBridge] =
-    useState<typeof pairedComputerSlotBridge>(undefined);
+  const [pairedComputerOpenedHostId, setPairedComputerOpenedHostId] = useState<string>();
   useEffect(() => {
     if (pairedComputerSlotReady && pairedComputerSlotBridge !== undefined) {
-      setPairedComputerOpenedBridge(pairedComputerSlotBridge);
+      setPairedComputerOpenedHostId(String(createHostId));
     }
-  }, [pairedComputerSlotBridge, pairedComputerSlotReady]);
+  }, [createHostId, pairedComputerSlotBridge, pairedComputerSlotReady]);
   const pairedComputerCodeBridge =
     pairedComputerSlotBridge !== undefined &&
-    (pairedComputerSlotReady || pairedComputerSlotBridge === pairedComputerOpenedBridge)
+    (pairedComputerSlotReady || pairedComputerOpenedHostId === String(createHostId))
       ? pairedComputerSlotBridge
       : undefined;
   // Every paired computer's Code threads and asks, listed in this window and
@@ -2854,6 +2858,7 @@ function LaunchedShell(
             source,
             mode,
           );
+  const pairedComputersBridge = pairedComputersOf(props.hostBridge);
   const renderPairedComputerCodeStart =
     pairedComputerCodeBridge === undefined
       ? undefined
@@ -2867,6 +2872,10 @@ function LaunchedShell(
                 selectedHostId={createHostId}
                 onSelectHost={handleSelectCreateHost}
                 viewScope={createHostViewScope}
+                {...(pairedComputerOrigin === undefined ? {} : { origin: pairedComputerOrigin })}
+                {...(pairedComputersBridge === undefined
+                  ? {}
+                  : { pairedComputers: pairedComputersBridge })}
                 {...(pairedThreadToOpenHere === undefined
                   ? {}
                   : {

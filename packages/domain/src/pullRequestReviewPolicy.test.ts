@@ -11,7 +11,10 @@ import {
   decidePullRequestReviewHandBack,
   decidePullRequestReviewerAction,
   evaluatePullRequestReviewHeadCurrency,
+  parsePullRequestReviewLegacyTargetKey,
   pullRequestReviewerExecutionPolicy,
+  pullRequestReviewLegacyTargetKey,
+  pullRequestReviewNodeTargetKey,
   pullRequestReviewTargetKey,
   rankPullRequestReviewerRoutes,
   resolveEffectivePullRequestReviewConfig,
@@ -300,5 +303,48 @@ describe("pull request review domain policy", () => {
       number: 42,
     });
     expect(first).toBe(second);
+  });
+
+  it("keys pull requests by GitHub node ID across repository renames, isolates reused names, and parses legacy keys", () => {
+    const projectId = decodeProjectId("33333333-3333-4333-8333-333333333333");
+    const beforeRename = pullRequestReviewTargetKey({
+      projectId,
+      repositoryOwner: "acme" as never,
+      repositoryName: "app" as never,
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9" as never,
+    });
+    const afterRename = pullRequestReviewTargetKey({
+      projectId,
+      repositoryOwner: "acme" as never,
+      repositoryName: "application" as never,
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9" as never,
+    });
+    const reusedNameDifferentPr = pullRequestReviewTargetKey({
+      projectId,
+      repositoryOwner: "acme" as never,
+      repositoryName: "app" as never,
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_reused9" as never,
+    });
+    const legacyKey = pullRequestReviewLegacyTargetKey({
+      projectId,
+      repositoryOwner: "acme" as never,
+      repositoryName: "app" as never,
+      number: 9,
+    });
+
+    expect(beforeRename).toBe(pullRequestReviewNodeTargetKey(projectId, "PR_kwDO_app9"));
+    expect(beforeRename).toBe(afterRename);
+    expect(reusedNameDifferentPr).not.toBe(beforeRename);
+    expect(legacyKey).not.toBe(beforeRename);
+    expect(parsePullRequestReviewLegacyTargetKey(legacyKey)).toEqual({
+      projectId: String(projectId),
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+    });
+    expect(parsePullRequestReviewLegacyTargetKey(beforeRename)).toBeUndefined();
   });
 });

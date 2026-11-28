@@ -1382,7 +1382,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolveSelectedExtensions,
         pinnedExtensionIds,
         threadDesktopDestination,
-        computerUseTools: ({ windowId, thread, destination, ask }) =>
+        computerUseTools: ({ windowId, thread, operationId, destination, ask }) =>
           computerToolsFor(
             decodeComputerUseOwner({
               windowId,
@@ -1395,6 +1395,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
             ask,
             appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
+            operationId,
           ),
         spendCeiling,
         terminalProcessPort,
@@ -3693,10 +3694,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       spendCeiling,
       turnMetrics,
+      pullRequestLinks: pullRequestLinkService,
     });
     const pullRequestReviewService = new PullRequestReviewService({
       registry: pullRequestReviewers,
       journal: persistence.journal,
+      pullRequestLinks: pullRequestLinkService,
       authority: {
         canAccessProject: (windowId, projectId) => canAccessCodeProject(windowId, projectId),
         authorizePullRequest: (windowId, target) =>
@@ -3807,6 +3810,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     // read-only turn, spend reservation and usage record, on the guide model.
     const guideService = new PullRequestGuideService({
       journal: persistence.journal,
+      pullRequestLinks: pullRequestLinkService,
       authority: {
         authorizePullRequest: (windowId, target) =>
           projectPullRequestService.authorizePullRequest(windowId, target),
@@ -3840,11 +3844,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           if (authority.status !== "authorized" || viewedForge === undefined) {
             return { status: "unavailable" };
           }
+          const canonical = authority.canonicalTarget ?? target;
           const read = await viewedForge.read(
             {
-              owner: String(target.repositoryOwner),
-              name: String(target.repositoryName),
-              number: target.number,
+              owner: String(canonical.repositoryOwner),
+              name: String(canonical.repositoryName),
+              number: canonical.number,
             },
             signal,
           );
@@ -3861,11 +3866,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           if (authority.status !== "authorized" || viewedForge === undefined) {
             return { status: "unavailable" };
           }
+          const canonical = authority.canonicalTarget ?? input.target;
           return viewedForge.write(
             {
-              owner: String(input.target.repositoryOwner),
-              name: String(input.target.repositoryName),
-              number: input.target.number,
+              owner: String(canonical.repositoryOwner),
+              name: String(canonical.repositoryName),
+              number: canonical.number,
               path: input.path,
               viewed: input.viewed,
               ...(input.headSha === undefined ? {} : { headSha: input.headSha }),

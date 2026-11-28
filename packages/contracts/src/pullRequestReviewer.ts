@@ -24,6 +24,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
+import { GithubPullRequestNodeId } from "./pullRequestIdentity";
 
 const encoder = new TextEncoder();
 
@@ -79,6 +80,7 @@ export const PullRequestReviewTarget = Schema.Struct({
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
   number: PositiveInt,
+  pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
 });
 export type PullRequestReviewTarget = typeof PullRequestReviewTarget.Type;
 

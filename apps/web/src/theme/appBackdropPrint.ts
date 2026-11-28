@@ -423,7 +423,11 @@ export function runMovingPrint(
 
   const draw = (now: number) => {
     if (pixels === undefined) return;
-    const t = (now - started) / 1000;
+    // A still print holds the scene's first frame, as the character field
+    // does. Timed from the call, it held whichever frame was due when idle
+    // time came, so the same still ground drew a little differently on each
+    // load (up to 22 of 255 per channel between two runs of the visual check).
+    const t = animated ? (now - started) / 1000 : 0;
     ripples = ripples.filter((ripple) => t - ripple.start <= WAVE_SECONDS);
     scene?.frame(t);
     const out = pixels.data;

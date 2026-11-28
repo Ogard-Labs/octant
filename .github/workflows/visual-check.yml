@@ -1,7 +1,7 @@
 name: Visual check
 # Draws the key screens in a pinned Chromium and fails when one changed visibly.
 # A pull request with the `design change` label is an intended change: the run
-# draws the new pictures, uploads them as the `visual-check` artifact and
+# draws the new pictures, uploads them as `visual-check-<half>` artifacts and
 # passes. It pushes nothing; a person commits the pictures with
 # scripts/visual-baselines-from-ci.ts.
 #
@@ -62,11 +62,17 @@ jobs:
           echo "draw=${draw}" >> "$GITHUB_OUTPUT"
           echo "Draw the key screens: ${draw}"
   visual:
-    name: Visual check
+    # The pictures are drawn in two halves at once; the "Visual check" job
+    # below reports them as the one required check.
+    name: Visual check (${{ matrix.shard }}/2)
     needs: scope
     if: github.event.pull_request.draft != true && needs.scope.outputs.draw == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       INTENDED: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'design change') }}
     steps:
@@ -98,6 +104,7 @@ jobs:
           CI: "true"
           OCTANT_VISUAL_CHECK: "1"
           OCTANT_QA_ARTIFACTS: ${{ runner.temp }}/visual-check
+          OCTANT_VISUAL_SHARD: ${{ matrix.shard }}/2
         run: |
           # Set only when writing: an empty value is still "set" to some readers.
           if [ "$INTENDED" = "true" ]; then export OCTANT_VISUAL_UPDATE=1; fi
@@ -109,7 +116,7 @@ jobs:
           pictures=("${RUNNER_TEMP}"/visual-check/*.actual.png)
           if [ ${#pictures[@]} -eq 0 ] || [ "$INTENDED" = "true" ]; then
             # No screen differed, or update mode failed: the check itself broke.
-            echo "::error::The visual check could not run to the end. See the log of the step above and the visual-check artifact."
+            echo "::error::The visual check could not run to the end. See the log of the step above and the visual-check-${{ matrix.shard }} artifact."
           elif [ "${{ github.event_name }}" = "push" ]; then
             echo "::error::The key screens on main no longer match their baselines: a change with the design change label was merged without committing its pictures. Run scripts/visual-baselines-from-ci.ts ${{ github.run_id }}, review the diffs and commit them."
           else
@@ -125,7 +132,7 @@ jobs:
             if [ ${#pictures[@]} -eq 0 ]; then
               echo "No screen changed visibly; there is nothing to commit."
             else
-              echo "These pictures changed (or are new). Download them from the \`visual-check\` artifact, review them, then commit:"
+              echo "These pictures changed (or are new). Download them from the \`visual-check-${{ matrix.shard }}\` artifact, review them, then commit:"
               echo
               for picture in "${pictures[@]}"; do echo "- $(basename "$picture" .actual.png)"; done
               echo
@@ -138,6 +145,30 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: visual-check
+          name: visual-check-${{ matrix.shard }}
           path: ${{ runner.temp }}/visual-check
           if-no-files-found: ignore
+  result:
+    # The required check. Skipped halves (a pull request that cannot change
+    # the screens, or a draft) pass, as the single job's skip did before.
+    name: Visual check
+    needs: [scope, visual]
+    # A draft runs nothing, as the single job did; ready_for_review starts it.
+    if: always() && github.event.pull_request.draft != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Report both halves
+        env:
+          SCOPE: ${{ needs.scope.result }}
+          VISUAL: ${{ needs.visual.result }}
+        run: |
+          echo "scope: ${SCOPE}, drawing: ${VISUAL}"
+          case "${VISUAL}" in
+            success|skipped) ;;
+            *) echo "::error::The visual check failed. See the Visual check (1/2) and (2/2) jobs."; exit 1 ;;
+          esac
+          case "${SCOPE}" in
+            success|skipped) ;;
+            *) echo "::error::The visual check could not decide its scope."; exit 1 ;;
+          esac
