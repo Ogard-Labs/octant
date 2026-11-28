@@ -3989,6 +3989,8 @@ A person starts and manages a coding session on whichever of their computers the
 - The hub admits a member's window guest only to the Projects its own Act list names, set only from a window on the hub (maintainer decision, 2026-11-21).
 - Every connected device is told when a new device joins or pairs, and Remove stays with a window on the host and an owner device (maintainer decision, 2026-11-19).
 - A window acting as its own person can bootstrap a local Code Project onto another computer over the direct paired session, never the hub, copying only ignored files the person ticked (maintainer decision, 2026-11-24). A two-machine smoke is an owed maintainer check.
+- Settings › Remote access shows a connections map and keyboard-accessible list separating transport path (LAN or Tailscale) from trust reason (`Paired by you` or `Introduced by the hub`), showing unconfirmed members clearly, drawing hub peer edges unmeasured as `Both in the hub`, and starting existing local pairing or hub join-code flows from drag or multi-select only when one end is this computer (maintainer decision, 2026-11-28).
+- A hub-introduced window opens threads on reachable hub members directly (never relayed); when the thread's Project is outside `Act`, it renders a read-only Watching bar with Connect to reply (ordinary pairing verified against that computer's origin and pin) and hides composer, approval, and Stop controls while the host refuses mutations. Residual risk accepted: with `Act` unticked, a hub-introduced device can still read Code transcripts on that member (maintainer decision, 2026-11-28). Two computers and a hub on a real Tailscale network plus one Connect is an owed maintainer check.
 
 Not built yet:
 
