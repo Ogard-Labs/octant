@@ -220,7 +220,7 @@ export function parseMobileUnifiedDiff(text: string): ReadonlyArray<MobileDiffFi
           text: `Mode changed: ${file.modeChange.oldMode} → ${file.modeChange.newMode}`,
         });
       }
-      if (file.emptyFile) {
+      if (file.emptyFileIndex === true) {
         lines.push({
           kind: "meta",
           text: file.change === "deleted" ? "Empty file deleted" : "Empty file added",

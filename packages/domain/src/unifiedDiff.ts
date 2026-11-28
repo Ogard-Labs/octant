@@ -71,6 +71,11 @@ export interface ParsedDiffFile {
    */
   readonly emptyFile?: true;
   /**
+   * True only when Git's `index` line explicitly proved an empty blob opposite
+   * a null object ID (distinguishing a real empty file from a truncated header).
+   */
+  readonly emptyFileIndex?: true;
+  /**
    * True when Git quoted a path whose octal byte escapes were not valid UTF-8,
    * so `path` retains the escaped form rather than substituting U+FFFD.
    */
@@ -127,6 +132,7 @@ interface FileAccumulator {
   sawHunk: boolean;
   sawBinaryContent: boolean;
   sawExplicitBinary: boolean;
+  sawEmptyFileIndex: boolean;
   hunks: HunkAccumulator[];
   source?: { start: number; end: number; headerEnd: number };
 }
@@ -166,6 +172,7 @@ function newAccumulator(): FileAccumulator {
     sawHunk: false,
     sawBinaryContent: false,
     sawExplicitBinary: false,
+    sawEmptyFileIndex: false,
     hunks: [],
   };
 }
@@ -368,6 +375,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     ...(accumulator.fileMode === undefined ? {} : { fileMode: accumulator.fileMode }),
     ...(modeOnly ? { modeOnly: true as const } : {}),
     ...(emptyFile ? { emptyFile: true as const } : {}),
+    ...(emptyFile && accumulator.sawEmptyFileIndex ? { emptyFileIndex: true as const } : {}),
     ...(nonUtf8Path ? { nonUtf8Path: true as const } : {}),
     ...(nonUtf8PreviousPath ? { nonUtf8PreviousPath: true as const } : {}),
     ...(renamed && accumulator.copied ? { copied: true as const } : {}),
@@ -486,14 +494,15 @@ export function parseUnifiedDiff(
         continue;
       }
       const indexMatch = CONTENT_INDEX.exec(line);
-      if (
-        indexMatch?.[1] !== undefined &&
-        indexMatch[2] !== undefined &&
-        indexMatch[1] !== indexMatch[2] &&
-        !isEmptyFileIndexPair(indexMatch[1], indexMatch[2])
-      ) {
-        accumulator.sawBinaryContent = true;
-        continue;
+      if (indexMatch?.[1] !== undefined && indexMatch[2] !== undefined) {
+        if (isEmptyFileIndexPair(indexMatch[1], indexMatch[2])) {
+          accumulator.sawEmptyFileIndex = true;
+          continue;
+        }
+        if (indexMatch[1] !== indexMatch[2]) {
+          accumulator.sawBinaryContent = true;
+          continue;
+        }
       }
     }
     if (!accumulator.sawHunk && line.startsWith("--- ")) {

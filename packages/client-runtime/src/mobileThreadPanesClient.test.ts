@@ -96,17 +96,27 @@ describe("phone thread panes", () => {
       "diff --git a/empty.txt b/empty.txt",
       "new file mode 100644",
       "index 0000000..e69de29",
+      "diff --git a/removed-empty.txt b/removed-empty.txt",
+      "deleted file mode 100644",
+      "index e69de29..0000000",
       "diff --git a/assets/icon.png b/assets/icon.png",
       "Binary files a/assets/icon.png and b/assets/icon.png differ",
       "diff --git a/src/truncated.ts b/src/truncated.ts",
       "index 1111111..2222222 100644",
+      "diff --git a/src/truncated-new.ts b/src/truncated-new.ts",
+      "new file mode 100644",
+      "diff --git a/src/truncated-deleted.ts b/src/truncated-deleted.ts",
+      "deleted file mode 100644",
     ].join("\n");
     const files = parseMobileUnifiedDiff(metadataAndBinary);
     expect(files.map((file) => [file.path, file.binary, file.lines])).toEqual([
       ["scripts/run.sh", false, [{ kind: "meta", text: "Mode changed: 100644 → 100755" }]],
       ["empty.txt", false, [{ kind: "meta", text: "Empty file added" }]],
+      ["removed-empty.txt", false, [{ kind: "meta", text: "Empty file deleted" }]],
       ["assets/icon.png", true, []],
       ["src/truncated.ts", false, []],
+      ["src/truncated-new.ts", false, []],
+      ["src/truncated-deleted.ts", false, []],
     ]);
   });
 

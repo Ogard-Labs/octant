@@ -430,7 +430,10 @@ function ReviewPane(props: {
             accessory="none"
           />
         </ListSection>
-        <UnifiedDiff file={opened} />
+        <UnifiedDiff
+          file={opened}
+          truncated={changes.status === "ready" && changes.value.truncated}
+        />
       </View>
     );
   }
@@ -458,7 +461,15 @@ function ReviewPane(props: {
             files.map((file, index) => (
               <ListRow
                 detail={
-                  file.binary ? "Binary file" : file.withoutDiff === true ? "New file" : undefined
+                  file.binary
+                    ? "Binary file"
+                    : file.withoutDiff === true
+                      ? "New file"
+                      : file.lines.length === 0
+                        ? changes.value.truncated
+                          ? "Cut at phone's limit"
+                          : "No patch lines"
+                        : undefined
                 }
                 key={file.path}
                 label={file.path}
@@ -506,7 +517,7 @@ function ReviewPane(props: {
  * A virtualized list so a large change stays smooth; long lines wrap rather
  * than scroll sideways, and each row carries its old and new line numbers.
  */
-function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
+function UnifiedDiff(props: { readonly file: MobileDiffFile; readonly truncated?: boolean }) {
   const { colors } = useTheme();
   // Line heights and the gutter follow the system text size, as the digits do,
   // so a number never wraps and a line never clips at the largest size.
@@ -586,6 +597,13 @@ function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
         ListHeaderComponent={
           <Text style={diffStyles.path}>
             {props.file.path} {diffstatText(props.file.additions, props.file.deletions)}
+          </Text>
+        }
+        ListEmptyComponent={
+          <Text style={diffStyles.path} testID="mobile-pane-review-diff-empty">
+            {props.truncated === true
+              ? "The diff was cut at the phone's limit; this file's patch is not available."
+              : "No patch lines available for this file."}
           </Text>
         }
         renderItem={({ item, index }) => {
