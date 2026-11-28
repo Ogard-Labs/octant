@@ -9,6 +9,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   commandReloadsThread,
+  approvalCallPreview,
   providerRequestFromEvent,
   totalTurnUsage,
 } from "./codeControllerState";
@@ -112,5 +113,50 @@ describe("providerRequestFromEvent", () => {
       approvalId: asked.approvalId,
       summary: asked.summary,
     });
+  });
+
+  it("names the call an approval gates, so its card can show what would run", () => {
+    expect(providerRequestFromEvent({ ...asked, toolCallId: "call-7" } as never)).toEqual({
+      kind: "approval",
+      approvalId: asked.approvalId,
+      summary: asked.summary,
+      toolCallId: "call-7",
+    });
+  });
+});
+
+describe("approvalCallPreview", () => {
+  const activity = new Map([
+    [
+      "turn-1",
+      {
+        reasoning: "",
+        rows: [
+          {
+            kind: "tool" as const,
+            id: "call-6",
+            toolName: "Read",
+            state: "completed" as const,
+            summary: "apps/web/src/composer/ThreadComposer.tsx",
+          },
+          {
+            kind: "tool" as const,
+            id: "call-7",
+            toolName: "Bash",
+            state: "started" as const,
+            summary: "bun test apps/web/src/composer\n",
+          },
+        ],
+      },
+    ],
+  ]);
+
+  it("reads the gated call's own line from the turn that holds it", () => {
+    expect(approvalCallPreview(activity, "call-7")).toBe("bun test apps/web/src/composer");
+  });
+
+  it("names nothing when the approval names no call, or a call no turn holds", () => {
+    expect(approvalCallPreview(activity, undefined)).toBeUndefined();
+    expect(approvalCallPreview(activity, "call-9")).toBeUndefined();
   });
 });

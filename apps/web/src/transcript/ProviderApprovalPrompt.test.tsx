@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { approvalReason } from "./approvalReason";
 import { ProviderApprovalPrompt } from "./ProviderApprovalPrompt";
 
 describe("provider approval prompt", () => {
@@ -26,6 +27,59 @@ describe("provider approval prompt", () => {
     render(<ProviderApprovalPrompt onAnswer={vi.fn()} summary="Run the build?" />);
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Remember for this Project" })).toBeNull();
+  });
+
+  it("asks a plain question with the thread's reason under it and the command in a well", () => {
+    render(
+      <ProviderApprovalPrompt
+        command="bun test apps/web/src/composer"
+        onAnswer={vi.fn()}
+        onRememberForProject={vi.fn()}
+        reason="This thread asks before it runs commands or changes files."
+        summary="Run the composer tests?"
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(within(card).getByText("Run the composer tests?")).toBeTruthy();
+    expect(
+      within(card).getByText("This thread asks before it runs commands or changes files."),
+    ).toBeTruthy();
+    const well = within(card).getByLabelText("The call it asks about");
+    expect(well.textContent).toBe("bun test apps/web/src/composer");
+    // The command is read before the answers, in layout and in reading order.
+    const answers = within(card).getAllByRole("button");
+    expect(answers.map((button) => button.textContent)).toEqual([
+      "Allow once",
+      "Remember for this Project",
+      "Deny",
+    ]);
+    expect(well.compareDocumentPosition(answers[0] as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("draws no well when the ask names no call", () => {
+    render(
+      <ProviderApprovalPrompt
+        onAnswer={vi.fn()}
+        reason="This thread asks before it runs commands or changes files."
+        summary="Let this thread use the iPhone?"
+      />,
+    );
+    expect(screen.queryByLabelText("The call it asks about")).toBeNull();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("says why the thread asks in the words of its mode", () => {
+    expect(approvalReason("ask-first")).toBe(
+      "This thread asks before it runs commands or changes files.",
+    );
+    expect(approvalReason("accept-edits")).toBe(
+      "This thread edits files on its own and asks before it runs commands.",
+    );
+    expect(approvalReason("auto")).toBe("This thread's reviewer left this one to you.");
+    expect(approvalReason("plan")).toBe("This thread is planning, read-only, so it asks first.");
+    expect(approvalReason("full-access")).toBe(
+      "This thread runs with Full access, and this one still asks you.",
+    );
   });
 
   it("asks to plan first and says the next turn runs in Plan, read-only", async () => {

@@ -199,7 +199,14 @@ allowed", "asked you", or "denied", the call in detail-size mono, the
 one-sentence reason in the muted ink, and the rule or model and the latency
 at the right as detail text. It always names Shield, never the provider, and
 does not count as a tool call. A Code turn that changed files ends with one card: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. When a Work or Code lead records a finished receipt through `octant_report_finished`, the turn ends with a **"Finished, with proof"** card showing the summary, the observed diff file and line counts (or `Diff unavailable`), each host-run check or goal criterion with its status (`Proven`, `Failed`, `Claimed`, `Unavailable`) and expandable output, and a `Stale` notice whenever a later file-change journal event landed after the receipt. The same card sits above the last reply on the Review page, where Send back prefills any failed or claimed items. A turn paused on the person uses a neutral composer-adjacent request row with
-an icon and explicit answer controls. Follow-up composers use one compact
+an icon and explicit answer controls. A provider approval reads as a plain
+question: the agent's ask, one quiet line saying why the thread asks, taken
+from its mode ("This thread asks before it runs commands or changes files.",
+"This thread edits files on its own and asks before it runs commands."), the
+gated call in a well when the call already drew a tool row (its command line
+or file name, read from that row, never guessed from a neighbour), and the
+answers under them from the leading edge: Allow once, Remember for this
+Project and Deny, with their words unchanged. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. A held
 message queue with items still waiting shows a compact **Follow-up paused**

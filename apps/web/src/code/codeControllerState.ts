@@ -37,6 +37,7 @@ import { foldCodeTurnUsage } from "@octant/domain";
 import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
+import { toolKind, toolPreview } from "../transcript/toolKinds";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
 export type CodeProviderRequest =
@@ -55,6 +56,8 @@ export type CodeProviderRequest =
       };
       /** The ask may also be answered with "Remember for this Project". */
       readonly canRememberForProject?: true;
+      /** The call this ask gates, when the runtime named one; its row holds the call's line. */
+      readonly toolCallId?: string;
     }
   | {
       readonly kind: "input";
@@ -158,6 +161,7 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
             },
           }),
       ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
+      ...(event.toolCallId === undefined ? {} : { toolCallId: String(event.toolCallId) }),
     };
   }
   // App questionnaires follow the session read so answers from another window
@@ -768,7 +772,29 @@ async function readConversationText(
   return readOperationText(client, threadId, operationId, contentId, signal);
 }
 
+/**
+ * The line of the call an approval gates, read from the tool row that call
+ * already drew (a command's first line, a file's name), so the card shows what
+ * would run without a read of its own. Nothing when the approval names no
+ * call or no turn on screen holds it: the card then asks without a well rather
+ * than guess from a neighbouring row.
+ */
+function approvalCallPreview(
+  activity: ReadonlyMap<string, TurnActivity>,
+  toolCallId: string | undefined,
+): string | undefined {
+  if (toolCallId === undefined) return undefined;
+  for (const turn of activity.values()) {
+    const row = turn.rows.find(
+      (candidate) => candidate.kind === "tool" && candidate.id === toolCallId,
+    );
+    if (row?.kind === "tool") return toolPreview(toolKind(row.toolName), row.summary);
+  }
+  return undefined;
+}
+
 export {
+  approvalCallPreview,
   providerRequestFromEvent,
   readOperationText,
   readConversationEvidence,

@@ -2884,8 +2884,9 @@ Approval and confirmation dialogs default to the safe answer, and the host decid
 - The safe action receives initial focus. Escape, Cancel and backdrop dismissal never change data. Destructive actions opt into the danger treatment.
 - An extension tool request names the plugin, its server and the tool, and offers only the choices the host says an approval covers (maintainer decision, 2026-11-12).
 - Native Code approvals are isolated host documents. Shared renderer components never grant Code authority, and Enter never implicitly grants access.
+- A provider approval card reads as a plain question: the ask, one line saying why the thread asks, derived from its mode, and the call it gates in a well when that call drew a tool row; the answers stay Allow once, Remember for this Project and Deny, under the question from the leading edge (maintainer decision, 2026-11-28).
 
-Status: Built. Detail: [DESIGN.md: Dialogs and sheets](../../DESIGN.md#dialogs-and-sheets), [OctantConfirmDialog](../../DESIGN.md#octantconfirmdialog), [Settings: Permissions](settings.md#permissions) and [Thread view: Native Code approvals](thread-view.md#native-code-approvals).
+Status: Built. Detail: [DESIGN.md: Dialogs and sheets](../../DESIGN.md#dialogs-and-sheets), [OctantConfirmDialog](../../DESIGN.md#octantconfirmdialog), [OctantApprovalCard](../../DESIGN.md#octantapprovalcard), [Settings: Permissions](settings.md#permissions) and [Thread view: Native Code approvals](thread-view.md#native-code-approvals).
 
 ### Accessibility baseline
 

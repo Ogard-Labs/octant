@@ -2919,6 +2919,55 @@ html[data-octant-reduced-motion="true"] .octant-status-dot[data-live="true"] {
   margin-inline-start: auto;
 }
 
+/* An approval card reads as a plain question: the ask in the primary ink,
+   one muted line saying why the thread asks, the call it gates in a well,
+   and the answers under them from the leading edge, so the eye reads down
+   one column and meets the answers last. With the buttons at the trailing
+   end of the question's line, a long ask wrapped around them and the
+   command sat after the choice it should come before. */
+.approval-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+}
+.approval-card > svg {
+  grid-column: 1;
+  /* Centred on the question's first line, whatever the text size. */
+  margin-block-start: calc((1lh - 14px) / 2);
+}
+.approval-card > :not(svg) {
+  grid-column: 2;
+}
+.approval-card .approval-row__text {
+  font-weight: var(--oct-weight-medium);
+}
+.approval-card .approval-row__detail {
+  margin-block-start: 2px;
+  font-weight: var(--oct-weight-regular);
+}
+.approval-card .approval-row__actions {
+  justify-content: flex-start;
+  margin-inline-start: 0;
+}
+/* The call an approval gates, in the system's well: a command's line or a
+   file's name, wrapped rather than cut, because it is what the person is
+   saying yes to. */
+.approval-row__well {
+  display: block;
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: var(--oct-radius-sm);
+  background: var(--octant-well);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  line-height: var(--oct-line-detail);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 /* Provider and extension requests are waiting state, not a decorative brass
    accent. Keep the actionable row in the same neutral surface language as the
    composer; semantic warning colour remains available to real warnings. */

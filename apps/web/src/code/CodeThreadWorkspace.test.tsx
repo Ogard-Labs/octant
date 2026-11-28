@@ -3588,6 +3588,54 @@ describe("CodeThreadWorkspace", () => {
     expect(within(card).getByRole("button", { name: "Deny" })).toBeInTheDocument();
   });
 
+  it("says why the thread asks and shows the gated command above the answers", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          providerRequests: [
+            {
+              kind: "approval",
+              approvalId: "30000000-0000-4000-8000-000000000003" as never,
+              summary: "Run the composer tests?",
+              toolCallId: "call-7",
+              canRememberForProject: true,
+            },
+          ],
+          turnActivity: new Map([
+            [
+              "turn-1",
+              {
+                reasoning: "",
+                rows: [
+                  {
+                    kind: "tool",
+                    id: "call-7",
+                    toolName: "Bash",
+                    state: "started",
+                    summary: "bun test apps/web/src/composer",
+                  },
+                ],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+    const card = screen.getByRole("group", { name: "Provider approval" });
+    expect(
+      within(card).getByText("This thread asks before it runs commands or changes files."),
+    ).toBeInTheDocument();
+    expect(within(card).getByLabelText("The call it asks about")).toHaveTextContent(
+      "bun test apps/web/src/composer",
+    );
+    expect(within(card).getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+    expect(
+      within(card).getByRole("button", { name: "Remember for this Project" }),
+    ).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
   it("keeps provider requests immediately above the composer", () => {
     render(
       <CodeThreadWorkspace

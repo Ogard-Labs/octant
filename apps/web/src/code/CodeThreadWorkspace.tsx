@@ -211,6 +211,8 @@ import { SideTaskInline } from "../followUps/SideTaskCards";
 import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
 import { LazyProviderQuestionCard as ProviderQuestionCard } from "../transcript/LazyProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { approvalReason } from "../transcript/approvalReason";
+import { approvalCallPreview } from "./codeControllerState";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { McpSignInNotice } from "../transcript/McpSignInNotice";
 import { RoutineProposalPrompt } from "../automation/RoutineProposalPrompt";
@@ -3053,6 +3055,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   {...(request.levelChange === undefined
                     ? {}
                     : { levelChange: request.levelChange })}
+                  reason={approvalReason(permissionModeOf(thread))}
+                  {...gatedCall(
+                    approvalCallPreview(props.controller.turnActivity, request.toolCallId),
+                  )}
                 />
               ) : (
                 <ProviderQuestionCard
@@ -3842,6 +3848,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
  * first, as every destructive confirmation here does, and either answer hands
  * focus back to the menu that opened it rather than to the page body.
  */
+/** The gated call's line for an approval card, when the call drew a row to read it from. */
+function gatedCall(command: string | undefined): { readonly command?: string } {
+  return command === undefined ? {} : { command };
+}
+
 function RestoreFilesConfirm(props: {
   readonly onKeep: () => void;
   readonly onRestore: () => void;

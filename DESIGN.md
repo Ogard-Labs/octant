@@ -1521,10 +1521,19 @@ is costly to render mounts only while open.
 ### OctantApprovalCard
 
 - **Purpose.** An inline provider, extension or Browser permission request.
-- **Anatomy.** `label`, `summary`, `detail`, `context`, `actions`, `error`.
-- **Tokens.** The card: 1px hairline, `--oct-radius-md`, `--octant-card`, 8 by
-  12px padding, 8 and 12px gaps, 14px at 1.45; a 14px pending mark in muted ink;
-  detail 13px muted; actions 4px apart at the trailing edge.
+- **Anatomy.** A plain question read down one column beside a 14px pending
+  mark: `summary` (the ask), `detail` (one line saying why the thread asks;
+  a provider approval derives it from the thread's mode, "This thread asks
+  before it runs commands or changes files."), `context` (for a provider
+  approval, the call it gates in a well, when the call drew a tool row to read
+  it from), then `actions` and `error`. `label` names the group.
+- **Tokens.** The card: 1px hairline, `--oct-radius-md`, `--octant-card`, 12px
+  padding, 8px gaps, 14px at 1.45; the mark in muted ink, centred on the
+  question's first line; the question at medium weight, the reason 13px
+  muted; the well `--octant-well`, `--oct-radius-sm`, 8 by 12px, detail-size
+  mono, wrapped rather than cut; actions 4px apart from the leading edge, under
+  everything they answer. The buttons and their words do not change with the
+  layout (Allow once, Remember for this Project, Deny).
 - **States.** Glass: ink 4%. Increased contrast: strong border.
 - **Accessibility.** `role="group"` named by `label`; a failure is `alert`. The
   host decides whether an action may proceed.

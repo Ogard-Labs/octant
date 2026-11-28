@@ -545,6 +545,31 @@ describe("the public-block visual language", () => {
     expect(system).toMatch(/\.composer\.composer--carded \{[^}]*outline:\s*0;/);
   });
 
+  it("lays an approval card out as a question: the ask, its reason, the call in a well, then the answers from the leading edge", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const block = (selector: string) =>
+      system.match(
+        new RegExp(`^${selector.replace(/[.[\]()>:*-]/g, "\\$&")} \\{\\n(?:.*\\n)*?\\}`, "m"),
+      )?.[0] ?? "";
+    const card = block(".approval-card");
+    expect(card).toMatch(/display:\s*grid/);
+    expect(card).toMatch(/grid-template-columns:\s*auto minmax\(0, 1fr\)/);
+    // Everything after the icon reads down one column, beside the icon.
+    expect(block(".approval-card > :not(svg)")).toMatch(/grid-column:\s*2/);
+    expect(block(".approval-card .approval-row__text")).toMatch(
+      /font-weight:\s*var\(--oct-weight-medium\)/,
+    );
+    const actions = block(".approval-card .approval-row__actions");
+    expect(actions).toMatch(/justify-content:\s*flex-start/);
+    expect(actions).toMatch(/margin-inline-start:\s*0/);
+    // The call sits in the system's well: its fill, the small radius, mono.
+    const well = block(".approval-row__well");
+    expect(well).toContain("background: var(--octant-well)");
+    expect(well).toContain("border-radius: var(--oct-radius-sm)");
+    expect(well).toContain("font-family: var(--oct-font-mono)");
+    expect(well).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const input = system.match(/\.composer-input\s*\{[^}]+\}/)?.[0] ?? "";
