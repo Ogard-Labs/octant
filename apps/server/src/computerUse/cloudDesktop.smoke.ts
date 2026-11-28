@@ -336,31 +336,31 @@ const control = async (command: unknown) =>
 if (!macOsRefusedTransfer) {
   const launched = await control({ operation: "launch", appId: "octant-smoke-app" });
   step("agent's launch", launched, controlAnswered(launched));
-}
-const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
-const observation =
-  observed.status === "answered" && observed.result.kind === "observation"
-    ? observed.result
-    : undefined;
-step(
-  "agent's observe",
-  observation === undefined ? observed : { image: observation.image?.data.length },
-  observation?.image !== undefined,
-);
-if (observation !== undefined) {
-  const clicked = await control({
-    operation: "click",
-    observationId: observation.observationId,
-    x: 50,
-    y: 50,
-  });
-  step("agent's click", clicked, controlAnswered(clicked));
-  const typed = await control({
-    operation: "type",
-    observationId: observation.observationId,
-    text: "typed",
-  });
-  step("agent's type", typed, controlAnswered(typed));
+  const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
+  const observation =
+    observed.status === "answered" && observed.result.kind === "observation"
+      ? observed.result
+      : undefined;
+  step(
+    "agent's observe",
+    observation === undefined ? observed : { image: observation.image?.data.length },
+    observation?.image !== undefined,
+  );
+  if (observation !== undefined) {
+    const clicked = await control({
+      operation: "click",
+      observationId: observation.observationId,
+      x: 50,
+      y: 50,
+    });
+    step("agent's click", clicked, controlAnswered(clicked));
+    const typed = await control({
+      operation: "type",
+      observationId: observation.observationId,
+      text: "typed",
+    });
+    step("agent's type", typed, controlAnswered(typed));
+  }
 }
 
 const extended = await service.extend({ ...caller, leaseId, byMinutes: 10 });

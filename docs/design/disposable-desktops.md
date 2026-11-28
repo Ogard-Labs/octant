@@ -1862,18 +1862,21 @@ where Cua documents no `network` `none`.
 - The driver is loaded for teardown and listed for leasing from the first
   start on both Linux and macOS hosts, behind the same `~/.cua/cua.sock`
   readiness check, so a recipe can name it before any lease exists; a Project
-  uses it only after a person saves a recipe that does. The lease service still
-  asks the daemon nothing until a Cua lease is journaled
+  uses it only after a person saves a recipe that does. Startup and passive
+  provider listing ask the daemon nothing; the host contacts Cua only when a
+  person starts a Cua lease, queries off-machine placements, or reconciles an
+  already-journaled Cua lease
   ([Built: offering E2B and Cua](#built-offering-e2b-and-cua)).
 - When no Cua daemon is detected (`daemon-not-connected`), Settings shows a
   plain "Get Cua Spaces" link (Settings › Computer use › Disposable desktops
   and the Project desktop recipe editor); Octant never bundles, installs,
   starts, updates, or signs it in (maintainer decision, 2026-11-28).
 - On macOS a Space gives a Mac with or without a screen a local disposable
-  desktop provider. Screen and input ship first while
-  [artifact transfer](#built-in-slice-3) stays refused (`path-unverifiable`)
-  there until a handle-path check exists for macOS (maintainer decision,
-  2026-11-28).
+  desktop provider. The person's Desktop tab screen and input ship first while
+  [artifact transfer](#built-in-slice-3) — and therefore agent app launch and
+  screenshot control that require a transferred app — stays refused
+  (`path-unverifiable`) there until a handle-path check exists for macOS
+  (maintainer decision, 2026-11-28).
 
 ### Threat model additions
 
@@ -2114,16 +2117,17 @@ Rules this sub-slice resolved:
   shell that starts the app in its own session and exits, so the
   `StartProcess` stream ends at once; a stream the daemon never ends times
   out.
-- **Octant asks the person's daemon nothing until it has a Cua lease.** The
-  driver is loaded on Linux hosts, so teardown reaches every Cua lease a host
-  ever journaled, and the lease service makes no restart listing for a
+- **Startup and passive provider listing ask the person's daemon nothing.** The
+  driver is loaded on Linux and macOS hosts, so teardown reaches every Cua lease
+  a host ever journaled, and the lease service makes no restart listing for a
   daemon-run provider until the journal holds a lease of it, so a host that
-  never leased from Cua makes no call to the socket. A listing makes the
-  daemon wait for Cua's relay, and a host that never chose Cua has nothing
-  there to find. The driver is listed from the first start rather than after
-  its first lease, because a recipe can name only a provider the host lists
-  and no first lease could otherwise happen. macOS loads it once Cua is
-  offered there.
+  never leased from Cua makes no call to the socket at startup or during
+  provider listing (Cua is contacted only when a person starts a Cua lease or
+  queries off-machine placements). A listing makes the daemon wait for Cua's
+  relay, and a host that never chose Cua has nothing there to find. The driver
+  is listed from the first start rather than after its first lease, because a
+  recipe can name only a provider the host lists and no first lease could
+  otherwise happen.
 - **The daemon a lease used is recorded and kept.** The `requested` event
   records the declared socket path and the user id whose home holds it. A
   provider that declares a daemon is never leased on a host that has no user

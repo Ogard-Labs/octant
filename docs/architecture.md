@@ -14868,9 +14868,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   billed lease is estimated from the recipe's hourly cost before it starts
   and refused if it would pass the cap, and no agent can change the cap
   ([Disposable desktops: C5](design/disposable-desktops.md#expiry-and-teardown-when-the-daemons-host-may-die)).
-  A host lists E2B, and Cua on Linux, from its first start; a recipe can
-  name either, and a provider whose setup is missing (no credential store, or
-  no Cua daemon running) is listed as needing setup and refuses every start
+  A host lists E2B, and Cua on Linux and macOS, from its first start; a recipe
+  can name either, and a provider whose setup is missing (no credential store,
+  or no Cua daemon running) is listed as needing setup and refuses every start
   ([Disposable desktops: offering E2B and Cua](design/disposable-desktops.md#built-offering-e2b-and-cua)).
 
 **Canvas export.** A destination plugin contributes an export target through
