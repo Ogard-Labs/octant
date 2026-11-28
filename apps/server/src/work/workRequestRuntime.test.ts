@@ -317,6 +317,8 @@ describe("WorkRequestRuntime", () => {
           options: [
             { label: "file:///Users/alice/secret" },
             ...Array.from({ length: 10 }, (_, i) => ({ label: `opt/${i}` })),
+            // A real label that reads like a numbered repeat stays distinct.
+            { label: "[redacted path] (2)" },
           ],
         }),
       ),
@@ -336,6 +338,7 @@ describe("WorkRequestRuntime", () => {
             "[redacted reference]",
             "[redacted path]",
             ...Array.from({ length: 9 }, (_, i) => `[redacted path] (${String(i + 2)})`),
+            "[redacted path] (2) (2)",
           ],
         },
       }),

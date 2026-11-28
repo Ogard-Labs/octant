@@ -624,12 +624,15 @@ function requestOptions(options: ReadonlyArray<{ readonly label: string }>): {
   readonly values: ReadonlyArray<string>;
 } {
   const values = options.slice(0, MAX_WORK_REQUEST_OPTIONS).map((option) => option.label);
-  const seen = new Map<string, number>();
+  // Every shown label is distinct, even where a provider's own label reads
+  // like a numbered repeat ("A", "A", "A (2)").
+  const used = new Set<string>();
   const labels = values.map((option) => {
-    const label = sanitizeRequestText(option, "Option unavailable").slice(0, 1_990).trim();
-    const count = (seen.get(label) ?? 0) + 1;
-    seen.set(label, count);
-    return count === 1 ? label : `${label} (${String(count)})`;
+    const label = sanitizeRequestText(option, "Option unavailable").slice(0, 1_980).trim();
+    let shown = label;
+    for (let count = 2; used.has(shown); count += 1) shown = `${label} (${String(count)})`;
+    used.add(shown);
+    return shown;
   });
   return { labels, values };
 }

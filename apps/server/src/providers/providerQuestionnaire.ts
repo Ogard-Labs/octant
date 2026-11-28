@@ -139,10 +139,24 @@ export function answerProviderQuestionnaire(
     only === undefined ||
     only.allowCustom === false ||
     written.length === 0 ||
-    written.startsWith("{")
+    isQuestionnaireResponseShaped(written)
   )
     return { status: "invalid" };
   return { status: "valid", answers: [[written]] };
+}
+
+/**
+ * A response the card sent that did not validate is refused, not passed on
+ * as the person's written words; any other text, braces included, is an
+ * answer.
+ */
+function isQuestionnaireResponseShaped(text: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && "answers" in parsed;
+  } catch {
+    return false;
+  }
 }
 
 /** Trimmed and bounded; a header or label is also kept to one line, a prompt keeps its lines. */
@@ -150,11 +164,14 @@ function bounded(value: string | undefined, maximum: number, oneLine = false): s
   if (value === undefined) return undefined;
   const trimmed = (oneLine ? value.replace(/\s+/g, " ") : value).trim();
   if (trimmed.length === 0) return undefined;
-  const characters = Array.from(trimmed);
-  return characters.length <= maximum
-    ? trimmed
-    : `${characters
-        .slice(0, maximum - 1)
-        .join("")
-        .trimEnd()}…`;
+  // The contract counts UTF-16 units, so the cut does too, and never splits
+  // a character: a prompt with an emoji would otherwise end one unit over and
+  // refuse the whole set.
+  if (trimmed.length <= maximum) return trimmed;
+  let kept = "";
+  for (const character of trimmed) {
+    if (kept.length + character.length > maximum - 1) break;
+    kept += character;
+  }
+  return `${kept.trimEnd()}…`;
 }

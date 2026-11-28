@@ -13,7 +13,7 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 5006,
+      "firstPromptBytes": 5066,
       "laterTurnBytes": 0
     },
     "work-child": {
@@ -39,7 +39,7 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 5096,
+      "firstPromptBytes": 5156,
       "laterTurnBytes": 0
     },
     "work-child": {
@@ -65,7 +65,7 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 5135,
+      "firstPromptBytes": 5195,
       "laterTurnBytes": 0
     },
     "work-child": {
@@ -91,7 +91,7 @@
       "laterTurnBytes": 8715
     },
     "chat-child": {
-      "firstPromptBytes": 5135,
+      "firstPromptBytes": 5195,
       "laterTurnBytes": 0
     },
     "work-child": {
@@ -117,7 +117,7 @@
       "laterTurnBytes": 0
     },
     "chat-child": {
-      "firstPromptBytes": 5135,
+      "firstPromptBytes": 5195,
       "laterTurnBytes": 0
     },
     "work-child": {
@@ -131,28 +131,28 @@
   },
   "harness": {
     "chat": {
-      "firstPromptBytes": 43231,
-      "laterTurnBytes": 43231
+      "firstPromptBytes": 43291,
+      "laterTurnBytes": 43291
     },
     "work": {
-      "firstPromptBytes": 63145,
-      "laterTurnBytes": 63145
+      "firstPromptBytes": 63205,
+      "laterTurnBytes": 63205
     },
     "code": {
-      "firstPromptBytes": 80893,
-      "laterTurnBytes": 80893
+      "firstPromptBytes": 80953,
+      "laterTurnBytes": 80953
     },
     "chat-child": {
-      "firstPromptBytes": 5156,
-      "laterTurnBytes": 5217
+      "firstPromptBytes": 5216,
+      "laterTurnBytes": 5277
     },
     "work-child": {
-      "firstPromptBytes": 25405,
-      "laterTurnBytes": 25471
+      "firstPromptBytes": 25465,
+      "laterTurnBytes": 25531
     },
     "code-child": {
-      "firstPromptBytes": 36861,
-      "laterTurnBytes": 36875
+      "firstPromptBytes": 36921,
+      "laterTurnBytes": 36935
     }
   }
 }
