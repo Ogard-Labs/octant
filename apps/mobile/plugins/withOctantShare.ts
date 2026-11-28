@@ -2,10 +2,12 @@
 // Octant from other apps on iOS and Android.
 //
 // On iOS this adds a dedicated App Group (`group.<bundleId>.share`) shared
-// between the main app and the `OctantShare` share extension target, and
-// registers the extension in EAS `appExtensions`. The extension receives ONLY
-// the App Group entitlement — no Keychain group, no device keys, no sessions,
-// no host list, and no network code.
+// between the main app and the `OctantShareExtension` share extension target,
+// and registers the extension in EAS `appExtensions`. The target name stays
+// distinct from the `OctantShare` CocoaPods module so Xcode does not shadow
+// `OctantShareModule` when compiling `ExpoModulesProvider.swift`. The extension
+// receives ONLY the App Group entitlement — no Keychain group, no device keys,
+// no sessions, no host list, and no network code.
 //
 // On Android this registers `sh.octant.share.ShareReceiverActivity` with
 // `SEND` and `SEND_MULTIPLE` intent filters and no extra permissions.
@@ -20,7 +22,7 @@ import {
   type ConfigPlugin,
 } from "expo/config-plugins";
 
-export const SHARE_EXTENSION_TARGET = "OctantShare";
+export const SHARE_EXTENSION_TARGET = "OctantShareExtension";
 export const SHARE_APP_GROUP_INFO_KEY = "OctantShareAppGroup";
 export const SHARE_RECEIVER_ACTIVITY = "sh.octant.share.ShareReceiverActivity";
 const EXTENSION_BUNDLE_SUFFIX = "share";

@@ -30,6 +30,10 @@ describe("mobile share extension and Android share target configuration", () => 
     expect(appConfig.plugins).toContain("./plugins/withOctantShare");
   });
 
+  it("keeps the iOS share extension target name distinct from the OctantShare pod module", () => {
+    expect(SHARE_EXTENSION_TARGET).not.toBe("OctantShare");
+  });
+
   it("adds a dedicated share App Group to the iOS app and EAS appExtensions without any Keychain group", async () => {
     const resolved = await resolvedShareConfig();
     expect(resolved.ios?.entitlements).toMatchObject({
