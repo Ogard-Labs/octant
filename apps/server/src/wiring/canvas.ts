@@ -1393,6 +1393,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasPublicShareService,
     canvasRoutes,
     canvasService,
+    canvasVersionImages,
     forgetCanvasShareImages,
     replicaArtifactSync,
     resolveCanvasWorkspace,

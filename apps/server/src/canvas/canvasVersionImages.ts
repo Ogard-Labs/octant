@@ -107,6 +107,16 @@ export class CanvasVersionImageStore {
   }
 
   /**
+   * Drops in-memory cached digest records for purged Canvases so erased
+   * histories do not linger in memory until server restart.
+   */
+  evict(canvasIds: ReadonlyArray<string>): void {
+    for (const canvasId of canvasIds) {
+      this.#cache.delete(canvasId);
+    }
+  }
+
+  /**
    * The recorded Project image digests for one version, or `undefined` when
    * none was recorded. Waits for any in-flight recording of this version so a
    * read right after commit sees its record rather than racing with it.

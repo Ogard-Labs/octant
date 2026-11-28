@@ -332,9 +332,10 @@ export async function prepareCanvasDesignAssetFile(input: {
     return { status: "unavailable", reason: "missing" };
   }
   const candidate = joinWorkPath(canonicalRoot, relative);
-  // Track the latest change time across every path component (including
-  // symlinks) and the resolved file so retargeting a symlink to an older file
-  // after a Canvas version commits still reads as changed after commit.
+  // Track the latest change time across symlink components and the resolved
+  // file so retargeting a symlink to an older file after a Canvas version
+  // commits still reads as changed after commit, without treating an unrelated
+  // sibling file added to an ordinary parent directory as a change to this image.
   let latestChangedAt: bigint | undefined;
   let currentSegmentPath = canonicalRoot;
   for (const segment of relative.split("/")) {
@@ -342,6 +343,7 @@ export async function prepareCanvasDesignAssetFile(input: {
     try {
       const segmentStat = await input.filesystem.lstat(currentSegmentPath);
       if (
+        segmentStat.isSymbolicLink &&
         segmentStat.changedAt !== undefined &&
         (latestChangedAt === undefined || segmentStat.changedAt > latestChangedAt)
       ) {

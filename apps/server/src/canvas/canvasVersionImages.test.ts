@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -596,10 +596,13 @@ describe("Canvas version Project image digests", () => {
     if (root === undefined) throw new Error("missing temp root");
     const targetPath = join(root, "older-draft.png");
     await writeFile(targetPath, PNG_B);
-    const past = new Date(Date.now() - 60_000);
-    await utimes(targetPath, past, past);
-    // Commit timestamp predates the symlink creation below.
-    const commitTime = new Date(Date.now() - 2_000).toISOString();
+    const targetStat = await lstat(targetPath);
+    // Commit timestamp is strictly after the target file's real ctime, then
+    // the symlink is created strictly after the commit timestamp.
+    const commitMs = Math.ceil(targetStat.ctimeMs) + 50;
+    const commitTime = new Date(commitMs).toISOString();
+    const waitMs = Math.max(20, commitMs + 50 - Date.now());
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
     await symlink(targetPath, join(root, "hero-link.png"));
 
     const store = new CanvasVersionImageStore({
@@ -625,5 +628,78 @@ describe("Canvas version Project image digests", () => {
       assetId: "shot",
       status: "unavailable",
     });
+  });
+
+  it("still records an unchanged Project image when an unrelated sibling file is added to its directory after commit", async () => {
+    if (root === undefined) throw new Error("missing temp root");
+    const imagesDir = join(root, "images");
+    await mkdir(imagesDir, { recursive: true });
+    const heroPath = join(imagesDir, "hero.png");
+    await writeFile(heroPath, PNG_A);
+    const heroStat = await lstat(heroPath);
+    const commitMs = Math.ceil(heroStat.ctimeMs) + 50;
+    const commitTime = new Date(commitMs).toISOString();
+    const waitMs = Math.max(20, commitMs + 50 - Date.now());
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    // Adding an unrelated sibling updates images/'s directory ctime after commit.
+    await writeFile(join(imagesDir, "notes.txt"), "sibling");
+    const dirStat = await lstat(imagesDir);
+    expect(dirStat.ctimeMs).toBeGreaterThan(commitMs);
+
+    const store = new CanvasVersionImageStore({
+      journal,
+      ports: livePorts(),
+      uuid: randomUUID,
+      actor,
+    });
+    const version = versionWith({
+      canvasId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      createdAt: commitTime,
+      blocks: [designWithProjectFile("images/hero.png")],
+    });
+
+    await store.record(version);
+    const record = await store.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      "screen",
+    );
+    expect(record?.get("shot")).toEqual({
+      blockId: "screen",
+      assetId: "shot",
+      status: "recorded",
+      sha256: SHA_A,
+    });
+  });
+
+  it("evicts cached digest records for purged Canvases", async () => {
+    if (root === undefined || connection === undefined) throw new Error("missing test fixture");
+    await writeFile(join(root, "evict-hero.png"), PNG_A);
+    const canvasId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const store = new CanvasVersionImageStore({
+      journal,
+      ports: livePorts(),
+      uuid: randomUUID,
+      actor,
+    });
+    const version = versionWith({
+      canvasId,
+      createdAt: "2099-01-01T00:00:00.000Z",
+      blocks: [designWithProjectFile("evict-hero.png")],
+    });
+
+    await store.record(version);
+    expect(await store.forBlock(canvasId, String(version.versionId), "screen")).toBeDefined();
+
+    // Simulate purge erasing the aggregate rows from SQLite and evicting the cache.
+    connection
+      .prepare("DELETE FROM aggregate_heads WHERE aggregate_type = ? AND aggregate_id = ?")
+      .run(CANVAS_VERSION_IMAGES_AGGREGATE_TYPE, canvasId);
+    connection
+      .prepare("DELETE FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?")
+      .run(CANVAS_VERSION_IMAGES_AGGREGATE_TYPE, canvasId);
+    store.evict([canvasId]);
+
+    expect(await store.forBlock(canvasId, String(version.versionId), "screen")).toBeUndefined();
   });
 });
