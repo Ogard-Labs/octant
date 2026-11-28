@@ -20,6 +20,7 @@ import {
   type CanvasPreviewWarning,
 } from "./canvasPreviewWarnings";
 import { renderCanvasDesignPage } from "./canvasDesignPage";
+import type { CanvasDesignAssetVersionContext } from "./canvasDesignAssets";
 import type { CanvasPreviewRenderer } from "./canvasPreviewRenderer";
 
 /**
@@ -48,6 +49,7 @@ export interface CanvasPreviewServiceOptions {
   readonly resolveDesignAssets?: (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
+    version?: CanvasDesignAssetVersionContext,
   ) => Promise<ReadonlyArray<CanvasDesignAssetResolution>>;
   /** Milliseconds since the epoch; injectable so a test owns the clock. */
   readonly now?: () => number;
@@ -194,7 +196,11 @@ export function createCanvasPreviewService(
             if (declaring === undefined || (declaring.assets ?? []).length === 0) continue;
             designAssets.set(
               String(block.blockId),
-              await resolveDesignAssets(declaring, definition.provenance),
+              await resolveDesignAssets(declaring, definition.provenance, {
+                canvasId: version.version.canvasId,
+                versionId: version.version.versionId,
+                marks: "labelled",
+              }),
             );
           }
         }

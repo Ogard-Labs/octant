@@ -3246,7 +3246,7 @@ The agent's `preview` returns typed layout warnings and a picture drawn in a no-
 
 - A model that accepts no images, or a host with no browser, still gets the warnings and a sentence saying why no picture was taken.
 - A Canvas read or previewed by another thread carries its outside-content mark to the reader.
-- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23).
+- The tool step keeps a reference to the version it drew, never the picture, and the opened row draws it under the window's own Canvas authority (maintainer request, 2026-11-23), always comparing Project image files against the version's recorded digests even on the newest version (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Canvas: Preview and placement in the thread](canvas.md#preview-and-placement-in-the-thread).
 
@@ -3258,6 +3258,7 @@ A design is the author's own markup in sandboxed frames. A design that runs scri
 - A prototype runs only on Run. Allow network is off by default and only the person sets it, at a window or on a device the host's own person paired; agents, routines, hub-introduced and restricted devices are refused (maintainer decision, 2026-11-12).
 - With it on, a page on the host's machine reaches public addresses only through the host's filtering proxy, under a short-lived renewed token (maintainer decision, 2026-11-13). In a browser on another machine the prototype is not network-contained, and says so.
 - Sharing design markup needs the person's acknowledgement that it leaves as written.
+- Locally authored versions declaring Project image files record their SHA-256 digests (never image bytes) in a separate per-Canvas aggregate (`canvas-version-images`, purged with the Canvas); the newest version keeps drawing live files while superseded versions (and preview miniatures even on the newest version) withhold changed files as `changed`, and unrecorded versions (pre-existing, carried-in, or replica-adopted) draw live files labelled `"Project images are shown as they are now"` (maintainer decision, 2026-11-28).
 
 Not built yet:
 
