@@ -55,6 +55,8 @@ export type CodeProviderRequest =
       };
       /** The ask may also be answered with "Remember for this Project". */
       readonly canRememberForProject?: true;
+      /** The call this ask gates, when the runtime named one; its row holds the call's line. */
+      readonly toolCallId?: string;
     }
   | {
       readonly kind: "input";
@@ -158,6 +160,7 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
             },
           }),
       ...(event.canRememberForProject === true ? { canRememberForProject: true } : {}),
+      ...(event.toolCallId === undefined ? {} : { toolCallId: String(event.toolCallId) }),
     };
   }
   // App questionnaires follow the session read so answers from another window
@@ -768,7 +771,31 @@ async function readConversationText(
   return readOperationText(client, threadId, operationId, contentId, signal);
 }
 
+/**
+ * The line of the call an approval gates, read from what that call's start
+ * named it to do (a command's line, a file's checkout-relative path), so the
+ * card shows what would run without a read of its own. Never the row's
+ * summary: that is progress or result text, and a Codex call's reads "Tool is
+ * running.". Nothing when the approval names no call, no turn on screen holds
+ * it, or its start named nothing: the card then asks without a well rather
+ * than guess.
+ */
+function approvalCallPreview(
+  activity: ReadonlyMap<string, TurnActivity>,
+  toolCallId: string | undefined,
+): string | undefined {
+  if (toolCallId === undefined) return undefined;
+  for (const turn of activity.values()) {
+    const row = turn.rows.find(
+      (candidate) => candidate.kind === "tool" && candidate.id === toolCallId,
+    );
+    if (row?.kind === "tool") return row.argument;
+  }
+  return undefined;
+}
+
 export {
+  approvalCallPreview,
   providerRequestFromEvent,
   readOperationText,
   readConversationEvidence,

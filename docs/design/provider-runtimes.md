@@ -608,7 +608,12 @@ normalized JSON input, no other tool call in between; pure policy in
     call emits `tool-request` with `toolName` and full `inputJson`, so all
     calls are loop-checked and receive the 3rd-call early warning.
   - **Claude Code:** provider-native tools emit `tool-start` paired with
-    `tool-call-content` (`part: "input"`), so they are loop-checked except
+    `tool-call-content` (`part: "input"`). A `Bash` or `Monitor` start also
+    carries the command's redacted first line as its display `argument`, and
+    an `Edit`, `Write`, or `NotebookEdit` start the checkout-relative path; a
+    start streamed before its input names it instead on one `tool-progress`
+    once the whole input arrives
+    ([Octant Shield](../architecture.md#octant-shield)). They are loop-checked except
     `Edit`, `Write`, and `NotebookEdit` (whose `tool-call-content` intentionally
     omits file contents and keeps only the path, marked `partial: true`, so
     each call resets the consecutive streak instead of falsely matching on path

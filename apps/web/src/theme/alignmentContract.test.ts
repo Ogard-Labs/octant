@@ -297,15 +297,19 @@ describe("the shell's edges and gaps", () => {
     expect(body).toContain("line-height: var(--oct-line-detail)");
   });
 
-  it("draws the title band's mark, the thread's disclosures and the thinking rule in the one hairline", () => {
+  it("draws the title band's mark and the rail's divider in the one hairline", () => {
     expect(rule(root, ".environment-mark")).toMatch(/border:\s*1px solid var\(--oct-hairline\)/);
-    expect(rule(components, ".turn-activity__disclosure + .turn-activity__disclosure")).toContain(
-      "1px solid var(--oct-hairline)",
-    );
-    expect(
-      rule(components, ".turn-activity__toolchain > .turn-activity__disclosure:first-child"),
-    ).toContain("1px solid var(--oct-hairline)");
     expect(rule(shell, ".sidebar-rail__divider")).toMatch(/background:\s*var\(--oct-hairline\)/);
+  });
+
+  it("parts a turn's steps by their row height alone, with no line between them", () => {
+    // Each step is a 28px line with its kind icon in one column; a hairline
+    // between every pair made a settled turn read as a table.
+    expect(components).not.toContain(".turn-activity__disclosure + .turn-activity__disclosure");
+    expect(components).not.toContain(
+      ".turn-activity__toolchain > .turn-activity__disclosure:first-child",
+    );
+    expect(components).not.toMatch(/\.turn-activity[^{]*\{[^}]*border-(?:top|bottom):\s*1px/);
   });
 
   it("writes a rail count as a plain numeral beside its icon, with no pill, edge or fill", () => {

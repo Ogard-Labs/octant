@@ -28,6 +28,11 @@ export type TurnActivityRow =
        * from output; this is a progress or result message, not captured tool I/O.
        */
       readonly summary?: string;
+      /**
+       * What the call was asked to do, as its start named it (a command's
+       * line, a checkout-relative path), apart from the progress text above.
+       */
+      readonly argument?: string;
       /** A page the call published outside this host, such as a Claude artifact. */
       readonly published?: ThreadPublishedPage;
       /** The call's result brought outside content into the thread. */

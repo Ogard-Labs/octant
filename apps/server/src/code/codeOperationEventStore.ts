@@ -2251,12 +2251,17 @@ function foldTurnFrame(
     // replacing the step dropped the miniature from a reopened thread.
     const canvasPreview =
       frame.event.canvasPreview ?? (previous?.kind === "tool" ? previous.canvasPreview : undefined);
+    // Only the start names what the call was asked to do; its progress and
+    // completion keep it, so a reopened thread's approval can still show it.
+    const argument =
+      frame.event.argument ?? (previous?.kind === "tool" ? previous.argument : undefined);
     const step = {
       kind: "tool" as const,
       toolCallId: frame.event.toolCallId,
       toolName: frame.event.toolName,
       state: frame.event.state,
       ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
+      ...(argument === undefined ? {} : { argument }),
       ...(frame.event.published === undefined ? {} : { published: frame.event.published }),
       ...(frame.event.outsideContent === undefined
         ? {}

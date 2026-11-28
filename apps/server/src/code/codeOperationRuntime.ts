@@ -8577,6 +8577,13 @@ function normalizedOperationEvent(
     };
   if (event.category === "tool") {
     const summary = event.text === undefined ? undefined : boundProviderSummary(event.text);
+    // What the runtime named the call to do, kept apart from its progress
+    // text so an approval for the call can show it. A start carries it, or
+    // for a streamed start the progress that followed once its input arrived.
+    const argument =
+      (event.status === "started" || event.status === "in-progress") && event.argument !== undefined
+        ? boundProviderSummary(event.argument)
+        : undefined;
     return {
       kind: "tool-activity",
       toolCallId: event.toolCallId ?? event.requestId ?? "provider-tool",
@@ -8592,6 +8599,7 @@ function normalizedOperationEvent(
               ? "started"
               : "running",
       ...(summary === undefined ? {} : { summary }),
+      ...(argument === undefined ? {} : { argument }),
       ...(event.status === "completed" && event.outsideContent !== undefined
         ? { outsideContent: event.outsideContent }
         : {}),

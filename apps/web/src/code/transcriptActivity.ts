@@ -93,13 +93,15 @@ function previousTool(
 /**
  * Folds one journaled tool-activity event into a row. A later event that omits
  * summary keeps what the row already held, so a completed call still names the
- * last progress the host recorded.
+ * last progress the host recorded; only the start names the call's argument,
+ * which every later state keeps.
  */
 function foldToolEvent(
   previous: ToolActivityRow | undefined,
   event: Extract<CodeOperationEvent, { kind: "tool-activity" }>,
 ): ToolActivityRow {
   const summary = event.summary ?? previous?.summary;
+  const argument = event.argument ?? previous?.argument;
   const published = event.published ?? previous?.published;
   const outsideContent = event.outsideContent ?? previous?.outsideContent;
   const routine = event.routine ?? previous?.routine;
@@ -115,6 +117,7 @@ function foldToolEvent(
     toolName: event.toolName,
     state: event.state,
     ...(summary === undefined ? {} : { summary }),
+    ...(argument === undefined ? {} : { argument }),
     ...(published === undefined ? {} : { published }),
     ...(outsideContent === undefined ? {} : { outsideContent }),
     ...(routine === undefined ? {} : { routine }),

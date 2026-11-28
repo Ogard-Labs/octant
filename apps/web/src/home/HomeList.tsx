@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCard } from "../ui/base/OctantCard";
 import type { HomeListContributor, HomeListRead } from "./homeCards";
 import {
   buildHomeList,
@@ -368,31 +369,33 @@ function HomeListSectionView(props: { readonly view: SectionView; readonly menu:
         <span className="home-list__count">{count}</span>
         <span className="home-list__menu">{props.menu}</span>
       </header>
-      {view.kind === "loading" ? (
-        <div className="home-list__rows" role="status">
-          <span className="sr-only">{`Loading ${title}`}</span>
-          {Array.from({ length: view.rows }, (_unused, row) => (
-            <HomeListSkeletonRow key={row} />
-          ))}
-        </div>
-      ) : view.kind === "empty" ? (
-        <p className="home-list__quiet">Nothing right now.</p>
-      ) : (
-        <ul className="home-list__rows">
-          {view.kind === "live"
-            ? view.section.rows.map((row) => (
-                <li data-row-id={row.id} key={row.id}>
-                  {row.custom ?? <HomeListRowView row={row} />}
-                </li>
-              ))
-            : view.rows.map((row) => (
-                <li data-row-id={row.id} key={row.id}>
-                  <HomeListRowView height={row.height} row={storedRow(row)} />
-                </li>
-              ))}
-        </ul>
-      )}
-      <SeeAllLine view={view} />
+      <OctantCard className="home-list__card">
+        {view.kind === "loading" ? (
+          <div className="home-list__rows" role="status">
+            <span className="sr-only">{`Loading ${title}`}</span>
+            {Array.from({ length: view.rows }, (_unused, row) => (
+              <HomeListSkeletonRow key={row} />
+            ))}
+          </div>
+        ) : view.kind === "empty" ? (
+          <p className="home-list__quiet">Nothing right now.</p>
+        ) : (
+          <ul className="home-list__rows">
+            {view.kind === "live"
+              ? view.section.rows.map((row) => (
+                  <li data-row-id={row.id} key={row.id}>
+                    {row.custom ?? <HomeListRowView row={row} />}
+                  </li>
+                ))
+              : view.rows.map((row) => (
+                  <li data-row-id={row.id} key={row.id}>
+                    <HomeListRowView height={row.height} row={storedRow(row)} />
+                  </li>
+                ))}
+          </ul>
+        )}
+        <SeeAllLine view={view} />
+      </OctantCard>
     </section>
   );
 }

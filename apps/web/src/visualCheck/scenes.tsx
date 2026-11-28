@@ -57,6 +57,10 @@ import {
   VISUAL_NOW,
 } from "./fixtures";
 import { ComposerInput } from "../composer/ComposerInput";
+import { approvalReason } from "../transcript/approvalReason";
+import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import type { TurnActivity } from "../transcript/turnActivity";
+import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { groundRenderers } from "./groundScenes";
 
 export interface VisualScene extends SceneMeta {
@@ -198,6 +202,112 @@ function HomeScene() {
         </div>
       </div>
     </section>
+  );
+}
+
+/** One finished turn's steps, settled: the read, the edit and the command it ran. */
+const THREAD_TURN_ACTIVITY: TurnActivity = {
+  reasoning: "",
+  rows: [
+    {
+      kind: "tool",
+      id: "call-read",
+      toolName: "Read",
+      state: "completed",
+      summary: "apps/web/src/composer/ThreadComposer.tsx",
+    },
+    {
+      kind: "tool",
+      id: "call-edit",
+      toolName: "Edit",
+      state: "completed",
+      summary: "apps/web/src/composer/ThreadComposer.tsx",
+    },
+    {
+      kind: "tool",
+      id: "call-test",
+      toolName: "Bash",
+      state: "running",
+      summary: "bun test apps/web/src/composer",
+    },
+  ],
+};
+
+/**
+ * A thread as it reads over a ground: a message, a reply with the turn's steps,
+ * the approval it waits on, and the composer, all in the thread's one column.
+ * The transcript is drawn from its shared classes and parts, with no host
+ * behind it, so the picture shows the plate behind the column and the ground
+ * beside it rather than a live conversation.
+ */
+function ThreadScene() {
+  return (
+    <section aria-label="Code thread" className="code-thread-workspace">
+      <div className="code-thread-workspace__conversation transcript-scroll">
+        <div className="code-thread-workspace__transcript thread-column">
+          <article aria-label="Your message" className="code-thread-workspace__message turn-user">
+            <div className="bubble">
+              <p>The composer loses focus after I send. Find the cause and fix it.</p>
+            </div>
+          </article>
+          <article className="code-thread-workspace__message turn-agent">
+            <TurnActivityRows activity={THREAD_TURN_ACTIVITY} running />
+            <p>
+              The editor was keyed by the draft revision, so every send remounted it and focus fell
+              back to the page. It is now keyed by the thread, and focus returns to the editor once
+              the send resolves.
+            </p>
+          </article>
+        </div>
+      </div>
+      <div aria-label="Pending provider requests" className="thread-pending-requests thread-column">
+        <ProviderApprovalPrompt
+          command="bun test apps/web/src/composer"
+          onAnswer={noop}
+          onRememberForProject={noop}
+          reason={approvalReason("ask-first")}
+          summary="Run the composer tests?"
+        />
+      </div>
+      <ThreadComposer
+        className="thread-composer code-thread-workspace__composer thread-column"
+        input={
+          <ComposerInput
+            aria-label="Follow-up message"
+            className="composer-input"
+            onChange={noop}
+            placeholder="Reply…"
+            value=""
+          />
+        }
+        notices={[]}
+        row={{
+          actions: { kind: "send", send: { ariaLabel: "Send", disabled: true } },
+          approval: <PermissionModePicker autoSupported onChange={noop} value="ask-first" />,
+        }}
+      />
+    </section>
+  );
+}
+
+/** The Environment section beside that thread, from the side panel's fixtures. */
+function ThreadEnvironmentScene() {
+  return (
+    <CodeThreadEnvironment
+      active
+      automationClient={threadRoutinesClient()}
+      deliveryOutcome="opened-pr"
+      environmentOpen
+      onExecute={async () => undefined}
+      onOpenRoutine={noop}
+      onOpenUsageDashboard={noop}
+      project={CODE_PROJECT}
+      projectClient={codeProjectClient()}
+      tab={CODE_TAB}
+      usageDashboardClient={threadUsageClient()}
+    >
+      {null}
+    </CodeThreadEnvironment>
   );
 }
 
@@ -561,7 +671,11 @@ const RENDERERS: ReadonlyArray<SceneRenderer> = [
   { id: "rail", render: () => <RailScene /> },
   { id: "rail-beside", render: () => <RailBesideScene /> },
   { id: "subagent-progress", render: () => <SubagentProgressScene /> },
-  ...groundRenderers(() => <HomeScene />),
+  ...groundRenderers({
+    start: () => <HomeScene />,
+    thread: () => <ThreadScene />,
+    environment: () => <ThreadEnvironmentScene />,
+  }),
 ];
 
 const FOLDED_TRAY_STORAGE = { getItem: () => "false", setItem: noop };

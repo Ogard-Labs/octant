@@ -37,8 +37,14 @@ const RESUMING_KINDS: ReadonlySet<ProviderRuntimeEvent["kind"]> = new Set([
 ]);
 
 export function observeLiveTurn(state: LiveTurnState, event: ProviderRuntimeEvent): LiveTurnState {
+  // A progress that names a call is the call's input arriving after a
+  // streamed start (Claude Code), which can land after the ask it gates; the
+  // agent has not moved on.
+  const namesCall = event.kind === "tool-progress" && event.argument !== undefined;
   const resumed =
-    state.waiting !== undefined && RESUMING_KINDS.has(event.kind) ? withoutWaiting(state) : state;
+    state.waiting !== undefined && RESUMING_KINDS.has(event.kind) && !namesCall
+      ? withoutWaiting(state)
+      : state;
   switch (event.kind) {
     case "tool-start": {
       const tool = boundedLabel(event.toolName, MAX_LIVE_STEP_TOOL_LENGTH);
@@ -93,6 +99,47 @@ const STEP_REDACTIONS: ReadonlyArray<{ pattern: RegExp; replacement: string }> =
   {
     pattern:
       /(--?(?:[a-z-]*(?:token|password|passwd|secret|api-?key|auth|credentials?))(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi,
+    replacement: "$1[redacted]",
+  },
+  // A name that is a password in a word of its own: DB_PASS, MY_PW, SMTP_PWD.
+  {
+    pattern:
+      /\b((?:[A-Za-z0-9]+_)*(?:PASS|PW|PWD|PASSPHRASE)(?:_[A-Za-z0-9]+)*)=(?:"[^"]*"|'[^']*'|\S+)/gi,
+    replacement: "$1=[redacted]",
+  },
+  // A password glued to its flag, as the MySQL clients take it (`-pSECRET`);
+  // a bare `-p` prompts and names nothing.
+  {
+    pattern: /(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^|;&]*?\s-p)[^\s'"]+/g,
+    replacement: "$1[redacted]",
+  },
+  // The value after a short password flag: sshpass, a registry login, openssl.
+  {
+    pattern:
+      /(\b(?:sshpass\s+-p|login\b[^|;&]*?\s-p|openssl\b[^|;&]*?\s-k)\s*)(?:"[^"]*"|'[^']*'|[^\s-]\S*)/g,
+    replacement: "$1[redacted]",
+  },
+  // openssl's `pass:SECRET` password source; `env:` and `file:` name no secret.
+  { pattern: /(\bpass:)(?:"[^"]*"|'[^']*'|\S+)/g, replacement: "$1[redacted]" },
+  // `user:password` given to curl and its kin (`-u`, `--user`, `--proxy-user`).
+  {
+    pattern: /((?:\s-[uU]|\s--(?:proxy-)?user)(?:\s+|=)?["']?)([^\s:'"]+):[^\s'"]+/g,
+    replacement: "$1$2:[redacted]",
+  },
+  // A registry credential set by name (`npm config set //host/:_authToken X`)
+  // and an AWS secret set through `aws configure set`.
+  {
+    pattern: /((?:^|[\s:])_(?:authToken|auth|password)(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi,
+    replacement: "$1[redacted]",
+  },
+  {
+    pattern:
+      /(\baws\s+configure\s+set\s+\S*(?:secret|token|key|password)\S*\s+)(?:"[^"]*"|'[^']*'|\S+)/gi,
+    replacement: "$1[redacted]",
+  },
+  // A password piped into `sudo -S`.
+  {
+    pattern: /(\b(?:echo|printf)\s+)(?:"[^"]*"|'[^']*'|\S+)(?=\s*\|\s*sudo\b[^|;&]*?\s-S\b)/g,
     replacement: "$1[redacted]",
   },
   {

@@ -175,7 +175,21 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 94%, so the
 ground stays a whisper behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. The veil is a plate behind the text column, not a wall (v7, maintainer
+decision 2026-11-28): it runs across the column the transcript and the composer
+are laid in and 24px past it on each side (`--octant-reading-plate-pad`), then
+eases out to nothing over 48px (`--octant-reading-plate-feather`), so the ground
+shows at its own strength in the gutters beside a conversation and is only a
+whisper behind its words. The plate is the window coat's own colour (the
+workspace colour) at 94% in either material, so it needs no step-down of the
+ground under Glass, which until v7 dimmed the ground to an eighth while a
+thread was on screen; the ground keeps a quarter of its strength under the
+sidebar under Glass. It has no blur. A tool pane (a browser, files, a diff),
+and a thread pane showing a picture or a capture in the thread's place, keep
+the full-width veil, and a split that holds a tool pane keeps the solid pane
+fill under the stage. Reduced transparency and increased contrast keep the
+reading background opaque: the plate's keep is 100% and it covers the whole
+pane there, and the pane's own fill stays under the thread.
 
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text, tables and code
@@ -188,7 +202,9 @@ sit 4px apart, and a fenced block is a
 `CodeBlock`: a 28px header strip naming the language with a ghost copy control,
 then detail-size mono on the application ground. Tool rows are 28px each, the
 name at the body size and the state at the right as detail text with a 12px
-mark (spinner, check, cross), parted by hairlines and indented together; at
+mark (spinner, check, cross), indented together and parted by their height
+alone, with no line between them (a hairline under every row made a turn's
+steps read as a table); at
 the default Reply detail (below) a settled turn folds them behind "N tool
 calls". An approval Octant Shield
 answered is a 28px line among them, not a disclosure: a 14px shield mark
@@ -197,7 +213,21 @@ allowed", "asked you", or "denied", the call in detail-size mono, the
 one-sentence reason in the muted ink, and the rule or model and the latency
 at the right as detail text. It always names Shield, never the provider, and
 does not count as a tool call. A Code turn that changed files ends with one card: "N files changed while this ran", then a 28px row per path with the folder in the meta ink, the name in the primary ink, and the added and removed line counts in the diff inks at the right. It folds after five rows, says "Showing n of N" when the record is incomplete rather than summing rows it never saw, and never says who wrote a file. When a Work or Code lead records a finished receipt through `octant_report_finished`, the turn ends with a **"Finished, with proof"** card showing the summary, the observed diff file and line counts (or `Diff unavailable`), each host-run check or goal criterion with its status (`Proven`, `Failed`, `Claimed`, `Unavailable`) and expandable output, and a `Stale` notice whenever a later file-change journal event landed after the receipt. The same card sits above the last reply on the Review page, where Send back prefills any failed or claimed items. A turn paused on the person uses a neutral composer-adjacent request row with
-an icon and explicit answer controls. Follow-up composers use one compact
+an icon and explicit answer controls. A provider approval reads as a plain
+question: the agent's ask, one quiet line saying why the thread asks, taken
+from its mode ("This thread asks before it runs commands or changes files.",
+"This thread edits files on its own and asks before it runs commands."), the
+gated call in a well when the runtime named what that call runs (its command
+line or the file's checkout-relative path, redacted and bounded to one line
+by the host and journaled on the call's row apart from its progress text:
+Codex and Claude Code name every command and file edit, Claude Code on the
+progress line after a streamed start), and the
+answers under them from the leading edge: Allow once, Remember for this
+Project and Deny, with their words unchanged. The well never shows the row's
+progress or result text (a Codex call's row reads "Tool is running." while it
+waits) and never guesses from a neighbouring row: a call whose start named
+nothing, a journal written before the host kept the argument, and a Work
+approval, which names no call, ask without a well. Follow-up composers use one compact
 hairline message surface across Chat, Work, and Code. Feedback above the toolbar
 appears only when it has content; empty feedback consumes no space. A held
 message queue with items still waiting shows a compact **Follow-up paused**

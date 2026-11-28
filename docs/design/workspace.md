@@ -1329,7 +1329,9 @@ wording, and reads are specified in [Start screen](start-screen.md).
   mounted and reads nothing.
 - **One list.** Needs you, In progress, Your pull requests, Continue, and on
   Code Open issues, in that order, each drawn only while it has rows and
-  separated by space, not boxes; rows have no card behind them. Each item shows
+  separated by space; each section's rows sit on one card under its header, so
+  they read on the card rather than on a ground (v7, maintainer decision
+  2026-11-28). Each item shows
   once (Needs you wins), at most five rows per section with a **See all** link to
   the full page, and one quiet line with a next step when everything is empty.
   The list draws once every source has answered, so nothing moves when a late

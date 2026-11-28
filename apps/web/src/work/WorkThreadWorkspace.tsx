@@ -239,6 +239,7 @@ import {
 } from "../transcript/turnActivity";
 import { useToolCallRecordsReader } from "../transcript/toolCallRecordsReader";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
+import { approvalReason } from "../transcript/approvalReason";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { McpSignInNotice } from "../transcript/McpSignInNotice";
@@ -2933,6 +2934,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             });
           }}
           summary={`${request.detail.action}: ${request.detail.description}`}
+          {...(thread === undefined ? {} : { reason: approvalReason(workModeOf(thread.access)) })}
           {...(levelChange === undefined
             ? {}
             : {

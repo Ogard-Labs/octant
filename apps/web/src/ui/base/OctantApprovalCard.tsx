@@ -22,7 +22,7 @@ export function OctantApprovalCard(props: OctantApprovalCardProps) {
   return (
     <section
       aria-label={props.label}
-      className={cn("approval-row approval-row--request", props.className)}
+      className={cn("approval-row approval-row--request approval-card", props.className)}
       role="group"
     >
       <CirclePause aria-hidden="true" size={14} />

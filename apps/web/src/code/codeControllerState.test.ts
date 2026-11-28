@@ -2,6 +2,7 @@ import type {
   ProviderContextBreakdown,
   AggregateVersion,
   CodeCommand,
+  CodeOperationEvent,
   CodeThreadId,
   ProviderInstanceId,
   ProviderModelId,
@@ -9,9 +10,12 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   commandReloadsThread,
+  approvalCallPreview,
   providerRequestFromEvent,
   totalTurnUsage,
 } from "./codeControllerState";
+import { applyActivityEvent } from "./transcriptActivity";
+import { EMPTY_TURN_ACTIVITY } from "../transcript/turnActivity";
 
 const threadId = "00000000-0000-4000-8000-000000000001" as CodeThreadId;
 const expectedVersion = 1 as AggregateVersion;
@@ -112,5 +116,68 @@ describe("providerRequestFromEvent", () => {
       approvalId: asked.approvalId,
       summary: asked.summary,
     });
+  });
+
+  it("names the call an approval gates, so its card can show what would run", () => {
+    expect(providerRequestFromEvent({ ...asked, toolCallId: "call-7" } as never)).toEqual({
+      kind: "approval",
+      approvalId: asked.approvalId,
+      summary: asked.summary,
+      toolCallId: "call-7",
+    });
+  });
+});
+
+describe("approvalCallPreview", () => {
+  // The rows as the journal builds them: the Codex adapter's start names the
+  // command, and the progress line after it says only that the tool runs.
+  const fold = (...events: ReadonlyArray<Extract<CodeOperationEvent, { kind: "tool-activity" }>>) =>
+    new Map([
+      [
+        "turn-1",
+        events.reduce(
+          (activity, event) => applyActivityEvent(activity, event),
+          EMPTY_TURN_ACTIVITY,
+        ),
+      ],
+    ]);
+  const started = (argument?: string) =>
+    ({
+      kind: "tool-activity",
+      toolCallId: "call-7",
+      toolName: "Bash",
+      state: "started",
+      ...(argument === undefined ? {} : { argument }),
+    }) satisfies Extract<CodeOperationEvent, { kind: "tool-activity" }>;
+  const running = {
+    kind: "tool-activity",
+    toolCallId: "call-7",
+    toolName: "Bash",
+    state: "running",
+    summary: "Tool is running.",
+  } satisfies Extract<CodeOperationEvent, { kind: "tool-activity" }>;
+
+  it("shows the command the gated call was asked to run, not its progress text", () => {
+    const activity = fold(started("bun test apps/web/src/composer"), running);
+    expect(approvalCallPreview(activity, "call-7")).toBe("bun test apps/web/src/composer");
+  });
+
+  it("shows the command a streamed start named on the progress after it", () => {
+    // The Claude adapter opens the row before the call's input arrives, then
+    // names the command once it does.
+    const named = { ...running, summary: "Tool is ready to run.", argument: "bun test apps/web" };
+    expect(approvalCallPreview(fold(started(), named, running), "call-7")).toBe(
+      "bun test apps/web",
+    );
+  });
+
+  it("names nothing when the call's row carries only progress text", () => {
+    expect(approvalCallPreview(fold(started(), running), "call-7")).toBeUndefined();
+  });
+
+  it("names nothing when the approval names no call, or a call no turn holds", () => {
+    const activity = fold(started("bun test apps/web/src/composer"));
+    expect(approvalCallPreview(activity, undefined)).toBeUndefined();
+    expect(approvalCallPreview(activity, "call-9")).toBeUndefined();
   });
 });

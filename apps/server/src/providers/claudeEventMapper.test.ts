@@ -553,26 +553,133 @@ describe("mapClaudeMessage", () => {
     },
   );
 
-  it("names a started shell command only when it reaches a server", () => {
+  it("names a started shell command on its start, local or remote, as one redacted line", () => {
     const start = (command: string) =>
-      mapped(context(), {
+      eventValues(
+        mapped(context(), {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: "message-bash",
+          content: [
+            { kind: "tool-use", toolUseId: "sdk-tool-1", toolName: "Bash", input: { command } },
+          ],
+          usage,
+        }),
+      ).filter((next) => next.kind === "tool-start");
+    expect(start("ssh web1 uptime")).toEqual([
+      expect.objectContaining({ kind: "tool-start", argument: "ssh web1 uptime" }),
+    ]);
+    expect(start("cat notes.txt")).toEqual([
+      expect.objectContaining({ kind: "tool-start", argument: "cat notes.txt" }),
+    ]);
+    const secret = start(
+      "GITHUB_TOKEN=ghp_fixture-secret-must-not-cross bun run deploy --password hunter2-must-not-cross\nrm -rf later-line-must-not-cross",
+    );
+    expect(secret).toEqual([
+      expect.objectContaining({
+        kind: "tool-start",
+        argument: expect.stringContaining("bun run deploy"),
+      }),
+    ]);
+    expect(JSON.stringify(secret)).not.toMatch(/must-not-cross/);
+  });
+
+  it("names a streamed local command on the progress after its start, once its whole input arrives", () => {
+    const ctx = context();
+    const streamed = eventValues(
+      mapped(ctx, {
         kind: "stream-event",
         sessionId: claudeSessionId,
         event: {
           kind: "content-start",
           index: 0,
+          // Claude's stream opens the call with no input; a part of one is
+          // never taken for the whole.
           content: {
             kind: "tool-use",
-            toolUseId: "sdk-tool-1",
+            toolUseId: "sdk-bash-1",
             toolName: "Bash",
-            input: { command },
+            input: { command: "bun te" },
           },
         },
-      });
-    expect(start("ssh web1 uptime")).toMatchObject([
-      { kind: "event", event: { kind: "tool-start", argument: "ssh web1 uptime" } },
+      }),
+    );
+    const whole = () =>
+      eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: "message-bash",
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId: "sdk-bash-1",
+              toolName: "Bash",
+              input: { command: "API_KEY=sk-fixture-must-not-cross bun test apps/web" },
+            },
+          ],
+          usage,
+        }),
+      );
+    const first = whole();
+    // A repeat of the same message names nothing again.
+    const repeated = whole();
+
+    expect(streamed).toEqual([expect.objectContaining({ kind: "tool-start" })]);
+    expect(streamed[0]).not.toHaveProperty("argument");
+    const named = first.filter((next) => next.kind === "tool-progress");
+    expect(named).toEqual([
+      expect.objectContaining({
+        toolCallId: "tool-1",
+        argument: expect.stringContaining("bun test apps/web"),
+      }),
     ]);
-    expect(JSON.stringify(start("cat notes.txt"))).not.toContain("notes.txt");
+    expect(JSON.stringify(named)).not.toContain("must-not-cross");
+    expect(repeated.filter((next) => next.kind === "tool-progress")).toEqual([]);
+  });
+
+  it("names the checkout-relative path a file call writes, and nothing for one outside the checkout", () => {
+    const ctx = context();
+    const starts = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-files",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-edit-1",
+            toolName: "Edit",
+            input: {
+              file_path: "/repo/apps/server/.env",
+              old_string: "OLD-must-not-cross",
+              new_string: "NEW-must-not-cross",
+            },
+          },
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-write-1",
+            toolName: "Write",
+            input: { file_path: "docs/notes.md", content: "body-must-not-cross" },
+          },
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-write-2",
+            toolName: "Write",
+            input: { file_path: "/Users/someone/.ssh/config", content: "outside-must-not-cross" },
+          },
+        ],
+        usage,
+      }),
+    ).filter((next) => next.kind === "tool-start");
+
+    expect(starts).toEqual([
+      expect.objectContaining({ toolName: "Edit", argument: "apps/server/.env" }),
+      expect.objectContaining({ toolName: "Write", argument: "docs/notes.md" }),
+      expect.objectContaining({ toolName: "Write" }),
+    ]);
+    expect(starts[2]).not.toHaveProperty("argument");
+    expect(JSON.stringify(starts)).not.toMatch(/must-not-cross|\.ssh|someone/);
   });
 
   it("maps tool start, bounded progress, and sanitized success/failure results", () => {
@@ -681,8 +788,8 @@ describe("mapClaudeMessage", () => {
       { kind: "tool-call-content", toolCallId: "tool-1", part: "input", text: '{"command":"ls"}' },
       { kind: "usage" },
     ]);
-    // The start itself still carries nothing of the command.
-    expect(JSON.stringify(started[0])).not.toContain("ls");
+    // The start names the command as one line, apart from the call's input.
+    expect(started[0]).toMatchObject({ kind: "tool-start", argument: "ls" });
     expect(settled).toMatchObject([
       {
         kind: "tool-call-content",

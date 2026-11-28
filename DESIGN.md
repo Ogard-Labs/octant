@@ -318,18 +318,23 @@ under the fill).
 | Tooltip                                                                | the float, opaque                                                                                                    | the same                                                     | the same                                                        |
 
 - **Text keeps a calm ground.** Where the application ground runs behind the
-  panes, every surface that holds running text (the thread's reading veil, the
-  sidebar's lists, and in the opaque window the dock panes, the Environment
-  section and the bottom panel, which are opaque) keeps at least 94% of its own
+  panes, every surface that holds running text (the thread's reading plate, the
+  sidebar's lists, the Environment section, and in the opaque window the dock
+  tiles and the bottom panel, which are opaque) keeps at least 94% of its own
   surface colour over it: `--octant-reading-surface-keep`, one variable on the
-  shell. Empty areas (a start screen's stage, the gutters between panes, the
-  title band) keep the ground at full strength. No blur, and the Glass coat
+  shell. A thread's surface is a feathered plate behind its text column only
+  (the column and `--octant-reading-plate-pad`, 24px, past it, easing out over
+  `--octant-reading-plate-feather`, 48px), in the window coat's own colour, so
+  the ground shows at its own strength beside a conversation (v7, maintainer
+  decision 2026-11-28); it has no blur and no step-down of the ground under
+  Glass. Empty areas (a start screen's stage, the gutters beside a thread's
+  column, the title band) keep the ground at full strength. No blur, and the Glass coat
   defaults are unchanged; Reduced transparency and Increased contrast resolve
   to 100%. At 80% and 82% a photo or a field of characters ran through the
   letters and read as noise (maintainer request, 2026-11-15). A start screen is no
   exception: only its stage stays open on the ground, and a pane opened beside
   it (a pull request in the dock, say) takes the same surface, the pane colour
-  or, under Glass, the workspace colour, at 94%. letters and read as noise (maintainer request, 2026-11-15).
+  or, under Glass, the workspace colour, at 94%.
 - **A float's edge catches the light under Glass.** Every floating surface's
   shadow (`--octant-shadow-pop`) starts with a rim slot, `--octant-float-rim`,
   that is an empty shadow everywhere except under the host's Glass rule (a
@@ -532,7 +537,7 @@ token.
 | `--oct-radius-lg`    | 16px   | A floating surface: menu, context menu, popover, select list, combobox list, hover card, tooltip card, palette, toast, the guided tour's card, composer popups; and the composer once it grows past one row                                                                                                |
 | `--oct-radius-xl`    | 20px   | A dialog, the Settings sheet, the narrow dock sheet (an `OctantDialog`)                                                                                                                                                                                                                                    |
 | `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                                           |
-| `--oct-radius-pill`  | 9999px | Only what is round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round swatch, a meter, a slider thumb, the composer at one row                                                                                                                               |
+| `--oct-radius-pill`  | 9999px | Only what is round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round swatch, a meter, a slider thumb, the composer's round buttons                                                                                                                          |
 
 - A part inside a control takes the control radius less the padding between
   them, never below 2px (a segmented thumb, a toggle-group item, a field's
@@ -648,7 +653,8 @@ fetched, never emoji.
 | -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `--octant-shadow-pop`      | `var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface; the rim slot is lit only under window Glass ([Translucency](#translucency)) |
 | `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)`                          | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)`                          | A small float drawn by a feature (tooltip card)                                                     |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | The composer and a picker pinned to it                                                              |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | A picker pinned to the composer, a notice card                                                      |
+| `--oct-shadow-rest`        | `0 2px 12px -6px rgb(0 0 0 / 30%)`                                                              | `0 2px 12px -6px` ink 7%                                                                        | The composer's box: the float's ink, closer and shorter                                             |
 | `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                                                | the same                                                                                        | A ring where an outline cannot be used                                                              |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
@@ -1521,10 +1527,19 @@ is costly to render mounts only while open.
 ### OctantApprovalCard
 
 - **Purpose.** An inline provider, extension or Browser permission request.
-- **Anatomy.** `label`, `summary`, `detail`, `context`, `actions`, `error`.
-- **Tokens.** The card: 1px hairline, `--oct-radius-md`, `--octant-card`, 8 by
-  12px padding, 8 and 12px gaps, 14px at 1.45; a 14px pending mark in muted ink;
-  detail 13px muted; actions 4px apart at the trailing edge.
+- **Anatomy.** A plain question read down one column beside a 14px pending
+  mark: `summary` (the ask), `detail` (one line saying why the thread asks;
+  a provider approval derives it from the thread's mode, "This thread asks
+  before it runs commands or changes files."), `context` (for a provider
+  approval, the call it gates in a well, when the runtime named what that
+  call runs), then `actions` and `error`. `label` names the group.
+- **Tokens.** The card: 1px hairline, `--oct-radius-md`, `--octant-card`, 12px
+  padding, 8px gaps, 14px at 1.45; the mark in muted ink, centred on the
+  question's first line; the question at medium weight, the reason 13px
+  muted; the well `--octant-well`, `--oct-radius-sm`, 8 by 12px, detail-size
+  mono, wrapped rather than cut; actions 4px apart from the leading edge, under
+  everything they answer. The buttons and their words do not change with the
+  layout (Allow once, Remember for this Project, Deny).
 - **States.** Glass: ink 4%. Increased contrast: strong border.
 - **Accessibility.** `role="group"` named by `label`; a failure is `alert`. The
   host decides whether an action may proceed.
@@ -1692,19 +1707,21 @@ narrowest pane's width.
 - **The box** is the one resting surface that floats: the frosted float fill
   with its blur in a browser, the float colour at 96% with no blur in the desktop
   app, and the control wash (ink 7%) under glass in a browser,
-  one faint outline (`--oct-border-faint`, ink 5%), `--oct-shadow-float`. At one
-  row it is a full pill 44px tall (`data-shape="pill"`); once the prompt grows
-  past one line, or a queue or chips stand above it, it takes `--oct-radius-lg`
-  and the prompt takes the full width on top with the controls in one row along
-  the bottom: attach at the leading edge, the microphone and send at the
-  trailing edge. A grown box returns to a pill only when the prompt is empty, so
-  the wider layout cannot flip it back and forth. Over an application ground in
+  one faint outline (`--oct-border-faint`, ink 5%), and the soft resting shadow
+  (`--oct-shadow-rest`). It is a calm rounded rectangle at `--oct-radius-lg`
+  (16px) at every height, never a pill: 44px tall at one row
+  (`data-shape="pill"` names that layout, not the corner); once the prompt grows
+  past one line, or a queue or chips stand above it, the prompt takes the full
+  width on top with the controls in one row along the bottom: attach at the
+  leading edge, the microphone and send at the trailing edge. A grown box
+  returns to one row only when the prompt is empty, so the wider layout cannot
+  flip it back and forth. Over an application ground in
   a browser it is the glass surface (floor, thick tint, blur); in the desktop app
   it is the float colour at 96%.
 - **Inside**: attach, the frameless prompt, then the microphone and send at the
   trailing edge. They are round 28px buttons (`--oct-composer-cell`), 8px
   (`--oct-composer-inset`) from the box's edge, the one place a control is a
-  circle, because the box is a pill. Their glyphs are 16px at the shared 2 stroke. Attach is a quiet fill (ink 6%) with a hover
+  circle, like the send arrow's own disc. Their glyphs are 16px at the shared 2 stroke. Attach is a quiet fill (ink 6%) with a hover
   step (11%). The microphone is a ghost with a round hover fill (8%). Send is the
   ink as its fill (`--octant-text-primary`) with the page colour as its arrow, at
   20% opacity while there is nothing to send, and it grows to 106% on hover (not
@@ -1720,8 +1737,9 @@ narrowest pane's width.
   Project, branch, folder and pull requests live in the Environment panel (plan
   usage does not: it shows in the rail's rings, on a start screen and in
   Settings), and its info and plan proposal are items of the + menu: a full row
-  truncated every label in a thread's column. Labels 12px meta, icons 16px,
-  nothing filled at rest.
+  truncated every label in a thread's column. Labels 12px meta at the regular
+  weight (the Project's name, the model, the mode; Full access alone keeps its
+  word at medium in the warning ink), icons 16px, nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet
   chips (meta ink, no fill at rest, 24px).
 - **Notices** are never in the box: each is the callout's compact card directly
@@ -2022,7 +2040,15 @@ application ground; every other page covers it with the reading veil.
   default (`scope: welcome`). A person may put it behind every page
   (`scope: everywhere`, which includes the sidebar); then every
   surface that shows text or information lies under the reading veil (the sheet
-  colour at 94%) and only the start screens stay open on the ground.
+  colour at 94%), a thread's only behind its text column, so the ground shows at
+  its own strength beside a conversation and Home, faintly through the sidebar
+  and the Environment section, and only the start screens stay open on it.
+  Under Glass the ground keeps its strength behind a thread and Home; it steps
+  down to an eighth only while a destination page is up (v7, maintainer
+  decision 2026-11-28).
+- **Home's list on cards.** Each section of Home's list holds its rows on one
+  `OctantCard` under its header, so the rows read on a card, not on the
+  picture; never the glass variant, whose blur would frost the ground.
 - **The grounds.**
 
   | Ground                | What it draws                                                                                                                                                                                                                                                                  | Home readability                                                                                                                                                                                                                                                                                                                               |
@@ -2040,9 +2066,10 @@ application ground; every other page covers it with the reading veil.
   hidden or it is off screen, caps its backing store at twice the display ratio
   and 5 million pixels, waits for idle time and fades in over
   `--oct-motion-ground-in`. Text never sits on it bare: the composer box is
-  opaque on an opaque window, Home masks or dims behind its text, a tool's pane (a
-  dock tile, the Environment section, the bottom panel) is solid wherever a
-  ground is on, every other
+  opaque on an opaque window, Home masks or dims behind its text and holds its
+  list on cards, a tool's pane (a dock tile, the bottom panel) is solid wherever
+  a ground is on, the Environment section keeps the sidebar's 94%, a thread
+  reads on its plate, every other
   page lies under the veil. The Home ground fades to the stage colour over the lower 45% in both modes. Reduced
   motion holds a still frame. Increased contrast turns the ground off. Under
   glass the ground lies on the coat, the composer keeps its wash, and the
@@ -2092,7 +2119,7 @@ but never repaint a shared control.
 | `bun run ui:check` (`scripts/check-ui-stylesheets.ts`)                               | No raw colour in a rule (except `/* ui-style-exception: fixed-scheme */`); no off-scale font size, duration, spacing or radius; no weight above 600 outside the title roles; no paint on a class handed to an Octant primitive; no fixed recipe height off 20/24/28/32; no new raw `role="alert"`; ratchets against `scripts/ui-stylesheet-baseline.json` |
 | `scripts/check-ui-component-boundaries.ts`                                           | Feature code imports adapters only and renders no raw button, input, select or textarea                                                                                                                                                                                                                                                                   |
 | `bun run tokens:check`                                                               | `packages/theme/tokens/tokens.css` and `tokens.json` match the stylesheets (`bun run tokens:export` writes them)                                                                                                                                                                                                                                          |
-| `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer pill, outline and float shadow; one focus edge                                                                                                                                                          |
+| `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer's rounded box, outline and resting shadow; one focus edge                                                                                                                                               |
 | `theme/roundThingsContract.test.ts`                                                  | The pill token only on round things                                                                                                                                                                                                                                                                                                                       |
 | `theme/sharedControlPaintContract.test.ts`                                           | Composer-row controls quiet; the composer and a Settings group flat                                                                                                                                                                                                                                                                                       |
 | `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell; one page table                                                                                                                                                                                                                                                                                        |

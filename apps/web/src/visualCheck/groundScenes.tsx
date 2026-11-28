@@ -14,6 +14,7 @@ import {
 import type { ReactNode } from "react";
 import { AgentsCenter } from "../agents/AgentsCenter";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
+import { ENVIRONMENT_STRIP_WIDTH } from "../shell/rightUtilityDockModel";
 import { ShellFrame } from "../shell/ShellFrame";
 import { ShellSidebar } from "../shell/ShellSidebar";
 import { usePrefersReducedMotion } from "../shell/useShellPresentation";
@@ -30,7 +31,7 @@ import {
 
 /**
  * The application ground under a slice of the shell: the sidebar column and
- * one workspace column, a start screen or a destination page, each set the way
+ * one workspace column, a start screen, a destination page or a thread, each set the way
  * the window sets it for that ground, Glass level and Tint, so a change that
  * blurs, recolours, covers or resizes a ground or its coat shows in the
  * picture. Each ground is drawn once in each scheme; together they reach every
@@ -70,8 +71,13 @@ interface Ground {
   readonly glass: Glass;
   /** A Tint the person set; absent, the Glass level's own coat. */
   readonly tint?: number;
-  /** What the workspace column shows: the start screen, or a destination page. */
-  readonly column: "start" | "page";
+  /**
+   * What the workspace column shows: the start screen, a destination page, or
+   * a thread with the Environment section open beside it.
+   */
+  readonly column: "start" | "page" | "thread";
+  /** A thread's Environment section is open beside it. */
+  readonly environment?: boolean;
   readonly reducedTransparency?: boolean;
   readonly increasedContrast?: boolean;
 }
@@ -235,6 +241,24 @@ const GROUNDS: ReadonlyArray<Ground> = [
     tint: 20,
     column: "start",
   },
+  // A thread over the pixel ground, shown behind everything: the plate behind
+  // its text column and the ground whole beside it with Glass off; then at
+  // Glass's default level with Environment open, where the ground shows faintly
+  // through the sidebar and the Environment section (the window is too narrow
+  // there for the gutters beside the column to show much).
+  {
+    id: "thread-ground-everywhere",
+    background: { kind: "pixels", scene: "ridges", motion: "still", ...everywhere },
+    glass: "off",
+    column: "thread",
+  },
+  {
+    id: "thread-ground-everywhere-subtle",
+    background: { kind: "pixels", scene: "ridges", motion: "still", ...everywhere },
+    glass: "subtle",
+    column: "thread",
+    environment: true,
+  },
   // The fallbacks a person or the system can ask for.
   {
     id: "ground-reduced-transparency",
@@ -377,7 +401,35 @@ function Column(props: {
   readonly ground: Ground;
   readonly resolved: ResolvedAppBackground;
   readonly start: ReactNode;
+  readonly thread: ReactNode;
+  readonly environment: ReactNode;
 }) {
+  if (props.ground.column === "thread") {
+    // The dock is the workspace layer's second column, beside the panes.
+    return (
+      <>
+        <div className="primary-workspace-layer">
+          <main className="workspace">
+            <div className="workspace-root">
+              <section
+                aria-label="Workspace pane: Fix composer focus after send"
+                className="workspace-pane"
+                data-active="true"
+                data-focused="false"
+                data-header="false"
+                data-surface-kind="thread"
+              >
+                <div className="workspace-pane__panel">{props.thread}</div>
+              </section>
+            </div>
+          </main>
+        </div>
+        {props.ground.environment === true ? (
+          <EnvironmentStrip>{props.environment}</EnvironmentStrip>
+        ) : null}
+      </>
+    );
+  }
   const onStage = props.resolved.kind !== "none" && props.resolved.scope === "welcome";
   const page = props.ground.column === "page";
   return (
@@ -417,7 +469,37 @@ function Column(props: {
   );
 }
 
-function GroundScene(props: { readonly ground: Ground; readonly start: ReactNode }) {
+/** The Environment section open beside a thread, as the dock lays it out. */
+function EnvironmentStrip(props: { readonly children: ReactNode }) {
+  return (
+    <aside
+      aria-label="Right Utility Dock"
+      className="right-utility-dock"
+      data-dock-environment="true"
+    >
+      <div
+        className="right-utility-dock__surface right-utility-dock__surface--strip"
+        data-dock-lead="tiles"
+        data-dock-surface="environment"
+      >
+        <section
+          aria-label="Environment"
+          className="dock-env-strip"
+          style={{ width: ENVIRONMENT_STRIP_WIDTH }}
+        >
+          <div className="right-utility-dock__tool dock-env-strip__body">{props.children}</div>
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+function GroundScene(props: {
+  readonly ground: Ground;
+  readonly start: ReactNode;
+  readonly thread: ReactNode;
+  readonly environment: ReactNode;
+}) {
   const reducedMotion = usePrefersReducedMotion();
   const resolved = resolvedGround(props.ground, reducedMotion);
   const glass = hostGlass(props.ground);
@@ -434,7 +516,10 @@ function GroundScene(props: { readonly ground: Ground; readonly start: ReactNode
           : {})}
         {...(shown && !behindEverything ? { welcomeGround: backdrop("welcome") } : {})}
         chrome={<header className="window-chrome" />}
-        contextSidebarWidth={360}
+        contextSidebarWidth={props.ground.environment === true ? ENVIRONMENT_STRIP_WIDTH : 360}
+        {...(props.ground.environment === true
+          ? { dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH }
+          : {})}
         material={glass ? "translucent" : "opaque"}
         onCommitSidebarWidth={noop}
         onPreviewSidebarWidth={noop}
@@ -447,8 +532,16 @@ function GroundScene(props: { readonly ground: Ground; readonly start: ReactNode
         sidebarResizable={false}
         sidebarVibrancyMode={accessibleTheme(props.ground).sidebarBackground.vibrancyMode}
         sidebarWidth={280}
-        wideContextOpen={false}
-        workspace={<Column ground={props.ground} resolved={resolved} start={props.start} />}
+        wideContextOpen={props.ground.environment === true}
+        workspace={
+          <Column
+            ground={props.ground}
+            resolved={resolved}
+            start={props.start}
+            environment={props.environment}
+            thread={props.thread}
+          />
+        }
       />
     </PlanUsageProvider>
   );
@@ -463,11 +556,25 @@ export interface GroundRenderer {
   readonly settled: () => Promise<void>;
 }
 
-/** The ground scenes, each drawing `start` as its start screen. */
-export function groundRenderers(start: () => ReactNode): ReadonlyArray<GroundRenderer> {
+/** What a ground scene draws in its workspace column, by what the column shows. */
+export interface GroundColumns {
+  readonly start: () => ReactNode;
+  readonly thread: () => ReactNode;
+  readonly environment: () => ReactNode;
+}
+
+/** The ground scenes, each drawing the start screen or the thread it is given. */
+export function groundRenderers(columns: GroundColumns): ReadonlyArray<GroundRenderer> {
   return GROUNDS.map((ground) => ({
     id: ground.id,
-    render: () => <GroundScene ground={ground} start={start()} />,
+    render: () => (
+      <GroundScene
+        environment={ground.environment === true ? columns.environment() : null}
+        ground={ground}
+        start={ground.column === "thread" ? null : columns.start()}
+        thread={ground.column === "thread" ? columns.thread() : null}
+      />
+    ),
     theme: (plain) => groundTheme(ground, plain),
     // A Glass level is set only in the desktop app; a browser never gets Glass.
     ...(ground.glass === "off" ? {} : { desktop: hostGlass(ground) ? "glass" : "opaque" }),

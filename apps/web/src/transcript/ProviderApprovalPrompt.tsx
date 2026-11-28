@@ -5,7 +5,12 @@ import { OctantButton } from "../ui/base/OctantButton";
 import "./provider-level-change.css";
 
 export interface ProviderApprovalPromptProps {
+  /** The question the agent asks, as the host worded it. */
   readonly summary: string;
+  /** Why the thread asks, from its mode, on one quiet line under the question. */
+  readonly reason?: string;
+  /** The call the ask gates (a command's line, a checkout-relative path), shown in a well. */
+  readonly command?: string;
   readonly onAnswer: (decision: "approved" | "denied") => void;
   /**
    * Present when the ask may be answered for the whole Project as well as for
@@ -64,6 +69,16 @@ export function ProviderApprovalPrompt(props: ProviderApprovalPromptProps) {
           </OctantButton>
         </>
       }
+      context={
+        props.command === undefined ? undefined : (
+          // A group carries the name: a name on the code element itself is
+          // not one assistive technology has to read.
+          <div aria-label="The call it asks about" className="approval-row__well" role="group">
+            <code>{props.command}</code>
+          </div>
+        )
+      }
+      {...(props.reason === undefined ? {} : { detail: props.reason })}
       label="Provider approval"
       summary={props.summary}
     />

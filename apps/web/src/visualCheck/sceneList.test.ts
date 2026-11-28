@@ -18,10 +18,12 @@ it("compares, and never writes baselines, unless asked for exactly", () => {
 
 it("compares every ground picture at the finer tolerance and every other at the default", () => {
   const shots = visualShots();
-  const grounds = shots.filter((shot) => shot.scene.startsWith("ground-"));
+  // A ground scene names its ground: "ground-pixels", "thread-ground-everywhere".
+  const drawsGround = (scene: string) => /(?:^|-)ground-/.test(scene);
+  const grounds = shots.filter((shot) => drawsGround(shot.scene));
   expect(grounds.length).toBeGreaterThan(0);
   for (const shot of grounds) expect(shot.tolerance).toBe(GROUND_TOLERANCE);
-  for (const shot of shots.filter((each) => !each.scene.startsWith("ground-")))
+  for (const shot of shots.filter((each) => !drawsGround(each.scene)))
     expect(shot.tolerance).toBe(CHANNEL_TOLERANCE);
 });
 

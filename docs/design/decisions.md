@@ -268,6 +268,7 @@ Octant Shield is Octant's own automatic approval reviewer for every runtime that
 - Shield sends no telemetry, counts against spend ceilings and journals every decision.
 - Automatic model calls are set from a local window or a device the host's own person paired (maintainer decision, 2026-11-12); selection is manual and never fails over.
 - A release with Shield requires measuring its false-allow rate on the fixture set.
+- Claude Code names every call's command or checkout-relative file path as Codex does, one redacted, bounded line journaled on the call's row: the approval well shows it, and Shield's remote-command and forge records read it (maintainer decision, 2026-11-28).
 
 Not built yet:
 
@@ -2829,6 +2830,7 @@ A composer's box holds only attach, the prompt, the microphone and send, on a st
 - A card above the box is only for something the person must read or act on that stays until resolved, most severe first. What passes by itself is one quiet line that takes no layout room, so the transcript never jumps.
 - One always-mounted polite status region describes the prompt; refusal and offer cards are alerts.
 - The thread's place, info and turn figures live in Environment and [Thread info](#thread-info), not in the composer.
+- The box is a calm rounded rectangle at the large radius (16px) at every height, not a pill, with a soft resting shadow; the row under it is regular weight in the meta ink (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [DESIGN.md: Composer row](../../DESIGN.md#composer-row) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
@@ -2884,8 +2886,9 @@ Approval and confirmation dialogs default to the safe answer, and the host decid
 - The safe action receives initial focus. Escape, Cancel and backdrop dismissal never change data. Destructive actions opt into the danger treatment.
 - An extension tool request names the plugin, its server and the tool, and offers only the choices the host says an approval covers (maintainer decision, 2026-11-12).
 - Native Code approvals are isolated host documents. Shared renderer components never grant Code authority, and Enter never implicitly grants access.
+- A provider approval card reads as a plain question: the ask, one line saying why the thread asks, derived from its mode, and the call it gates in a well when that call's start named what it runs, kept apart from the row's progress text; the answers stay Allow once, Remember for this Project and Deny, under the question from the leading edge (maintainer decision, 2026-11-28).
 
-Status: Built. Detail: [DESIGN.md: Dialogs and sheets](../../DESIGN.md#dialogs-and-sheets), [OctantConfirmDialog](../../DESIGN.md#octantconfirmdialog), [Settings: Permissions](settings.md#permissions) and [Thread view: Native Code approvals](thread-view.md#native-code-approvals).
+Status: Built. Detail: [DESIGN.md: Dialogs and sheets](../../DESIGN.md#dialogs-and-sheets), [OctantConfirmDialog](../../DESIGN.md#octantconfirmdialog), [OctantApprovalCard](../../DESIGN.md#octantapprovalcard), [Settings: Permissions](settings.md#permissions) and [Thread view: Native Code approvals](thread-view.md#native-code-approvals).
 
 ### Accessibility baseline
 
@@ -2916,11 +2919,12 @@ A new window, its background and its drafts behave predictably.
 - Without a saved choice, a wide window opens the right dock where the active pane has a dock subject; an explicit show or hide is restored per window.
 - A ground is drawn as chosen and stays readable: the ASCII field stays the default, and no set or density inks heavier than it. A photo comes from the host's library, and the host refuses to delete one while it shows.
 - A still ground holds one frame: a Pixel ground or ASCII field set to still always shows its first frame, so it looks the same on every load and the Visual check's ground scenes can hold it to a fine tolerance.
+- Shown behind everything, the ground keeps its own strength behind a thread and Home: a thread reads on a feathered plate behind its text column only, in the window coat's colour at 94%, and Home's list sits on cards; it shows faintly through the sidebar and the Environment section. Under Glass it steps down only while a destination page is up. Nothing blurs, recolours or covers the ground beyond that, and reduced transparency and increased contrast keep every text surface opaque (maintainer decision, 2026-11-28).
 - Plugins offer character grounds as data only, while installed, trusted and enabled; a pick copies the values.
 - A new-task composer keeps its identity while its Project changes; a refused binding keeps the prior authorized Project and the draft. A failed first turn returns its text to the composer with the reason.
 - Closing a file tab, the Files tool, its thread or the window checks for unsaved Code Files edits, even when Files is hidden; Save must succeed to continue.
 
-Status: Built. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [File editing](workspace.md#file-editing), [Application ground](application-ground.md), [Custom grounds](custom-grounds.md) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
+Status: Built. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [File editing](workspace.md#file-editing), [Application ground](application-ground.md), [Custom grounds](custom-grounds.md), [DESIGN.md: Home with the drawn ground](../../DESIGN.md#home-with-the-drawn-ground), [Thread view: Transcript](thread-view.md#transcript) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
 ### Usage reading and provider marks
 
@@ -2944,6 +2948,7 @@ Reply detail chooses how much of a turn's thinking and tool calls the transcript
 - Answers only and Failures only sit below Low and hide rather than fold (maintainer decision, 2026-11-26). Approvals, questions, credential requests, Shield and reviewer decisions, errors, failed or unfinished calls, and failed or waiting subagents and tasks always show, and every hidden step shows while Find is open. A level a reader does not know reads as Low.
 - A running turn ends with one working line under its reply, and only a change of step is announced (maintainer decision, 2026-11-24).
 - A turn's durations are journaled host facts, never renderer guesses, and a call whose bounds cannot be trusted shows no time.
+- A turn's steps are parted by their height alone, with no line between rows, so a settled turn reads as a few quiet lines rather than a table (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [Thread view: Reply detail](thread-view.md#reply-detail), [Turn activity rows](thread-view.md#turn-activity-rows) and [Workspace: Reply detail in the thread in front](workspace.md#reply-detail-in-the-thread-in-front).
 
@@ -3224,8 +3229,9 @@ Under the Code composer, the start screen is an agent home of work to pick up.
 
 - Picking an item fills the prompt and attaches the issue as the thread's Create-from context.
 - Code Home's activity cards count from journaled facts or the signed-in GitHub account's bounded history, name their source, and say when a read is partial.
+- Each section of the start screen's list holds its rows on one card under its header (maintainer decision, 2026-11-28).
 
-Status: Built. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home) and [Activity timeframes](start-screen.md#activity-timeframes).
+Status: Built. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home), [The list](start-screen.md#the-list) and [Activity timeframes](start-screen.md#activity-timeframes).
 
 ### First-run setup
 
