@@ -709,8 +709,11 @@ or doubles it; `--octant-focus-ring` is never the indicator.
   ([Translucency](#translucency) for glass).
 - Pointer targets at least 24px on desktop and 44px on touch.
 - Every overlay opens, navigates and dismisses by keyboard, and returns focus.
-  A menu opened by keyboard starts on its current choice. Radio groups wrap and
-  take Home and End (`moveWithinRadioGroup`).
+  A menu opened by keyboard starts on its current choice. Radio groups
+  (`OctantRadioGroup`) and listboxes/comboboxes (`OctantListbox`,
+  `OctantCombobox`) share one keyboard model: Tab lands on the group once
+  (roving tabindex or virtual focus), Arrow keys move, Home and End jump, and
+  disabled options are skipped.
 - Tab order follows reading order from the left; the sidebar comes before the
   window chrome. A surface that takes Tab or Escape offers one documented way
   out.
@@ -1518,8 +1521,11 @@ own items. Every other menu, dropdown and select is Octant's own.
 
 ### Helpers
 
-`radioGroupKeys.ts` (`moveWithinRadioGroup`) gives a radio group its keys.
-`useLeavingFocus.ts` returns focus as an exit starts. Neither draws.
+`radioGroupKeys.ts` (`moveWithinTabList`, `chooseByNumber`) provides tablist
+arrow movement and optional number-key shortcuts; radio groups themselves use
+`OctantRadioGroup`, and listboxes and comboboxes use `OctantListbox` or
+`OctantCombobox`. `useLeavingFocus.ts` returns focus as an exit starts. Neither
+draws.
 
 ## Patterns
 

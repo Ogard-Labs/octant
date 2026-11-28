@@ -131,11 +131,15 @@ export function ThemeAppearanceEditor(props: {
             title="Colour scheme"
           >
             <div className="setgroup">
-              <div
+              <OctantRadioGroup
                 aria-label="Theme mode"
                 className="settings-scheme"
-                onKeyDown={moveWithinRadioGroup}
-                role="radiogroup"
+                onValueChange={(next) => {
+                  if (next === "system" || next === "light" || next === "dark") {
+                    void theme.applyPatch({ mode: next });
+                  }
+                }}
+                value={draft.mode}
               >
                 {(
                   [
@@ -144,14 +148,10 @@ export function ThemeAppearanceEditor(props: {
                     { value: "dark", label: "Dark" },
                   ] as const
                 ).map((option) => (
-                  <OctantButton
-                    aria-checked={draft.mode === option.value}
+                  <OctantRadioGroupItem
                     className="settings-scheme__card window-no-drag"
                     key={option.value}
-                    onClick={() => void theme.applyPatch({ mode: option.value })}
-                    role="radio"
-                    type="button"
-                    variant="bare"
+                    value={option.value}
                   >
                     <span
                       aria-hidden="true"
@@ -173,9 +173,9 @@ export function ThemeAppearanceEditor(props: {
                       </span>
                     </span>
                     <span className="settings-scheme__label">{option.label}</span>
-                  </OctantButton>
+                  </OctantRadioGroupItem>
                 ))}
-              </div>
+              </OctantRadioGroup>
               <SettingRow
                 label="Light preset"
                 scope="app"
@@ -281,46 +281,42 @@ export function ThemeAppearanceEditor(props: {
                 scope="app"
                 settingId="appearance.scheme.accent"
               >
-                <div
+                <OctantRadioGroup
                   aria-label="Accent colour"
                   className="settings-accent"
-                  onKeyDown={moveWithinRadioGroup}
-                  role="radiogroup"
+                  onValueChange={(next) => {
+                    const swatch = ACCENT_SWATCHES.find((candidate) => candidate.id === next);
+                    if (swatch === undefined) return;
+                    void theme.applyPatch({
+                      ...(swatch.id === "mono" ? { style: "mono" as const } : {}),
+                      semanticOverrides: overridesForAccent(
+                        draft.semanticOverrides,
+                        swatch.id,
+                        draft.style,
+                      ),
+                    });
+                  }}
+                  value={shownAccent}
                 >
-                  {ACCENT_SWATCHES.map((swatch) => {
-                    const checked = shownAccent === swatch.id;
-                    return (
-                      <OctantButton
-                        aria-checked={checked}
-                        aria-label={swatch.label}
-                        className="settings-accent__swatch hover:no-underline"
-                        key={swatch.id}
-                        onClick={() =>
-                          void theme.applyPatch({
-                            ...(swatch.id === "mono" ? { style: "mono" as const } : {}),
-                            semanticOverrides: overridesForAccent(
-                              draft.semanticOverrides,
-                              swatch.id,
-                              draft.style,
-                            ),
-                          })
-                        }
-                        role="radio"
-                        style={
-                          {
-                            "--settings-accent-swatch":
-                              swatchDotColor(swatch, shownMode) ?? "var(--octant-text-primary)",
-                          } as CSSProperties
-                        }
-                        title={swatch.label}
-                        type="button"
-                        variant="link"
-                      >
-                        <span aria-hidden="true" className="settings-accent__dot" />
-                      </OctantButton>
-                    );
-                  })}
-                </div>
+                  {ACCENT_SWATCHES.map((swatch) => (
+                    <OctantRadioGroupItem
+                      aria-label={swatch.label}
+                      className="settings-accent__swatch hover:no-underline"
+                      key={swatch.id}
+                      style={
+                        {
+                          "--settings-accent-swatch":
+                            swatchDotColor(swatch, shownMode) ?? "var(--octant-text-primary)",
+                        } as CSSProperties
+                      }
+                      title={swatch.label}
+                      value={swatch.id}
+                      variant="link"
+                    >
+                      <span aria-hidden="true" className="settings-accent__dot" />
+                    </OctantRadioGroupItem>
+                  ))}
+                </OctantRadioGroup>
               </SettingRow>
             </div>
           </SettingsSection>
@@ -788,8 +784,8 @@ function ThemeTransfer(props: {
 
 import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 /**
  * A small window drawn from a preset's own tokens (the band, the sidebar, the

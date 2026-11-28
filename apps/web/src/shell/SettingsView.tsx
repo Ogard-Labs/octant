@@ -257,7 +257,7 @@ import {
 } from "./hostBridge";
 import { providerSettingsViewProps } from "../providers/providerSettingsViewProps";
 import { ApplicationIdentity } from "./ApplicationIdentity";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
@@ -3911,44 +3911,40 @@ function SidebarBackgroundSettings({
       {background.kind === "preset" ? (
         <div className="settings-view__field" aria-label="Sidebar background presets">
           <span>Preset</span>
-          <div
-            className="settings-view__preset-grid"
-            onKeyDown={moveWithinRadioGroup}
-            role="radiogroup"
+          <OctantRadioGroup
             aria-label="Sidebar background presets"
+            className="settings-view__preset-grid"
+            disabled={suspended}
+            onValueChange={(next) =>
+              setBackground({
+                kind: "preset",
+                presetId: decodeSidebarBackgroundPresetId(next),
+                overlayColor: background.overlayColor,
+                overlayOpacity: background.overlayOpacity,
+                vibrancyMode: background.vibrancyMode,
+              })
+            }
+            value={background.presetId}
           >
             {SIDEBAR_BACKGROUND_PRESETS.map((preset) => {
               const selected = background.presetId === preset.id;
               return (
-                <OctantButton
-                  aria-checked={selected}
+                <OctantRadioGroupItem
                   aria-label={preset.displayName}
-                  disabled={suspended}
                   className="settings-view__preset-swatch"
                   key={preset.id}
-                  onClick={() =>
-                    setBackground({
-                      kind: "preset",
-                      presetId: decodeSidebarBackgroundPresetId(preset.id),
-                      overlayColor: background.overlayColor,
-                      overlayOpacity: background.overlayOpacity,
-                      vibrancyMode: background.vibrancyMode,
-                    })
-                  }
-                  role="radio"
                   style={{ background: preset.cssBackground }}
-                  type="button"
-                  variant="bare"
+                  value={preset.id}
                 >
                   {selected ? (
                     <span aria-hidden="true" className="settings-view__selection-mark">
                       <Check size={14} />
                     </span>
                   ) : null}
-                </OctantButton>
+                </OctantRadioGroupItem>
               );
             })}
-          </div>
+          </OctantRadioGroup>
         </div>
       ) : null}
       <label className="settings-view__field">

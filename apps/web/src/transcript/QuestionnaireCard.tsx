@@ -1,14 +1,19 @@
-import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { useQuestionnaireDraft, type QuestionnaireDraftIdentity } from "./questionnaireDrafts";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useId, useRef, useState } from "react";
 import type { Questionnaire, QuestionnaireResponse } from "@octant/contracts";
-import { validateQuestionnaireAnswer, type QuestionnaireAnswerValidation } from "@octant/domain";
+import { validateQuestionnaireAnswer } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
-import { chooseByNumber, moveOrChooseInRadioGroup } from "../ui/base/radioGroupKeys";
+import { chooseByNumber } from "../ui/base/radioGroupKeys";
 import { OptionKey } from "./OptionKey";
+import { QuestionnaireSummary, type QuestionnaireAnswerRule } from "./QuestionnaireSummary";
+
+export { QuestionnaireSummary, type QuestionnaireAnswerRule };
+
+const CUSTOM_RADIO_VALUE = "\0octant-questionnaire-custom";
 
 export interface QuestionnaireCardProps {
   readonly draftIdentity?: QuestionnaireDraftIdentity | undefined;
@@ -28,11 +33,6 @@ export interface QuestionnaireCardProps {
   /** The rule an answer is checked against; a Canvas form passes its own, without the inline ask's ceilings. */
   readonly validateAnswer?: QuestionnaireAnswerRule | undefined;
 }
-
-export type QuestionnaireAnswerRule = (
-  questionnaire: Questionnaire,
-  text: string,
-) => QuestionnaireAnswerValidation;
 
 export interface QuestionnaireRefusal {
   readonly refused: string;
@@ -145,62 +145,136 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                 ? "Choose one"
                 : `Select ${question.minSelections ?? 1}–${max} options`}
             </p>
-            <div
-              className="provider-question-card__choices"
-              role={question.selection === "single" ? "radiogroup" : "group"}
-              aria-label={question.prompt}
-              aria-describedby={`${id}-${index}-help`}
-              onKeyDown={
-                question.selection === "single" ? moveOrChooseInRadioGroup : chooseByNumber
-              }
-            >
-              {question.options.map((option, optionIndex) => {
-                const checked = !custom && selected.includes(option.id);
-                const label = (
-                  <>
-                    <span className="provider-question-card__option-label">
-                      {option.label}
-                      {option.recommended === true ? " (Recommended)" : ""}
-                      <OptionKey index={optionIndex} />
-                    </span>
-                    {option.description === undefined ? null : (
-                      <span className="provider-question-card__option-description">
-                        {option.description}
-                      </span>
-                    )}
-                  </>
-                );
-                const choose = () => {
+            {question.selection === "single" ? (
+              <OctantRadioGroup
+                aria-describedby={`${id}-${index}-help`}
+                aria-label={question.prompt}
+                className="provider-question-card__choices"
+                disabled={busy}
+                numberShortcuts
+                onValueChange={(next) => {
+                  if (next === CUSTOM_RADIO_VALUE) {
+                    setCustomIds((current) =>
+                      current.includes(question.id) ? current : [...current, question.id],
+                    );
+                    update({ questionId: question.id, selectedOptionIds: [] });
+                    return;
+                  }
                   setCustomIds((current) => current.filter((value) => value !== question.id));
-                  update({
-                    questionId: question.id,
-                    selectedOptionIds:
-                      question.selection === "single"
-                        ? [option.id]
-                        : checked
-                          ? selected.filter((value) => value !== option.id)
-                          : [...(custom ? [] : selected), option.id],
-                  });
-                };
-                return (
-                  <div
-                    className="provider-question-card__choice"
-                    data-checked={checked ? "" : undefined}
-                    key={option.id}
-                  >
-                    {question.selection === "single" ? (
-                      <OctantButton
-                        aria-checked={checked}
+                  update({ questionId: question.id, selectedOptionIds: [next] });
+                }}
+                value={custom ? CUSTOM_RADIO_VALUE : (selected[0] ?? "")}
+              >
+                {question.options.map((option, optionIndex) => {
+                  const checked = !custom && selected.includes(option.id);
+                  return (
+                    <div
+                      className="provider-question-card__choice"
+                      data-checked={checked ? "" : undefined}
+                      key={option.id}
+                    >
+                      <OctantRadioGroupItem
                         className="provider-question-card__option"
                         size={null}
-                        role="radio"
-                        type="button"
+                        value={option.id}
                         variant="ghost"
-                        onClick={choose}
                       >
-                        {label}
-                      </OctantButton>
-                    ) : (
+                        <span className="provider-question-card__option-label">
+                          {option.label}
+                          {option.recommended === true ? " (Recommended)" : ""}
+                          <OptionKey index={optionIndex} />
+                        </span>
+                        {option.description === undefined ? null : (
+                          <span className="provider-question-card__option-description">
+                            {option.description}
+                          </span>
+                        )}
+                      </OctantRadioGroupItem>
+                    </div>
+                  );
+                })}
+                {question.allowCustom === false ? null : (
+                  <div
+                    className="provider-question-card__choice"
+                    data-checked={custom ? "" : undefined}
+                  >
+                    <OctantRadioGroupItem
+                      className="provider-question-card__option"
+                      onClick={() => {
+                        if (!custom) return;
+                        setCustomIds((current) => current.filter((value) => value !== question.id));
+                        update({ questionId: question.id, selectedOptionIds: [] });
+                      }}
+                      size={null}
+                      value={CUSTOM_RADIO_VALUE}
+                      variant="ghost"
+                    >
+                      <span className="provider-question-card__option-label">
+                        Write another answer
+                        <OptionKey index={question.options.length} />
+                      </span>
+                    </OctantRadioGroupItem>
+                    {custom ? (
+                      <label className="questionnaire__written">
+                        Your answer
+                        <OctantTextarea
+                          maxLength={2_000}
+                          rows={2}
+                          value={answer?.customAnswer ?? ""}
+                          onChange={(event) =>
+                            update({
+                              questionId: question.id,
+                              selectedOptionIds: [],
+                              ...(event.target.value.trim() === ""
+                                ? {}
+                                : { customAnswer: event.target.value }),
+                            })
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                )}
+              </OctantRadioGroup>
+            ) : (
+              <div
+                className="provider-question-card__choices"
+                role="group"
+                aria-label={question.prompt}
+                aria-describedby={`${id}-${index}-help`}
+                onKeyDown={chooseByNumber}
+              >
+                {question.options.map((option, optionIndex) => {
+                  const checked = !custom && selected.includes(option.id);
+                  const label = (
+                    <>
+                      <span className="provider-question-card__option-label">
+                        {option.label}
+                        {option.recommended === true ? " (Recommended)" : ""}
+                        <OptionKey index={optionIndex} />
+                      </span>
+                      {option.description === undefined ? null : (
+                        <span className="provider-question-card__option-description">
+                          {option.description}
+                        </span>
+                      )}
+                    </>
+                  );
+                  const choose = () => {
+                    setCustomIds((current) => current.filter((value) => value !== question.id));
+                    update({
+                      questionId: question.id,
+                      selectedOptionIds: checked
+                        ? selected.filter((value) => value !== option.id)
+                        : [...(custom ? [] : selected), option.id],
+                    });
+                  };
+                  return (
+                    <div
+                      className="provider-question-card__choice"
+                      data-checked={checked ? "" : undefined}
+                      key={option.id}
+                    >
                       <label className="questionnaire__checkbox">
                         <OctantCheckbox
                           checked={checked}
@@ -209,58 +283,58 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
                         />
                         <span>{label}</span>
                       </label>
-                    )}
-                  </div>
-                );
-              })}
-              {question.allowCustom === false ? null : (
-                <div
-                  className="provider-question-card__choice"
-                  data-checked={custom ? "" : undefined}
-                >
-                  <OctantButton
-                    aria-checked={custom}
-                    className="provider-question-card__option"
-                    size={null}
-                    role={question.selection === "single" ? "radio" : "checkbox"}
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setCustomIds((current) =>
-                        custom
-                          ? current.filter((value) => value !== question.id)
-                          : [...current, question.id],
-                      );
-                      update({ questionId: question.id, selectedOptionIds: [] });
-                    }}
+                    </div>
+                  );
+                })}
+                {question.allowCustom === false ? null : (
+                  <div
+                    className="provider-question-card__choice"
+                    data-checked={custom ? "" : undefined}
                   >
-                    <span className="provider-question-card__option-label">
-                      Write another answer
-                      <OptionKey index={question.options.length} />
-                    </span>
-                  </OctantButton>
-                  {custom ? (
-                    <label className="questionnaire__written">
-                      Your answer
-                      <OctantTextarea
-                        maxLength={2_000}
-                        rows={2}
-                        value={answer?.customAnswer ?? ""}
-                        onChange={(event) =>
-                          update({
-                            questionId: question.id,
-                            selectedOptionIds: [],
-                            ...(event.target.value.trim() === ""
-                              ? {}
-                              : { customAnswer: event.target.value }),
-                          })
-                        }
-                      />
-                    </label>
-                  ) : null}
-                </div>
-              )}
-            </div>
+                    <OctantButton
+                      aria-checked={custom}
+                      className="provider-question-card__option"
+                      size={null}
+                      role="checkbox"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        setCustomIds((current) =>
+                          custom
+                            ? current.filter((value) => value !== question.id)
+                            : [...current, question.id],
+                        );
+                        update({ questionId: question.id, selectedOptionIds: [] });
+                      }}
+                    >
+                      <span className="provider-question-card__option-label">
+                        Write another answer
+                        <OptionKey index={question.options.length} />
+                      </span>
+                    </OctantButton>
+                    {custom ? (
+                      <label className="questionnaire__written">
+                        Your answer
+                        <OctantTextarea
+                          maxLength={2_000}
+                          rows={2}
+                          value={answer?.customAnswer ?? ""}
+                          onChange={(event) =>
+                            update({
+                              questionId: question.id,
+                              selectedOptionIds: [],
+                              ...(event.target.value.trim() === ""
+                                ? {}
+                                : { customAnswer: event.target.value }),
+                            })
+                          }
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            )}
           </fieldset>
         );
       })}
@@ -297,48 +371,5 @@ function QuestionnaireEditor(props: QuestionnaireCardProps) {
         </OctantButton>
       </footer>
     </form>
-  );
-}
-
-export function QuestionnaireSummary(props: {
-  readonly prompt: string;
-  readonly questionnaire: Questionnaire;
-  readonly answer: string;
-  readonly validateAnswer?: QuestionnaireAnswerRule | undefined;
-}) {
-  const validated = (props.validateAnswer ?? validateQuestionnaireAnswer)(
-    props.questionnaire,
-    props.answer,
-  );
-  if (validated.status === "invalid")
-    return <p role="status">Submitted answers are unavailable.</p>;
-  return (
-    <OctantCollapsible className="questionnaire-summary" summary={`Answers sent · ${props.prompt}`}>
-      <dl>
-        {props.questionnaire.questions.map((question) => {
-          const answer = validated.response.answers.find(
-            (entry) => entry.questionId === question.id,
-          );
-          const text =
-            answer?.customAnswer ??
-            question.options
-              .filter((option) => answer?.selectedOptionIds.includes(option.id))
-              .map((option) => option.label)
-              .join(", ");
-          return (
-            <div key={question.id}>
-              <dt>{question.prompt}</dt>
-              <dd>{text || "None selected"}</dd>
-            </div>
-          );
-        })}
-        {validated.response.comment === undefined ? null : (
-          <div>
-            <dt>Comment</dt>
-            <dd>{validated.response.comment}</dd>
-          </div>
-        )}
-      </dl>
-    </OctantCollapsible>
   );
 }

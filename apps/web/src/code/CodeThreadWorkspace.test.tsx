@@ -3527,7 +3527,7 @@ describe("CodeThreadWorkspace", () => {
       decision: "approved",
     });
 
-    await user.click(screen.getByRole("radio", { name: /npm/ }));
+    await user.click(await screen.findByRole("radio", { name: /npm/ }));
     await user.click(screen.getByRole("button", { name: "Submit" }));
     expect(answerProviderRequest).toHaveBeenCalledWith({
       kind: "input",

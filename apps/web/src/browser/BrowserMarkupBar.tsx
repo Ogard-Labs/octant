@@ -9,10 +9,11 @@ import {
   Undo2,
   X,
 } from "../ui/icons";
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { MARKUP_INKS, markupInk, type MarkupInkId } from "../theme/markupInk";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 
 export type MarkupTool = "select" | "pen" | "box" | "arrow" | "text";
 
@@ -89,33 +90,36 @@ export function BrowserMarkupBar(props: BrowserMarkupBarProps) {
           triggerLabel={`Ink colour: ${chosen.label}`}
           triggerVariant="ghost-icon"
         >
-          <div
+          <OctantRadioGroup
             aria-label="Ink colour"
             className="browser-markup__inks"
-            onKeyDown={moveBetweenInks}
-            role="radiogroup"
+            onValueChange={(next) => {
+              const ink = MARKUP_INKS.find((candidate) => candidate.id === next);
+              if (ink !== undefined) props.onInk(ink.id);
+            }}
+            value={props.ink}
           >
             {MARKUP_INKS.map((ink) => (
-              <OctantButton
-                key={ink.id}
-                aria-checked={props.ink === ink.id}
+              <OctantRadioGroupItem
                 aria-label={ink.label}
                 className="browser-markup__button"
-                onClick={() => {
-                  props.onInk(ink.id);
-                  setInkOpen(false);
+                key={ink.id}
+                onClick={() => setInkOpen(false)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setInkOpen(false);
+                  }
                 }}
-                role="radio"
                 size="icon"
-                tabIndex={props.ink === ink.id ? 0 : -1}
                 title={ink.label}
-                type="button"
+                value={ink.id}
                 variant="bare"
               >
                 <InkDot value={ink.value} />
-              </OctantButton>
+              </OctantRadioGroupItem>
             ))}
-          </div>
+          </OctantRadioGroup>
         </OctantPopover>
         <OctantButton
           aria-label="Thick stroke"
@@ -210,30 +214,4 @@ function InkDot(props: { readonly value: string }) {
       style={{ background: props.value }}
     />
   );
-}
-
-/** Arrows, Home and End move among the six inks; Enter or Space on one picks it. */
-function moveBetweenInks(event: KeyboardEvent<HTMLElement>): void {
-  const steps: Readonly<Record<string, number>> = {
-    ArrowRight: 1,
-    ArrowDown: 1,
-    ArrowLeft: -1,
-    ArrowUp: -1,
-  };
-  const radios = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]'));
-  const at = radios.findIndex((radio) => radio === document.activeElement);
-  if (at === -1) return;
-  const step = steps[event.key];
-  const next =
-    step !== undefined
-      ? (at + step + radios.length) % radios.length
-      : event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? radios.length - 1
-          : undefined;
-  const radio = next === undefined ? undefined : radios[next];
-  if (radio === undefined) return;
-  event.preventDefault();
-  radio.focus();
 }

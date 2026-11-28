@@ -46,6 +46,7 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { markInteraction, markInteractionAfterPaint } from "../polling/interactionTrace";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -477,34 +478,25 @@ export function ChatComposer(props: ChatComposerProps) {
     syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
   }
 
+  const commandListbox = useOctantListbox({
+    activeIndex: activeCommandIndex,
+    allowHomeEnd: false,
+    allowTabActivate: true,
+    count: commandOpen ? commandMatches.length : 0,
+    disabled: !commandOpen,
+    onActivate: (index) => {
+      const command = commandMatches[index];
+      if (command !== undefined) chooseCommand(command);
+    },
+    onActiveIndexChange: setActiveCommandIndex,
+    onDismiss: commandOpen ? () => setCommandToken(undefined) : undefined,
+  });
+
   async function onDraftKeyDown(event: KeyboardEvent<ComposerInputElement>) {
     if (event.nativeEvent.isComposing) return;
     if (suggestionInput.takeOnTab(event)) return;
     if (atMenu.handleKeyDown(event)) return;
-    if (commandOpen && commandMatches.length > 0) {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveCommandIndex((current) => (current + 1) % commandMatches.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveCommandIndex(
-          (current) => (current - 1 + commandMatches.length) % commandMatches.length,
-        );
-        return;
-      }
-      if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey && activeCommand) {
-        event.preventDefault();
-        chooseCommand(activeCommand);
-        return;
-      }
-    }
-    if (event.key === "Escape" && commandOpen) {
-      event.preventDefault();
-      setCommandToken(undefined);
-      return;
-    }
+    if (commandListbox.handleKeyDown(event)) return;
     if (mention.handleKeyDown(event)) return;
     if (extensionResolving) {
       if (event.key === "Enter" && !event.shiftKey) event.preventDefault();
@@ -723,22 +715,20 @@ export function ChatComposer(props: ChatComposerProps) {
               No matching command. Leaving this as ordinary text.
             </p>
           ) : (
-            <ul
+            <OctantListbox
               aria-label="Commands you can run"
+              as="ul"
               className="chat-composer__command-list"
               id={commandListId}
-              role="listbox"
             >
               {commandMatches.map((command, index) => (
                 <li className="chat-composer__command-option" key={command.id} role="presentation">
-                  <OctantButton
-                    aria-selected={index === activeCommandIndex}
+                  <OctantListboxOption
                     id={`${commandListId}-${command.id}`}
                     onClick={() => chooseCommand(command)}
                     onMouseEnter={() => setActiveCommandIndex(index)}
-                    role="option"
+                    selected={index === activeCommandIndex}
                     size="sm"
-                    type="button"
                     variant={index === activeCommandIndex ? "secondary" : "ghost"}
                   >
                     <Slash aria-hidden="true" size={12} />
@@ -748,10 +738,10 @@ export function ChatComposer(props: ChatComposerProps) {
                         ? command.group
                         : `${command.group} · ${command.detail}`}
                     </span>
-                  </OctantButton>
+                  </OctantListboxOption>
                 </li>
               ))}
-            </ul>
+            </OctantListbox>
           )}
         </div>
       ) : null}

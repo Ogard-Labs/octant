@@ -10,10 +10,11 @@ import type { CanvasDocumentRecipe } from "@octant/contracts/canvas-skill";
 import type { AgentRunAuthority } from "@octant/contracts/agent-run";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
-import { useCallback, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface CanvasCreationContext {
@@ -221,7 +222,6 @@ function StartFromChooser(props: {
 }) {
   const labelId = useId();
   const descriptionPrefix = useId();
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const options: ReadonlyArray<StartFromOption> = [
     { value: BLANK, title: "Blank", description: "An empty Canvas with its title.", skeleton: [] },
     ...props.recipes.map((recipe) => ({
@@ -231,59 +231,27 @@ function StartFromChooser(props: {
       skeleton: recipe.skeleton,
     })),
   ];
-  const selectedIndex = Math.max(
-    0,
-    options.findIndex((option) => option.value === props.value),
-  );
-
-  const move = (event: KeyboardEvent<HTMLDivElement>) => {
-    const last = options.length - 1;
-    let next: number | undefined;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-      next = selectedIndex === last ? 0 : selectedIndex + 1;
-    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-      next = selectedIndex === 0 ? last : selectedIndex - 1;
-    } else if (event.key === "Home") {
-      next = 0;
-    } else if (event.key === "End") {
-      next = last;
-    }
-    const option = next === undefined ? undefined : options[next];
-    if (next === undefined || option === undefined) return;
-    event.preventDefault();
-    props.onChange(option.value);
-    optionRefs.current[next]?.focus();
-  };
 
   return (
     <div className="canvas-start-from">
       <p className="canvas-start-from__label" id={labelId}>
         Start from
       </p>
-      <div
+      <OctantRadioGroup
         aria-labelledby={labelId}
         className="canvas-start-from__options"
-        onKeyDown={move}
-        role="radiogroup"
+        onValueChange={props.onChange}
+        value={props.value}
       >
         {options.map((option, index) => {
-          const checked = index === selectedIndex;
           const descriptionId = `${descriptionPrefix}-${index}`;
           return (
-            <OctantButton
-              aria-checked={checked}
+            <OctantRadioGroupItem
               aria-describedby={descriptionId}
               aria-label={option.title}
               className="canvas-start-from__option"
               key={option.value}
-              onClick={() => props.onChange(option.value)}
-              ref={(element) => {
-                optionRefs.current[index] = element;
-              }}
-              role="radio"
-              tabIndex={checked ? 0 : -1}
-              type="button"
-              variant="bare"
+              value={option.value}
             >
               <SkeletonPreview skeleton={option.skeleton} />
               <span className="canvas-start-from__text">
@@ -292,10 +260,10 @@ function StartFromChooser(props: {
                   {option.description}
                 </span>
               </span>
-            </OctantButton>
+            </OctantRadioGroupItem>
           );
         })}
-      </div>
+      </OctantRadioGroup>
     </div>
   );
 }

@@ -1,13 +1,16 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import type { RemoteAccessAdministrationBridge } from "../shell/hostBridge";
 import { providerModelLabel } from "../providers/providerModelLabel";
-import { ModelPicker } from "../providers/ModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { continuationLink } from "./continuationLink";
 import "../styles/conversation-inputs.css";
+
+const LazyModelPicker = lazy(() =>
+  import("../providers/ModelPicker").then((module) => ({ default: module.ModelPicker })),
+);
 
 export const ContinuityScreenContext = createContext<{
   readonly hostLabel?: string;
@@ -165,25 +168,29 @@ export function ContinueElsewhere(props: {
             ? "Omitted on the next continuation: original files and images, by your explicit text-only choice."
             : "Original files and images are preserved. A missing or unsupported input refuses the turn before sending."}
         </p>
-        <ModelPicker
-          groups={props.groups}
-          selectedProviderInstanceId={props.selected.providerInstanceId}
-          selectedModelId={props.selected.modelId}
-          disabled={busy || props.disabled === true}
-          onSelect={(selection) => {
-            setBusy(true);
-            void Promise.resolve(props.onProviderChange(selection))
-              .then(() =>
-                setNotice(
-                  "Provider selection requested. Review the current destination in the composer; your draft remains unsent.",
-                ),
-              )
-              .catch(() =>
-                setNotice("The provider change was refused. Your draft and inputs are kept."),
-              )
-              .finally(() => setBusy(false));
-          }}
-        />
+        {open ? (
+          <Suspense fallback={null}>
+            <LazyModelPicker
+              groups={props.groups}
+              selectedProviderInstanceId={props.selected.providerInstanceId}
+              selectedModelId={props.selected.modelId}
+              disabled={busy || props.disabled === true}
+              onSelect={(selection) => {
+                setBusy(true);
+                void Promise.resolve(props.onProviderChange(selection))
+                  .then(() =>
+                    setNotice(
+                      "Provider selection requested. Review the current destination in the composer; your draft remains unsent.",
+                    ),
+                  )
+                  .catch(() =>
+                    setNotice("The provider change was refused. Your draft and inputs are kept."),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            />
+          </Suspense>
+        ) : null}
         <h3>Another screen, same host</h3>
         {destinationScreen === undefined ? null : (
           <p>

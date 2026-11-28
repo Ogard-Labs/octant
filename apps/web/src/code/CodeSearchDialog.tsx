@@ -12,14 +12,19 @@ import type {
 } from "@octant/contracts";
 import { decodeCodeProjectFilePath } from "@octant/contracts";
 import { CornerDownLeft, FileText, Search } from "../ui/icons";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
 import { isApplePlatform } from "../platform";
 import { failureMessage } from "../lib/failureMessage";
 import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
-import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 
 const RESULTS_ID = "code-search-results";
 
@@ -192,26 +197,6 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
     };
   }, [checkoutId, client, scope, threadId, trimmed, composing]);
 
-  const active = matches.length === 0 ? -1 : Math.min(activeIndex, matches.length - 1);
-  const statusMessage =
-    errorMessage !== undefined
-      ? errorMessage
-      : trimmed === ""
-        ? scope === "path"
-          ? "Type part of a file name."
-          : "Type text to find inside the repository's files."
-        : searching
-          ? "Searching…"
-          : matches.length === 0
-            ? truncated
-              ? // Saying only "no match" here would be a claim about the whole
-                // repository that the host never made.
-                "No match yet. Octant stopped before searching the whole repository."
-              : "No match in this checkout."
-            : `${matches.length} match${matches.length === 1 ? "" : "es"}${
-                truncated ? ", and Octant stopped before searching the whole repository." : "."
-              }`;
-
   function close(): void {
     setScope(undefined);
   }
@@ -233,33 +218,31 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
     props.onOpenFile(path);
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (matches.length === 0) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex(active + 1 >= matches.length ? 0 : active + 1);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex(active <= 0 ? matches.length - 1 : active - 1);
-      return;
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setActiveIndex(0);
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setActiveIndex(matches.length - 1);
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      open(matches[active]);
-    }
-  }
+  const listbox = useOctantListbox({
+    activeIndex,
+    count: matches.length,
+    onActivate: (index) => open(matches[index]),
+    onActiveIndexChange: setActiveIndex,
+  });
+  const active = listbox.activeIndex;
+  const statusMessage =
+    errorMessage !== undefined
+      ? errorMessage
+      : trimmed === ""
+        ? scope === "path"
+          ? "Type part of a file name."
+          : "Type text to find inside the repository's files."
+        : searching
+          ? "Searching…"
+          : matches.length === 0
+            ? truncated
+              ? // Saying only "no match" here would be a claim about the whole
+                // repository that the host never made.
+                "No match yet. Octant stopped before searching the whole repository."
+              : "No match in this checkout."
+            : `${matches.length} match${matches.length === 1 ? "" : "es"}${
+                truncated ? ", and Octant stopped before searching the whole repository." : "."
+              }`;
 
   const label = scope === "path" ? "Go to file" : "Find in repository";
   return (
@@ -276,24 +259,23 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
         >
           <div className="command-palette__field">
             <Search aria-hidden="true" size={14} />
-            <OctantInput
-              {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
-              aria-controls={RESULTS_ID}
-              aria-expanded={matches.length > 0}
+            <OctantListboxInput
+              activeDescendantId={active >= 0 ? optionId(active) : undefined}
               aria-label={label}
               autoComplete="off"
+              controlsId={RESULTS_ID}
+              expanded={matches.length > 0}
               onChange={(event) => {
                 setQuery(event.target.value);
                 setActiveIndex(0);
               }}
               onKeyDown={(event) => {
-                if (!event.nativeEvent.isComposing) handleKeyDown(event);
+                listbox.handleKeyDown(event);
               }}
               onCompositionStart={() => setComposing(true)}
               onCompositionEnd={() => setComposing(false)}
               placeholder={scope === "path" ? "Go to file" : "Find in repository"}
               ref={inputRef}
-              role="combobox"
               value={query}
             />
             {query === "" ? null : (
@@ -335,22 +317,22 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
           >
             {statusMessage}
           </p>
-          <div
+          <OctantListbox
+            activeDescendantId={active >= 0 ? optionId(active) : undefined}
             aria-label="Search results"
             className="command-palette__results"
             id={RESULTS_ID}
-            role="listbox"
           >
             {matches.map((match, index) => (
-              <div
-                aria-selected={index === active}
+              <OctantListboxOption
+                as="div"
                 className="command-palette__result"
                 data-active={index === active}
                 id={optionId(index)}
                 key={`${String(match.path)}:${match.scope === "content" ? match.line : 0}:${index}`}
                 onClick={() => open(match)}
                 onMouseMove={() => setActiveIndex(index)}
-                role="option"
+                selected={index === active}
               >
                 <span className="command-palette__result-title">
                   <FileText aria-hidden="true" size={12} />
@@ -368,9 +350,9 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
                     <span>Enter</span>
                   </span>
                 ) : null}
-              </div>
+              </OctantListboxOption>
             ))}
-          </div>
+          </OctantListbox>
         </OctantDialog>
       )}
     </OctantDialogPresence>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "../ui/icons";
 import {
   describeChord,
@@ -11,7 +11,12 @@ import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantKbd } from "../ui/base/OctantKbd";
-import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import { keybindingActionForCommand } from "./commandKeybinding";
 import { useNeedsYou, useOctantCommands } from "./CommandRegistry";
 import { filterOctantCommands, groupOctantCommands, type OctantCommand } from "./commandModel";
@@ -72,7 +77,6 @@ export function CommandPalette() {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
   const available = commands.length > 0;
 
   useEffect(() => {
@@ -87,7 +91,6 @@ export function CommandPalette() {
       restoreFocusRef.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setQuery("");
-      setActiveIndex(0);
       setOpen(true);
       refreshNeedsYou.current?.();
     }
@@ -134,12 +137,6 @@ export function CommandPalette() {
     };
   }, [commands, open, query, waitingCommands]);
 
-  const active = results.length === 0 ? -1 : Math.min(activeIndex, results.length - 1);
-  const statusMessage =
-    results.length === 0
-      ? "No matching command."
-      : `${results.length} matching command${results.length === 1 ? "" : "s"}.`;
-
   function close(): void {
     setOpen(false);
   }
@@ -150,33 +147,21 @@ export function CommandPalette() {
     command.action.run();
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-    if (results.length === 0) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex(active + 1 >= results.length ? 0 : active + 1);
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex(active <= 0 ? results.length - 1 : active - 1);
-      return;
-    }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setActiveIndex(0);
-      return;
-    }
-    if (event.key === "End") {
-      event.preventDefault();
-      setActiveIndex(results.length - 1);
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      run(results[active]);
-    }
-  }
+  const listbox = useOctantListbox({
+    count: results.length,
+    onActivate: (index) => run(results[index]),
+  });
+  const active = listbox.activeIndex;
+  const statusMessage =
+    results.length === 0
+      ? "No matching command."
+      : `${results.length} matching command${results.length === 1 ? "" : "s"}.`;
+
+  const resetActiveIndexRef = useRef(listbox.setActiveIndex);
+  resetActiveIndexRef.current = listbox.setActiveIndex;
+  useEffect(() => {
+    if (open) resetActiveIndexRef.current(0);
+  }, [open]);
 
   return (
     <OctantDialogPresence>
@@ -192,20 +177,21 @@ export function CommandPalette() {
         >
           <div className="command-palette__field">
             <Search aria-hidden="true" size={14} />
-            <OctantInput
-              {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
-              aria-controls={RESULTS_ID}
-              aria-expanded={results.length > 0}
+            <OctantListboxInput
+              activeDescendantId={active >= 0 ? optionId(active) : undefined}
               aria-label="Search commands"
               autoComplete="off"
+              controlsId={RESULTS_ID}
+              expanded={results.length > 0}
               onChange={(event) => {
                 setQuery(event.target.value);
-                setActiveIndex(0);
+                listbox.setActiveIndex(0);
               }}
-              onKeyDown={handleKeyDown}
+              onKeyDown={(event) => {
+                listbox.handleKeyDown(event);
+              }}
               placeholder="Search commands"
               ref={inputRef}
-              role="combobox"
               value={query}
             />
           </div>
@@ -217,11 +203,11 @@ export function CommandPalette() {
           >
             {statusMessage}
           </p>
-          <div
+          <OctantListbox
+            activeDescendantId={active >= 0 ? optionId(active) : undefined}
             aria-label="Command results"
             className="command-palette__results"
             id={RESULTS_ID}
-            role="listbox"
           >
             {groups.map((group) => (
               <div
@@ -240,15 +226,15 @@ export function CommandPalette() {
                     actionId === undefined ? undefined : keybindings.bindings.get(actionId);
                   const shortcut = chord === undefined ? undefined : describeChord(chord, apple);
                   return (
-                    <div
-                      aria-selected={index === active}
+                    <OctantListboxOption
+                      as="div"
                       className="command-palette__result"
                       data-active={index === active}
                       id={optionId(index)}
                       key={command.id}
                       onClick={() => run(command)}
-                      onMouseMove={() => setActiveIndex(index)}
-                      role="option"
+                      onMouseMove={() => listbox.setActiveIndex(index)}
+                      selected={index === active}
                     >
                       <span className="command-palette__result-title">{command.title}</span>
                       {command.detail === undefined ? null : (
@@ -263,12 +249,12 @@ export function CommandPalette() {
                           <span>Enter</span>
                         </span>
                       ) : null}
-                    </div>
+                    </OctantListboxOption>
                   );
                 })}
               </div>
             ))}
-          </div>
+          </OctantListbox>
           <footer className="command-palette__footer">
             <p className="command-palette__scope" role="note">
               Host-offered commands. Every action still runs its normal authority check.

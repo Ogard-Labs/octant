@@ -1,7 +1,7 @@
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
 import { ChevronDown, FileSearch, GitMerge, GitPullRequest, Save } from "../../ui/icons";
 import { useState } from "react";
-import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption } from "../../ui/base/OctantListbox";
 import { OctantPopover } from "../../ui/base/OctantPopover";
 
 export const CODE_DELIVERY_OUTCOME_OPTIONS: ReadonlyArray<{
@@ -75,18 +75,20 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
       {...(props.disabled === undefined ? {} : { triggerDisabled: props.disabled })}
     >
       <p className="code-composer-choice__caption">This task delivers</p>
-      <div aria-label="Delivers" className="code-composer-choice__list" role="listbox">
+      <OctantListbox
+        aria-label="Delivers"
+        className="code-composer-choice__list"
+        navigation="roving"
+      >
         {CODE_DELIVERY_OUTCOME_OPTIONS.map((option) => (
-          <OctantButton
-            aria-selected={option.id === props.value}
+          <OctantListboxOption
             className="code-composer-choice__option"
             key={option.id}
             onClick={() => {
               props.onChange(option.id);
               setOpen(false);
             }}
-            role="option"
-            type="button"
+            selected={option.id === props.value}
             variant="ghost"
           >
             <span className="code-composer-choice__option-icon">
@@ -96,9 +98,9 @@ export function CodeDeliveryOutcomeSelector(props: CodeDeliveryOutcomeSelectorPr
               <span className="code-composer-choice__option-label">{option.label}</span>
               <span className="code-composer-choice__option-detail">{option.detail}</span>
             </span>
-          </OctantButton>
+          </OctantListboxOption>
         ))}
-      </div>
+      </OctantListbox>
     </OctantPopover>
   );
 }

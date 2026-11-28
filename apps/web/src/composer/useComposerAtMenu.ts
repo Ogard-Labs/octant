@@ -27,7 +27,7 @@ import { filterOctantCommands } from "../palette/commandModel";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { readPathMentionQuery, type PathMentionCandidate } from "../code/pathMentions";
 import { useThreadNativeSetupServices } from "../providers/ThreadNativeSetupControl";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import type { ComposerInputElement } from "./ComposerInput";
 // The picker and chip load the first time a prompt shows one, so the start
 // screen's initial load carries neither them nor their styles.
@@ -460,6 +460,19 @@ export function useComposerAtMenu(input: {
     setActiveIndex(0);
     row.choose();
   };
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowHomeEnd: false,
+    allowTabActivate: true,
+    count: open && modelPicker === undefined ? rows.length : 0,
+    disabled: !open || modelPicker !== undefined || resolving,
+    onActivate: (index) => {
+      const row = rows[index];
+      if (row !== undefined) choose(row);
+    },
+    onActiveIndexChange: setActiveIndex,
+    onDismiss: open && modelPicker === undefined ? () => setToken(undefined) : undefined,
+  });
   const handleKeyDown = (event: KeyboardEvent<ComposerInputElement>): boolean => {
     if (event.nativeEvent.isComposing) return false;
     if (resolving) {
@@ -484,28 +497,7 @@ export function useComposerAtMenu(input: {
       }
       return false;
     }
-    if (!open) return false;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((current) => (current + 1) % rows.length);
-      return true;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((current) => (current - 1 + rows.length) % rows.length);
-      return true;
-    }
-    if ((event.key === "Enter" || event.key === "Tab") && !event.shiftKey && active) {
-      event.preventDefault();
-      choose(active);
-      return true;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setToken(undefined);
-      return true;
-    }
-    return false;
+    return listbox.handleKeyDown(event);
   };
   return {
     active,
@@ -563,28 +555,26 @@ export function ComposerAtTypeahead(props: {
     "div",
     { className: "chat-composer__command-typeahead" },
     createElement(
-      "ul",
+      OctantListbox,
       {
         "aria-label": "Skills, tools, and files you can mention",
+        as: "ul",
         className: "chat-composer__command-list",
         id: controller.listId,
-        role: "listbox",
       },
       ...controller.rows.map((row, index) =>
         createElement(
           "li",
           { className: "chat-composer__command-option", key: row.id, role: "presentation" },
           createElement(
-            OctantButton,
+            OctantListboxOption,
             {
-              "aria-selected": row.id === controller.active?.id,
               id: `${controller.listId}-${row.id}`,
               onClick: () => controller.choose(row),
               onMouseDown: (event: { preventDefault: () => void }) => event.preventDefault(),
               onMouseEnter: () => controller.setActiveIndex(index),
-              role: "option",
+              selected: row.id === controller.active?.id,
               size: "sm",
-              type: "button",
               variant: row.id === controller.active?.id ? "secondary" : "ghost",
             },
             createElement(ICONS[row.icon], { "aria-hidden": true, size: 12 }),

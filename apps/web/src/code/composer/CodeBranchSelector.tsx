@@ -1,10 +1,10 @@
 import type { CodeWorktreeRef } from "@octant/contracts/code";
 import { Check, ChevronDown, ChevronRight, GitBranch, Search } from "../../ui/icons";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantBadge } from "../../ui/base/OctantBadge";
-import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../../ui/base/OctantListbox";
 import { OctantPopover } from "../../ui/base/OctantPopover";
 import { PopupSkeletonRows } from "../../ui/base/PopupSkeletonRows";
 
@@ -43,6 +43,7 @@ export interface CodeBranchSelectorProps {
  * authoritative fetch and worktree creation stay on the server.
  */
 export function CodeBranchSelector(props: CodeBranchSelectorProps) {
+  const listId = useId();
   const [open, setOpen] = useState(props.startOpen === true);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -63,6 +64,20 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
     if (trimmed === "") return refs;
     return refs.filter((ref) => ref.name.toLowerCase().includes(trimmed));
   }, [props.refs, query]);
+
+  const listbox = useOctantListbox({
+    allowHomeEnd: false,
+    count: filtered.length,
+    initialActiveIndex: -1,
+    onActivate: (index) => {
+      const ref = filtered[index];
+      if (ref === undefined) return;
+      props.onSelectRef(ref);
+      setOpen(false);
+    },
+  });
+  const activeOptionId =
+    listbox.activeIndex >= 0 ? `${listId}-option-${String(listbox.activeIndex)}` : undefined;
 
   const triggerLabel = props.branch;
   const asRow = props.presentation === "row";
@@ -103,8 +118,16 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       <label className="octant-popover-search code-branch-selector__search">
         <Search aria-hidden="true" size={14} />
         <OctantInput
+          aria-activedescendant={activeOptionId}
+          aria-controls={listId}
           aria-label="Search refs"
-          onChange={(event) => setQuery(event.currentTarget.value)}
+          onChange={(event) => {
+            setQuery(event.currentTarget.value);
+            listbox.setActiveIndex(-1);
+          }}
+          onKeyDown={(event) => {
+            listbox.handleKeyDown(event);
+          }}
           placeholder="Search refs…"
           ref={searchRef}
           type="search"
@@ -112,7 +135,13 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
           value={query}
         />
       </label>
-      <div aria-label="Refs" className="code-branch-selector__list" role="listbox">
+      <OctantListbox
+        activeDescendantId={activeOptionId}
+        aria-label="Refs"
+        className="code-branch-selector__list"
+        id={listId}
+        navigation="roving"
+      >
         {props.loading === true && (props.refs === undefined || props.refs.length === 0) ? (
           <PopupSkeletonRows label="Loading refs…" rows={6} />
         ) : filtered.length === 0 ? (
@@ -122,24 +151,23 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
               : "No refs match the search."}
           </p>
         ) : (
-          filtered.map((ref) => {
+          filtered.map((ref, index) => {
             const selected =
               ref.kind === "remote"
                 ? props.startFromOrigin &&
                   ref.name === `${props.remoteName ?? "origin"}/${props.branch}`
                 : !props.startFromOrigin && ref.name === props.branch;
             return (
-              <OctantButton
-                aria-selected={selected}
+              <OctantListboxOption
+                active={index === listbox.activeIndex}
                 className="octant-popover-option code-branch-selector__option"
+                id={`${listId}-option-${String(index)}`}
                 key={`${ref.kind}:${ref.name}`}
                 onClick={() => {
                   props.onSelectRef(ref);
                   setOpen(false);
                 }}
-                role="option"
-                type="button"
-                variant="bare"
+                selected={selected}
               >
                 <span className="code-branch-selector__option-name">{ref.name}</span>
                 <span className="code-branch-selector__option-meta">
@@ -152,11 +180,11 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
                     <OctantBadge variant="secondary">{ref.remoteName ?? "remote"}</OctantBadge>
                   ) : null}
                 </span>
-              </OctantButton>
+              </OctantListboxOption>
             );
           })
         )}
-      </div>
+      </OctantListbox>
       {props.onStartFromOriginChange !== undefined && !asRow ? (
         <div className="code-branch-selector__footer">
           <span className="oct-menu-option">Start from origin</span>

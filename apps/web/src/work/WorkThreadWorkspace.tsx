@@ -250,7 +250,7 @@ import {
 } from "../finishedReceipts/FinishedReceiptCard";
 import { useThreadFinishedReceipts } from "../finishedReceipts/FinishedReceiptProvider";
 import { PendingRequests } from "../transcript/PendingRequests";
-import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { LazyProviderQuestionCard as ProviderQuestionCard } from "../transcript/LazyProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TurnActions } from "../transcript/TurnActions";
 import {

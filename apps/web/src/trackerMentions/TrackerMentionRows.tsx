@@ -1,6 +1,6 @@
 import { trackerMentionLabel } from "@octant/domain";
 import type { TrackerMentionCandidate } from "@octant/contracts/tracker-mention-search";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantListboxOption } from "../ui/base/OctantListbox";
 import {
   TRACKER_MENTION_KIND_LABEL,
   TrackerMentionIcon,
@@ -21,14 +21,12 @@ export interface TrackerMentionRowsProps {
 export function TrackerMentionRows(props: TrackerMentionRowsProps) {
   return props.candidates.map((candidate, index) => (
     <li className="thread-mention__option" key={candidate.url} role="presentation">
-      <OctantButton
-        aria-selected={index === props.activeIndex}
+      <OctantListboxOption
         id={`${props.listId}-${candidate.source}-${candidate.id}`}
         onClick={() => props.onChoose(candidate)}
         onMouseEnter={() => props.onHover(index)}
-        role="option"
+        selected={index === props.activeIndex}
         size="sm"
-        type="button"
         variant={index === props.activeIndex ? "secondary" : "ghost"}
       >
         <span className="thread-mention__mark">
@@ -43,7 +41,7 @@ export function TrackerMentionRows(props: TrackerMentionRowsProps) {
             {`${TRACKER_MENTION_KIND_LABEL[candidate.kind]} · ${candidate.container}`}
           </span>
         </span>
-      </OctantButton>
+      </OctantListboxOption>
     </li>
   ));
 }

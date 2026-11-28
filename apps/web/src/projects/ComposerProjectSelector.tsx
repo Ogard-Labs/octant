@@ -23,12 +23,16 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
   type ReactNode,
   Fragment,
 } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { ProjectIcon } from "./ProjectIcon";
 
@@ -263,38 +267,19 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
     [close, props],
   );
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      if (view !== "projects" || flatEntries.length === 0) return;
-      const inSearch = event.target === searchRef.current;
-      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) setKeyboardMoved(true);
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveIndex((i) => (i + 1 >= flatEntries.length ? 0 : i + 1));
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveIndex((i) => (i - 1 < 0 ? flatEntries.length - 1 : i - 1));
-      } else if (event.key === "Home" && !inSearch) {
-        event.preventDefault();
-        setActiveIndex(0);
-      } else if (event.key === "End" && !inSearch) {
-        event.preventDefault();
-        setActiveIndex(flatEntries.length - 1);
-      } else if (
-        event.key === "Enter" ||
-        // Space is a character in the search field, whose keydown reaches this
-        // container. Only the list itself reads Space as activation; Project
-        // names and paths commonly contain spaces.
-        (event.key === " " && !inSearch)
-      ) {
-        const entry = flatEntries[activeIndex];
-        if (entry === undefined) return;
-        event.preventDefault();
-        activate(entry);
-      }
+  const listbox = useOctantListbox({
+    activeIndex,
+    allowHomeEnd: (event) => event.target !== searchRef.current,
+    allowSpaceActivate: (event) => event.target !== searchRef.current,
+    count: flatEntries.length,
+    disabled: view !== "projects",
+    onActivate: (index) => {
+      const entry = flatEntries[index];
+      if (entry !== undefined) activate(entry);
     },
-    [activate, activeIndex, flatEntries, view],
-  );
+    onActiveIndexChange: setActiveIndex,
+    onKeyboardMove: () => setKeyboardMoved(true),
+  });
 
   useEffect(() => {
     if (view !== "projects") return;
@@ -307,13 +292,6 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
   useEffect(() => {
     if (activeIndex >= flatEntries.length) setActiveIndex(flatEntries.length - 1);
   }, [activeIndex, flatEntries.length]);
-
-  useEffect(() => {
-    if (activeIndex < 0) return;
-    document
-      .getElementById(`${listboxId}-option-${activeIndex}`)
-      ?.scrollIntoView?.({ block: "nearest" });
-  }, [activeIndex, listboxId]);
 
   useLayoutEffect(() => {
     if (frameHeight !== undefined) return;
@@ -328,10 +306,6 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
     className: "octant-popover-option composer-folder-selector__option",
     "data-active": keyboardMoved && index === activeIndex ? "true" : undefined,
     id: `${listboxId}-option-${index}`,
-    role: "option" as const,
-    tabIndex: -1,
-    type: "button" as const,
-    variant: "bare" as const,
   });
   const check = (chosen: boolean): ReactNode =>
     chosen ? <Check aria-hidden="true" className="octant-popover-option__check" size={14} /> : null;
@@ -342,7 +316,9 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
   return (
     <div
       className={`composer-folder-selector__body${view === "github" ? " composer-folder-selector__body--github" : ""}`}
-      onKeyDown={handleKeyDown}
+      onKeyDown={(event) => {
+        listbox.handleKeyDown(event);
+      }}
       ref={bodyRef}
       {...(frameHeight === undefined || view === "github"
         ? {}
@@ -386,18 +362,17 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
           {searchShown ? (
             <label className="octant-popover-search">
               <Search aria-hidden="true" size={14} />
-              <OctantInput
-                aria-activedescendant={activeDescendant}
-                aria-controls={listboxId}
-                aria-expanded="true"
+              <OctantListboxInput
+                activeDescendantId={activeDescendant}
                 aria-label="Search Projects"
+                controlsId={listboxId}
+                expanded
                 onChange={(e) => {
                   setQuery(e.target.value);
                   setActiveIndex(-1);
                 }}
                 placeholder="Search Projects…"
                 ref={searchRef}
-                role="combobox"
                 type="search"
                 unstyled
                 value={query}
@@ -409,13 +384,12 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
               {query.trim() === "" ? "No Projects yet" : "No Projects match your search"}
             </p>
           ) : null}
-          <div
-            aria-activedescendant={searchShown ? undefined : activeDescendant}
+          <OctantListbox
+            activeDescendantId={searchShown ? undefined : activeDescendant}
             aria-label="Project options"
             className="composer-folder-selector__list"
             id={listboxId}
             ref={listboxRef}
-            role="listbox"
             tabIndex={searchShown ? -1 : 0}
           >
             {nothingToList ? null : (
@@ -433,10 +407,10 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                     {savedEntries.map((entry, index) => {
                       const chosen = isChosen(entry);
                       return (
-                        <OctantButton
-                          aria-selected={chosen}
+                        <OctantListboxOption
                           key={String(entry.projectId)}
                           onClick={() => activate(entry)}
+                          selected={chosen}
                           title={entry.rootPath}
                           {...optionProps(index)}
                         >
@@ -456,7 +430,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                             )}
                           </span>
                           {check(chosen)}
-                        </OctantButton>
+                        </OctantListboxOption>
                       );
                     })}
                   </div>
@@ -475,10 +449,10 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                       const index = savedEntries.length + offset;
                       const chosen = isChosen(entry);
                       return (
-                        <OctantButton
-                          aria-selected={chosen}
+                        <OctantListboxOption
                           key={String(entry.projectId)}
                           onClick={() => activate(entry)}
+                          selected={chosen}
                           title={entry.location}
                           {...optionProps(index)}
                         >
@@ -492,7 +466,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                             </span>
                           </span>
                           {check(chosen)}
-                        </OctantButton>
+                        </OctantListboxOption>
                       );
                     })}
                   </div>
@@ -531,8 +505,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                       {startsCreate ? (
                         <div aria-hidden="true" className="composer-folder-selector__divider" />
                       ) : null}
-                      <OctantButton
-                        aria-selected={chosen}
+                      <OctantListboxOption
                         {...(refused ? { "aria-disabled": true } : {})}
                         {...(reason === undefined
                           ? {}
@@ -545,6 +518,7 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                           ? { "aria-label": label }
                           : {})}
                         onClick={() => activate(entry)}
+                        selected={chosen}
                         {...(entry.kind === "default-folder" && reason === undefined
                           ? { title: entry.rootPath }
                           : {})}
@@ -587,13 +561,13 @@ function ProjectMenu(props: ComposerProjectSelectorProps & { readonly close: () 
                           ) : null}
                         </span>
                         {check(chosen)}
-                      </OctantButton>
+                      </OctantListboxOption>
                     </Fragment>
                   );
                 })}
               </div>
             )}
-          </div>
+          </OctantListbox>
         </>
       )}
     </div>

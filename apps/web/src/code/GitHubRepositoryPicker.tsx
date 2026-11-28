@@ -10,6 +10,7 @@ import { Check, Link, RefreshCw, Search } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantListbox, OctantListboxOption, useOctantListbox } from "../ui/base/OctantListbox";
 import { describeGithubRemediation } from "../github/githubRemediation";
 import { parseGithubRepositoryReference } from "./githubRepositoryReference";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -331,30 +332,23 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
     }
   };
 
-  const handleListboxKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
-    if (options.length === 0) return;
-    const lastIndex = options.length - 1;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex((index) => (index === undefined ? 0 : Math.min(index + 1, lastIndex)));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex((index) => (index === undefined ? lastIndex : Math.max(index - 1, 0)));
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      setActiveIndex(0);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      setActiveIndex(lastIndex);
-    } else if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      const active = activeIndex === undefined ? undefined : options[activeIndex];
+  const listbox = useOctantListbox({
+    activeIndex: activeIndex ?? -1,
+    allowSpaceActivate: true,
+    count: options.length,
+    getOptionLabel: (index) => {
+      const row = options[index];
+      return row === undefined ? "" : `${row.owner}/${row.name}`;
+    },
+    loop: false,
+    onActivate: (index) => {
+      const active = options[index];
       if (active !== undefined) select(active);
-    }
-  };
+    },
+    onActiveIndexChange: (next) => setActiveIndex(next < 0 ? undefined : next),
+  });
 
-  const activeOption =
-    activeIndex === undefined || activeIndex >= options.length ? undefined : options[activeIndex];
+  const activeOption = listbox.activeIndex < 0 ? undefined : options[listbox.activeIndex];
 
   return (
     <div className="github-picker">
@@ -457,14 +451,14 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                 No repositories match.
               </p>
             ) : (
-              <ul
-                aria-activedescendant={
-                  activeOption === undefined ? undefined : optionId(activeOption)
-                }
+              <OctantListbox
+                activeDescendantId={activeOption === undefined ? undefined : optionId(activeOption)}
                 aria-label="GitHub repositories"
+                as="ul"
                 className="github-picker__listbox"
-                onKeyDown={handleListboxKeyDown}
-                role="listbox"
+                onKeyDown={(event) => {
+                  listbox.handleKeyDown(event);
+                }}
                 tabIndex={0}
               >
                 {showRecents ? (
@@ -476,7 +470,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                   const isRecentBoundary = showRecents && index === recents.length;
                   return (
                     <RepositoryOption
-                      active={activeIndex === index}
+                      active={listbox.activeIndex === index}
                       id={optionId(row)}
                       key={row.nodeId}
                       onClick={() => select(row)}
@@ -487,7 +481,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
                     />
                   );
                 })}
-              </ul>
+              </OctantListbox>
             )}
             {catalogue.hasNextPage ? (
               <OctantButton
@@ -560,8 +554,8 @@ function RepositoryOption(props: {
           All repositories
         </li>
       ) : null}
-      <li
-        aria-selected={props.selected}
+      <OctantListboxOption
+        as="li"
         className={
           props.active
             ? "octant-popover-option github-picker__option github-picker__option--active"
@@ -570,7 +564,7 @@ function RepositoryOption(props: {
         id={props.id}
         onClick={props.onClick}
         onPointerEnter={() => props.onPreview?.(row)}
-        role="option"
+        selected={props.selected}
         title={`${row.owner}/${row.name}`}
       >
         <span className="github-picker__option-name">
@@ -586,7 +580,7 @@ function RepositoryOption(props: {
         {props.selected ? (
           <Check aria-hidden="true" className="octant-popover-option__check" size={14} />
         ) : null}
-      </li>
+      </OctantListboxOption>
     </>
   );
 }

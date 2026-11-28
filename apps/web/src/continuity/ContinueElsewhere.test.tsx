@@ -101,7 +101,7 @@ describe("continuing the same task elsewhere", () => {
     expect(screen.getAllByText("Execution Mac", { exact: true }).length).toBeGreaterThan(0);
     expect(screen.getByText("Current browser")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Text only: omit files and images" }));
-    await user.click(screen.getByRole("option", { name: /second model/ }));
+    await user.click(await screen.findByRole("option", { name: /second model/ }));
     expect(change).toHaveBeenCalledWith({ providerInstanceId: instance.id, modelId: "second" });
     expect(screen.getByRole("link", { name: "Open task link" }).getAttribute("href")).toBe(
       `https://host.example/?continueMode=work&continueThread=${id}`,

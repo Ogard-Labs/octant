@@ -14,7 +14,9 @@ import {
   OctantComboboxTrigger,
 } from "../ui/base/OctantCombobox";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantListbox, OctantListboxInput, OctantListboxOption } from "../ui/base/OctantListbox";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantSeparator, OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -636,6 +638,40 @@ function Labels() {
             Graph
           </OctantToggleGroupItem>
         </OctantToggleGroup>
+      </Specimen>
+      <Specimen
+        adapters={["OctantRadioGroup", "OctantRadioGroupItem"]}
+        props={`appearance="segmented"; value="light"; one item disabled`}
+      >
+        <OctantRadioGroup appearance="segmented" aria-label="Theme" defaultValue="light">
+          <OctantRadioGroupItem appearance="segmented" value="system">
+            System
+          </OctantRadioGroupItem>
+          <OctantRadioGroupItem appearance="segmented" value="light">
+            Light
+          </OctantRadioGroupItem>
+          <OctantRadioGroupItem appearance="segmented" disabled value="dark">
+            Dark
+          </OctantRadioGroupItem>
+        </OctantRadioGroup>
+      </Specimen>
+      <Specimen
+        adapters={["OctantListbox", "OctantListboxInput", "OctantListboxOption"]}
+        props="searchable combobox input paired with a shared listbox"
+      >
+        <div className="gallery-field-width">
+          <OctantListboxInput
+            aria-label="Filter choices"
+            controlsId="gallery-listbox-sample"
+            defaultValue=""
+            expanded
+            placeholder="Filter choices"
+          />
+          <OctantListbox aria-label="Choices" id="gallery-listbox-sample" navigation="roving">
+            <OctantListboxOption selected>First choice</OctantListboxOption>
+            <OctantListboxOption>Second choice</OctantListboxOption>
+          </OctantListbox>
+        </div>
       </Specimen>
     </>
   );

@@ -209,7 +209,7 @@ import {
 import { TurnLoopStallNotice } from "../transcript/TurnLoopStallNotice";
 import { SideTaskInline } from "../followUps/SideTaskCards";
 import { FinishedReceiptInline } from "../finishedReceipts/FinishedReceiptCard";
-import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { LazyProviderQuestionCard as ProviderQuestionCard } from "../transcript/LazyProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
 import { McpSignInNotice } from "../transcript/McpSignInNotice";

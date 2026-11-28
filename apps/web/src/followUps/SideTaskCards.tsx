@@ -1,32 +1,31 @@
-import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import {
   createContext,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { GitBranch, MessageSquarePlus, X } from "../ui/icons";
 import type { SideTask, SideTaskContext, SideTaskResult } from "@octant/contracts";
 import {
   SideTaskClientFailure,
   type SideTaskClient,
 } from "@octant/client-runtime/side-task-client";
-import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { OctantAlert } from "../ui/base/OctantAlert";
-import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
-import { LazyThreadReferenceChip } from "../threadReferences/LazyThreadReferenceChip";
 import "./follow-up-suggestions.css";
+
+const LazySideTaskCard = lazy(() =>
+  import("./SideTaskCardItem").then((module) => ({ default: module.SideTaskCard })),
+);
 
 type StartedResult = Extract<SideTaskResult, { readonly kind: "side-task-started" }>;
 type SideTaskAction = "start" | "continue" | "dismiss";
@@ -289,218 +288,22 @@ export function sideTasksAfterTurn(
 
 /** The side-task cards and receipts that follow one reply in a transcript. */
 export function SideTaskInline(props: SideTaskPlacement) {
-  const tasks = useThreadSideTasks();
+  const value = useContext(SideTasksContext);
+  const tasks = value?.tasks ?? NO_TASKS;
   const here = sideTasksAfterTurn(tasks, props);
-  if (here.length === 0) return null;
+  if (here.length === 0 || value === undefined) return null;
   return (
     <div className="side-tasks">
-      {here.map((task) => (
-        <SideTaskCard key={String(task.offer.id)} running={props.running} task={task} />
-      ))}
+      <Suspense fallback={null}>
+        {here.map((task) => (
+          <LazySideTaskCard
+            controller={value}
+            key={String(task.offer.id)}
+            running={props.running}
+            task={task}
+          />
+        ))}
+      </Suspense>
     </div>
-  );
-}
-
-function wantsWorktree(task: SideTask, context: SideTaskContext): boolean {
-  return task.offer.mode === "code" && (task.offer.target === "new-worktree" || context === "fork");
-}
-
-function SideTaskCard(props: { readonly task: SideTask; readonly running: boolean }) {
-  const { task } = props;
-  const value = useContext(SideTasksContext);
-  const id = String(task.offer.id);
-  const hintId = useId();
-  const [chosen, setChosen] = useState<SideTaskContext>();
-  if (value === undefined) return null;
-  const unconfirmedAction = value.unconfirmedActions.get(id);
-  const message =
-    unconfirmedAction === undefined
-      ? value.messages.get(id)
-      : `${unconfirmedAction} Waiting for the host's recorded status before another action is allowed.`;
-  const failure =
-    message === undefined ? null : (
-      <OctantAlert className="side-task__error" tone="danger">
-        {message}
-      </OctantAlert>
-    );
-
-  if (task.status !== "offered") {
-    const delivery = task.continuedDelivery ?? value.deliveries.get(id);
-    return (
-      <div aria-label={`Side task: ${task.offer.title}`} className="side-task-receipt" role="group">
-        <p className="side-task-receipt__line">
-          <span className="side-task-receipt__title">
-            {task.startedThreadId === undefined ? (
-              task.offer.title
-            ) : (
-              <LazyThreadReferenceChip
-                look="link"
-                threadId={String(task.startedThreadId)}
-                title={task.offer.title}
-              />
-            )}
-          </span>
-          <span aria-hidden="true"> · </span>
-          {task.status === "started" ? (
-            <>
-              {task.startedWith === "fork" ? "Forked into a new thread" : "Started in a new thread"}
-              {task.childState === undefined ? null : (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  {task.childState === "working"
-                    ? "Working"
-                    : task.childState === "attention"
-                      ? "Needs you"
-                      : "Finished"}
-                </>
-              )}
-              {task.reporting === undefined || task.startedThreadId === undefined ? null : (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <OctantButton
-                    disabled={value.busy !== undefined || unconfirmedAction !== undefined}
-                    onClick={() => value.setReporting(task, task.reporting === "stopped")}
-                    size={null}
-                    type="button"
-                    variant="link"
-                  >
-                    {task.reporting === "stopped" ? "Resume reporting" : "Stop reporting"}
-                  </OctantButton>
-                </>
-              )}
-              {task.startedThreadId === undefined ? null : (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <OctantButton
-                    className="side-task-receipt__open"
-                    onClick={() => value.open(task)}
-                    size={null}
-                    type="button"
-                    variant="link"
-                  >
-                    Open
-                  </OctantButton>
-                </>
-              )}
-            </>
-          ) : task.status === "continued-here" ? (
-            delivery === "unconfirmed" ? (
-              "Not sure it was delivered. Check this thread and its queue before sending it yourself."
-            ) : delivery === "queued" ? (
-              "Queued here, runs after the current reply"
-            ) : (
-              "Doing it here"
-            )
-          ) : (
-            "Dismissed"
-          )}
-        </p>
-        {failure}
-      </div>
-    );
-  }
-
-  const busyHere = value.busy?.id === id ? value.busy.action : undefined;
-  const blocked = value.busy !== undefined || unconfirmedAction !== undefined;
-  // A fork needs a settled offering turn, so until then the choice shows fresh.
-  const context: SideTaskContext = props.running
-    ? "fresh"
-    : (chosen ?? task.offer.context ?? "fresh");
-  const worktree = wantsWorktree(task, context);
-  const destination = worktree
-    ? "a new worktree"
-    : task.offer.mode === "chat"
-      ? "a new chat"
-      : "a new thread";
-  const newLabel = worktree
-    ? "New worktree"
-    : task.offer.mode === "chat"
-      ? "New chat"
-      : "New thread";
-  const hint = props.running
-    ? "Available when this reply finishes."
-    : task.offer.mode === "code"
-      ? "Including the conversation starts a new worktree from the files as this reply left them."
-      : undefined;
-  return (
-    <article aria-label={`Side task: ${task.offer.title}`} className="side-task">
-      <div className="side-task__head">
-        {task.offer.target === "new-worktree" ? (
-          <GitBranch aria-hidden="true" size={14} />
-        ) : (
-          <MessageSquarePlus aria-hidden="true" size={14} />
-        )}
-        <strong className="side-task__title">{task.offer.title}</strong>
-        <OctantIconButton
-          disabled={blocked}
-          label={`Dismiss ${task.offer.title}`}
-          onClick={() => value.act(task, "dismiss")}
-          size="icon-xs"
-          type="button"
-        >
-          <X aria-hidden="true" size={12} />
-        </OctantIconButton>
-      </div>
-      <p className="side-task__reason">{task.offer.reason}</p>
-      <OctantCollapsible className="side-task__prompt" summary="Prompt">
-        <p>{task.offer.prompt}</p>
-      </OctantCollapsible>
-      <p className="side-task__question">Start this in {destination}, or do it here?</p>
-      <div
-        aria-label="What the new thread starts with"
-        className="side-task__context"
-        onKeyDown={moveWithinRadioGroup}
-        role="radiogroup"
-      >
-        <OctantButton
-          aria-checked={context === "fresh"}
-          disabled={blocked}
-          onClick={() => setChosen("fresh")}
-          role="radio"
-          size="xs"
-          type="button"
-          variant={context === "fresh" ? "secondary" : "ghost"}
-        >
-          Fresh
-        </OctantButton>
-        <OctantButton
-          aria-checked={context === "fork"}
-          {...(hint === undefined ? {} : { "aria-describedby": hintId })}
-          disabled={blocked || props.running}
-          onClick={() => setChosen("fork")}
-          role="radio"
-          size="xs"
-          type="button"
-          variant={context === "fork" ? "secondary" : "ghost"}
-        >
-          Include this conversation
-        </OctantButton>
-      </div>
-      {hint === undefined ? null : (
-        <p className="side-task__hint" id={hintId}>
-          {hint}
-        </p>
-      )}
-      <div className="side-task__actions">
-        <OctantButton
-          disabled={blocked}
-          onClick={() => value.act(task, "start", context)}
-          size="xs"
-          type="button"
-        >
-          {busyHere === "start" ? "Starting…" : newLabel}
-        </OctantButton>
-        <OctantButton
-          disabled={blocked}
-          onClick={() => value.act(task, "continue")}
-          size="xs"
-          type="button"
-          variant="outline"
-        >
-          {busyHere === "continue" ? "Sending…" : "Do it here"}
-        </OctantButton>
-      </div>
-      {failure}
-    </article>
   );
 }

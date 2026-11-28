@@ -4,7 +4,7 @@ import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ResultSourceNotice } from "../transcript/ResultQuoteScope";
 import { ConversationInputs } from "../continuity/ConversationInputs";
-import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
+import { QuestionnaireSummary } from "../transcript/QuestionnaireSummary";
 import { threadCompactionSubject } from "../context/CompactionDivider";
 import type {
   ChatAttempt,
@@ -44,7 +44,7 @@ import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { SideTaskInline } from "../followUps/SideTaskCards";
-import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
+import { LazyProviderQuestionCard as ProviderQuestionCard } from "../transcript/LazyProviderQuestionCard";
 import { PendingRequests } from "../transcript/PendingRequests";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";

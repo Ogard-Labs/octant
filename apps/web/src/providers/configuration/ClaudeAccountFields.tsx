@@ -13,7 +13,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
 import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountValues";
-import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
+import { OctantRadioGroup, OctantRadioGroupItem } from "../../ui/base/OctantRadioGroup";
 
 /**
  * A Claude gateway account's address. When the host's own environment names a
@@ -82,27 +82,25 @@ export function ClaudeAccountAccentPicker(props: {
   readonly onChange: (accent: ClaudeAccountAccent) => void;
 }) {
   return (
-    <div
-      className="claude-account-accent-picker"
-      onKeyDown={moveWithinRadioGroup}
-      role="radiogroup"
+    <OctantRadioGroup<ClaudeAccountAccent | "">
       aria-label={props.label}
+      className="claude-account-accent-picker"
+      onValueChange={(accent) => {
+        if (accent !== "") props.onChange(accent);
+      }}
+      value={props.value}
     >
       {CLAUDE_ACCOUNT_ACCENT_VALUES.map((accent) => (
-        <OctantButton
-          aria-checked={props.value === accent}
+        <OctantRadioGroupItem<ClaudeAccountAccent>
           aria-label={CLAUDE_ACCOUNT_ACCENT_LABELS[accent]}
           className="claude-account-accent-picker__swatch"
           data-accent={accent}
           data-selected={props.value === accent ? "true" : "false"}
           key={accent}
-          onClick={() => props.onChange(accent)}
-          role="radio"
-          type="button"
-          variant="bare"
+          value={accent}
         />
       ))}
-    </div>
+    </OctantRadioGroup>
   );
 }
 

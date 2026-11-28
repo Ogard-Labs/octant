@@ -435,7 +435,7 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "1 step hidden" })).toBeVisible();
   });
 
-  it("at Answers only keeps an open question in the transcript and its prompt", () => {
+  it("at Answers only keeps an open question in the transcript and its prompt", async () => {
     const view = viewFixture({
       turns: [
         {
@@ -464,7 +464,7 @@ describe("ChatTranscript", () => {
       </ReplyDetailContext.Provider>,
     );
     expect(screen.getByText("Waiting for your answer")).toBeVisible();
-    expect(screen.getByLabelText("Provider question")).toHaveTextContent("Proceed?");
+    expect(await screen.findByLabelText("Provider question")).toHaveTextContent("Proceed?");
     expect(screen.queryByRole("button", { name: /Web search/ })).not.toBeInTheDocument();
   });
 
