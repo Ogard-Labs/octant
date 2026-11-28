@@ -26,9 +26,9 @@ export type AgentWorkRequest =
   | (Extract<PendingWorkRequest, { kind: "approval" }> & {
       readonly levelChange?: WorkLevelChangeRequest;
     })
-  | (Extract<PendingWorkRequest, { kind: "question" }> & {
-      readonly questionnaire?: Questionnaire;
-    });
+  // The row carries a questionnaire itself; the request route's journaled
+  // one is still read, so a host whose rows predate it is answered the same.
+  | Extract<PendingWorkRequest, { kind: "question" }>;
 export type AgentQuestionnaireAnswer = QuestionnaireResponse["answers"][number];
 export type AgentWorkRequestRead =
   | { readonly kind: "ready"; readonly requests: ReadonlyArray<AgentWorkRequest> }
