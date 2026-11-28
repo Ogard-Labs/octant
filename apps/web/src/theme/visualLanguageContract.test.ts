@@ -524,7 +524,7 @@ describe("the public-block visual language", () => {
     expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
   });
 
-  it("draws the composer as a pill at one row with a faint hairline and one soft float shadow", () => {
+  it("draws the composer as a calm rounded rectangle at every height, with a faint hairline and a soft resting shadow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
     const frame = system.match(/^\.composer \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const surface = system.match(/^\.thread-composer__surface \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
@@ -533,16 +533,44 @@ describe("the public-block visual language", () => {
     expect(frame).toMatch(/box-shadow:\s*none/);
     expect(frame).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
     expect(surface).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
-    expect(surface).toMatch(/box-shadow:\s*var\(--oct-shadow-float\)/);
+    expect(surface).toMatch(/box-shadow:\s*var\(--oct-shadow-rest\)/);
     expect(surface).toMatch(/outline:\s*1px solid var\(--oct-border-faint\)/);
     expect(surface).toMatch(/outline-offset:\s*-1px/);
-    // One row is a full pill; the box takes the large radius once it grows.
+    // One row is the same 16px corner as a grown box: no pill at any height.
+    expect(system).not.toMatch(/\.thread-composer__surface\[data-shape="pill"\] \{[^}]*radius/);
+    // The resting shadow is the float's own ink in each scheme, drawn closer
+    // and shorter, so the box sits on the page rather than hovering over it.
+    expect(system).toMatch(/--oct-shadow-rest:\s*0 2px 12px -6px rgb\(0 0 0 \/ 30%\);/);
     expect(system).toMatch(
-      /\.thread-composer__surface\[data-shape="pill"\] \{\s*border-radius:\s*var\(--oct-radius-pill\);/,
+      /--oct-shadow-rest:\s*0 2px 12px -6px color-mix\(in srgb, var\(--octant-text-primary\) 7%, transparent\);/,
     );
     // A carded composer's box is the surface inside it: the frame draws no
     // second line around it.
     expect(system).toMatch(/\.composer\.composer--carded \{[^}]*outline:\s*0;/);
+  });
+
+  it("writes the row under the composer at the regular weight in the meta ink", () => {
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    // Every rule that names the selector on its own, read together: one may
+    // set its ink and another only its corner.
+    const block = (selector: string) => {
+      const bodies: string[] = [];
+      for (let from = system.indexOf(`\n${selector} {`); from >= 0;) {
+        bodies.push(system.slice(from, system.indexOf("}", from)));
+        from = system.indexOf(`\n${selector} {`, from + 1);
+      }
+      expect(bodies.length, selector).toBeGreaterThan(0);
+      return bodies.join("\n");
+    };
+    for (const selector of [
+      ".composer-place__name,\n.composer-place__folder",
+      '.composer-row [role="combobox"]',
+      ".composer-row .composer-model-picker__trigger",
+    ]) {
+      const body = block(selector);
+      expect(body, selector).toContain("color: var(--oct-meta);");
+      expect(body, selector).not.toContain("var(--oct-weight-medium)");
+    }
   });
 
   it("lays an approval card out as a question: the ask, its reason, the call in a well, then the answers from the leading edge", () => {

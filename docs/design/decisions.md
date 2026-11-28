@@ -2829,6 +2829,7 @@ A composer's box holds only attach, the prompt, the microphone and send, on a st
 - A card above the box is only for something the person must read or act on that stays until resolved, most severe first. What passes by itself is one quiet line that takes no layout room, so the transcript never jumps.
 - One always-mounted polite status region describes the prompt; refusal and offer cards are alerts.
 - The thread's place, info and turn figures live in Environment and [Thread info](#thread-info), not in the composer.
+- The box is a calm rounded rectangle at the large radius (16px) at every height, not a pill, with a soft resting shadow; the row under it is regular weight in the meta ink (maintainer decision, 2026-11-28).
 
 Status: Built. Detail: [DESIGN.md: Composer row](../../DESIGN.md#composer-row) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 

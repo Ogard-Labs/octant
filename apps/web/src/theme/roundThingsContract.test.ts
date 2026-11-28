@@ -70,11 +70,9 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".canvas-block__note::before",
   // A notice's tone icon sits on a small round dot of its tone.
   ".callout > svg",
-  // The composer's attach, microphone, send and stop: the box they stand in is
-  // a pill, so they are circles.
+  // The composer's attach, microphone, send and stop: round marks on the box,
+  // like the send arrow's own disc.
   '.composer-field__attach :is(button, [role="button"]), .composer-field__actions :is(button, [role="button"])',
-  // The composer's box while it holds one row.
-  '.thread-composer__surface[data-shape="pill"]',
   // The page's annotation toolbar under a Browser page: one pill, and the
   // tools in it are circles for the same reason the composer's are.
   ".browser-annotate__pill",

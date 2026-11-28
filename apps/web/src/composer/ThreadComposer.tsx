@@ -324,13 +324,13 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
     prompt.setAttribute("aria-describedby", [...own, ...added].join(" "));
     prompt.dataset["composerDescribed"] = added.join(" ");
   });
-  // The box is a full pill while it holds one row and takes the large radius
-  // once it grows (a longer message, a queue, chips above the prompt). Then the
-  // prompt takes the full width on top and the controls stand in a row along
-  // the bottom. The prompt's own height decides, not the box's: the grown
-  // layout is wider for the text and taller for the row, so reading the box
-  // would flip the shape back and forth. A grown box returns to a pill only once
-  // the prompt is empty. The stylesheet reads data-shape.
+  // The box holds one row until it grows (a longer message, a queue, chips
+  // above the prompt). Then the prompt takes the full width on top and the
+  // controls stand in a row along the bottom; the corner stays the same. The
+  // prompt's own height decides, not the box's: the grown layout is wider for
+  // the text and taller for the row, so reading the box would flip the shape
+  // back and forth. A grown box returns to one row only once the prompt is
+  // empty. The stylesheet reads data-shape ("pill" is the one-row layout).
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
     if (surface === null) return;

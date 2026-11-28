@@ -246,9 +246,13 @@
   --oct-radius-lg: 16px;
   /* A dialog and the Settings sheet: one step above a menu's 16px. */
   --oct-radius-xl: 20px;
-  /* The one soft shadow a resting object may cast: the composer's, and the
-     picker pinned to it. Ink at 7% on light, black at 30% on dark. */
+  /* The soft shadow a floating object casts: the picker pinned to the
+     composer, a notice card. Ink at 7% on light, black at 30% on dark. */
   --oct-shadow-float: 0 6px 24px -10px rgb(0 0 0 / 30%);
+  /* The composer's box, the one resting object that casts a shadow: the
+     float's own ink, drawn closer and shorter, so the box sits on the page
+     rather than hovering over the transcript. */
+  --oct-shadow-rest: 0 2px 12px -6px rgb(0 0 0 / 30%);
   --oct-border-faint: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
@@ -504,6 +508,7 @@
 
 :root[data-octant-theme-mode="light"] {
   --oct-shadow-float: 0 4px 18px -6px color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
+  --oct-shadow-rest: 0 2px 12px -6px color-mix(in srgb, var(--octant-text-primary) 7%, transparent);
 }
 
 /* An explicit choice on <html> overrides the OS. Because every colour is
@@ -5046,13 +5051,12 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   overflow: hidden;
   min-width: 0;
   color: var(--oct-meta);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .composer-place__folder {
   font-family: var(--oct-font-mono);
-  font-weight: var(--oct-weight-regular);
 }
 /* At a phone's width the row cannot be one line. A thread on a server, which
    names where it runs, is then two: that place and under it the row of
@@ -5169,7 +5173,7 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   color: var(--oct-meta);
   background: transparent;
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-regular);
 }
 /* The select trigger wears the pane title's own recipe — meta ink at rest,
    fg ink over the soft fill when pointed at — so the frame's controls and the
@@ -5219,7 +5223,7 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-regular);
   text-align: left;
 }
 
@@ -5317,11 +5321,12 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-composer-inset);
 }
-/* The composer's surface: a full pill at one row and the large radius once it
-   grows (ThreadComposer sets data-shape from the box's height). It is the one
-   resting object that floats, so it carries one soft shadow and a faint
-   hairline. Its attach and send buttons are controls at the control radius,
-   8px in from the corner, so each is concentric with it to within a pixel. */
+/* The composer's surface: a calm rounded rectangle at the large radius, one
+   row tall or grown (ThreadComposer sets data-shape from the prompt's height,
+   for the grown layout below, not for the corner). It is the one resting
+   object that casts a shadow, so it carries the soft resting shadow and a
+   faint hairline. A full pill at one row read as a search field, and its
+   corner jumped from round to 16px the moment the prompt wrapped. */
 .thread-composer__surface {
   min-width: 0;
   /* The frosted float fill with its blur on an opaque window; the stylesheet
@@ -5332,12 +5337,9 @@ html[data-octant-reduced-motion="true"] .composer-field__actions button[data-var
   -webkit-backdrop-filter: var(--octant-float-blur);
   border: 0;
   border-radius: var(--oct-radius-lg);
-  box-shadow: var(--oct-shadow-float);
+  box-shadow: var(--oct-shadow-rest);
   outline: 1px solid var(--oct-border-faint);
   outline-offset: -1px;
-}
-.thread-composer__surface[data-shape="pill"] {
-  border-radius: var(--oct-radius-pill);
 }
 
 /* On a dark page the 5% hairline all but vanishes against the pane, so the box

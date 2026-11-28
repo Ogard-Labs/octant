@@ -532,7 +532,7 @@ token.
 | `--oct-radius-lg`    | 16px   | A floating surface: menu, context menu, popover, select list, combobox list, hover card, tooltip card, palette, toast, the guided tour's card, composer popups; and the composer once it grows past one row                                                                                                |
 | `--oct-radius-xl`    | 20px   | A dialog, the Settings sheet, the narrow dock sheet (an `OctantDialog`)                                                                                                                                                                                                                                    |
 | `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                                           |
-| `--oct-radius-pill`  | 9999px | Only what is round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round swatch, a meter, a slider thumb, the composer at one row                                                                                                                               |
+| `--oct-radius-pill`  | 9999px | Only what is round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round swatch, a meter, a slider thumb, the composer's round buttons                                                                                                                          |
 
 - A part inside a control takes the control radius less the padding between
   them, never below 2px (a segmented thumb, a toggle-group item, a field's
@@ -648,7 +648,8 @@ fetched, never emoji.
 | -------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `--octant-shadow-pop`      | `var(--octant-float-rim), 0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `var(--octant-float-rim), 0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface; the rim slot is lit only under window Glass ([Translucency](#translucency)) |
 | `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)`                          | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)`                          | A small float drawn by a feature (tooltip card)                                                     |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | The composer and a picker pinned to it                                                              |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                                             | `0 4px 18px -6px` ink 7%                                                                        | A picker pinned to the composer, a notice card                                                      |
+| `--oct-shadow-rest`        | `0 2px 12px -6px rgb(0 0 0 / 30%)`                                                              | `0 2px 12px -6px` ink 7%                                                                        | The composer's box: the float's ink, closer and shorter                                             |
 | `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                                                | the same                                                                                        | A ring where an outline cannot be used                                                              |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
@@ -1701,19 +1702,21 @@ narrowest pane's width.
 - **The box** is the one resting surface that floats: the frosted float fill
   with its blur in a browser, the float colour at 96% with no blur in the desktop
   app, and the control wash (ink 7%) under glass in a browser,
-  one faint outline (`--oct-border-faint`, ink 5%), `--oct-shadow-float`. At one
-  row it is a full pill 44px tall (`data-shape="pill"`); once the prompt grows
-  past one line, or a queue or chips stand above it, it takes `--oct-radius-lg`
-  and the prompt takes the full width on top with the controls in one row along
-  the bottom: attach at the leading edge, the microphone and send at the
-  trailing edge. A grown box returns to a pill only when the prompt is empty, so
-  the wider layout cannot flip it back and forth. Over an application ground in
+  one faint outline (`--oct-border-faint`, ink 5%), and the soft resting shadow
+  (`--oct-shadow-rest`). It is a calm rounded rectangle at `--oct-radius-lg`
+  (16px) at every height, never a pill: 44px tall at one row
+  (`data-shape="pill"` names that layout, not the corner); once the prompt grows
+  past one line, or a queue or chips stand above it, the prompt takes the full
+  width on top with the controls in one row along the bottom: attach at the
+  leading edge, the microphone and send at the trailing edge. A grown box
+  returns to one row only when the prompt is empty, so the wider layout cannot
+  flip it back and forth. Over an application ground in
   a browser it is the glass surface (floor, thick tint, blur); in the desktop app
   it is the float colour at 96%.
 - **Inside**: attach, the frameless prompt, then the microphone and send at the
   trailing edge. They are round 28px buttons (`--oct-composer-cell`), 8px
   (`--oct-composer-inset`) from the box's edge, the one place a control is a
-  circle, because the box is a pill. Their glyphs are 16px at the shared 2 stroke. Attach is a quiet fill (ink 6%) with a hover
+  circle, like the send arrow's own disc. Their glyphs are 16px at the shared 2 stroke. Attach is a quiet fill (ink 6%) with a hover
   step (11%). The microphone is a ghost with a round hover fill (8%). Send is the
   ink as its fill (`--octant-text-primary`) with the page colour as its arrow, at
   20% opacity while there is nothing to send, and it grows to 106% on hover (not
@@ -1729,8 +1732,9 @@ narrowest pane's width.
   Project, branch, folder and pull requests live in the Environment panel (plan
   usage does not: it shows in the rail's rings, on a start screen and in
   Settings), and its info and plan proposal are items of the + menu: a full row
-  truncated every label in a thread's column. Labels 12px meta, icons 16px,
-  nothing filled at rest.
+  truncated every label in a thread's column. Labels 12px meta at the regular
+  weight (the Project's name, the model, the mode; Full access alone keeps its
+  word at medium in the warning ink), icons 16px, nothing filled at rest.
 - **The row above the box** (start screens): where the work runs, as quiet
   chips (meta ink, no fill at rest, 24px).
 - **Notices** are never in the box: each is the callout's compact card directly
@@ -2101,7 +2105,7 @@ but never repaint a shared control.
 | `bun run ui:check` (`scripts/check-ui-stylesheets.ts`)                               | No raw colour in a rule (except `/* ui-style-exception: fixed-scheme */`); no off-scale font size, duration, spacing or radius; no weight above 600 outside the title roles; no paint on a class handed to an Octant primitive; no fixed recipe height off 20/24/28/32; no new raw `role="alert"`; ratchets against `scripts/ui-stylesheet-baseline.json` |
 | `scripts/check-ui-component-boundaries.ts`                                           | Feature code imports adapters only and renders no raw button, input, select or textarea                                                                                                                                                                                                                                                                   |
 | `bun run tokens:check`                                                               | `packages/theme/tokens/tokens.css` and `tokens.json` match the stylesheets (`bun run tokens:export` writes them)                                                                                                                                                                                                                                          |
-| `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer pill, outline and float shadow; one focus edge                                                                                                                                                          |
+| `theme/visualLanguageContract.test.ts`                                               | Radii from tokens; the framed panel's outline, gap, clip and pane lines; flat resting surfaces; one hairline and one drop on floats; the composer's rounded box, outline and resting shadow; one focus edge                                                                                                                                               |
 | `theme/roundThingsContract.test.ts`                                                  | The pill token only on round things                                                                                                                                                                                                                                                                                                                       |
 | `theme/sharedControlPaintContract.test.ts`                                           | Composer-row controls quiet; the composer and a Settings group flat                                                                                                                                                                                                                                                                                       |
 | `theme/surfaceLanguageContract.test.ts`                                              | Faces; each type role defined once; one page shell; one page table                                                                                                                                                                                                                                                                                        |
