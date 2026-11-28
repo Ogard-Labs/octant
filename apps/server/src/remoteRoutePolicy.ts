@@ -1329,17 +1329,23 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // approval and question their scope can answer and putting one off, the
   // fleet read, provider limits and an asked-for refresh, and the protected
   // files list and its changes. None has a catalogued action.
-  ...[
-    PENDING_REQUESTS_PATH,
-    "/api/fleet-activity",
-    "/api/provider-usage-limits",
-    "/api/octant-instructions",
-  ].map((path) => ({
+  ...["/api/fleet-activity", "/api/provider-usage-limits", "/api/octant-instructions"].map(
+    (path) => ({
+      kind: "exact" as const,
+      path,
+      methods: ["GET"] as const,
+      allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    }),
+  ),
+  // The route reads and bounds its own query: `?threadId=` alone narrows the
+  // list to one thread, and any other query is refused there.
+  {
     kind: "exact" as const,
-    path,
+    path: PENDING_REQUESTS_PATH,
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
-  })),
+    allowQuery: true,
+  },
   // The work on this host a paired device may already open; the route narrows
   // the answer to the device that asked.
   {

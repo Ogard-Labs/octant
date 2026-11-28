@@ -33,10 +33,23 @@ export interface PendingRequestRouteDependencies {
       reader?: PrincipalKind,
       principal?: ClientPrincipal,
       imageOffersOnly?: boolean,
+      threadId?: string,
     ) => Promise<PendingRequestList>;
   };
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+}
+
+/**
+ * The thread a read is narrowed to: `?threadId=` alone, once, shaped as a
+ * thread id. Anything else is not a thread read.
+ */
+function threadFilterOf(query: URLSearchParams): string | undefined {
+  const keys = [...query.keys()];
+  const value = query.get("threadId");
+  return keys.length === 1 && keys[0] === "threadId" && value !== null && /^[A-Za-z0-9-]{1,64}$/.test(value)
+    ? value
+    : undefined;
 }
 
 /**
@@ -45,16 +58,25 @@ export interface PendingRequestRouteDependencies {
  * the remote listener forwards here, reads under its own scope, so it is
  * listed only what its own answer commands and ask routes would admit.
  * Listing grants nothing: every answer still passes its own route's check.
- * Deferral stays with a local window.
+ * Deferral stays with a local window. `?threadId=` narrows the list to one
+ * thread before the cap, so an open thread reads its own requests whole
+ * however many wait elsewhere; it never widens what the caller is listed.
  */
 export function createPendingRequestRouteHandler(dependencies: PendingRequestRouteDependencies) {
   const read = createLocalWindowReadRoute({
     path: PENDING_REQUESTS_PATH,
     noun: "Pending request",
     plural: "Pending requests",
+    acceptsQuery: (query) => threadFilterOf(query) !== undefined,
     read: async (windowId, reader, request, principal) => {
       const shared = request.headers.get("accept") === PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE;
-      const list = await dependencies.service.list(windowId, reader, principal, !shared);
+      const list = await dependencies.service.list(
+        windowId,
+        reader,
+        principal,
+        !shared,
+        threadFilterOf(new URL(request.url).searchParams),
+      );
       if (shared) {
         return decodePendingRequestList(list);
       }

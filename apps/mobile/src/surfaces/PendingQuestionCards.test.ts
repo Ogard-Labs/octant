@@ -5,6 +5,7 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import { ThemeProvider } from "../../design-system/theme";
+import { heldQuestionnaireDraft, holdQuestionnaireDraft } from "../approvals/questionnaireDraft";
 import { PendingQuestionCards } from "./PendingQuestionCards";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
@@ -98,13 +99,32 @@ const evidence = {
   byteLength: 7,
 };
 
-function hostListing(requests: ReadonlyArray<unknown>) {
+function hostListing(
+  requests: ReadonlyArray<unknown>,
+  options: { readonly truncated?: boolean; readonly refusesThreadReads?: boolean } = {},
+) {
   const sent: Array<{ readonly method: string; readonly path: string; readonly body: unknown }> =
     [];
+  const reads: string[] = [];
   const transport: MobileRemoteTransport = {
     hostId: "00000000-0000-4000-8000-0000000000aa",
     authenticatedFetch: async ({ method, path, body }) => {
-      if (method === "GET") return Response.json({ requests, truncated: false });
+      if (method === "GET") {
+        reads.push(path);
+        const [, query = ""] = path.split("?");
+        const threadId = new URLSearchParams(query).get("threadId");
+        // A host from before thread reads refuses every query.
+        if (threadId !== null && options.refusesThreadReads === true)
+          return Response.json({ code: "invalid" }, { status: 400 });
+        return Response.json({
+          requests: requests.filter(
+            (request) =>
+              threadId === null ||
+              (request as { readonly threadId: string }).threadId === threadId,
+          ),
+          truncated: options.truncated ?? false,
+        });
+      }
       sent.push({ method, path, body });
       if (path === "/api/code/evidence") {
         return Response.json(evidence);
@@ -112,7 +132,7 @@ function hostListing(requests: ReadonlyArray<unknown>) {
       return Response.json({ kind: "attempt-updated" });
     },
   };
-  return { transport, sent };
+  return { transport, sent, reads };
 }
 
 async function render(transport: MobileRemoteTransport, mode: "chat" | "code", threadId: string) {
@@ -173,6 +193,33 @@ describe("a Chat question on the phone", () => {
     });
   });
 
+  it("reads its own thread's requests, so a host with many waiting elsewhere still shows it", async () => {
+    const { transport, reads } = hostListing([chatQuestionnaire, codeQuestion]);
+    const container = await render(transport, "chat", chatThreadId);
+    expect(reads).toEqual([`/api/pending-requests?threadId=${chatThreadId}`]);
+    expect(container.querySelectorAll('[data-testid="mobile-chat-question"]')).toHaveLength(1);
+  });
+
+  it("falls back to the whole list on a host that takes no thread read", async () => {
+    const { transport, reads } = hostListing([chatQuestionnaire], { refusesThreadReads: true });
+    const container = await render(transport, "chat", chatThreadId);
+    expect(reads).toEqual([
+      `/api/pending-requests?threadId=${chatThreadId}`,
+      "/api/pending-requests",
+    ]);
+    expect(container.querySelectorAll('[data-testid="mobile-chat-question"]')).toHaveLength(1);
+  });
+
+  it("keeps an unsent answer when the host's list is cut short", async () => {
+    const { transport } = hostListing([], { truncated: true, refusesThreadReads: true });
+    const scope = `${transport.hostId}|chat|${chatThreadId}`;
+    const key = `${scope}|turn|attempt|request`;
+    const draft = { answers: [] };
+    holdQuestionnaireDraft(key, chatQuestionnaire.questionnaire as never, draft as never);
+    await render(transport, "chat", chatThreadId);
+    expect(heldQuestionnaireDraft(key, chatQuestionnaire.questionnaire as never)).toBe(draft);
+  });
+
   it("shows only its own thread's questions", async () => {
     const { transport } = hostListing([chatQuestionnaire, codeQuestion]);
     const container = await render(transport, "chat", "30000000-0000-4000-8000-0000000000ff");
@@ -203,5 +250,25 @@ describe("a Code question on the phone", () => {
       requestId: "provider-req-1",
       response: evidence,
     });
+  });
+
+  it("shows a refusal the running turn gives and keeps the answer to send again", async () => {
+    vi.mocked(executeMobileCodeOperation).mockImplementation(
+      async (_transport, command) =>
+        ({
+          kind: "provider-turn-state",
+          operationId: command.operationId,
+          state: "running",
+          failure: { category: "stale", message: "That question is no longer pending." },
+        }) as never,
+    );
+    const { transport } = hostListing([codeQuestion]);
+    const container = await render(transport, "code", codeThreadId);
+    await press(container, "radio", "develop");
+    await press(container, "button", "Send answer");
+    expect(container.textContent).toContain("That question is no longer pending.");
+    expect(
+      container.querySelector('[role="radio"][aria-label="develop"]')?.getAttribute("aria-checked"),
+    ).toBe("true");
   });
 });

@@ -18131,7 +18131,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
   answer, oldest waiting first,
-  at most 128 with a `truncated` flag. It adds no authority: each mode lists
+  at most 128 with a `truncated` flag. `?threadId=` alone narrows the list to
+  one thread before that cap, so an open thread reads its own requests however
+  many wait elsewhere; the route refuses any other query, and the remote
+  listener forwards only what the route takes. It adds no authority: each mode lists
   only what its existing answer command would admit for that window. Work uses
   the Work request service's Project check (an active Work Project) and lists a
   request only on a thread the window's Work thread list holds; Code passes each

@@ -25,28 +25,45 @@ export type ThreadPendingQuestion = Extract<
 
 const decodePendingRequest = decodeHostAnswer(PendingRequest);
 
+/** The thread's waiting questions, and whether the host's list held all of them. */
+export interface ThreadPendingQuestions {
+  readonly questions: ReadonlyArray<ThreadPendingQuestion>;
+  /**
+   * The host cut its list short, so a question missing from it may still be
+   * waiting: its unsent answer is kept.
+   */
+  readonly incomplete: boolean;
+}
+
 /**
- * The thread's waiting questions, read from the host's list of everything
- * this device can answer. Each item is decoded on its own, so a kind a newer
- * host adds never hides the rest. A secret question is left to a surface
- * with a masked field.
+ * The thread's waiting questions, read from the host's list of what this
+ * device can answer, narrowed to this thread before the host's cap so many
+ * requests elsewhere never hide them. A host from before that narrowing
+ * refuses the query, and its whole list is read instead. Each item is decoded
+ * on its own, so a kind a newer host adds never hides the rest. A secret
+ * question is left to a surface with a masked field.
  */
 export async function listThreadPendingQuestions(
   transport: MobileRemoteTransport,
   mode: "chat" | "code",
   threadId: string,
-): Promise<ReadonlyArray<ThreadPendingQuestion>> {
-  const response = await transport.authenticatedFetch({
-    method: "GET",
-    path: "/api/pending-requests",
-    headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
-  });
+): Promise<ThreadPendingQuestions> {
+  const read = (path: string) =>
+    transport.authenticatedFetch({
+      method: "GET",
+      path,
+      headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
+    });
+  let response = await read(`/api/pending-requests?threadId=${encodeURIComponent(threadId)}`);
+  if (response.status === 400) response = await read("/api/pending-requests");
   if (!response.ok) throw new Error("The host's waiting questions could not be read.");
   const body: unknown = await response.json();
   const items =
     typeof body === "object" && body !== null && "requests" in body && Array.isArray(body.requests)
       ? (body.requests as ReadonlyArray<unknown>)
       : [];
+  const incomplete =
+    typeof body !== "object" || body === null || !("truncated" in body) || body.truncated !== false;
   const questions: ThreadPendingQuestion[] = [];
   for (const item of items) {
     let request: PendingRequest;
@@ -65,7 +82,10 @@ export async function listThreadPendingQuestions(
       questions.push(request);
     }
   }
-  return questions.sort((left, right) => left.requestedAt.localeCompare(right.requestedAt));
+  return {
+    questions: questions.sort((left, right) => left.requestedAt.localeCompare(right.requestedAt)),
+    incomplete,
+  };
 }
 
 function draftScope(transport: MobileRemoteTransport, mode: string, threadId: string): string {
@@ -106,22 +126,19 @@ async function refusalOf(response: Response, fallback: string): Promise<string> 
   return fallback;
 }
 
-/** A refusal can come back as a failed or interrupted turn, not only as a failed operation. */
+/**
+ * A refusal can come back as a turn state, not only as a failed operation: a
+ * failed or interrupted turn, and a turn still running or waiting that names
+ * why it did not take this answer (a harness question already settled, an
+ * invalid set). An answer the turn took carries no failure.
+ */
 function codeRefusal(result: CodeOperationResult): string | undefined {
   if (result.kind === "operation-failed") return result.failure.message;
-  if (result.kind === "provider-turn-state" && result.state === "failed") {
-    return (
-      result.failure?.message ?? "The answer was not delivered. The turn changed since it asked."
-    );
-  }
-  if (
-    result.kind === "provider-turn-state" &&
-    result.state === "interrupted" &&
-    result.failure !== undefined
-  ) {
-    return result.failure.message;
-  }
-  return undefined;
+  if (result.kind !== "provider-turn-state") return undefined;
+  if (result.failure !== undefined) return result.failure.message;
+  return result.state === "failed"
+    ? "The answer was not delivered. The turn changed since it asked."
+    : undefined;
 }
 
 /**
@@ -193,17 +210,18 @@ export function PendingQuestionCards(props: PendingQuestionCardsProps) {
     [props.transport, props.mode, props.threadId],
   );
   const resource = usePolledResource(load, { intervalMs: props.refreshIntervalMs ?? 3_000 });
-  const questions = resource.value ?? [];
-  const loaded = resource.value !== undefined;
+  const questions = resource.value?.questions ?? [];
+  // Only a whole list proves a question is no longer waiting.
+  const complete = resource.value?.incomplete === false;
   const waitingKeys = questions.map((request) => draftKeyOf(props.transport, request)).join("\n");
   // A question no longer waiting takes its unsent answers with it.
   useEffect(() => {
-    if (!loaded) return;
+    if (!complete) return;
     forgetSettledQuestionnaireDrafts(
       draftScope(props.transport, props.mode, props.threadId),
       waitingKeys === "" ? [] : waitingKeys.split("\n"),
     );
-  }, [loaded, waitingKeys, props.transport, props.mode, props.threadId]);
+  }, [complete, waitingKeys, props.transport, props.mode, props.threadId]);
 
   return (
     <>

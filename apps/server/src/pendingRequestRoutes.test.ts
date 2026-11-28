@@ -457,6 +457,23 @@ describe("pending request route", () => {
     expect(body.requests[0].requestedAt).toBe("2026-10-06T08:00:00.000Z");
   });
 
+  it("reads one thread's requests whole, narrowed before the cap, however many wait elsewhere", async () => {
+    const elsewhere = Array.from({ length: MAX_PENDING_REQUESTS + 2 }, (_, index) =>
+      decodePendingRequest({
+        ...workApproval,
+        requestedAt: new Date(Date.UTC(2026, 9, 6, 7, 0, index)).toISOString(),
+        answer: { requestId: "00000000-0000-4000-8000-000000000903", expectedVersion: index + 1 },
+      }),
+    );
+    const { route } = fixture({ work: elsewhere, code: [codeApproval], chat: [chatQuestion] });
+    const whole = await (await route(request()))?.json();
+    expect(whole.truncated).toBe(true);
+    expect(whole.requests).not.toContainEqual(chatQuestion);
+    const response = await route(request(`?threadId=${String(chatQuestion.threadId)}`));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ requests: [chatQuestion], truncated: false });
+  });
+
   it("refuses a read without the window capability", async () => {
     const { route, sources } = fixture();
     const response = await route(new Request("http://127.0.0.1/api/pending-requests"));
@@ -507,8 +524,14 @@ describe("pending request route", () => {
 
   it("refuses a caller that names a window or any other parameter", async () => {
     const { route } = fixture();
-    const response = await route(request(`?windowId=${String(windowId)}`));
-    expect(response?.status).toBe(400);
+    for (const query of [
+      `?windowId=${String(windowId)}`,
+      `?threadId=${String(chatQuestion.threadId)}&windowId=${String(windowId)}`,
+      `?threadId=${String(chatQuestion.threadId)}&threadId=x`,
+      "?threadId=../x",
+    ]) {
+      expect((await route(request(query)))?.status).toBe(400);
+    }
   });
 
   it("drops a request from the next read once its mode no longer lists it", async () => {

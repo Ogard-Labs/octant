@@ -2,6 +2,7 @@ import type {
   ProviderContextBreakdown,
   AggregateVersion,
   CodeCommand,
+  CodeOperationResult,
   CodeThreadId,
   ProviderInstanceId,
   ProviderModelId,
@@ -9,6 +10,7 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   commandReloadsThread,
+  providerAnswerOutcome,
   providerRequestFromEvent,
   totalTurnUsage,
 } from "./codeControllerState";
@@ -158,6 +160,30 @@ describe("providerRequestFromEvent", () => {
       kind: "approval",
       approvalId: asked.approvalId,
       summary: asked.summary,
+    });
+  });
+});
+
+describe("an answer to a provider's question or approval", () => {
+  const turnState = (fields: Record<string, unknown>) =>
+    ({
+      kind: "provider-turn-state",
+      operationId: "00000000-0000-4000-8000-000000000001",
+      ...fields,
+    }) as unknown as CodeOperationResult;
+
+  it("is refused when a turn still running names why it did not take it, and taken when it names nothing", () => {
+    expect(
+      providerAnswerOutcome(
+        turnState({
+          state: "running",
+          failure: { category: "stale", message: "That question is no longer pending." },
+        }),
+      ),
+    ).toEqual({ status: "refused", message: "That question is no longer pending." });
+    expect(providerAnswerOutcome(turnState({ state: "waiting" }))).toEqual({ status: "answered" });
+    expect(providerAnswerOutcome(turnState({ state: "interrupted" }))).toEqual({
+      status: "answered",
     });
   });
 });

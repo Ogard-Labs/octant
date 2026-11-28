@@ -1483,7 +1483,11 @@ quiet **Recommended** pill, an always-visible written-answer field, the
 optional **Anything to add?**, one **Send answers** (**Send answer** for a
 single question) and, in Work, **Dismiss**, which ends the question unanswered
 as the desktop's does. Its unsent draft is kept in memory per request, so it
-survives leaving the thread. Each sends the answer and the
+survives leaving the thread. In Chat and Code the card reads the thread's own
+waiting requests, narrowed by the host before its cap, so many requests on
+other threads never hide them; a draft is dropped only when a whole list shows
+its request no longer waits. A refusal from a turn still running keeps the
+draft as well. Each sends the answer and the
 version it read through the same request route a window uses, and the host
 journals it as the device. Approving a tool call lets the agent act, so it
 asks for the phone's own confirmation first; denying, answering a question
