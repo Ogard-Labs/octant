@@ -153,7 +153,8 @@ jobs:
     # the screens, or a draft) pass, as the single job's skip did before.
     name: Visual check
     needs: [scope, visual]
-    if: always()
+    # A draft runs nothing, as the single job did; ready_for_review starts it.
+    if: always() && github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:

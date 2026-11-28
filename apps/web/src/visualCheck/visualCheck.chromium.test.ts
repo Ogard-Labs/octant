@@ -216,6 +216,8 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         readonly failures: ReadonlyArray<string>;
       }
       const allShots = visualShots(visualShard(process.env.OCTANT_VISUAL_SHARD));
+      // A shard past the end of the list would pass having compared nothing.
+      expect(allShots.length, "This shard holds no pictures to compare.").toBeGreaterThan(0);
       const outcomes: Array<ShotOutcome | undefined> = Array.from({ length: allShots.length });
       let nextIndex = 0;
       const ownedBrowser = browser;
