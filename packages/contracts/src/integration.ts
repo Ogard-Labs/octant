@@ -2,6 +2,19 @@ import { Schema } from "effect";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const safeText = (limit: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(limit));
+const SECRETISH_ACCOUNT_REF = /(?:lin_api_|bearer\s|access_token|refresh_token|token=)/i;
+
+/**
+ * Opaque, credential-free reference to one connected account of an integration
+ * on a host. Survives reconnecting the same account without carrying tokens or
+ * reusable numeric slots.
+ */
+export const IntegrationAccountRef = Schema.String.pipe(
+  Schema.filter(
+    (value) => /^[A-Za-z0-9_-]{1,128}$/.test(value) && !SECRETISH_ACCOUNT_REF.test(value),
+  ),
+);
+export type IntegrationAccountRef = typeof IntegrationAccountRef.Type;
 
 /**
  * Lifecycle states an integration can report for its connection to an external
@@ -80,12 +93,47 @@ export const IntegrationAuthenticationSnapshot = Schema.Struct({
 export type IntegrationAuthenticationSnapshot = typeof IntegrationAuthenticationSnapshot.Type;
 
 /**
+ * Per-account authentication state returned by `GET /api/integrations/:slug/accounts`.
+ */
+export const IntegrationAccountEntry = Schema.Struct({
+  accountRef: IntegrationAccountRef,
+  state: IntegrationAuthenticationState,
+  account: Schema.optional(IntegrationAccount),
+  capabilities: Schema.Array(IntegrationCapability).pipe(Schema.maxItems(32)),
+  remediation: Schema.optional(safeText(512)),
+  reconnectRequired: Schema.optional(Schema.Boolean),
+  isLegacy: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type IntegrationAccountEntry = typeof IntegrationAccountEntry.Type;
+
+/**
+ * Snapshot of every account connected for an integration on this host.
+ */
+export const IntegrationAccountsSnapshot = Schema.Struct({
+  accounts: Schema.Array(IntegrationAccountEntry).pipe(Schema.maxItems(16)),
+  oauthConfigured: Schema.Boolean,
+  unusedPersonalCredentialStored: Schema.optional(Schema.Boolean),
+  indexDamaged: Schema.optional(Schema.Boolean),
+  remediation: Schema.optional(safeText(512)),
+}).annotations(strict);
+export type IntegrationAccountsSnapshot = typeof IntegrationAccountsSnapshot.Type;
+
+/**
  * Commands the host can issue to manage the integration's authentication.
  */
 export const IntegrationAuthenticationCommand = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("setup") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("refresh") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("logout") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("setup"),
+    accountRef: Schema.optional(IntegrationAccountRef),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refresh"),
+    accountRef: Schema.optional(IntegrationAccountRef),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("logout"),
+    accountRef: Schema.optional(IntegrationAccountRef),
+  }).annotations(strict),
 ).annotations(strict);
 export type IntegrationAuthenticationCommand = typeof IntegrationAuthenticationCommand.Type;
 
@@ -103,6 +151,7 @@ export const IntegrationCommand = Schema.Union(
     kind: Schema.Literal("operation"),
     operationId: safeText(64),
     input: Schema.Unknown,
+    accountRef: Schema.optional(IntegrationAccountRef),
   }).annotations(strict),
 ).annotations(strict);
 export type IntegrationCommand = typeof IntegrationCommand.Type;
@@ -174,6 +223,11 @@ export type IntegrationObservation = typeof IntegrationObservation.Type;
 /** Decodes an unknown value as an integration authentication snapshot. */
 export const decodeIntegrationAuthenticationSnapshot = Schema.decodeUnknownSync(
   IntegrationAuthenticationSnapshot,
+);
+
+/** Decodes an unknown value as a multi-account integration snapshot. */
+export const decodeIntegrationAccountsSnapshot = Schema.decodeUnknownSync(
+  IntegrationAccountsSnapshot,
 );
 
 /** Decodes an unknown value as an integration authentication command. */

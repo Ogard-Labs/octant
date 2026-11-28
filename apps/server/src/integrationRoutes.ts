@@ -1,8 +1,10 @@
 import {
   decodeIntegrationAuthenticationCommand,
   decodeIntegrationCommand,
+  IntegrationAccountRef,
   type IntegrationAuthenticationCommand,
 } from "@octant/contracts/integration";
+import { Schema } from "effect";
 import { LINEAR_HOST_ONLY_OPERATIONS } from "@octant/contracts/linear-issues";
 import type { IntegrationService } from "./integration/integrationService";
 import { principalActsAsHostPerson } from "./clientPrincipal";
@@ -38,21 +40,23 @@ export function createIntegrationRouteHandler(dependencies: {
     }
     if (url.search !== "") return failure("invalid", 400, origin);
     const snapshotRoute = api.rest === "authentication";
+    const accountsRoute = api.rest === "accounts";
     const commandRoute = api.rest === "authentication/commands";
     const operationRoute = api.rest === "operations";
     const secretRoute = api.rest === "secrets";
-    if (snapshotRoute && request.method !== "GET" && request.method !== "HEAD") {
+    const readRoute = snapshotRoute || accountsRoute;
+    if (readRoute && request.method !== "GET" && request.method !== "HEAD") {
       return failure("invalid", 400, origin);
     }
     if ((commandRoute || operationRoute || secretRoute) && request.method !== "POST") {
       return failure("invalid", 400, origin);
     }
-    if (!snapshotRoute && !commandRoute && !operationRoute && !secretRoute) {
+    if (!readRoute && !commandRoute && !operationRoute && !secretRoute) {
       return failure("invalid", 400, origin);
     }
 
     let body: unknown = undefined;
-    if (!snapshotRoute) {
+    if (!readRoute) {
       const parsed = await readJson(request, secretRoute ? SECRET_BODY_LIMIT : BODY_LIMIT);
       if (parsed.kind !== "ok") {
         return failure("invalid", parsed.kind === "too-large" ? 413 : 400, origin);
@@ -70,7 +74,7 @@ export function createIntegrationRouteHandler(dependencies: {
     } catch {
       return failure("unauthorized", 401, origin);
     }
-    if (snapshotRoute || operationRoute) {
+    if (readRoute || operationRoute) {
       if (context.principal.kind !== "local-window" && context.principal.kind !== "remote-device") {
         return failure("unauthorized", 403, origin);
       }
@@ -80,6 +84,16 @@ export function createIntegrationRouteHandler(dependencies: {
     try {
       if (snapshotRoute) {
         return response(await dependencies.service.snapshot(api.slug, request.signal), 200, origin);
+      }
+      if (accountsRoute) {
+        if (dependencies.service.accountsSnapshot === undefined) {
+          return failure("unavailable", 503, origin);
+        }
+        return response(
+          await dependencies.service.accountsSnapshot(api.slug, request.signal),
+          200,
+          origin,
+        );
       }
       if (commandRoute) {
         let command: IntegrationAuthenticationCommand;
@@ -121,11 +135,33 @@ export function createIntegrationRouteHandler(dependencies: {
           api.slug,
           "personal-api-key",
           secret.credential,
+          secret.accountRef,
         );
-        if (stored.kind !== "stored") return failure("unavailable", 503, origin);
+        if (stored.kind === "refused") {
+          return response({ category: "invalid", message: stored.reason }, 400, origin);
+        }
+        if (stored.kind !== "stored") {
+          return response({ category: "unavailable", message: stored.reason }, 503, origin);
+        }
         return response({ kind: "stored" }, 200, origin);
       }
-      await dependencies.service.deleteSecret(api.slug, "personal-api-key");
+      if (secret.kind === "adopt-legacy") {
+        if (dependencies.service.adoptLegacyPersonalCredential === undefined) {
+          return failure("unavailable", 503, origin);
+        }
+        const adopted = await dependencies.service.adoptLegacyPersonalCredential(
+          api.slug,
+          request.signal,
+        );
+        if (adopted.kind === "refused") {
+          return response({ category: "invalid", message: adopted.reason }, 400, origin);
+        }
+        if (adopted.kind !== "stored") {
+          return response({ category: "unavailable", message: adopted.reason }, 503, origin);
+        }
+        return response({ kind: "stored" }, 200, origin);
+      }
+      await dependencies.service.deleteSecret(api.slug, "personal-api-key", secret.accountRef);
       return response({ kind: "cleared" }, 200, origin);
     } catch {
       return failure("unavailable", 503, origin);
@@ -143,24 +179,44 @@ function matchApi(pathname: string): { readonly slug: string; readonly rest: str
   return { slug, rest: rest.slice(slash + 1) };
 }
 
+const decodeAccountRef = Schema.decodeUnknownOption(IntegrationAccountRef);
+
 function decodeSecretCommand(
   body: unknown,
-): { readonly kind: "put"; readonly credential: string } | { readonly kind: "delete" } | undefined {
+):
+  | { readonly kind: "put"; readonly credential: string; readonly accountRef?: string }
+  | { readonly kind: "delete"; readonly accountRef?: string }
+  | { readonly kind: "adopt-legacy" }
+  | undefined {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
   if (!("kind" in body) || !("scope" in body) || body.scope !== "personal-api-key") {
     return undefined;
   }
   const keys = Object.keys(body);
-  if (body.kind === "delete" && keys.length === 2) return { kind: "delete" };
+  let accountRef: string | undefined;
+  if ("accountRef" in body && body.accountRef !== undefined) {
+    const parsedRef = decodeAccountRef(body.accountRef);
+    if (parsedRef._tag === "None") return undefined;
+    accountRef = parsedRef.value;
+  }
+  const hasRefKey = "accountRef" in body;
+  if (body.kind === "adopt-legacy" && keys.length === 2) {
+    return { kind: "adopt-legacy" };
+  }
+  if (body.kind === "delete" && keys.length === (hasRefKey ? 3 : 2)) {
+    return accountRef === undefined ? { kind: "delete" } : { kind: "delete", accountRef };
+  }
   if (
     body.kind === "put" &&
     "credential" in body &&
     typeof body.credential === "string" &&
     body.credential.length > 0 &&
     Buffer.byteLength(body.credential, "utf8") <= SECRET_BODY_LIMIT &&
-    keys.length === 3
+    keys.length === (hasRefKey ? 4 : 3)
   ) {
-    return { kind: "put", credential: body.credential };
+    return accountRef === undefined
+      ? { kind: "put", credential: body.credential }
+      : { kind: "put", credential: body.credential, accountRef };
   }
   return undefined;
 }

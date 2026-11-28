@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeIntegrationAccountsSnapshot,
   decodeIntegrationAuthenticationCommand,
   decodeIntegrationAuthenticationSnapshot,
   decodeIntegrationCommand,
@@ -80,6 +81,53 @@ describe("integration contract", () => {
       decodeIntegrationAuthenticationSnapshot({
         state: "unknown-state",
         capabilities: [],
+      }),
+    ).toThrow();
+  });
+
+  it("decodes multi-account snapshots and optional accountRef on commands while rejecting secret-shaped refs", () => {
+    const accounts = decodeIntegrationAccountsSnapshot({
+      accounts: [
+        {
+          accountRef: "acct-personal",
+          state: "ready",
+          account: {
+            login: "personal",
+            source: "oauth",
+            scopes: ["read", "write"],
+            workspace: "Personal",
+          },
+          capabilities: [{ operationId: "list-issues", available: true }],
+          isLegacy: true,
+        },
+      ],
+      oauthConfigured: true,
+      unusedPersonalCredentialStored: true,
+    });
+    expect(accounts.accounts).toHaveLength(1);
+    expect(accounts.accounts[0]?.accountRef).toBe("acct-personal");
+
+    expect(
+      decodeIntegrationAuthenticationCommand({ kind: "logout", accountRef: "acct-personal" }),
+    ).toEqual({ kind: "logout", accountRef: "acct-personal" });
+    expect(
+      decodeIntegrationCommand({
+        kind: "operation",
+        operationId: "list-issues",
+        input: {},
+        accountRef: "acct-personal",
+      }),
+    ).toEqual({
+      kind: "operation",
+      operationId: "list-issues",
+      input: {},
+      accountRef: "acct-personal",
+    });
+
+    expect(() =>
+      decodeIntegrationAuthenticationCommand({
+        kind: "logout",
+        accountRef: "lin_api_secret_value",
       }),
     ).toThrow();
   });

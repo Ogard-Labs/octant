@@ -5,6 +5,7 @@ import { bindPrincipalRouteContext } from "./principalRouteContext";
 const store = { authenticateAuthority: vi.fn() };
 const service = {
   snapshot: vi.fn(async () => ({ state: "unauthorized", capabilities: [] })),
+  accountsSnapshot: vi.fn(async () => ({ accounts: [], oauthConfigured: true })),
   execute: vi.fn(),
   executeOperation: vi.fn(async () => ({
     kind: "ok" as const,
@@ -13,6 +14,7 @@ const service = {
   completeAuthorization: vi.fn(async () => ({ kind: "stored" as const })),
   putSecret: vi.fn(async () => ({ kind: "stored" as const })),
   deleteSecret: vi.fn(async () => undefined),
+  adoptLegacyPersonalCredential: vi.fn(async () => ({ kind: "stored" as const })),
 };
 
 function request(path = "/api/integrations/linear/authentication", method = "GET") {
@@ -105,6 +107,7 @@ describe("integration authentication routes", () => {
       "linear",
       "personal-api-key",
       "lin_api_abcdefghijklmnop1234",
+      undefined,
     );
     expect(await response?.text()).not.toContain("lin_api_");
   });
@@ -203,5 +206,41 @@ describe("integration authentication routes", () => {
     service.execute.mockResolvedValueOnce({ state: "unauthorized", capabilities: [] });
     expect((await handler(pairedAuth))?.status).toBe(200);
     expect(service.execute).toHaveBeenCalledOnce();
+  });
+
+  it("lists connected accounts on GET /accounts and forwards accountRef on operations and logout", async () => {
+    const handler = createHandler();
+    const accountsReq = request("/api/integrations/linear/accounts", "GET");
+    bindLocalWindow(accountsReq);
+    const accountsRes = await handler(accountsReq);
+    expect(accountsRes?.status).toBe(200);
+    expect(service.accountsSnapshot).toHaveBeenCalledWith("linear", expect.anything());
+
+    const opReq = new Request("http://127.0.0.1/api/integrations/linear/operations", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({
+        kind: "operation",
+        operationId: "list-issues",
+        input: {},
+        accountRef: "acct-work",
+      }),
+    });
+    bindLocalWindow(opReq);
+    expect((await handler(opReq))?.status).toBe(200);
+    expect(service.executeOperation).toHaveBeenCalledWith(
+      "linear",
+      { kind: "operation", operationId: "list-issues", input: {}, accountRef: "acct-work" },
+      expect.anything(),
+    );
+
+    const adoptReq = new Request("http://127.0.0.1/api/integrations/linear/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://127.0.0.1" },
+      body: JSON.stringify({ kind: "adopt-legacy", scope: "personal-api-key" }),
+    });
+    bindLocalWindow(adoptReq);
+    expect((await handler(adoptReq))?.status).toBe(200);
+    expect(service.adoptLegacyPersonalCredential).toHaveBeenCalledWith("linear", expect.anything());
   });
 });

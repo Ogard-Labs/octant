@@ -488,8 +488,10 @@ export function InboxView(props: InboxViewProps) {
                   <ul className="surface-list">
                     {linear.page.rows.map((row) => {
                       const key = linearIssueSeenKey(row);
+                      const rowKey =
+                        row.accountRef === undefined ? row.id : `${row.accountRef}:${row.id}`;
                       return (
-                        <li className="surface-row inbox-row" key={row.id}>
+                        <li className="surface-row inbox-row" key={rowKey}>
                           <a
                             className="inbox-view__row"
                             data-unseen={seenKeys.has(key) ? undefined : "true"}
@@ -505,7 +507,9 @@ export function InboxView(props: InboxViewProps) {
                                 {row.title}
                               </span>
                               <span className="oct-meta">
-                                {row.identifier} · {row.state.name}
+                                {row.workspaceLabel === undefined
+                                  ? `${row.identifier} · ${row.state.name}`
+                                  : `${row.workspaceLabel} · ${row.identifier} · ${row.state.name}`}
                               </span>
                             </span>
                           </a>

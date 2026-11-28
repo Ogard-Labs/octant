@@ -20,6 +20,7 @@ export interface TrackerReferenceResolvePorts {
   };
   readonly linear?: {
     readonly available: boolean;
+    readonly accountRef?: string | undefined;
     readonly getIssue: (key: string) => Promise<TrackerReferenceLookup>;
   };
 }

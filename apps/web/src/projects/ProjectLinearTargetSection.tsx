@@ -1,8 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { ProjectLinearTarget, ProjectSummary } from "@octant/contracts";
+import type { IntegrationAccountEntry } from "@octant/contracts/integration";
 import type { LinearIssueFilterOptions } from "@octant/contracts/linear-issues";
 import { formatProjectLinearTarget } from "@octant/domain";
+import {
+  linearAccountDisplayLabel,
+  readyLinearAccounts,
+} from "../linear/linearIssuesReadAvailable";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -17,12 +22,17 @@ export interface ProjectLinearTargetSectionProps {
 }
 
 /**
- * Per-Project Linear team and optional Linear project selector inside Project
- * Overview. Reads teams and projects through the connected Linear integration
- * and delegates persistence to the host Project command.
+ * Per-Project Linear account, team, and optional Linear project selector inside
+ * Project Overview. Reads accounts, teams, and projects through the connected
+ * Linear integration and delegates persistence to the host Project command.
  */
 export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProps) {
   const { project, linearClient, disabled, onChoose } = props;
+  const current = project.linearTarget;
+  const [accounts, setAccounts] = useState<ReadonlyArray<IntegrationAccountEntry>>();
+  const [selectedAccountRef, setSelectedAccountRef] = useState<string | undefined>(
+    current?.accountRef,
+  );
   const [filters, setFilters] = useState<LinearIssueFilterOptions>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -30,9 +40,59 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
 
   useEffect(() => {
     let active = true;
+    const readAccounts = linearClient.accountsSnapshot;
+    if (typeof readAccounts !== "function") {
+      setAccounts(undefined);
+      return;
+    }
+    void readAccounts.call(linearClient).then(
+      (snapshot) => {
+        if (!active) return;
+        const ready = readyLinearAccounts(snapshot.accounts);
+        setAccounts(ready);
+        setSelectedAccountRef((previous) => {
+          if (previous !== undefined && ready.some((entry) => entry.accountRef === previous)) {
+            return previous;
+          }
+          if (current?.accountRef !== undefined) return current.accountRef;
+          const legacy = ready.find((entry) => entry.isLegacy === true);
+          return legacy?.accountRef ?? ready[0]?.accountRef;
+        });
+      },
+      () => {
+        if (active) setAccounts(undefined);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [linearClient, current?.accountRef]);
+
+  const readyAccounts = useMemo(() => accounts ?? [], [accounts]);
+  const isMultiAccount = readyAccounts.length > 1;
+  const accountConnected =
+    accounts === undefined ||
+    (selectedAccountRef !== undefined &&
+      readyAccounts.some((entry) => entry.accountRef === selectedAccountRef));
+  const legacyRef = readyAccounts.find((entry) => entry.isLegacy === true)?.accountRef;
+  const resolvedCurrentAccountRef =
+    current?.accountRef ??
+    (current !== undefined ? (legacyRef ?? readyAccounts[0]?.accountRef) : undefined);
+
+  useEffect(() => {
+    let active = true;
+    if (!accountConnected) {
+      setFilters(undefined);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(undefined);
-    void linearClient.listIssueFilters().then(
+    const load =
+      selectedAccountRef === undefined
+        ? linearClient.listIssueFilters()
+        : linearClient.listIssueFilters(selectedAccountRef);
+    void load.then(
       (options) => {
         if (!active) return;
         setFilters(options);
@@ -48,16 +108,32 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     return () => {
       active = false;
     };
-  }, [linearClient]);
+  }, [linearClient, selectedAccountRef, accountConnected]);
 
-  const current = project.linearTarget;
   const teams = filters?.teams ?? [];
   const projects = filters?.projects ?? [];
+
+  const showAccountPicker = isMultiAccount || current?.accountRef !== undefined;
+  const accountOptions = [
+    ...readyAccounts.map((entry) => ({
+      id: entry.accountRef,
+      label: linearAccountDisplayLabel(entry),
+    })),
+    ...(selectedAccountRef !== undefined && !accountConnected
+      ? [{ id: selectedAccountRef, label: "Disconnected account (unavailable)" }]
+      : []),
+  ];
+
+  const onCurrentAccount =
+    current !== undefined &&
+    (accounts === undefined || resolvedCurrentAccountRef === selectedAccountRef);
 
   const teamOptions = [
     { id: UNBOUND, label: "Not bound" },
     ...teams.map((team) => ({ id: team.id, label: team.label })),
-    ...(current !== undefined && !teams.some((team) => team.id === current.teamId)
+    ...(onCurrentAccount &&
+    current !== undefined &&
+    !teams.some((team) => team.id === current.teamId)
       ? [{ id: current.teamId, label: `${current.teamName} (${current.teamKey})` }]
       : []),
   ];
@@ -65,7 +141,8 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
   const projectOptions = [
     { id: ANY_PROJECT, label: "Any Linear project" },
     ...projects.map((item) => ({ id: item.id, label: item.label })),
-    ...(current?.projectId !== undefined &&
+    ...(onCurrentAccount &&
+    current?.projectId !== undefined &&
     current.projectName !== undefined &&
     !projects.some((item) => item.id === current.projectId)
       ? [{ id: current.projectId, label: current.projectName }]
@@ -88,6 +165,14 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     }
   }
 
+  const selectedEntry =
+    selectedAccountRef === undefined
+      ? undefined
+      : readyAccounts.find((entry) => entry.accountRef === selectedAccountRef);
+  const shouldEmitAccountRef =
+    selectedAccountRef !== undefined &&
+    (isMultiAccount || current?.accountRef !== undefined || selectedEntry?.isLegacy !== true);
+
   function handleTeamChange(teamId: string) {
     if (teamId === UNBOUND) {
       void save(null);
@@ -99,10 +184,12 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     const teamName = found.name ?? extractTeamName(found.label);
     if (teamKey === undefined) return;
     void save({
+      ...(shouldEmitAccountRef ? { accountRef: selectedAccountRef } : {}),
       teamId: found.id,
       teamKey,
       teamName,
-      ...(found.id === current?.teamId &&
+      ...(onCurrentAccount &&
+      found.id === current?.teamId &&
       current.projectId !== undefined &&
       current.projectName !== undefined
         ? { projectId: current.projectId, projectName: current.projectName }
@@ -114,6 +201,7 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     if (current === undefined) return;
     if (projectId === ANY_PROJECT) {
       void save({
+        ...(shouldEmitAccountRef ? { accountRef: selectedAccountRef } : {}),
         teamId: current.teamId,
         teamKey: current.teamKey,
         teamName: current.teamName,
@@ -123,6 +211,7 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     const found = projects.find((item) => item.id === projectId);
     if (found === undefined) return;
     void save({
+      ...(shouldEmitAccountRef ? { accountRef: selectedAccountRef } : {}),
       teamId: current.teamId,
       teamKey: current.teamKey,
       teamName: current.teamName,
@@ -131,26 +220,45 @@ export function ProjectLinearTargetSection(props: ProjectLinearTargetSectionProp
     });
   }
 
+  const boundAccountLabel =
+    resolvedCurrentAccountRef === undefined
+      ? undefined
+      : readyAccounts.find((entry) => entry.accountRef === resolvedCurrentAccountRef);
+
   return (
     <div className="linear-settings__advanced">
       <p className="linear-settings__note">
         {current === undefined
           ? "Not bound to a Linear team. Choose a team to scope Create from…, the Linear browser, and octant_linear reads to this Project."
-          : `Bound to ${formatProjectLinearTarget(current)}.`}
+          : boundAccountLabel !== undefined && isMultiAccount
+            ? `Bound to ${linearAccountDisplayLabel(boundAccountLabel)} · ${formatProjectLinearTarget(current)}.`
+            : accounts !== undefined && !accountConnected
+              ? `Bound to ${formatProjectLinearTarget(current)} (account unavailable — reconnect in Settings to restore).`
+              : `Bound to ${formatProjectLinearTarget(current)}.`}
       </p>
       {loading ? (
         <p className="linear-settings__note">Loading Linear teams…</p>
       ) : (
         <div className="linear-settings__controls">
+          {showAccountPicker && accountOptions.length > 0 ? (
+            <OctantSelectField
+              aria-label="Linear account"
+              disabled={disabled === true || saving || onChoose === undefined}
+              onValueChange={setSelectedAccountRef}
+              options={accountOptions}
+              placeholder="Choose account"
+              value={selectedAccountRef ?? ""}
+            />
+          ) : null}
           <OctantSelectField
             aria-label="Linear team"
             disabled={disabled === true || saving || onChoose === undefined}
             onValueChange={handleTeamChange}
             options={teamOptions}
             placeholder="Not bound"
-            value={current?.teamId ?? UNBOUND}
+            value={onCurrentAccount && current !== undefined ? current.teamId : UNBOUND}
           />
-          {current !== undefined && projects.length > 0 ? (
+          {onCurrentAccount && current !== undefined && projects.length > 0 ? (
             <OctantSelectField
               aria-label="Linear project"
               disabled={disabled === true || saving || onChoose === undefined}

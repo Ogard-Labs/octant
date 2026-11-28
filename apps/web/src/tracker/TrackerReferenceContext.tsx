@@ -95,13 +95,14 @@ export function useTrackerReferenceResolutions(text: string): TrackerReferenceRe
   portsRef.current = ports;
   const githubAvailable = ports?.github?.available === true;
   const linearAvailable = ports?.linear?.available === true;
+  const linearAccountRef = ports?.linear?.accountRef;
 
   useEffect(() => {
-    // Drop cached resolutions when connection posture changes so a disconnected
-    // host cannot keep showing titles from an earlier authorized session.
+    // Drop cached resolutions when connection posture or bound Linear account
+    // changes so a disconnected host or different workspace cannot reuse titles.
     cacheRef.current = new Map();
     setByIdentity(keepEmpty(new Map()));
-  }, [githubAvailable, linearAvailable]);
+  }, [githubAvailable, linearAvailable, linearAccountRef]);
 
   useEffect(() => {
     const activePorts = portsRef.current;

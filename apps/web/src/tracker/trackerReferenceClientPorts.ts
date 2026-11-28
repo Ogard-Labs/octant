@@ -17,6 +17,7 @@ export interface TrackerReferenceClientPortsInput {
   };
   readonly linear?: {
     readonly available: boolean;
+    readonly accountRef?: string | undefined;
     readonly client: IntegrationClient;
   };
 }
@@ -82,13 +83,18 @@ export function createTrackerReferenceClientPorts(
       : {
           linear: {
             available: linearInput.available,
+            ...(linearInput.accountRef === undefined ? {} : { accountRef: linearInput.accountRef }),
             getIssue: async (key: string) => {
               try {
                 if (typeof linearInput.client.getIssueByIdentifier === "function") {
                   try {
-                    const detail = await linearInput.client.getIssueByIdentifier({
-                      identifier: key,
-                    });
+                    const detail =
+                      linearInput.accountRef === undefined
+                        ? await linearInput.client.getIssueByIdentifier({ identifier: key })
+                        : await linearInput.client.getIssueByIdentifier(
+                            { identifier: key },
+                            linearInput.accountRef,
+                          );
                     return {
                       kind: "resolved" as const,
                       title: detail.title,
@@ -104,10 +110,13 @@ export function createTrackerReferenceClientPorts(
                     }
                   }
                 }
-                const page = await linearInput.client.listIssues({
-                  search: key,
-                  pageSize: 50,
-                });
+                const page =
+                  linearInput.accountRef === undefined
+                    ? await linearInput.client.listIssues({ search: key, pageSize: 50 })
+                    : await linearInput.client.listIssues(
+                        { search: key, pageSize: 50 },
+                        linearInput.accountRef,
+                      );
                 const row = page.rows.find((candidate) => candidate.identifier === key);
                 if (row === undefined) {
                   return { kind: "not-found" as const };
