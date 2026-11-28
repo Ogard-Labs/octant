@@ -161,11 +161,22 @@ sidebar's fill; at 80% and 82% a photo still ran through the letters, maintainer
 request 2026-11-15), so the ground is a whisper and agent replies remain bare prose: a thread, every other pane
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
-generator). A start screen (a welcome or a new thread) is the one exception and
+generator). A thread's veil is a plate behind its text column only: the column
+and 24px past it, easing out over 48px, so the ground shows at its own strength
+in the gutters beside the conversation, with Glass on or off (v7, maintainer
+decision 2026-11-28; [Thread view](thread-view.md)). A pane's veil is the window
+coat's own colour at 94% in either material; a destination page under Glass
+keeps the coat itself, and the ground steps down to an eighth while a page is
+up. A start screen (a welcome or a new thread) is the one exception and
 stays open on the ground, but only its stage. A tool's pane is never on the
-ground: a dock tile, the dock's overview, the Environment section and the bottom
-panel are the pane colour, opaque, wherever a ground is on (beside a start
-screen and beside a thread, on an opaque window and under Glass; `surface.css`).
+ground: a dock tile, the dock's overview and the bottom panel are the pane
+colour, opaque, wherever a ground is on (beside a start screen and beside a
+thread, on an opaque window and under Glass; `surface.css`). The Environment
+section beside a thread is the thread's surface continued, not a tool: under a
+ground that runs behind everything it is the pane colour at the sidebar's keep
+(94%, whole under reduced transparency and increased contrast), so the ground
+shows through it as faintly as through the sidebar (v7, maintainer decision
+2026-11-28).
 A fill at 94%, the sidebar's colour at 72% under a veil, and a blur of the
 ground were each tried there, and the desktop window, which draws no backdrop
 blur, showed the ground's cells and streaks behind a pull request's title and
@@ -177,7 +188,8 @@ Background. The phone shares the same pictures and print effect under
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
 carries a soft wash of the page colour that fades out before the edges (under
-Glass the ground steps down instead, and the question and its hint carry a
-thin glow in the page colour), and a
+Glass the wash is the window coat's own colour, and the question and its hint
+also carry a thin glow in the page colour; until v7 the ground stepped down to
+half instead, maintainer decision 2026-11-28), and a
 conversation pane's title rail shares the conversation's reading surface, so
 no text sits straight on a busy photo.

@@ -2918,11 +2918,12 @@ A new window, its background and its drafts behave predictably.
 - Without a saved choice, a wide window opens the right dock where the active pane has a dock subject; an explicit show or hide is restored per window.
 - A ground is drawn as chosen and stays readable: the ASCII field stays the default, and no set or density inks heavier than it. A photo comes from the host's library, and the host refuses to delete one while it shows.
 - A still ground holds one frame: a Pixel ground or ASCII field set to still always shows its first frame, so it looks the same on every load and the Visual check's ground scenes can hold it to a fine tolerance.
+- Shown behind everything, the ground keeps its own strength behind a thread and Home: a thread reads on a feathered plate behind its text column only, in the window coat's colour at 94%, and Home's list sits on cards; it shows faintly through the sidebar and the Environment section. Under Glass it steps down only while a destination page is up. Nothing blurs, recolours or covers the ground beyond that, and reduced transparency and increased contrast keep every text surface opaque (maintainer decision, 2026-11-28).
 - Plugins offer character grounds as data only, while installed, trusted and enabled; a pick copies the values.
 - A new-task composer keeps its identity while its Project changes; a refused binding keeps the prior authorized Project and the draft. A failed first turn returns its text to the composer with the reason.
 - Closing a file tab, the Files tool, its thread or the window checks for unsaved Code Files edits, even when Files is hidden; Save must succeed to continue.
 
-Status: Built. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [File editing](workspace.md#file-editing), [Application ground](application-ground.md), [Custom grounds](custom-grounds.md) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
+Status: Built. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [File editing](workspace.md#file-editing), [Application ground](application-ground.md), [Custom grounds](custom-grounds.md), [DESIGN.md: Home with the drawn ground](../../DESIGN.md#home-with-the-drawn-ground), [Thread view: Transcript](thread-view.md#transcript) and [Thread view: Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
 
 ### Usage reading and provider marks
 
@@ -3227,8 +3228,9 @@ Under the Code composer, the start screen is an agent home of work to pick up.
 
 - Picking an item fills the prompt and attaches the issue as the thread's Create-from context.
 - Code Home's activity cards count from journaled facts or the signed-in GitHub account's bounded history, name their source, and say when a read is partial.
+- Each section of the start screen's list holds its rows on one card under its header (maintainer decision, 2026-11-28).
 
-Status: Built. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home) and [Activity timeframes](start-screen.md#activity-timeframes).
+Status: Built. Detail: [Start screen: Code agent home](start-screen.md#code-agent-home), [The list](start-screen.md#the-list) and [Activity timeframes](start-screen.md#activity-timeframes).
 
 ### First-run setup
 

@@ -899,6 +899,20 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
 }
 
+/* The Environment section beside a thread is the thread's own surface
+   continued, not a tool, so under a ground that runs behind everything it lets
+   the ground through as faintly as the sidebar does: the pane colour at the
+   sidebar's keep, which is whole under reduced transparency and increased
+   contrast (v7, maintainer decision 2026-11-28). Tool tiles stay solid. */
+.shell--app-backdrop.shell-frame .right-utility-dock[data-dock-environment="true"] {
+  --octant-panel-surface: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--octant-workspace) 98%, var(--octant-text-primary))
+      var(--octant-sidebar-keep),
+    transparent
+  );
+}
+
 /* A lone tool beside a start screen has no pane under it (the stage's fill is
    cleared above), so the dock lays the same solid fill under its tiles. */
 @media (min-width: 681px) {
@@ -1262,37 +1276,34 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   :is(.draft-thread, .work-composer-adapter, .code-composer-adapter):not(
     :is(.draft-thread, .work-composer-adapter, .code-composer-adapter) *
   ) {
+  --octant-start-wash: var(--octant-app-background);
   background: radial-gradient(
     ellipse clamp(300px, 40vw, 640px) 440px at 50% 260px,
-    color-mix(in srgb, var(--octant-app-background) 84%, transparent),
-    color-mix(in srgb, var(--octant-app-background) 50%, transparent) 60%,
+    color-mix(in srgb, var(--octant-start-wash) 84%, transparent),
+    color-mix(in srgb, var(--octant-start-wash) 50%, transparent) 60%,
     transparent 100%
   );
 }
 
 /* Under Glass the page colour is not what surrounds the column: on an OLED
-   preset it is black, and the wash sat on the grey glass as a dark stain
-   behind the question. There the column takes no wash and the ground steps
-   down instead while a start screen is up, so the letters stay quiet behind
-   the question without a shape of their own. */
+   preset it is black, and the wash in it sat on the grey glass as a dark
+   stain behind the question. There the wash is the window coat's own colour,
+   the one the glass is tinted with. Until v7 the column took no wash and the
+   whole ground stepped down to half while a start screen was up; now the
+   ground keeps its own strength around Home (maintainer decision,
+   2026-11-28), and without a wash a dark picture behind a light page left the
+   question unreadable, so the wash is the start screen's feathered plate. */
 .shell--app-backdrop.shell--material-translucent.shell-frame
   :is(.draft-thread, .work-composer-adapter, .code-composer-adapter):not(
     :is(.draft-thread, .work-composer-adapter, .code-composer-adapter) *
   ) {
-  background: transparent;
+  --octant-start-wash: var(--octant-workspace);
 }
 
-.shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    :is(.draft-thread, .work-composer-adapter, .code-composer-adapter)
-  )
-  > .app-backdrop[data-placement="shell"] {
-  opacity: 0.5;
-}
-
-/* At half strength the ground still ran through the question itself: Code
-   Home's question sits high on the page, outside where a centred clearing
-   would fall. A glow the width of a stroke in the page colour lifts the
-   letters off the ground without the wash's dark stain on the glass. */
+/* The ground runs through the question itself: Code Home's question sits
+   high on the page, outside where a centred clearing would fall. A glow the
+   width of a stroke in the page colour lifts the letters off the ground
+   without the wash's dark stain on the glass. */
 .shell--app-backdrop.shell--material-translucent.shell-frame
   :is(.welcome__question, .welcome__status) {
   text-shadow:
@@ -1373,6 +1384,84 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   }
 }
 
+/* A pane's veil is the window coat's own colour (the workspace colour the
+   coat is made of) at the reading keep, in either material. Under Glass the
+   veil used to be the coat itself, which is see-through by design, so the
+   ground had to step down behind every thread to be read through; with the
+   veil made of the coat's colour at 94% the ground can stay whole beside the
+   text, and the keep's 100% under reduced transparency and increased contrast
+   makes the veil opaque there. A destination page keeps the coat (below). */
+.shell--app-backdrop.shell-frame
+  .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]) {
+  --octant-veil-surface: var(--octant-workspace);
+}
+
+/* A thread reads on a plate, not a wall: the veil runs behind the text column
+   and its pad, then eases out over the feather, so the ground shows at its
+   own strength in the gutters beside a conversation (v7, maintainer decision
+   2026-11-28) and is only a whisper behind the words. The column is the one
+   the transcript and the composer are laid in; a percentage in the gradient
+   is the pane's width, which is the column's container. The plate starts
+   below the title band, which belongs to the window frame. No blur: the
+   desktop window draws none, and the ground is never frosted. Tool panes
+   (a browser, files, a diff) keep the full veil above. */
+.shell--app-backdrop.shell-frame
+  .workspace-pane:is([data-surface-kind="thread"], [data-surface-kind="side-chat"]) {
+  background-image: linear-gradient(
+    to right,
+    transparent
+      calc(
+        50% - var(--oct-thread-column) / 2 - var(--octant-reading-plate-pad) -
+          var(--octant-reading-plate-feather)
+      ),
+    var(--octant-thread-veil)
+      calc(50% - var(--oct-thread-column) / 2 - var(--octant-reading-plate-pad)),
+    var(--octant-thread-veil)
+      calc(50% + var(--oct-thread-column) / 2 + var(--octant-reading-plate-pad)),
+    transparent
+      calc(
+        50% + var(--oct-thread-column) / 2 + var(--octant-reading-plate-pad) +
+          var(--octant-reading-plate-feather)
+      )
+  );
+  background-position: 0 var(--oct-title-rail-h);
+  background-size: 100% calc(100% - var(--oct-title-rail-h));
+  background-repeat: no-repeat;
+}
+
+/* With Glass off the frame lays the opaque pane fill under the thread's
+   column (Glass clears it), and the workspace layer is a stacking context of
+   its own (its clip and mask), so that fill sat over a ground that runs
+   behind everything: the plate above had nothing to be a plate over, and a
+   thread showed no ground at all. While a thread is in the stage, and no
+   destination page covers it, the fill goes clear the way it does for a start
+   screen, so the ground stands beside the plate in either material. Reduced
+   transparency and increased contrast keep the fill, and a stage with no ground
+   behind it is not touched. */
+@media (prefers-reduced-transparency: no-preference) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell--app-backdrop.shell-frame:has(
+      .workspace-pane:is([data-surface-kind="thread"], [data-surface-kind="side-chat"])
+    ):not(
+      :has(
+        .primary-workspace-layer
+          > :is(
+            .inbox-layer,
+            .code-board-layer,
+            .archive-layer,
+            .review-layer,
+            .projects-page-layer,
+            .agents-center-layer,
+            .automation-center-layer,
+            .artifact-library-layer
+          )
+      )
+    )
+    > .workspace-layer::before {
+    background: transparent;
+  }
+}
+
 /* A destination page covers every pane, so the veil of a thread left open
    beneath it would lay a second one under the page's own and wash the ground
    out entirely. Under a page the panes stay clear. */
@@ -1407,31 +1496,30 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   background: transparent;
 }
 
-/* Under Glass the sheet is nearly clear, so an 80% veil of it could not quiet
-   the ground: its letters ran crisp behind the transcript, and on a
-   destination page "Describe with Octant" sat on a column of glyphs. While
-   any reading surface is on screen the ground itself steps down to about the
-   strength the veil leaves it on an opaque sheet; a third was tried first and
-   the To review list still read as names printed over a character ground
-   (walk-through, October 2026). At a fifth the packaged window still showed a
-   field of letters behind a transcript, so it is an eighth. A backdrop blur
-   behind the thread was tried too: a browser frosted the letters, but the
-   packaged window, whose glass is the system's, drew them sharp. */
+/* Under Glass a destination page's veil is the coat, which is nearly clear,
+   so a veil of it could not quiet the ground: on a page "Describe with
+   Octant" sat on a column of glyphs. While a page is up the ground itself
+   steps down to about the strength the veil leaves it on an opaque sheet; a
+   third was tried first and the To review list still read as names printed
+   over a character ground (walk-through, October 2026), and at a fifth the
+   packaged window still showed a field of letters, so it is an eighth. A
+   backdrop blur was tried too: a browser frosted the letters, but the
+   packaged window, whose glass is the system's, drew them sharp. A thread no
+   longer steps the ground down: its plate is the coat's colour at the reading
+   keep (above), so the ground shows whole beside it (maintainer decision,
+   2026-11-28). */
 .shell--app-backdrop.shell--material-translucent.shell-frame:has(
-    :is(
-      .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]),
-      .primary-workspace-layer
-        > :is(
-          .inbox-layer,
-          .code-board-layer,
-          .archive-layer,
-          .review-layer,
-          .projects-page-layer,
-          .agents-center-layer,
-          .automation-center-layer,
-          .artifact-library-layer
-        )
-    )
+    .primary-workspace-layer
+      > :is(
+        .inbox-layer,
+        .code-board-layer,
+        .archive-layer,
+        .review-layer,
+        .projects-page-layer,
+        .agents-center-layer,
+        .automation-center-layer,
+        .artifact-library-layer
+      )
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.12;

@@ -92,6 +92,8 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "ground-pixels-picture-subtle", tolerance: GROUND_TOLERANCE },
   { id: "ground-flowing", tolerance: GROUND_TOLERANCE },
   { id: "ground-flowing-everywhere-subtle", tolerance: GROUND_TOLERANCE },
+  { id: "thread-ground-everywhere", tolerance: GROUND_TOLERANCE },
+  { id: "thread-ground-everywhere-subtle", tolerance: GROUND_TOLERANCE },
   { id: "ground-none", tolerance: GROUND_TOLERANCE },
   { id: "ground-none-strong", tolerance: GROUND_TOLERANCE },
   { id: "ground-none-subtle-tint-floor", tolerance: GROUND_TOLERANCE },

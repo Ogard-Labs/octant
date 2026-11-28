@@ -318,18 +318,23 @@ under the fill).
 | Tooltip                                                                | the float, opaque                                                                                                    | the same                                                     | the same                                                        |
 
 - **Text keeps a calm ground.** Where the application ground runs behind the
-  panes, every surface that holds running text (the thread's reading veil, the
-  sidebar's lists, and in the opaque window the dock panes, the Environment
-  section and the bottom panel, which are opaque) keeps at least 94% of its own
+  panes, every surface that holds running text (the thread's reading plate, the
+  sidebar's lists, the Environment section, and in the opaque window the dock
+  tiles and the bottom panel, which are opaque) keeps at least 94% of its own
   surface colour over it: `--octant-reading-surface-keep`, one variable on the
-  shell. Empty areas (a start screen's stage, the gutters between panes, the
-  title band) keep the ground at full strength. No blur, and the Glass coat
+  shell. A thread's surface is a feathered plate behind its text column only
+  (the column and `--octant-reading-plate-pad`, 24px, past it, easing out over
+  `--octant-reading-plate-feather`, 48px), in the window coat's own colour, so
+  the ground shows at its own strength beside a conversation (v7, maintainer
+  decision 2026-11-28); it has no blur and no step-down of the ground under
+  Glass. Empty areas (a start screen's stage, the gutters beside a thread's
+  column, the title band) keep the ground at full strength. No blur, and the Glass coat
   defaults are unchanged; Reduced transparency and Increased contrast resolve
   to 100%. At 80% and 82% a photo or a field of characters ran through the
   letters and read as noise (maintainer request, 2026-11-15). A start screen is no
   exception: only its stage stays open on the ground, and a pane opened beside
   it (a pull request in the dock, say) takes the same surface, the pane colour
-  or, under Glass, the workspace colour, at 94%. letters and read as noise (maintainer request, 2026-11-15).
+  or, under Glass, the workspace colour, at 94%.
 - **A float's edge catches the light under Glass.** Every floating surface's
   shadow (`--octant-shadow-pop`) starts with a rim slot, `--octant-float-rim`,
   that is an empty shadow everywhere except under the host's Glass rule (a
@@ -2035,7 +2040,15 @@ application ground; every other page covers it with the reading veil.
   default (`scope: welcome`). A person may put it behind every page
   (`scope: everywhere`, which includes the sidebar); then every
   surface that shows text or information lies under the reading veil (the sheet
-  colour at 94%) and only the start screens stay open on the ground.
+  colour at 94%), a thread's only behind its text column, so the ground shows at
+  its own strength beside a conversation and Home, faintly through the sidebar
+  and the Environment section, and only the start screens stay open on it.
+  Under Glass the ground keeps its strength behind a thread and Home; it steps
+  down to an eighth only while a destination page is up (v7, maintainer
+  decision 2026-11-28).
+- **Home's list on cards.** Each section of Home's list holds its rows on one
+  `OctantCard` under its header, so the rows read on a card, not on the
+  picture; never the glass variant, whose blur would frost the ground.
 - **The grounds.**
 
   | Ground                | What it draws                                                                                                                                                                                                                                                                  | Home readability                                                                                                                                                                                                                                                                                                                               |
@@ -2053,9 +2066,10 @@ application ground; every other page covers it with the reading veil.
   hidden or it is off screen, caps its backing store at twice the display ratio
   and 5 million pixels, waits for idle time and fades in over
   `--oct-motion-ground-in`. Text never sits on it bare: the composer box is
-  opaque on an opaque window, Home masks or dims behind its text, a tool's pane (a
-  dock tile, the Environment section, the bottom panel) is solid wherever a
-  ground is on, every other
+  opaque on an opaque window, Home masks or dims behind its text and holds its
+  list on cards, a tool's pane (a dock tile, the bottom panel) is solid wherever
+  a ground is on, the Environment section keeps the sidebar's 94%, a thread
+  reads on its plate, every other
   page lies under the veil. The Home ground fades to the stage colour over the lower 45% in both modes. Reduced
   motion holds a still frame. Increased contrast turns the ground off. Under
   glass the ground lies on the coat, the composer keeps its wash, and the

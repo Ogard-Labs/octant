@@ -1,7 +1,9 @@
-/* The start screen's one calm list: sections separated by space, rows with no
-   card behind them (a wash on hover only), on the composer's own measure. Row
-   recipe is the Pull requests list's: a 16px state glyph, the title at the
-   detail step, one meta line at the small step. */
+/* The start screen's calm list: sections separated by space, each section's
+   rows on one card under its heading (a wash on a row on hover only), on the
+   composer's own measure. The card is what the rows read on when a ground
+   shows behind Home (v7, maintainer decision 2026-11-28): bare rows sat
+   straight on the picture. Row recipe is the Pull requests list's: a 16px
+   state glyph, the title at the detail step, one meta line at the small step. */
 
 .home-list {
   /* One right edge: a header's count, a row's status and a custom row's actions
@@ -24,6 +26,13 @@
   display: grid;
   min-width: 0;
   gap: var(--oct-space-1);
+}
+
+/* The card holds the rows edge to edge: a row keeps its own 8px inset and
+   its hover wash, 4px in from the card's corner. */
+.home-list__card.home-list__card {
+  gap: 0;
+  padding: var(--oct-space-1);
 }
 
 .home-list__head {

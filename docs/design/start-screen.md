@@ -156,9 +156,12 @@ share one grid: the heading's left edge is the glyph column's left edge, and the
 count, a row's status word and a self-drawn row's actions all end at one right
 edge, a 24px gutter in from the list's edge, which holds only the menu. Every
 header keeps the same slots (title, a 12px busy mark, count, menu), so nothing
-shifts when a section starts or stops updating. Rows have no card
-behind them (a wash on hover and focus only) and sections are told apart by
-space, not boxes. A row is the Pull requests list's row: a state glyph at the
+shifts when a section starts or stops updating. Each section's rows sit on
+one card under its header (`OctantCard`: the card colour and its hairline, 4px
+inside it, a wash on a row on hover and focus only), so over a ground the rows
+read on the card rather than on the picture; sections are told apart by space
+(v7, maintainer decision 2026-11-28). The card is the ordinary one, never the
+glass variant, whose blur would frost the ground behind it. A row is the Pull requests list's row: a state glyph at the
 16px step, the title at the 13px detail step, and one meta line at 12px
 (`repository · #number · age`, a thread's Project and branch, a service's port
 and Project). A pull request names its author only when it is someone else's, and

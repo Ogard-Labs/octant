@@ -68,6 +68,11 @@
      one edit moves every such surface; an empty area (a start screen, the gutters,
      the title band) keeps the ground at full strength. */
   --octant-reading-surface-keep: 94%;
+  /* A thread's plate: how far it runs past the text column on each side at
+     that keep, and how far it then eases out to nothing, so the ground stands
+     whole beside the column and no edge of the plate reads as a panel. */
+  --octant-reading-plate-pad: var(--oct-space-6);
+  --octant-reading-plate-feather: var(--oct-space-12);
   /* The sidebar inside the framed panel is the panel's tone, a few steps toward
      the ground at most, so the two sides of the seam read as one surface with
      a line between them. It keeps 82% of its colour, so the application ground

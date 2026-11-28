@@ -295,3 +295,100 @@ describe("window glass", () => {
     );
   });
 });
+
+describe("the ground behind a thread and Home", () => {
+  const flat = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\s+/g, " ");
+  const threadPane =
+    '.workspace-pane:is([data-surface-kind="thread"], [data-surface-kind="side-chat"])';
+
+  it("lays a feathered plate behind a thread's text column only, below the title band, with no blur", () => {
+    const surface = flat(read("styles/surface.css"));
+    const rule =
+      new RegExp(
+        `\\.shell--app-backdrop\\.shell-frame ${threadPane.replace(/[.[\]()":,=-]/g, "\\$&")} \\{([^}]*)\\}`,
+      ).exec(surface)?.[1] ?? "";
+    expect(rule).not.toBe("");
+    // Clear at both edges, the plate's colour across the column and its pad,
+    // easing out over the feather; the column is the one the text is laid in.
+    expect(rule).toMatch(/background-image: linear-gradient\( to right, transparent calc\(/);
+    expect(rule).toContain("var(--oct-thread-column)");
+    expect(rule).toContain("var(--octant-reading-plate-pad)");
+    expect(rule).toContain("var(--octant-reading-plate-feather)");
+    expect(rule.match(/var\(--octant-thread-veil\)/g)).toHaveLength(2);
+    expect(rule.match(/ transparent calc\(/g)).toHaveLength(2);
+    // Below the title band, which belongs to the window frame.
+    expect(rule).toContain("background-position: 0 var(--oct-title-rail-h);");
+    expect(rule).toContain("background-size: 100% calc(100% - var(--oct-title-rail-h));");
+    expect(rule).toContain("background-repeat: no-repeat;");
+    expect(rule).not.toMatch(/backdrop-filter|filter:/);
+    // The plate's measures come from the spacing scale.
+    const shell = read("styles/shell.css");
+    expect(shell).toContain("--octant-reading-plate-pad: var(--oct-space-6);");
+    expect(shell).toContain("--octant-reading-plate-feather: var(--oct-space-12);");
+  });
+
+  it("clears the pane fill under a thread over a ground with Glass off, but not under a page or where transparency is reduced", () => {
+    const surface = flat(read("styles/surface.css"));
+    const clear =
+      /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\) \.shell--app-backdrop\.shell-frame:has\( (\.workspace-pane:is\([^)]*\)) \):not\( :has\( \.primary-workspace-layer > :is\(([^)]*)\) \) \) > \.workspace-layer::before \{ background: transparent; \}/.exec(
+        surface,
+      );
+    expect(clear?.[1]).toBe(threadPane);
+    expect(clear?.[2]).toContain(".agents-center-layer");
+  });
+
+  it("draws every pane's veil in the coat's own colour at the reading keep, so it turns opaque wherever transparency is reduced", () => {
+    const surface = flat(read("styles/surface.css"));
+    expect(surface).toContain(
+      '.shell--app-backdrop.shell-frame .workspace-pane:not([data-surface-kind="welcome"], [data-surface-kind="draft-thread"]) { --octant-veil-surface: var(--octant-workspace); }',
+    );
+    // The keep is 100% under reduced transparency and increased contrast, so
+    // the veil and the plate made from it are opaque there.
+    expect(surface).toContain(
+      "--octant-thread-veil: color-mix( in srgb, var(--octant-veil-surface, var(--octant-sheet-surface)) var(--octant-reading-surface-keep, 94%), transparent );",
+    );
+  });
+
+  it("keeps the ground at its own strength behind a thread and a start screen under Glass, and steps it down only under a destination page", () => {
+    const surface = flat(read("styles/surface.css"));
+    // A start screen's column keeps its feathered wash under Glass, in the
+    // coat's own colour, rather than the whole ground at half strength.
+    expect(surface).toMatch(
+      /\.shell--app-backdrop\.shell--material-translucent\.shell-frame :is\(\.draft-thread, \.work-composer-adapter, \.code-composer-adapter\):not\( :is\(\.draft-thread, \.work-composer-adapter, \.code-composer-adapter\) \* \) \{ --octant-start-wash: var\(--octant-workspace\); \}/,
+    );
+    // No half-strength ground while a start screen is up.
+    expect(surface).not.toMatch(
+      /\.shell--material-translucent\.shell-frame:has\( :is\(\.draft-thread[^{]*\{ opacity: 0\.5; \}/,
+    );
+    const stepDown = [
+      ...surface.matchAll(
+        /([^{}]*) > \.app-backdrop\[data-placement="shell"\] \{ opacity: ([\d.]+); \}/g,
+      ),
+    ];
+    expect(stepDown).toHaveLength(1);
+    const [, selector, opacity] = stepDown[0] ?? [];
+    expect(opacity).toBe("0.12");
+    expect(selector).toContain(".primary-workspace-layer > :is(");
+    expect(selector).not.toContain(".workspace-pane");
+  });
+
+  it("lets the ground through the Environment panel as faintly as through the sidebar, and keeps tool tiles solid", () => {
+    const surface = flat(read("styles/surface.css"));
+    const strip =
+      /\.shell--app-backdrop\.shell-frame \.right-utility-dock\[data-dock-environment="true"\] \{([^}]*)\}/.exec(
+        surface,
+      )?.[1] ?? "";
+    expect(strip).toContain(
+      "--octant-panel-surface: color-mix( in srgb, color-mix(in srgb, var(--octant-workspace) 98%, var(--octant-text-primary)) var(--octant-sidebar-keep), transparent );",
+    );
+    expect(strip).not.toMatch(/backdrop-filter/);
+    // The sidebar's keep is whole under reduced transparency and increased contrast.
+    expect(read("styles/shell.css")).toMatch(
+      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*:is\(\.shell, \.shell\[data-octant-sidebar-vibrancy\]\) \{[^}]*--octant-sidebar-keep: 100%;/,
+    );
+    // A tile in the dock keeps the solid pane fill.
+    expect(read("styles/dock.css")).toMatch(
+      /\.dock-tile \{[^}]*background: var\(--octant-pane-fill\);/,
+    );
+  });
+});

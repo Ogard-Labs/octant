@@ -109,6 +109,21 @@ describe("the start list's cached paint", () => {
     expect(needs.querySelector("svg.octant-spinner")).not.toBeNull();
   });
 
+  it("sets each section's rows on a card under the section's heading", async () => {
+    const late = lateCard("needs-you");
+    renderList(late.definition, memoryStorage());
+    const needs = await screen.findByRole("region", { name: "Needs you" });
+    await late.answer({ status: "ready", rows: [row("a", "needs-you", "Fresh title")] });
+
+    const card = within(needs)
+      .getByRole("button", { name: /Fresh title/ })
+      .closest("[data-slot='card']");
+    expect(card).not.toBeNull();
+    expect(needs.contains(card)).toBe(true);
+    // The heading names the card from above it, as the Activity cards' do.
+    expect(card?.contains(within(needs).getByRole("heading", { name: "Needs you" }))).toBe(false);
+  });
+
   it("replaces the stored rows in place with the fresh answer and makes them live", async () => {
     const storage = seeded([section("needs-you", [row("a", "needs-you", "Old title")])]);
     const late = lateCard("needs-you");

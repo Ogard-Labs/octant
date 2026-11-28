@@ -175,7 +175,19 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 94%, so the
 ground stays a whisper behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
+ground. The veil is a plate behind the text column, not a wall (v7, maintainer
+decision 2026-11-28): it runs across the column the transcript and the composer
+are laid in and 24px past it on each side (`--octant-reading-plate-pad`), then
+eases out to nothing over 48px (`--octant-reading-plate-feather`), so the ground
+shows at its own strength in the gutters beside a conversation and is only a
+whisper behind its words. The plate is the window coat's own colour (the
+workspace colour) at 94% in either material, so it needs no step-down of the
+ground under Glass, which until v7 dimmed the ground to an eighth while a
+thread was on screen; the ground keeps a quarter of its strength under the
+sidebar under Glass. It has no blur. A tool pane (a browser, files, a diff)
+keeps the full-width veil. Reduced transparency and increased contrast keep
+the reading background opaque: the plate's keep is 100% there, and the pane's
+own fill stays under the thread.
 
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text, tables and code
