@@ -199,12 +199,12 @@ describe("WorkRequestDetail", () => {
     ).toThrow();
   });
 
-  it("rejects more than 8 user-input options", () => {
+  it("rejects more than 20 user-input options", () => {
     expect(() =>
       decodeWorkRequestDetail({
         kind: "user-input",
         prompt: "Pick one",
-        options: Array.from({ length: 9 }, (_, index) => `option-${index}`),
+        options: Array.from({ length: 21 }, (_, index) => `option-${index}`),
       }),
     ).toThrow();
   });

@@ -30,7 +30,35 @@ describe("questionnaire contracts", () => {
     { questions: [{ ...question, minSelections: 3 }] },
     { questions: [{ ...question, selection: "single", maxSelections: 2 }] },
     { questions: Array.from({ length: 5 }, (_, index) => ({ ...question, id: String(index) })) },
+    { questions: [{ ...question, header: "x".repeat(65) }] },
+    {
+      questions: [
+        {
+          ...question,
+          options: Array.from({ length: 21 }, (_, index) => ({
+            id: `o${index}`,
+            label: `${index}`,
+          })),
+        },
+      ],
+    },
   ])("refuses ambiguous identities and invalid questionnaire limits", (value) => {
     expect(() => Schema.decodeUnknownSync(Questionnaire)(value)).toThrow();
+  });
+  it("keeps a short header and up to twenty choices a provider offered", () => {
+    const decoded = Schema.decodeUnknownSync(Questionnaire)({
+      questions: [
+        {
+          ...question,
+          header: "Exports",
+          options: Array.from({ length: 20 }, (_, index) => ({
+            id: `o${index}`,
+            label: `${index}`,
+          })),
+        },
+      ],
+    });
+    expect(decoded.questions[0]?.header).toBe("Exports");
+    expect(decoded.questions[0]?.options).toHaveLength(20);
   });
 });

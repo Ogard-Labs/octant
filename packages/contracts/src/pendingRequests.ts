@@ -14,7 +14,13 @@ import {
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
-import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } from "./workRequests";
+import { Questionnaire } from "./questionnaire";
+import {
+  MAX_WORK_REQUEST_OPTIONS,
+  WorkQuestionnaire,
+  WorkRequestId,
+  WorkRequestSanitizedText,
+} from "./workRequests";
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
 
@@ -337,6 +343,12 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: WorkRequestSanitizedText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_WORK_REQUEST_OPTIONS)),
+    /**
+     * The whole set when the agent asked several things at once, so a row can
+     * say how many questions wait and the thread's card answers them in one
+     * reply.
+     */
+    questionnaire: Schema.optional(WorkQuestionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
@@ -361,6 +373,8 @@ export const PendingRequest = Schema.Union(
     options: Schema.Array(
       Schema.Struct({ label: CodeQuestionOptionText }).annotations(strict),
     ).pipe(Schema.maxItems(MAX_CODE_QUESTION_OPTIONS)),
+    /** The whole set, when the agent asked several things at once. */
+    questionnaire: Schema.optional(Questionnaire),
     /**
      * The question asks for a secret. The row finds it and leaves the answer
      * to the thread's masked field, so no list answers it as evidence.
@@ -424,6 +438,8 @@ export const PendingRequest = Schema.Union(
     threadId: ChatThreadId,
     text: ChatAttemptQuestion.from.fields.prompt,
     options: ChatAttemptQuestion.from.fields.options,
+    /** The whole set, when the agent asked several things at once. */
+    questionnaire: Schema.optional(Questionnaire),
     /** The question asks for a secret; only the thread's masked field answers it. */
     secret: Schema.optional(Schema.Literal(true)),
     answer: ChatPendingQuestionAnswer,

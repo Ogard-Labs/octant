@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { validateCanvasChoiceAnswer, validateQuestionnaireAnswer } from "./questionnaire";
+import {
+  optionRecommendation,
+  questionnaireAnswerValues,
+  validateCanvasChoiceAnswer,
+  validateQuestionnaireAnswer,
+} from "./questionnaire";
 
 const questionnaire = {
   questions: [
@@ -156,5 +161,47 @@ describe("Canvas choice answers", () => {
     });
     expect(validateCanvasChoiceAnswer(many, missing).status).toBe("invalid");
     expect(validateCanvasChoiceAnswer(many, unknown).status).toBe("invalid");
+  });
+});
+
+describe("provider question options", () => {
+  it.each([
+    ["Plan first (Recommended)", { label: "Plan first", recommended: true }],
+    ["(recommended) Plan first", { label: "Plan first", recommended: true }],
+    ["Plan first", { label: "Plan first", recommended: false }],
+    ["Recommended reading", { label: "Recommended reading", recommended: false }],
+  ])("reads a recommendation marked in the label %s as a flag", (label, expected) => {
+    expect(optionRecommendation(label)).toEqual(expected);
+  });
+
+  it("keeps a label that is nothing but the mark", () => {
+    expect(optionRecommendation("(Recommended)")).toEqual({
+      label: "(Recommended)",
+      recommended: false,
+    });
+  });
+
+  it("gives each question's answer as the words the provider offered, or the written answer", () => {
+    const answered = validateQuestionnaireAnswer(
+      questionnaire,
+      JSON.stringify({
+        version: 1,
+        answers: [
+          { questionId: "formats", selectedOptionIds: ["pdf", "md"] },
+          { questionId: "open", selectedOptionIds: [], customAnswer: "Only on Fridays" },
+        ],
+      }),
+    );
+    if (answered.status !== "valid") throw new Error("expected a valid answer");
+    expect(questionnaireAnswerValues(questionnaire, answered.response)).toEqual([
+      ["PDF", "Markdown"],
+      ["Only on Fridays"],
+    ]);
+    expect(
+      questionnaireAnswerValues(questionnaire, answered.response, [
+        ["PDF (Recommended)", "Markdown"],
+        ["Open it", "Save only"],
+      ]),
+    ).toEqual([["PDF (Recommended)", "Markdown"], ["Only on Fridays"]]);
   });
 });

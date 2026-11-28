@@ -3,7 +3,7 @@ import {
   ConversationInputPolicy,
   ConversationInputReference,
 } from "./conversationInputs";
-import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
+import { MAX_QUESTION_OPTIONS, Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
@@ -161,7 +161,7 @@ export const ChatAttemptQuestion = Schema.Struct({
   questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(MAX_QUESTION_OPTIONS)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
   /**
@@ -186,7 +186,7 @@ export const ChatAttemptAnsweredQuestion = Schema.Struct({
   questionnaire: Schema.optional(Questionnaire),
   requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(MAX_QUESTION_OPTIONS)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
   /** What the person answered; absent only on a secret question, whose value is kept nowhere. */

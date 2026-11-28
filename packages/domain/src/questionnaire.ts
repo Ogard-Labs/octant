@@ -95,3 +95,48 @@ export function questionAnswerIsAllowed(
       (question.maxSelections ?? (question.selection === "single" ? 1 : question.options.length))
   );
 }
+
+/**
+ * A provider's option label with its recommendation read out. Claude, Codex
+ * and OpenCode tell their models to mark the option they recommend by adding
+ * "(Recommended)" to its label; the card shows that as its own quiet mark, so
+ * the words stay the option's own. A label that is only the mark is kept.
+ */
+export function optionRecommendation(label: string): {
+  readonly label: string;
+  readonly recommended: boolean;
+} {
+  const stripped = label
+    .replace(/^\s*\(recommended\)\s*/i, "")
+    .replace(/\s*\(recommended\)\s*$/i, "")
+    .trim();
+  return stripped.length === 0 || stripped === label.trim()
+    ? { label, recommended: false }
+    : { label: stripped, recommended: true };
+}
+
+/**
+ * Each question's answer as the words a provider offered, in question order:
+ * the chosen options' labels, or the written answer alone. Every provider
+ * whose own reply names answers by their text (Claude, Codex, OpenCode, an
+ * ACP form) answers a whole set from one validated response with this.
+ * `providerValues[question][option]`, when given, is the provider's own word
+ * for an option (its label before the card read a recommendation out of it),
+ * so the provider gets back exactly the choice it offered.
+ */
+export function questionnaireAnswerValues(
+  questionnaire: Questionnaire,
+  response: QuestionnaireResponse,
+  providerValues?: ReadonlyArray<ReadonlyArray<string>>,
+): ReadonlyArray<ReadonlyArray<string>> {
+  return questionnaire.questions.map((question, questionIndex) => {
+    const answer = response.answers.find((entry) => entry.questionId === question.id);
+    if (answer === undefined) return [];
+    if (answer.customAnswer !== undefined) return [answer.customAnswer];
+    return question.options.flatMap((option, optionIndex) =>
+      answer.selectedOptionIds.includes(option.id)
+        ? [providerValues?.[questionIndex]?.[optionIndex] ?? option.label]
+        : [],
+    );
+  });
+}
