@@ -417,6 +417,46 @@ and below Full access the launch's Seatbelt profile confines those reads to
 what the session may already read. Refusing Vibe at Guarded over them would
 be stricter than Vibe's own app.
 
+## Provider question sets
+
+When an agent asks several things at once, the person answers one
+questionnaire, whichever provider asked (maintainer decision, 2026-11-28). The
+adapter turns the provider's set into one `user-input-request` carrying a
+[questionnaire](workspace.md#inline-questionnaires) and replies to the
+provider once, in the provider's own answer shape, when the person sends it:
+
+| Provider          | Asked through                    | Kept per question                                                                      | One reply                                                                                            |
+| ----------------- | -------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Claude Code       | `AskUserQuestion` (at most four) | header, choices with descriptions, multi-select, a written answer                      | the callback's `answers` map, keyed by question text; several choices are one comma-separated answer |
+| Codex             | `item/tool/requestUserInput`     | header, choices with descriptions, a written answer (Codex's own `isOther`)            | `{ answers: { [id]: { answers: [...] } } }` for the whole set                                        |
+| OpenCode          | the `question` tool's form (2.x) | header (the field title), choices with descriptions, multiselect, the field's `custom` | the form reply, a list for a multiselect field and one value for any other                           |
+| ACP session forms | `elicitation.form`               | the field title as header, each choice's `description`, single or multiple             | the form's property names and choice values ([Mistral Vibe surface](#mistral-vibe-surface))          |
+| Octant's harness  | the `ask-user` tool              | as the agent wrote it                                                                  | the decoded response, as the tool's result                                                           |
+
+- Question ids are `q0`, `q1`, ... and choice ids `o0`, `o1`, ..., by
+  position. A "(Recommended)" mark at either end of a choice's label becomes
+  the choice's recommended flag; the provider still gets back its own label,
+  mark included.
+- A provider's own form returns no comment, so these questionnaires offer
+  none.
+- The card's title is the one question, or the set's headers joined with
+  " · ", or "N questions" when a question has no header.
+- One validated response answers the whole set; an answer that leaves out a
+  question, names a choice the question does not offer, or breaks a
+  selection limit answers nothing and the question stays open. A set of one
+  question also takes a plain written answer, for a surface that sends only
+  text.
+- A set a questionnaire cannot hold keeps one request per question, so
+  nothing the provider asked is cut or reworded: more than four questions, a
+  question with no choices (Codex), or a question asking for a secret
+  outside Strict, which is answered in a masked field and kept out of every
+  record (Codex). Every question path shares one ceiling of twenty choices;
+  a provider that offers more is refused rather than cut.
+- A subagent's set is asked on its parent's thread as the same one
+  questionnaire, and its one answer goes back to the subagent's provider.
+- An ACP profile that reports `userQuestions: "unsupported"` keeps refusing
+  questions honestly; this rule does not widen what it may ask.
+
 ## Reading what a runtime sends
 
 What a provider runtime sends is read tolerantly (maintainer decision,
@@ -1800,11 +1840,13 @@ authorize a Strict launch.
   The person accepts it by moving the thread out of Plan. Octant's thread plan
   (the person's structured proposal) has no path from a provider, so the plan
   stays reply text (not built yet: a provider-proposed thread plan).
-- `item/tool/requestUserInput` reaches the person as the thread's
-  questionnaire, one request per question with its choices, in order; when
-  every question is answered Codex gets one reply mapping each question id to
-  `{ answers: [text] }`. Codex adds a free answer to each question itself,
-  so a typed answer passes through. A set with a question Codex marks
+- `item/tool/requestUserInput` reaches the person as one questionnaire for
+  the whole set ([Provider question sets](#provider-question-sets)); Codex
+  gets one reply mapping each question id to `{ answers: [...] }`. A set with
+  a question that offers no choices is asked one question at a time, each
+  with its choices, in order, and replied to once every question is
+  answered. Codex adds a free answer to each question itself, so a typed
+  answer passes through. A set with a question Codex marks
   `isSecret`, or that asks for a password, passphrase, API key, access token,
   or private key, is never shown: Codex is answered at once with a refusal
   telling the model Octant does not collect secrets in chat. Outside Strict
@@ -2251,12 +2293,15 @@ routes; its `question` tool publishes a `form.created` form marked
 (the question as the description, its header as the title, its choices as
 options), and takes the answer at
 `POST /api/session/{id}/form/{form}/reply` as `{ answer: { q0: ... } }`
-(read from the v2.0.22 and v2.0.27 source). A subagent's form is asked the
+(read from the v2.0.22 and v2.0.27 source). The whole form is one
+questionnaire answered once ([Provider question sets](#provider-question-sets)):
+a multiselect field takes a list of the chosen labels, any other field one
+value, as the form's `Form.Value` allows (read from the 2.4.2 build). A subagent's form is asked the
 same way and answered in the subagent's own session. The written posture
 allows `question` at every level, Plan included, since a question changes
 nothing, and the capability is reported `supported`. A question asking for
-several answers (a multiselect field) fails the turn as an unsupported
-format. A form with a question that asks for a password,
+several answers (a multiselect field) is asked as one, and only a set the
+questionnaire cannot hold that has one fails the turn as too large to show. A form with a question that asks for a password,
 passphrase, API key, access token, or private key is never shown or
 journaled: each of its fields is answered at once with the refusal Codex
 gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
