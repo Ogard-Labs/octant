@@ -81,7 +81,7 @@ describe("ProviderDiscoverySection", () => {
   it("says the host search found nothing when the scan has no candidates", () => {
     const emptySnapshot = { ...baseSnapshot, candidates: [] };
     render(<ProviderDiscoverySection {...defaultProps} snapshot={emptySnapshot} />);
-    expect(screen.getByText(/No providers found on this host/)).toBeDefined();
+    expect(screen.getByText(/No providers found on this computer/)).toBeDefined();
     expect(screen.getByText(/Add provider manually/)).toBeDefined();
     expect(screen.queryByText(/under Advanced/)).toBeNull();
   });

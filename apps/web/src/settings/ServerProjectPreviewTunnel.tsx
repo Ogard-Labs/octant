@@ -124,7 +124,7 @@ export function ServerProjectPreviewTunnel(props: {
     >
       <p className="shield-servers__note">
         Open a port already running on this server. If this computer is paired with it, use its
-        existing paired-host preview.
+        existing paired-computer preview.
       </p>
       <p className="shield-servers__note">
         The remote endpoint is 127.0.0.1 on this Project's server. Opening a preview does not start
@@ -202,8 +202,8 @@ export function ServerProjectPreviewTunnel(props: {
           <p className="shield-servers__note">
             {view.status === "listening"
               ? props.onOpenRelayedPreview !== undefined
-                ? "Relayed through this host's private listener. The remote connection is checked when opened."
-                : "Relayed through this host's private listener. Open this preview from Octant's desktop app, which signs each proxied request on an isolated origin."
+                ? "Relayed through this computer's private listener. The remote connection is checked when opened."
+                : "Relayed through this computer's private listener. Open this preview from Octant's desktop app, which signs each proxied request on an isolated origin."
               : `Preview ${view.status}.`}{" "}
             Remote 127.0.0.1:{view.remotePort}. Relay {view.endpoint}.
           </p>

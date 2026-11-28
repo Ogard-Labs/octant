@@ -175,7 +175,7 @@ export function EnvironmentRoutines(props: {
       await read();
       return true;
     } catch {
-      setMessage("The change did not reach the host. Try again.");
+      setMessage("The change did not reach this computer. Try again.");
       return false;
     } finally {
       setBusy(false);

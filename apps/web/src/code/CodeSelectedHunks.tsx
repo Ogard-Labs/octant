@@ -105,7 +105,7 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
             () =>
               reject(
                 new Error(
-                  "The host did not finish in time. Refresh the comparison before trying again; a requested write may still finish.",
+                  "This computer did not finish in time. Refresh the comparison before trying again; a requested write may still finish.",
                 ),
               ),
             WAIT_MS,
@@ -135,7 +135,7 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
       result.checkoutId !== props.checkoutId ||
       result.scope !== scope
     )
-      throw new Error("The host did not return this checkout's exact comparison.");
+      throw new Error("This computer did not return this checkout's exact comparison.");
     const content = await wait(
       props.client.operationContent(props.threadId, result.operationId, result.diff.contentId),
     );

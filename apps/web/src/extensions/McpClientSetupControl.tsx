@@ -147,7 +147,7 @@ function McpClientSetupDialog(
   // form must not say that none is.
   const linkFirst =
     secretStores === undefined && props.setup.secretStoreAvailable
-      ? "A client secret is chosen in Settings › Skills & Extensions on the host's own window."
+      ? "A client secret is chosen in Settings › Skills & Extensions on that computer's own window."
       : undefined;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -398,7 +398,7 @@ function McpClientSetupDialog(
               {hasSavedSecret
                 ? "The saved secret is kept. Enter another item reference only to replace it."
                 : canLinkSecret
-                  ? "An item in your linked 1Password store. Octant checks it on this host and keeps only a reference."
+                  ? "An item in your linked 1Password store. Octant checks it on this computer and keeps only a reference."
                   : (linkFirst ??
                     "Link a secret store in Settings to choose a client secret. This form never takes the secret value.")}
             </span>

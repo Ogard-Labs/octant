@@ -90,7 +90,7 @@ describe("provider capability and setup wording", () => {
 
   it("says where a desktop runs, whose account it uses, and whether it bills", () => {
     expect(providerCapability(provider({ locality: "host-local", billed: false }))).toBe(
-      "Runs on this host. No account and no cost.",
+      "Runs on this computer. No account and no cost.",
     );
     expect(providerCapability(provider({}))).toMatch(
       /your own E2B account.*bills you.*asks before every start/,

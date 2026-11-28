@@ -325,7 +325,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       setLoading(false);
       setDefinition(undefined);
       setSelectedVersionId(undefined);
-      setMessage("The host canvas client is unavailable.");
+      setMessage("This computer's canvas client is unavailable.");
       return () => {
         alive = false;
       };
@@ -399,7 +399,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           return {
             kind: "denied",
             message:
-              "The board changed on the host and was reloaded. Drag again to keep the change.",
+              "The board changed on this computer and was reloaded. Drag again to keep the change.",
           };
         }
         return { kind: "denied", message: result.message };
@@ -534,7 +534,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           kind: "denied",
           message:
             result.denialCode === "stale-version"
-              ? "The plan changed on the host and was reloaded. Set the status again to keep it."
+              ? "The plan changed on this computer and was reloaded. Set the status again to keep it."
               : result.message,
         };
       },
@@ -641,7 +641,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return {
           kind: "denied",
           denialCode: "unavailable",
-          message: "Canvas refresh is unavailable on this host.",
+          message: "Canvas refresh is unavailable on this computer.",
         };
       }
       const result = await refresh(request);
@@ -658,7 +658,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return {
           kind: "denied",
           denialCode: "cancelled",
-          message: "Canvas refresh cancellation is unavailable on this host.",
+          message: "Canvas refresh cancellation is unavailable on this computer.",
         };
       }
       const result = await cancelRefresh(request);
@@ -675,7 +675,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return {
           kind: "denied",
           denialCode: "unavailable",
-          message: "Canvas sharing is unavailable on this host.",
+          message: "Canvas sharing is unavailable on this computer.",
         };
       }
       const result = await share(request);
@@ -692,7 +692,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return {
           kind: "denied",
           denialCode: "unavailable",
-          message: "Canvas share revoke is unavailable on this host.",
+          message: "Canvas share revoke is unavailable on this computer.",
         };
       }
       const result = await revokeShare(request);
@@ -710,7 +710,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const prepareExportInTheme = useCallback(
     (request: CanvasExportPrepareRequest): Promise<CanvasExportPrepareResult> => {
       if (prepareExport === undefined) {
-        return Promise.reject(new Error("Canvas export is unavailable on this host."));
+        return Promise.reject(new Error("Canvas export is unavailable on this computer."));
       }
       return prepareExport(holdsDesign ? withWorkspaceFrameTheme(request) : request);
     },
@@ -803,7 +803,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return {
           kind: "unavailable" as const,
           denialCode: "unavailable" as const,
-          message: "Canvas share access is unavailable on this host.",
+          message: "Canvas share access is unavailable on this computer.",
         };
       }
       const result = await accessShare(request);

@@ -385,7 +385,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <OctantEmpty
         eyebrow="Remote folder"
-        message="This thread's checkout is a folder on a remote machine, which Octant no longer supports."
+        message="This thread's checkout is a folder on a remote computer, which Octant no longer supports."
         state="neutral"
         title={`${props.tab.title} is not available here`}
       />
@@ -1654,7 +1654,7 @@ function TerminalWorkspaceSurface(
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
       else
         setFailure(
-          "The host returned no terminal process. Octant will retry when it is available.",
+          "This computer returned no terminal process. Octant will retry when it is available.",
         );
     } catch {
       setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
@@ -1671,7 +1671,7 @@ function TerminalWorkspaceSurface(
     // A successful rebind reinstalls the thread view, so this surface is
     // replaced by the terminal rather than needing to clear anything itself.
     if (outcome === undefined) {
-      setRebindRefusal("Octant could not reach the host. Reconnect and try again.");
+      setRebindRefusal("Octant could not reach this computer. Reconnect and try again.");
       return;
     }
     if (outcome.status === "refused") setRebindRefusal(checkoutRebindRefusal(outcome.reason));

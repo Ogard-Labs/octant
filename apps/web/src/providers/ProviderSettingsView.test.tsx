@@ -1334,7 +1334,7 @@ describe("ProviderSettingsView", () => {
       }),
     );
     expect(
-      screen.getByText("CLI updates: Provider-owned update available on this host"),
+      screen.getByText("CLI updates: Provider-owned update available on this computer"),
     ).toBeVisible();
     await user.click(update);
     expect(onUpdateProviderCli).toHaveBeenCalledWith(id);
@@ -1404,7 +1404,7 @@ describe("ProviderSettingsView", () => {
     );
     expect(screen.queryByRole("button", { name: /Update .* CLI/ })).not.toBeInTheDocument();
     expect(
-      screen.getByText("CLI updates: Manual installation required on this host"),
+      screen.getByText("CLI updates: Manual installation required on this computer"),
     ).toBeVisible();
   });
 
@@ -1675,7 +1675,7 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/Claude runtime is incompatible/i)).toBeVisible();
     expect(
       within(details).getByText(
-        "Host check: Claude initialization version did not match the configured binary.",
+        "System check: Claude initialization version did not match the configured binary.",
       ),
     ).toBeVisible();
     expect(within(details).getByText("Binary: /opt/homebrew/bin/claude")).toBeVisible();
@@ -2406,7 +2406,7 @@ describe("ProviderSettingsView", () => {
     renderExpanded(<ModelEndpointSettingsView {...props} />);
     const card = screen.getByLabelText("Foundry relay");
     const optIn = within(card).getByRole("checkbox", {
-      name: "Allow sign-in with a code from this host's terminal for Foundry relay",
+      name: "Allow sign-in with a code from this computer's terminal for Foundry relay",
     });
     const save = within(card).getByRole("button", {
       name: "Save Azure AI Foundry settings for Foundry relay",
@@ -3536,7 +3536,7 @@ describe("ProviderSettingsView", () => {
     const details = within(card).getByLabelText("Incompatibility details");
     expect(within(card).getByText(/Review the installed OpenCode version/i)).toBeVisible();
     expect(
-      within(details).getByText("Host check: The installed OpenCode runtime is incompatible."),
+      within(details).getByText("System check: The installed OpenCode runtime is incompatible."),
     ).toBeVisible();
     expect(within(details).getByText("Version: v0.0.0-beta-18721")).toBeVisible();
   });
@@ -3816,7 +3816,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Detected Codex" });
-    expect(within(card).getByText("Detected on this host — enable to use")).toBeVisible();
+    expect(within(card).getByText("Detected on this computer — enable to use")).toBeVisible();
     expect(within(card).getByLabelText("Detected locally")).toBeVisible();
   });
 
@@ -3899,7 +3899,7 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const detectedSection = screen.getByRole("region", { name: "Detected on this host" });
+    const detectedSection = screen.getByRole("region", { name: "Detected on this computer" });
     const detectedCard = within(detectedSection).getByRole("article", { name: "Detected Codex" });
     await user.click(
       within(detectedCard).getByRole("button", { name: "Details for Detected Codex" }),
@@ -4397,7 +4397,7 @@ describe("ProviderSettingsView", () => {
         />,
       );
 
-      expect(screen.queryByRole("heading", { name: "Detected on this host" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Detected on this computer" })).toBeNull();
       expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
       const neutral = screen.getByRole("heading", { name: "Other providers" });
       const card = screen.getByRole("article", { name: "Existing CLI" });
@@ -4485,7 +4485,7 @@ describe("ProviderSettingsView", () => {
     const groups = [
       { region: screen.getByRole("region", { name: "Providers" }), rows: ["Existing CLI"] },
       {
-        region: screen.getByRole("region", { name: "Detected on this host" }),
+        region: screen.getByRole("region", { name: "Detected on this computer" }),
         rows: ["Codex local"],
       },
       {
@@ -4707,7 +4707,7 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const detectedHeading = screen.getByRole("heading", { name: "Detected on this host" });
+    const detectedHeading = screen.getByRole("heading", { name: "Detected on this computer" });
     const supportedHeading = screen.getByRole("heading", { name: "Supported, not detected" });
     const detectedCard = screen.getByRole("article", { name: "Codex local" });
     const absentCard = screen.getByRole("article", { name: "Kilo local" });
@@ -4724,7 +4724,7 @@ describe("ProviderSettingsView", () => {
 
     // Reordering must present the stored order the grips edit, not the groups.
     fireEvent.click(screen.getByRole("button", { name: "Reorder providers" }));
-    expect(screen.queryByRole("heading", { name: "Detected on this host" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Detected on this computer" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Supported, not detected" })).toBeNull();
     expect(screen.getByRole("article", { name: "Codex local" })).toBeVisible();
     expect(screen.getByRole("article", { name: "Kilo local" })).toBeVisible();
@@ -4929,7 +4929,7 @@ describe.each([
     store: "this computer's credential store",
     storeName: "credential store",
     elsewhere: /Keychain|this Mac/,
-    keySetup: "On the Linux host, run octant provider key set",
+    keySetup: "On the Linux computer, run octant provider key set",
     otherKeySetup: /On macOS/,
   },
   {
@@ -4940,7 +4940,7 @@ describe.each([
     storeName: "Keychain",
     elsewhere: /credential store|this computer/,
     keySetup: "On macOS, open this profile in Octant desktop",
-    otherKeySetup: /Linux host|octant provider key set/,
+    otherKeySetup: /Linux computer|octant provider key set/,
   },
 ] as const)("provider forms on a $host host", (platform) => {
   beforeEach(() => {
@@ -5102,7 +5102,7 @@ describe("browser key setup before the host reports its platform", () => {
     const note = within(screen.getByRole("article", { name: "Claude local" })).getByText(
       /This browser cannot save or remove credentials\./,
     );
-    expect(note).toHaveTextContent("On the Linux host, run octant provider key set");
+    expect(note).toHaveTextContent("On the Linux computer, run octant provider key set");
     expect(note).toHaveTextContent("On macOS, open this profile in Octant desktop");
   });
 });

@@ -320,7 +320,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
         });
       })
       .catch(() => {
-        if (!cancelled) setStatus("Octant could not list the photos on this host.");
+        if (!cancelled) setStatus("Octant could not list the photos on this computer.");
       });
     return () => {
       cancelled = true;
@@ -543,7 +543,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
       {showPhoto ? (
         <div className="setgroup">
           <SettingRow
-            description="A picture from this host's library."
+            description="A picture from this computer's library."
             label="Photo"
             scope="app"
             settingId="app-background-photo"
@@ -577,7 +577,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   paint, so a list that arrives, a photo that is added or a
                   refusal moves nothing around them. */}
               <div className="settings-app-background__gallery-head">
-                <span className="settings-app-background__gallery-title">On this host</span>
+                <span className="settings-app-background__gallery-title">On this computer</span>
                 <span
                   className="settings-app-background__gallery-status"
                   data-tone={status === PHOTO_ADDED || status === PHOTO_REMOVED ? "done" : "note"}
@@ -587,7 +587,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 </span>
               </div>
               <OctantRadioGroup
-                aria-label="Photos on this host"
+                aria-label="Photos on this computer"
                 className="settings-app-background__gallery-row"
                 key={galleryResetKey}
                 onValueChange={(next) => {

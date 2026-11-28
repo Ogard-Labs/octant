@@ -60,12 +60,16 @@ export function DesktopPreview(props: {
         );
       } else {
         setAvailable(false);
-        setNotice("Preview sharing requires an available local desktop and a window on its host.");
+        setNotice(
+          "Preview sharing requires an available local desktop and a window on this computer.",
+        );
       }
     } catch {
       if (alive.current && reading === revision.current) {
         setAvailable(false);
-        setNotice("The host could not confirm this preview. Check the connection and try again.");
+        setNotice(
+          "This computer could not confirm this preview. Check the connection and try again.",
+        );
       }
     }
   };
@@ -108,7 +112,7 @@ export function DesktopPreview(props: {
       } else {
         setReview(undefined);
         setNotice(
-          "The host refused this preview. Check that the dev server runs in this thread’s own worktree, then review again.",
+          "This computer refused this preview. Check that the dev server runs in this thread’s own worktree, then review again.",
         );
       }
     } catch {

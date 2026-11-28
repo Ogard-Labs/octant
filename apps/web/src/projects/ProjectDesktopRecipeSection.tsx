@@ -360,7 +360,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       : [
           {
             id: String(saved.providerId),
-            label: `${String(saved.providerId)} (not available on this host)`,
+            label: `${String(saved.providerId)} (not available on this computer)`,
             disabled: true,
           },
         ]),
@@ -446,7 +446,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
       : [
           {
             id: draft.placementId,
-            label: `${draft.placementId} (not available on this host)`,
+            label: `${draft.placementId} (not available on this computer)`,
             disabled: true,
           },
         ]),
@@ -550,7 +550,7 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
     : keyState === "loading"
       ? "Checking the key…"
       : keyState === "failed"
-        ? "This window can't ask the host about the key."
+        ? "This window can't ask this computer about the key."
         : keyState === "saved"
           ? `Key saved in ${hostCredentialStore(hostPlatform)}. Enter a new one to replace it.`
           : keyState === "missing"
@@ -611,14 +611,14 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
           <h2 id={headingId}>Disposable desktop</h2>
           <p>
             The throwaway Linux desktop this Project's Code threads start from the Desktop tool. It
-            has no network and none of this host's files, only what an agent sends it. Removing the
-            recipe or changing its provider ends this Project's running desktops.
+            has no network and none of this computer's files, only what an agent sends it. Removing
+            the recipe or changing its provider ends this Project's running desktops.
           </p>
         </div>
       </div>
       {offered.status === "loading" ? (
         <p className="project-provider-policy__empty" role="status">
-          Checking which desktop providers this host offers…
+          Checking which desktop providers this computer offers…
         </p>
       ) : offered.status === "failed" ? (
         <p className="project-provider-policy__empty" role="status">
@@ -626,8 +626,8 @@ export function ProjectDesktopRecipeSection(props: ProjectDesktopRecipeSectionPr
         </p>
       ) : providers.length === 0 ? (
         <p className="project-provider-policy__empty" role="status">
-          No desktop provider is ready on this host. A Linux host offers its own once Bubblewrap,
-          Xvfb, xdotool, and ImageMagick are installed and Octant restarts.
+          No desktop provider is ready on this computer. A Linux computer offers its own once
+          Bubblewrap, Xvfb, xdotool, and ImageMagick are installed and Octant restarts.
         </p>
       ) : null}
       {providerOptions.length === 0 ? null : (

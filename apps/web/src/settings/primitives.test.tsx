@@ -20,7 +20,7 @@ import {
 describe("scopeLabel", () => {
   it("maps each scope to a human label", () => {
     expect(scopeLabel("app")).toBe("This app");
-    expect(scopeLabel("host")).toBe("Selected host");
+    expect(scopeLabel("host")).toBe("This computer");
     expect(scopeLabel("mode")).toBe("Mode");
     expect(scopeLabel("project")).toBe("Project");
     expect(scopeLabel("thread")).toBe("Thread");
@@ -36,7 +36,7 @@ describe("ScopeIndicator", () => {
 
   it("renders the host scope without exposing unsafe host details", () => {
     render(<ScopeIndicator scope="host" />);
-    expect(screen.getByText("Selected host")).toBeInTheDocument();
+    expect(screen.getByText("This computer")).toBeInTheDocument();
     // No host id, name, or address is rendered.
     expect(screen.queryByText(/host-|localhost|127\./i)).not.toBeInTheDocument();
   });

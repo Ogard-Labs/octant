@@ -45,9 +45,10 @@ export function agentAvailabilityNote(
       };
     case "host-lends-no-browser":
       return {
-        message: "The agent cannot use this Browser: the host does not lend it to this thread.",
+        message:
+          "The agent cannot use this Browser: this computer does not lend it to this thread.",
         omission: reason,
-        remedy: "Check host settings",
+        remedy: "Check Settings › This computer",
       };
     default:
       return { message: "Browser availability is unknown." };

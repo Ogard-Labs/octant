@@ -417,7 +417,7 @@ describe("a to-do draft on its Project's paired computer", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    expect(await screen.findByText("The host refused to create the thread.")).toBeVisible();
+    expect(await screen.findByText("That computer refused to create the thread.")).toBeVisible();
     expect(onCreated).not.toHaveBeenCalled();
     expect(api.execute).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: "Remove source" })).toBeVisible();

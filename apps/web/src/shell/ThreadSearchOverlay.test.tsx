@@ -295,7 +295,7 @@ describe("ThreadSearchOverlay", () => {
     await user.type(screen.getByRole("combobox"), "nothing here");
 
     expect(
-      screen.getByText("No matching threads; the host thread list is unavailable."),
+      screen.getByText("No matching threads; this computer's thread list is unavailable."),
     ).toBeVisible();
     expect(screen.queryByText("No matching threads.")).toBeNull();
   });
@@ -324,7 +324,9 @@ describe("ThreadSearchOverlay", () => {
     renderOverlay({ listing: "unavailable", threads: [] });
 
     expect(
-      screen.getByText("The host thread list is unavailable, so Search has nothing to match."),
+      screen.getByText(
+        "This computer's thread list is unavailable, so Search has nothing to match.",
+      ),
     ).toBeVisible();
   });
 });

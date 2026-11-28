@@ -243,7 +243,7 @@ describe("Work host queue", () => {
       await screen.findByAltText("kept.png");
       await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
       if (retry) {
-        await screen.findByText(/host has not confirmed/);
+        await screen.findByText(/This computer has not confirmed/);
         fireEvent.paste(composer, {
           clipboardData: {
             files: [new File(["later"], "later.png", { type: "image/png" })],

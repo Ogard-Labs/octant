@@ -484,6 +484,6 @@ describe("ShieldServersSettings", () => {
   it("says servers are managed on the host computer when there is no client", () => {
     render(<ShieldServersSettings client={undefined} projectNames={PROJECTS} />);
 
-    expect(screen.getByText(/managed on the host computer/)).toBeVisible();
+    expect(screen.getByText(/managed on the computer running Octant/)).toBeVisible();
   });
 });

@@ -595,7 +595,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
           {deliveryStatus.providerDelivery === "unavailable"
             ? "Notifications need push credentials. Add them to turn this on."
             : deliveryStatus.deliveryEnabled
-              ? "Notification delivery is enabled for this host."
+              ? "Notification delivery is enabled for this computer."
               : "Notification delivery is currently unavailable."}
         </p>
       )}
@@ -1196,7 +1196,7 @@ function AutomationDetail(props: {
           <dd>{automationTriggerSummary(automation.trigger, props.format)}</dd>
         </div>
         <div>
-          <dt>Host</dt>
+          <dt>Computer</dt>
           <dd>{String(automation.hostId)}</dd>
         </div>
         <div>

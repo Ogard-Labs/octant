@@ -54,7 +54,7 @@ export function ThreadConnectionNotice(props: {
         }
         className="thread-connection-notice"
         testId="thread-connection-notice"
-        title="Can't reach the host"
+        title="Can't reach this computer"
         tone="warning"
       >
         <p>Reconnecting. Your draft is kept.</p>

@@ -191,7 +191,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
     return (
       <SettingsSection title="This computer">
         <SettingsState kind={loadFailed ? "error" : "loading"}>
-          {loadFailed ? "Replica membership could not be read from this host." : "Reading…"}
+          {loadFailed ? "Replica membership could not be read from this computer." : "Reading…"}
         </SettingsState>
       </SettingsSection>
     );
@@ -989,7 +989,7 @@ export function SyncStatusReadOnly(props: { readonly client: ReplicaSyncStatusCl
             ? "Reading sync status…"
             : read.status === "refused"
               ? "Sync status is not available to this device."
-              : "Sync status could not be read from the host."}
+              : "Sync status could not be read from this computer."}
         </SettingsState>
       </SettingsSection>
     );
@@ -998,7 +998,7 @@ export function SyncStatusReadOnly(props: { readonly client: ReplicaSyncStatusCl
   return (
     <>
       <SyncStatusSection
-        description="Set up sync, join, and revoke in the Octant app on the host computer."
+        description="Set up sync, join, and revoke in the Octant app on the computer running Octant."
         restoreFact
         standing={STANDING[view.thisComputer]}
         status={view.status}

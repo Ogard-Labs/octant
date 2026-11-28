@@ -117,7 +117,7 @@ describe("useFirstRunOnboardingController", () => {
 
     expect(resolve).not.toHaveBeenCalled();
     expect(result.current.submitting).toBeUndefined();
-    expect(result.current.blockedMessage).toContain("cannot reach the host");
+    expect(result.current.blockedMessage).toContain("cannot reach this computer");
     expect(render().result.current.blockedMessage).toBeUndefined();
   });
 

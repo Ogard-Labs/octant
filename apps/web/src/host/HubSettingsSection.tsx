@@ -128,7 +128,7 @@ const REFUSAL_COPY: Readonly<Record<string, string>> = {
     "The remote listener is not on a private network address, so the hub will not use it.",
   "listener-has-no-pin":
     "The remote listener serves a certificate Octant cannot pin, so a join code cannot name it.",
-  "pairing-unavailable": "Pairing is not available on this host right now.",
+  "pairing-unavailable": "Pairing is not available on this computer right now.",
   "not-a-join-code": "That is not a join code.",
   "damaged-join-code": "That join code is damaged. Copy it again.",
   "newer-join-code": "That join code is from a newer Octant. Update this app first.",

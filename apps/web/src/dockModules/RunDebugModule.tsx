@@ -51,7 +51,7 @@ export default function RunDebugModule(props: RunDebugModuleProps) {
     return unavailable("Run and debug", "This thread has no checkout to debug in yet.");
   }
   if (client === undefined) {
-    return unavailable("Run and debug", "This window has no connection to the host.");
+    return unavailable("Run and debug", "This window has no connection to this computer.");
   }
   return (
     <RunDebugPanel

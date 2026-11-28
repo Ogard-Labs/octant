@@ -200,7 +200,7 @@ export function useSessionCompaction(
         watched.current.delete(String(compactionId));
         setRefusal(error.reason);
       } else {
-        setErrorMessage("Couldn't compact: the host did not answer. Try again.");
+        setErrorMessage("Couldn't compact: this computer did not answer. Try again.");
       }
     } finally {
       startingRef.current = false;

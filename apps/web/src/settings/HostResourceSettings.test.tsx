@@ -82,7 +82,7 @@ describe("computer resource settings", () => {
     expect(screen.getByText("Concurrent commands")).toBeVisible();
     expect(group).toBeDisabled();
     expect(group).toHaveAttribute("data-loading", "true");
-    expect(screen.getByText("Reading the host's load…")).toBeVisible();
+    expect(screen.getByText("Reading this computer's load…")).toBeVisible();
 
     answer(
       decodeAgentRunPolicySettings({

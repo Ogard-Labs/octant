@@ -19,19 +19,19 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   "needs-person":
     "Run server checks at this computer or from a device its person paired. Restricted sessions cannot probe servers.",
   "needs-local-window":
-    "Run server checks in the Octant window on the host. A paired client cannot administer its servers.",
+    "Run server checks in the Octant window on the computer running Octant. A paired client cannot administer its servers.",
   "server-not-registered": "Register this server under Permissions › Servers before checking it.",
   "registration-changed":
     "The registered server changed during the check. Inspect its alias and login user, then check again.",
   "missing-agent":
-    "No SSH agent is available to Octant. Start or unlock your agent on the Octant host and load the intended key, then check again.",
+    "No SSH agent is available to Octant. Start or unlock your agent on this computer and load the intended key, then check again.",
   "authentication-refused":
-    "SSH could not authenticate. Check the agent's loaded key and the registered login user on the Octant host. Never paste a private key into a thread.",
+    "SSH could not authenticate. Check the agent's loaded key and the registered login user on this computer. Never paste a private key into a thread.",
   "key-confirmation-required": "This server's key needs a confirmation at this computer.",
   "kept-key-unsupported":
-    "This check uses the host's SSH agent. It cannot verify a key Octant keeps. Use the existing server key controls; no key was created or changed.",
+    "This check uses this computer's SSH agent. It cannot verify a key Octant keeps. Use the existing server key controls; no key was created or changed.",
   "unknown-identity":
-    "SSH reports an unknown server identity. Make your own first SSH connection on the Octant host and verify its fingerprint independently, then check again. Octant cannot accept it for you.",
+    "SSH reports an unknown server identity. Make your own first SSH connection on this computer and verify its fingerprint independently, then check again. Octant cannot accept it for you.",
   "changed-identity":
     "SSH reports a changed or revoked server identity. Stop and verify the change with the server administrator before correcting your known hosts. Octant has accepted nothing.",
   "host-unavailable":
@@ -39,7 +39,7 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   "directory-unavailable":
     "SSH answered, but that directory could not be opened. Correct the absolute path or its access on the server, then check again.",
   "unsupported-runtime":
-    "Server Projects use Octant Harness. Native provider runtimes run on the Octant host and cannot execute this server Project. Choose Octant Harness; this does not test a provider installation.",
+    "Server Projects use Octant Harness. Native provider runtimes run on this computer and cannot execute this server Project. Choose Octant Harness; this does not test a provider installation.",
   "probe-unavailable":
     "The server did not return the expected POSIX shell and directory response. Check that its login can run sh and pwd. No thread was started.",
   cancelled:
@@ -139,8 +139,8 @@ export function RemoteSetupChecks(props: {
         setPhase(ready ? "connected" : "stopped");
         setHostMessage(
           ready
-            ? "The host reports its private listener ready now. Pair a device through the existing controls to verify access from that device; this is not a remote reachability test."
-            : "The host listener is stopped or unavailable. Check its network and awake state, then use the listener controls below. Rechecking does not enable or restart it.",
+            ? "This computer reports its private listener ready now. Pair a device through the existing controls to verify access from that device; this is not a remote reachability test."
+            : "This computer's listener is stopped or unavailable. Check its network and awake state, then use the listener controls below. Rechecking does not enable or restart it.",
         );
       } else if (selected !== undefined && props.client?.check !== undefined) {
         const answer = await Promise.race([
@@ -164,7 +164,7 @@ export function RemoteSetupChecks(props: {
       if (sequence.current !== attempt) return;
       setPhase("disconnected");
       setHostMessage(
-        "The Octant host could not answer. Check that it is running, awake and reachable, then recheck. No thread or command is restarted.",
+        "Octant on this computer could not answer. Check that it is running, awake and reachable, then recheck. No thread or command is restarted.",
       );
     } finally {
       clearTimeout(timer);
@@ -176,7 +176,7 @@ export function RemoteSetupChecks(props: {
       <p>Check readiness without starting a thread or changing registration, keys or SSH trust.</p>
       {host ? null : (
         <ol className="remote-setup__steps">
-          <li>Check registration, runtime support and the host’s SSH agent.</li>
+          <li>Check registration, runtime support and this computer’s SSH agent.</li>
           <li>
             Open a fresh SSH connection with strict identity checking and noninteractive
             authentication.
@@ -197,11 +197,13 @@ export function RemoteSetupChecks(props: {
       ) : (
         <>
           {props.servers === undefined ? (
-            <p>Servers cannot be registered here. Use the Octant app on the host computer.</p>
+            <p>
+              Servers cannot be registered here. Use the Octant app on the computer running Octant.
+            </p>
           ) : loadFailed ? (
             <OctantAlert tone="danger">
-              The Octant host could not load registered servers. Reload to recheck; no SSH
-              connection was started.
+              This computer could not load registered servers. Reload to recheck; no SSH connection
+              was started.
             </OctantAlert>
           ) : servers === undefined ? (
             <p>Loading registered servers…</p>
@@ -265,8 +267,8 @@ export function RemoteSetupChecks(props: {
           )}
           {props.client?.check === undefined ? (
             <p>
-              Read-only connection checks are unavailable from this host version or client. Use the
-              existing server controls; no connection has been proved.
+              Read-only connection checks are unavailable from this Octant version or client. Use
+              the existing server controls; no connection has been proved.
             </p>
           ) : null}
         </>
@@ -331,7 +333,7 @@ export function RemoteSetupChecks(props: {
                 ? "Reconnecting for a read-only check…"
                 : phase === "connected"
                   ? host
-                    ? "Host readiness checked"
+                    ? "Computer readiness checked"
                     : "Connected for this check"
                   : phase === "disconnected"
                     ? "Disconnected"

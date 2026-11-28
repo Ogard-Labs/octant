@@ -128,7 +128,7 @@ describe("the library view", () => {
       within(dialog).getByRole("button", { name: "Add local server" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
-      within(dialog).getByText(/Add the local server from the Octant window on this host/),
+      within(dialog).getByText(/Add the local server from the Octant window on that computer/),
     ).toBeTruthy();
   });
 

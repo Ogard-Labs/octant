@@ -222,7 +222,7 @@ function classify(error: unknown): GoalStatus {
 function commandFailureMessage(error: unknown): string {
   if (error instanceof GoalClientFailure) {
     if (error.status === 401) return "This window is not authorized to change the Goal.";
-    if (error.status === 0) return "The host Goal service is unavailable.";
+    if (error.status === 0) return "The Goal service on this computer is unavailable.";
     return error.message;
   }
   return "The Goal command was refused as invalid.";

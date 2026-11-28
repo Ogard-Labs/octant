@@ -67,7 +67,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
     computerEnabled === false
       ? "Off"
       : computer?.supported === false
-        ? "Unavailable on this host"
+        ? "Unavailable on this computer"
         : computerEnabled === undefined
           ? "Not reported"
           : computer === undefined
@@ -110,7 +110,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
       Icon: Users,
       state:
         current?.helperPosture === "automatic"
-          ? "Automatic · Within host limits"
+          ? "Automatic · Within this computer's limits"
           : current?.helperPosture === "off"
             ? "Off"
             : current?.helperPosture === "ask"

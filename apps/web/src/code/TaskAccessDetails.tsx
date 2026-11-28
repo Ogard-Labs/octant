@@ -147,14 +147,15 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
           className="task-access-details__report flex max-h-[min(50vh,30rem)] min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain"
         >
           <p>
-            These are the host&apos;s reported limits. Every action is checked again when it runs.
+            These are this computer&apos;s reported limits. Every action is checked again when it
+            runs.
           </p>
           {read.status === "loading" ? (
-            <p role="status">Reading thread access from the host…</p>
+            <p role="status">Reading thread access from this computer…</p>
           ) : facts === undefined ? (
             <OctantAlert tone="warning">
-              The host has not reported current thread access. Reconnect or refresh before relying
-              on a previous report.
+              This computer has not reported current thread access. Reconnect or refresh before
+              relying on a previous report.
             </OctantAlert>
           ) : (
             <>
@@ -270,7 +271,7 @@ export function TaskAccessDetails({ read }: { readonly read: AccessRead }) {
                           : "Open reviewer settings"}
                       </OctantButton>
                     ) : (
-                      <span>Ask the host owner to make this change.</span>
+                      <span>Ask the owner of this computer to make this change.</span>
                     )}
                   </li>
                 ))}

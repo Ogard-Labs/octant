@@ -612,7 +612,7 @@ describe("Code host queue", () => {
       pasteImage(composer, "first.png");
       await screen.findByAltText("first.png");
       await user.click(screen.getByRole("button", { name: "Send into the running turn" }));
-      await screen.findByText(/host has not confirmed/);
+      await screen.findByText(/This computer has not confirmed/);
       pasteImage(composer, "later.png");
       await screen.findByAltText("later.png");
       await user.click(screen.getByRole("button", { name: "Check queue" }));
@@ -3004,7 +3004,7 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(result).toEqual({
       status: "refused",
-      reason: "Image attachments are unavailable on this host.",
+      reason: "Image attachments are unavailable on this computer.",
     });
   });
 

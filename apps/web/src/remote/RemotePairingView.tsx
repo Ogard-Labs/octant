@@ -79,7 +79,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
         />
       );
     case "requesting-hello":
-      return <RemotePairingShellState state="loading" title="Contacting Octant host…" />;
+      return <RemotePairingShellState state="loading" title="Contacting that computer…" />;
     case "confirm":
       return (
         <RemotePairingConfirm
@@ -92,7 +92,7 @@ export function RemotePairingView(props: RemotePairingViewProps) {
         <RemotePairingShellState
           state="loading"
           title="Sending pairing request…"
-          message="The host will be asked to approve this browser."
+          message="That computer will be asked to approve this browser."
         />
       );
     case "resuming":
@@ -142,7 +142,7 @@ function RemotePairingEntry(props: RemotePairingEntryProps) {
     <section aria-label="Remote browser pairing" className="remote-pairing" role="region">
       <h1 className="remote-pairing__title">Pair this browser with Octant</h1>
       <p className="remote-pairing__description">
-        Paste a pairing link from the host, or type a pairing code.
+        Paste a pairing link from that computer, or type a pairing code.
       </p>
       {props.warning === undefined ? null : (
         <OctantAlert tone="warning">{props.warning}</OctantAlert>
@@ -207,13 +207,13 @@ function RemotePairingConfirm(props: RemotePairingConfirmProps) {
   const [deviceLabel, setDeviceLabel] = useState("Remote browser");
 
   return (
-    <section aria-label="Confirm host identity" className="remote-pairing" role="region">
-      <h1 className="remote-pairing__title">Confirm this host</h1>
+    <section aria-label="Confirm computer identity" className="remote-pairing" role="region">
+      <h1 className="remote-pairing__title">Confirm this computer</h1>
       <div className="remote-pairing__identity">
-        <RemotePairingFact label="Host" value={props.hostHello.displayName} />
-        <RemotePairingFact label="Host ID" value={props.hostHello.hostId} />
+        <RemotePairingFact label="Computer" value={props.hostHello.displayName} />
+        <RemotePairingFact label="Computer ID" value={props.hostHello.hostId} />
         <RemotePairingFact
-          label="Host key fingerprint"
+          label="Computer key fingerprint"
           value={props.hostHello.hostKeyFingerprint}
           isMonospace
         />
@@ -257,14 +257,14 @@ interface RemotePairingWaitingProps {
 function RemotePairingWaiting(props: RemotePairingWaitingProps) {
   return (
     <section
-      aria-label="Waiting for host approval"
+      aria-label="Waiting for approval on that computer"
       aria-live="polite"
       className="remote-pairing"
       role="status"
     >
-      <h1 className="remote-pairing__title">Waiting for host approval</h1>
+      <h1 className="remote-pairing__title">Waiting for approval on that computer</h1>
       <p className="remote-pairing__description">
-        Compare the code below with the one shown on the host. Approve on the host, not here.
+        Compare the code below with the one shown on that computer. Approve it there, not here.
       </p>
       <div className="remote-pairing__comparison" role="status">
         <span className="remote-pairing__comparison-label">Comparison code</span>
@@ -273,9 +273,9 @@ function RemotePairingWaiting(props: RemotePairingWaitingProps) {
         </span>
       </div>
       <div className="remote-pairing__identity">
-        <RemotePairingFact label="Host" value={props.claim.hostDisplayName} />
+        <RemotePairingFact label="Computer" value={props.claim.hostDisplayName} />
         <RemotePairingFact
-          label="Host key fingerprint"
+          label="Computer key fingerprint"
           value={props.claim.hostKeyFingerprint}
           isMonospace
         />
@@ -342,9 +342,9 @@ function RemotePairingFailed(props: RemotePairingFailedProps) {
               : props.category === "lost-key"
                 ? "Device key unavailable"
                 : props.category === "host-changed"
-                  ? "Host identity changed"
+                  ? "Computer identity changed"
                   : props.category === "incompatible"
-                    ? "Host incompatible"
+                    ? "Computer incompatible"
                     : props.category === "recovery-required"
                       ? "Remote access requires re-pairing"
                       : props.category === "rate-limited"

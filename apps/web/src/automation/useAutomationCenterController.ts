@@ -170,7 +170,7 @@ export function useAutomationCenterController(
           setList({
             status: "unavailable",
             message:
-              "Automation history could not be loaded, so your automations are not shown and none are scheduled. Restart the host to try again.",
+              "Automation history could not be loaded, so your automations are not shown and none are scheduled. Restart Octant to try again.",
           });
           return;
         }
@@ -309,7 +309,10 @@ export function useAutomationCenterController(
         setDetailGeneration((generation) => generation + 1);
         return result;
       } catch (error) {
-        const message = failureMessage(error, "The automation command did not reach the host.");
+        const message = failureMessage(
+          error,
+          "The automation command did not reach this computer.",
+        );
         setNotice(message);
         return { kind: "automation-transport-failed", message };
       }

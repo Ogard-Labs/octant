@@ -82,7 +82,7 @@ export function NavigatorPanel(props: NavigatorPanelProps) {
 
       {state.kind === "unsupported" ? (
         <p className="navigator-panel__notice" role="status">
-          Navigator is not available on this host.
+          Navigator is not available on this computer.
         </p>
       ) : null}
 
@@ -273,7 +273,7 @@ function describe(state: NavigatorAssistantState): string {
     case "loading":
       return "Reading Navigator readiness…";
     case "unsupported":
-      return "Not available on this host";
+      return "Not available on this computer";
     case "unconfigured":
       return "No default model configured";
     case "unavailable":

@@ -97,7 +97,7 @@ export function HostDisplayPane({
         if (!abort.signal.aborted && active.current === view) {
           close();
           setNotice(
-            "The host display disconnected. Check Computer use permissions and that the Mac is unlocked.",
+            "This computer's display disconnected. Check Computer use permissions and that the Mac is unlocked.",
           );
         }
       }
@@ -123,7 +123,7 @@ export function HostDisplayPane({
       active.current = answer.viewId;
       setView(answer.viewId);
     } catch {
-      if (alive.current) setNotice("The host display is unavailable or already open.");
+      if (alive.current) setNotice("This computer's display is unavailable or already open.");
     } finally {
       if (alive.current) setPending(false);
     }
@@ -152,7 +152,7 @@ export function HostDisplayPane({
     } catch {
       if (active.current === view) {
         close();
-        setNotice("The host could not confirm who has control. Open the display again.");
+        setNotice("This computer could not confirm who has control. Open the display again.");
       }
     } finally {
       if (alive.current) setPending(false);
@@ -178,7 +178,7 @@ export function HostDisplayPane({
         .catch(() => {
           if (active.current === view) {
             close();
-            setNotice("The host could not confirm that input was delivered.");
+            setNotice("This computer could not confirm that input was delivered.");
           }
         });
     },
@@ -213,19 +213,19 @@ export function HostDisplayPane({
     };
   }
   return (
-    <section aria-label="Host display">
+    <section aria-label="This computer's display">
       {view ? (
         <>
           <OctantButton disabled={pending || !picture} onClick={() => void changeControl()}>
             {control ? "Hand back to agent" : "Take control"}
           </OctantButton>
           <OctantButton onClick={close} variant="outline">
-            Close host display
+            Close display
           </OctantButton>
           {picture && (
             <img
               ref={image}
-              alt="Mac host display"
+              alt="Mac display"
               className="host-display__image"
               src={"data:image/jpeg;base64," + picture.jpeg}
               tabIndex={control ? 0 : -1}

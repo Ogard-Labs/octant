@@ -34,7 +34,7 @@ export function createThreadWaitClient(options: {
         await json(`/api/code-thread-waits?${query}`, { headers, cache: "no-store" }),
       );
       if (String(listed.threadId) !== String(threadId)) {
-        throw new Error("The host returned what another thread waits on.");
+        throw new Error("This computer returned what another thread waits on.");
       }
       return listed.waits;
     },

@@ -219,6 +219,8 @@ describe("Web search on Settings › Integrations", () => {
 
   it("says where web search is set when this window has no host to ask", () => {
     render(<WebSearchSettingsView />);
-    expect(screen.getByText("Web search is set on the host this window runs on.")).toBeVisible();
+    expect(
+      screen.getByText("Web search is set on the computer this window runs on."),
+    ).toBeVisible();
   });
 });

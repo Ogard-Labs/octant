@@ -172,7 +172,7 @@ describe("ProviderCatalogView", () => {
     openSetup(/^Amazon Bedrock, /);
     expect(
       screen.getByText(
-        /choose Amazon Bedrock in Add endpoint.*sign in from a terminal on this host/,
+        /choose Amazon Bedrock in Add endpoint.*sign in from a terminal on this computer/,
       ),
     ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Open Model endpoints" }));
@@ -193,7 +193,7 @@ describe("ProviderCatalogView", () => {
     const view = props();
     const { rerender } = render(<ProviderCatalogView {...view} />);
     openSetup(/^Codex, /);
-    fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Look on this computer" }));
     expect(view.onScan).toHaveBeenCalledTimes(1);
 
     rerender(
@@ -293,7 +293,7 @@ describe("ProviderCatalogView", () => {
       />,
     );
     openSetup(/^Codex, /);
-    fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
+    fireEvent.click(screen.getByRole("button", { name: "Look on this computer" }));
     expect(await screen.findByText("Discovery service is unavailable.")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(onScan).toHaveBeenCalledTimes(2));
@@ -313,8 +313,8 @@ describe("ProviderCatalogView", () => {
       />,
     );
     openSetup(/^Codex, /);
-    fireEvent.click(screen.getByRole("button", { name: "Look on this host" }));
-    expect(await screen.findByText("Octant could not look on this host.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Look on this computer" }));
+    expect(await screen.findByText("Octant could not look on this computer.")).toBeDefined();
   });
 
   it("sends an endpoint driver to Add endpoint rather than adding one itself", () => {

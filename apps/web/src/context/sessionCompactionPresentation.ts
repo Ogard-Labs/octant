@@ -88,7 +88,7 @@ export function refusalClause(reason: ContextCompactionRefusalReason): string {
     case "mode-disabled":
       return "this mode is turned off";
     case "remote-client":
-      return "a session is compacted from a window on the host";
+      return "a session is compacted from a window on this computer";
     case "project-unavailable":
       return "the thread or its Project is archived or unavailable";
     case "model-options-unsupported":

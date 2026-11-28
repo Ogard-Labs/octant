@@ -26,7 +26,7 @@ export function refusalText(reason: CodeDebugRefusalReason): string {
     case "no-debug-adapter":
       return "No debug adapter for this configuration is installed and switched on for Code. Add one in Settings › Skills & Extensions.";
     case "unsupported-platform":
-      return "This host cannot debug this program. Debugging runs on macOS and Linux, and on Windows outside Strict; native programs are not debugged on macOS yet.";
+      return "This computer cannot debug this program. Debugging runs on macOS and Linux, and on Windows outside Strict; native programs are not debugged on macOS yet.";
     case "mode-prohibited":
       return "Debugging is available in Code threads only.";
     case "plan-read-only":
@@ -38,7 +38,7 @@ export function refusalText(reason: CodeDebugRefusalReason): string {
     case "configuration-invalid":
       return "The program or folder is missing, is not the right kind of file, or leads outside the checkout.";
     case "confinement-unavailable":
-      return "This host cannot confine the program, so nothing was started.";
+      return "This computer cannot confine the program, so nothing was started.";
     case "no-session":
       return "That debug session is no longer running.";
   }
@@ -57,7 +57,7 @@ export function startAnswerText(
     case "busy":
       return answer.reason === "thread-has-session"
         ? "This thread already has a debug session that this panel does not hold. Stop it in the window that shows it, or wait for it to end, then press Start again."
-        : "This host is already running as many debug sessions as it allows. Stop one first.";
+        : "This computer is already running as many debug sessions as it allows. Stop one first.";
     case "failed":
       switch (answer.reason) {
         case "adapter-unverified":
@@ -97,9 +97,9 @@ export function endReasonText(reason: CodeDebugSessionEndReason, exitCode?: numb
     case "project-erased":
       return "The session ended because the Project was erased.";
     case "host-shutdown":
-      return "The session ended because the host shut down.";
+      return "The session ended because Octant shut down.";
     case "host-restarted":
-      return "The session ended because the host restarted.";
+      return "The session ended because Octant restarted.";
   }
 }
 

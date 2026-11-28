@@ -1037,8 +1037,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       let reason: string | undefined;
       if (props.attachmentClient === undefined) {
         reason = isImageAttachment(file)
-          ? "Image attachments are unavailable on this host."
-          : "Attachments are unavailable on this host.";
+          ? "Image attachments are unavailable on this computer."
+          : "Attachments are unavailable on this computer.";
         attachments.refuse(reason);
       } else if (seesImages.takesImages === false && isImageAttachment(file)) {
         reason = seesImages.refusal ?? "Choose a vision model to attach images.";
@@ -3515,7 +3515,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 busy={attachments.busy}
                 refusedReason={
                   props.attachmentClient === undefined
-                    ? "Attachments are unavailable on this host."
+                    ? "Attachments are unavailable on this computer."
                     : undefined
                 }
                 onRefused={attachments.refuse}

@@ -376,7 +376,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
         <div className="app-update__disclosure-body">
           <p>
             A check is a plain request for a file listing the latest version, and Octant compares it
-            on this machine. It sends:
+            on this computer. It sends:
           </p>
           <ul>
             {OCTANT_UPDATE_CHECK_DISCLOSURE.map((item) => (
@@ -648,7 +648,7 @@ function NightlyDataRow(props: { readonly bridge: OctantHostBridge | undefined }
     <>
       <SettingRow
         description="Whether Octant Nightly works on its own data or on Octant's data."
-        more="Nightly's own data runs Nightly's own host, so it works without Octant installed and never changes Octant's data. Octant's data uses Octant's host and needs a compatible Octant running. A change applies when Octant Nightly relaunches."
+        more="Nightly's own data runs Nightly's own background service, so it works without Octant installed and never changes Octant's data. Octant's data uses Octant's background service and needs a compatible Octant running. A change applies when Octant Nightly relaunches."
         label="Data"
         scope="app"
         settingId="app-nightly-data"

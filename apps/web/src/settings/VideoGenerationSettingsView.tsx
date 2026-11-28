@@ -99,7 +99,7 @@ function VideoProviderCreateForm(props: { readonly controller: ProviderControlle
       busy={controller.busy}
       credentialManagementAvailable={controller.credentialManagementAvailable}
       heading="Connect a video provider"
-      hint="Use a Gemini, Runway, or fal API key. Keys stay in the host's secure store."
+      hint="Use a Gemini, Runway, or fal API key. Keys stay in this computer's secure store."
       initialProviderType="gemini-video"
       onCreate={controller.create}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}

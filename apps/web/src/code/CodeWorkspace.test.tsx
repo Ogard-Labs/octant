@@ -159,7 +159,7 @@ describe("CodeWorkspace", () => {
       expect(screen.getByRole("heading", { name: `${title} is not available here` })).toBeVisible();
       expect(
         screen.getByText(
-          "This thread's checkout is a folder on a remote machine, which Octant no longer supports.",
+          "This thread's checkout is a folder on a remote computer, which Octant no longer supports.",
         ),
       ).toBeVisible();
       unmount();

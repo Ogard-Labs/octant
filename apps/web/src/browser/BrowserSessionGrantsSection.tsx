@@ -143,7 +143,7 @@ export function BrowserSessionGrantsSection(props: {
   return (
     <SettingsSection
       title="Browser session permissions"
-      description="Allow a selected caller to use an existing sign-in on this host for exact sites. An automation's or child's permission is kept across a restart until it expires, is revoked or its caller changes; a terminal's ends with the host. File transfers and login or script permissions stay separate."
+      description="Allow a selected caller to use an existing sign-in on this computer for exact sites. An automation's or child's permission is kept across a restart until it expires, is revoked or its caller changes; a terminal's ends when Octant stops. File transfers and login or script permissions stay separate."
     >
       <SettingRow
         label="Session permissions"
@@ -152,7 +152,7 @@ export function BrowserSessionGrantsSection(props: {
         focused={props.focusedSetting === "browser-session-permissions"}
         description={
           props.profiles.length === 0
-            ? "No Browser profiles are available on this host. Check Browser profiles above, then reopen this page to reload them."
+            ? "No Browser profiles are available on this computer. Check Browser profiles above, then reopen this page to reload them."
             : loaded && targets.length === 0
               ? "No eligible automation or managed child in this Project. A caller needs current tool authority and a supported provider. Reviewing a permission starts nothing."
               : "Choose the caller and profile explicitly, then review sites and expiry."
@@ -195,7 +195,7 @@ export function BrowserSessionGrantsSection(props: {
           settingId="browser-session-permissions"
           key={grant.grantId}
           label={`${grant.target.label} · ${grant.profileLabel}`}
-          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}${grant.continuesWithoutWindow === true ? " · Continues when windows close" : " · Requires an open local window"}${grant.survivesRestart === true ? " · Kept across restarts" : " · Ends when the host restarts"}`}
+          description={`${grant.origins.join(", ")} · Expires ${new Date(grant.expiresAt).toLocaleString()} · ${grant.target.modelId}${grant.continuesWithoutWindow === true ? " · Continues when windows close" : " · Requires an open local window"}${grant.survivesRestart === true ? " · Kept across restarts" : " · Ends when Octant restarts"}`}
           scope="host"
         >
           <OctantButton
@@ -254,8 +254,8 @@ export function BrowserSessionGrantsSection(props: {
                 {review === undefined ? null : (
                   <p>
                     {review.grant.survivesRestart === true
-                      ? "This permission survives a host restart and an app update. A changed definition, model, authority or Project binding ends it, and so does a host that did not close normally."
-                      : "This permission ends when this host restarts."}
+                      ? "This permission survives an Octant restart and an app update. A changed definition, model, authority or Project binding ends it, and so does an Octant session that did not close normally."
+                      : "This permission ends when Octant restarts."}
                   </p>
                 )}
                 {review === undefined ? null : (
@@ -328,8 +328,8 @@ export function BrowserSessionGrantsSection(props: {
                     <dd className="break-all">{review.grant.origins.join(", ")}</dd>
                     <dt>Model</dt>
                     <dd>{review.grant.target.modelId}</dd>
-                    <dt>Execution host</dt>
-                    <dd>This host</dd>
+                    <dt>Computer</dt>
+                    <dd>This computer</dd>
                     <dt>Expires</dt>
                     <dd>{new Date(review.grant.expiresAt).toLocaleString()}</dd>
                   </dl>

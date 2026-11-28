@@ -94,20 +94,23 @@ export default function VitalsModule(props: Props) {
     };
   }, [catalogUnknown, serverProjectId, serverUrl, windowCapability]);
 
-  if (serverUrl === undefined) return unavailable("Vitals", "No host is connected.");
+  if (serverUrl === undefined) return unavailable("Vitals", "No computer is connected.");
   if (catalogUnknown) {
     return serverProjects.catalog === "failed"
-      ? unavailable("Vitals", "Could not read server Projects, so this thread's host is unknown.")
+      ? unavailable(
+          "Vitals",
+          "Could not read server Projects, so where this thread runs is unknown.",
+        )
       : loading("Vitals");
   }
   if (state.status === "unsupported") {
     return unavailable("Vitals", "This server does not report load. Vitals needs a Linux server.");
   }
   if (state.status === "refused") {
-    return unavailable("Vitals", "This window may not read this host's load.");
+    return unavailable("Vitals", "This window may not read this computer's load.");
   }
   if (state.status === "unavailable") {
-    return unavailable("Vitals", "This host did not report its load. Trying again.");
+    return unavailable("Vitals", "This computer did not report its load. Trying again.");
   }
   return <VitalsView history={state.history} />;
 }
@@ -135,7 +138,7 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
   if (latest === undefined) {
     return (
       <section aria-label="Vitals" className="vitals" data-state="waiting">
-        <OctantEmpty state="loading" title="Reading this host" />
+        <OctantEmpty state="loading" title="Reading this computer" />
       </section>
     );
   }

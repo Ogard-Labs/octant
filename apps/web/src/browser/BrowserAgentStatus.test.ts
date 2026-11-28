@@ -16,7 +16,7 @@ it("names admission, Plan and unknown states without offering a new permission",
 it.each([
   ["no-tool-transport", "Choose provider"],
   ["excluded-by-thread-constraints", "Review thread access"],
-  ["host-lends-no-browser", "Check host settings"],
+  ["host-lends-no-browser", "Check Settings › This computer"],
 ] as const)("keeps the specific omission and its recovery action: %s", (reason, remedy) => {
   const note = agentAvailabilityNote({ status: "omitted", reason });
   expect(note.message).toMatch(/The agent cannot use this Browser/);

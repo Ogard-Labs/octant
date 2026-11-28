@@ -38,7 +38,7 @@ describe("capabilityTransportFor", () => {
       host: "192.168.1.5:13773",
     });
     expect(refusal.status === "refused" ? refusal.message : "").toBe(
-      "Octant refuses to send this window's capability over plain HTTP to 192.168.1.5:13773. Open the Machine over https://, or on its loopback address.",
+      "Octant refuses to send this window's capability over plain HTTP to 192.168.1.5:13773. Open Octant over https://, or on this computer's loopback address.",
     );
     for (const address of [
       "http://octant-host.lan/",

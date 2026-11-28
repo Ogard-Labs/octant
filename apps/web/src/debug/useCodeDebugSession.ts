@@ -22,7 +22,7 @@ const RUNNING_POLL_MS = 400;
 const STOPPED_POLL_MS = 1_000;
 /** Console lines the panel keeps; older ones scroll away, as the host's ring does. */
 const MAX_CONSOLE_LINES = 1_000;
-const UNREACHABLE_TEXT = "The host could not be reached.";
+const UNREACHABLE_TEXT = "This computer could not be reached.";
 
 export type DebugConsoleItem =
   | { readonly kind: "output"; readonly entry: CodeDebugOutputEntry }

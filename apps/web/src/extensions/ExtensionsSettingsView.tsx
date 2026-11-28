@@ -52,7 +52,7 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
  * surface stays actionable across every mode and provider family.
  */
 const BLOCK_REASON_LABELS: Readonly<Record<ExtensionBlockReason, string>> = {
-  "host-prohibited": "Host prohibited",
+  "host-prohibited": "Blocked on this computer",
   "mode-prohibited": "Mode prohibited",
   "project-prohibited": "Project prohibited",
   "thread-prohibited": "Thread prohibited",

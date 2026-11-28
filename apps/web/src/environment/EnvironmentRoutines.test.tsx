@@ -284,7 +284,7 @@ describe("EnvironmentRoutines", () => {
 
     await chooseFromRow("Friday digest", "Pause");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("did not reach the host");
+    expect(await screen.findByRole("alert")).toHaveTextContent("did not reach this computer");
     expect(screen.queryByText("Paused")).not.toBeInTheDocument();
   });
 

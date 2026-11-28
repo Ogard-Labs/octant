@@ -99,7 +99,7 @@ export function McpPlanReadOnlySection(props: McpPlanReadOnlySectionProps) {
       setLoaded({ kind: "ready", settings: result.settings });
       return true;
     } catch {
-      setRefusal("Octant could not reach the host. Nothing changed.");
+      setRefusal("Octant could not reach this computer. Nothing changed.");
       return false;
     } finally {
       setBusy(false);

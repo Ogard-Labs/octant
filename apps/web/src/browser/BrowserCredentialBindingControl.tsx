@@ -440,7 +440,7 @@ export function BrowserCredentialBindingControl(props: BrowserCredentialBindingC
             }
           >
             Review an item before saving permission for this exact website and Browser profile.
-            Permission lasts up to eight hours, ends when the host restarts, and does not renew from
+            Permission lasts up to eight hours, ends when Octant restarts, and does not renew from
             website cookies. Store unlock and website sign-in are separate. Saving permission fills
             nothing; filling and submitting each need your separate approval.
           </OctantConfirmDialog>

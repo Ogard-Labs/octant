@@ -17,7 +17,7 @@ export default function RemoteDiagnostics(props: { readonly client: DiagnosticsE
       <SettingsSection title="Diagnostics">
         <div className="setgroup">
           <SettingRow
-            description="Saves a file about this host for you to read and send yourself; nothing is uploaded."
+            description="Saves a file about this computer for you to read and send yourself; nothing is uploaded."
             more="It lists versions, provider status, recent log lines, and activity names, never messages or keys."
             label="Save diagnostics"
             scope="host"

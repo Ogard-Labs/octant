@@ -171,7 +171,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
           error.message,
         );
       } else {
-        setFailed("unavailable", "Octant host is unavailable.");
+        setFailed("unavailable", "That computer is unavailable.");
       }
     }
   }, [client, setFailed]);
@@ -304,7 +304,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
             error.message,
           );
         } else {
-          setFailed("unavailable", "Octant host is unreachable.");
+          setFailed("unavailable", "That computer is unreachable.");
         }
       }
     },
@@ -375,7 +375,7 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
               error.message,
             );
           } else {
-            setFailed("unavailable", "Octant host is unreachable.");
+            setFailed("unavailable", "That computer is unreachable.");
           }
         }
       })();

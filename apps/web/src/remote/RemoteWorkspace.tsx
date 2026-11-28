@@ -419,7 +419,7 @@ function RemoteChatSurface(
       ...(chatProjectId === undefined ? {} : { projectId: chatProjectId }),
     });
     if (created?.kind !== "thread-created") {
-      setCreateError(controller.errorMessage ?? "The host did not create a thread.");
+      setCreateError(controller.errorMessage ?? "That computer did not create a thread.");
       return;
     }
     setActiveThreadId(created.thread.id);
@@ -517,8 +517,8 @@ function RemoteWorkSurface(props: RemoteSurfaceProps) {
       errorMessage={workNavigation.errorMessage}
       emptyMessage={
         props.actsAsHostPerson
-          ? "No Work threads on this host yet. Start one here or from the host."
-          : "No Work threads on this host yet. Start one from the host; it will appear here."
+          ? "No Work threads on this computer yet. Start one here or from that computer."
+          : "No Work threads on this computer yet. Start one from that computer; it will appear here."
       }
       start={
         props.actsAsHostPerson ? (
@@ -706,8 +706,8 @@ export function RemoteCodeSurface(props: RemoteCodeSurfaceProps) {
       errorMessage={controller.errorMessage}
       emptyMessage={
         props.actsAsHostPerson
-          ? "No Code threads on this host yet. Start one here or from the host."
-          : "No Code threads on this host yet. Start one from the host; it will appear here."
+          ? "No Code threads on this computer yet. Start one here or from that computer."
+          : "No Code threads on this computer yet. Start one from that computer; it will appear here."
       }
       // A device that does not act as the host's person, such as one only the
       // hub introduced, is offered the form too: the host lists it only the
@@ -884,7 +884,7 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
           <div role="alert">
             <OctantEmpty
               layout="line"
-              detail={props.errorMessage ?? `${label} could not be read from the host.`}
+              detail={props.errorMessage ?? `${label} could not be read from that computer.`}
               title={`${label} could not be read`}
             />
           </div>
@@ -930,10 +930,10 @@ function RemoteThreadPane<T extends RemoteThread>(props: RemoteThreadPaneProps<T
             message={
               props.readOnly
                 ? `Choose a ${label} thread to watch it here.`
-                : `Choose a ${label} thread to read it here and send a turn to the host.`
+                : `Choose a ${label} thread to read it here and send a turn to that computer.`
             }
             state="neutral"
-            title={`${label} on the paired host`}
+            title={`${label} on the paired computer`}
           />
         ) : null}
       </div>

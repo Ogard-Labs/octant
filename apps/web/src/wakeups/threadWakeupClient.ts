@@ -25,7 +25,7 @@ export function createThreadWakeupClient(options: {
       signal: AbortSignal.timeout(15_000),
       ...init,
     });
-    if (!response.ok) throw new Error("The host's wake-ups are unavailable.");
+    if (!response.ok) throw new Error("This computer's wake-ups are unavailable.");
     return await response.json();
   }
   return {
@@ -35,7 +35,7 @@ export function createThreadWakeupClient(options: {
         await json(`/api/thread-wakeups?${query}`, { headers, cache: "no-store" }),
       );
       if (wakeups.some((wakeup) => wakeup.mode !== mode || wakeup.threadId !== threadId)) {
-        throw new Error("The host returned another thread's wake-ups.");
+        throw new Error("This computer returned another thread's wake-ups.");
       }
       return wakeups;
     },

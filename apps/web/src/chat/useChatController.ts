@@ -1435,7 +1435,7 @@ export function useChatController(options: ChatControllerOptions) {
       if (result !== undefined) return { status: "ok" };
       return {
         status: "refused",
-        message: lastExecuteError.current ?? "The host could not change this thread.",
+        message: lastExecuteError.current ?? "This computer could not change this thread.",
       };
     },
     [bootstrap, client, execute],

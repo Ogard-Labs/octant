@@ -140,7 +140,7 @@ export function buildChatMarkdownExport(input: ChatMarkdownExportInput): ChatMar
   }
   if (input.connectionStatus === "disconnected") {
     notes.push(
-      "This client had lost its connection to the host when the export was taken, so newer messages may exist that it has not seen.",
+      "This client had lost its connection to this computer when the export was taken, so newer messages may exist that it has not seen.",
     );
   }
 

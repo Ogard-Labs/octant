@@ -696,14 +696,14 @@ export function ShieldServersSettings(props: ShieldServersSettingsProps) {
   if (client === undefined) {
     return (
       <SettingsState kind="empty">
-        Servers are managed on the host computer. Open Octant there to add or change them.
+        Servers are managed on the computer running Octant. Open Octant there to add or change them.
       </SettingsState>
     );
   }
   if (view === undefined) {
     return (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
-        {loadFailed ? "Servers could not be read from this host." : "Reading servers…"}
+        {loadFailed ? "Servers could not be read from this computer." : "Reading servers…"}
       </SettingsState>
     );
   }

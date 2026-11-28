@@ -280,7 +280,7 @@ export function useThreadMessageQueue(options: {
             result = await client.execute(receipt.command);
           } catch {
             keepUncertain(
-              "The host has not confirmed this change. Check again before adding another message; your draft is kept.",
+              "This computer has not confirmed this change. Check again before adding another message; your draft is kept.",
             );
             return "unknown";
           }
@@ -292,7 +292,7 @@ export function useThreadMessageQueue(options: {
             )
           ) {
             keepUncertain(
-              "The host cannot confirm the earlier submission with current access. Its receipt is kept; restore access and check again.",
+              "This computer cannot confirm the earlier submission with current access. Its receipt is kept; restore access and check again.",
             );
             return "unknown";
           }
@@ -305,7 +305,7 @@ export function useThreadMessageQueue(options: {
         const latest = readQueueReceipts(host, scope);
         if (latest.status === "unavailable") {
           keepUncertain(
-            "The host answered, but recovery storage is unavailable. Check queue before submitting again.",
+            "This computer answered, but recovery storage is unavailable. Check queue before submitting again.",
           );
           return "unknown";
         }
@@ -316,7 +316,7 @@ export function useThreadMessageQueue(options: {
         receipt = { ...receipt, ...(accepted ? { accepted: true } : { refused: true }) };
         if (retained !== undefined && !saveQueueReceipt(receipt)) {
           keepUncertain(
-            "The host answered, but its receipt could not be settled safely. Check queue again.",
+            "This computer answered, but its receipt could not be settled safely. Check queue again.",
           );
           return "unknown";
         }
@@ -354,7 +354,7 @@ export function useThreadMessageQueue(options: {
         setMessage(
           result?.status === "refused"
             ? (result.message ??
-                `The host refused this queue change: ${result.reason.replaceAll("-", " ")}.`)
+                `This computer refused this queue change: ${result.reason.replaceAll("-", " ")}.`)
             : result?.status === "conflict"
               ? "The queue changed in another window. Review it and try again; your draft is kept."
               : result?.status === "applied" &&
@@ -365,7 +365,7 @@ export function useThreadMessageQueue(options: {
                       String(item.messageId) === String(command.messageId) &&
                       item.waitsForNextTurn !== true,
                   )
-                ? "This host cannot keep a message for the next turn, so this one may steer the running turn."
+                ? "This computer cannot keep a message for the next turn, so this one may steer the running turn."
                 : undefined,
         );
         return accepted ? "accepted" : "refused";

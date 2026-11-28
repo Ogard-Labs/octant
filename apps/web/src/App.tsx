@@ -7167,7 +7167,7 @@ function LaunchedShell(
           layout="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
-          message={controller.errorMessage ?? "The local Octant server is unavailable."}
+          message={controller.errorMessage ?? "Octant on this computer is unavailable."}
           role="alert"
           state="disconnected"
           title="Octant is disconnected"
@@ -7331,7 +7331,7 @@ function LaunchedShell(
         message:
           error instanceof Error && error.message.trim() !== ""
             ? error.message
-            : "The host could not change this thread.",
+            : "This computer could not change this thread.",
       };
     }
   }
@@ -8592,7 +8592,7 @@ function LaunchedShell(
             made?.kind === "thread-updated"
               ? "The coordinator was created with the default bounds"
               : "The thread was created, but it could not become a coordinator"
-          }: ${codeController.lastExecuteError.current?.message ?? "the host refused the change."}`;
+          }: ${codeController.lastExecuteError.current?.message ?? "this computer refused the change."}`;
           // A start the composer stays on leaves the thread closed; its row
           // under the composer offers Open.
           if (stay === undefined) {

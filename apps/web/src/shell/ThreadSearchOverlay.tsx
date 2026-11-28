@@ -80,7 +80,7 @@ const SCOPE_LABEL: Record<ThreadSearchScope, string> = { all: "All", ...MODE_LAB
 
 const LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">, string> = {
   loading: "Threads are still loading, so these results may be incomplete.",
-  unavailable: "The host thread list is unavailable, so Search has nothing to match.",
+  unavailable: "This computer's thread list is unavailable, so Search has nothing to match.",
 };
 
 const ARCHIVED_LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">, string> = {
@@ -154,12 +154,12 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         ? "No matching threads yet; more results are still loading."
         : listing === "unavailable"
           ? archivedListing === "unavailable" && contentListing === "unavailable"
-            ? "No matching threads; the host thread list, archived threads, and message search are unavailable."
+            ? "No matching threads; this computer's thread list, archived threads, and message search are unavailable."
             : archivedListing === "unavailable"
-              ? "No matching threads; the host thread list and archived threads are unavailable."
+              ? "No matching threads; this computer's thread list and archived threads are unavailable."
               : contentListing === "unavailable"
-                ? "No matching threads; the host thread list and message search are unavailable."
-                : "No matching threads; the host thread list is unavailable."
+                ? "No matching threads; this computer's thread list and message search are unavailable."
+                : "No matching threads; this computer's thread list is unavailable."
           : archivedListing === "unavailable" && contentListing === "unavailable"
             ? "No matching live threads; archived and message search are unavailable."
             : archivedListing === "unavailable"

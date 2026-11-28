@@ -36,11 +36,11 @@ export interface ThreadCheckpoints {
 const refusalText: Record<ThreadCheckpointRefusalReason, string> = {
   "thread-unavailable": "This thread is no longer available.",
   "anchor-unavailable": "This message is no longer part of the conversation.",
-  "revision-unavailable": "The host did not record a revision for this message.",
+  "revision-unavailable": "This computer did not record a revision for this message.",
   "checkpoint-forgotten": "This checkpoint has been put away.",
   "project-unavailable": "This thread's Project is unavailable.",
-  "restore-unavailable": "This host cannot take up threads in that mode.",
-  "restore-refused": "The host turned the new thread down.",
+  "restore-unavailable": "This computer cannot take up threads in that mode.",
+  "restore-refused": "This computer turned the new thread down.",
 };
 
 /**

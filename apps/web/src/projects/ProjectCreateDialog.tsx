@@ -522,7 +522,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </OctantButton>
         </div>
         <OctantAlert tone="warning">
-          You cannot pick a folder here. The signed-in web app needs the host folder browser;
+          You cannot pick a folder here. The signed-in web app needs this computer's folder browser;
           Electron needs the native picker bridge.
         </OctantAlert>
         <div className="project-dialog__actions">

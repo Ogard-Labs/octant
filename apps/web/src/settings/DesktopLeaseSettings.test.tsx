@@ -66,7 +66,7 @@ describe("DesktopLeaseSettings", () => {
     await user.click(await screen.findByRole("option", { name: "5" }));
     expect(request).toHaveBeenLastCalledWith({ kind: "set-lease-settings", leasesPerThread: 5 });
 
-    await user.click(screen.getByRole("combobox", { name: "Desktops on this host" }));
+    await user.click(screen.getByRole("combobox", { name: "Desktops on this computer" }));
     await user.click(await screen.findByRole("option", { name: "1" }));
     expect(request).toHaveBeenLastCalledWith({
       kind: "set-lease-settings",

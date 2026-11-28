@@ -104,7 +104,7 @@ export function CodeTestPane(props: CodeTestPaneProps) {
         approved = (await props.requestApproval?.({ command })) === true;
       } catch {
         endRun();
-        setFailure("Repository test approval failed. Retry when the host is reachable.");
+        setFailure("Repository test approval failed. Retry when this computer is reachable.");
         return;
       }
       if (!approved) {

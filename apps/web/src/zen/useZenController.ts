@@ -252,7 +252,7 @@ export function useZenController(options: UseZenControllerOptions) {
                     setBarCollapsedState(safe.barCollapsed);
                     presentationSpace.current = safe;
                     setMessage(
-                      "Zen exit was interrupted by a newer server state. The workspace is still available.",
+                      "Zen exit was interrupted by newer state on this computer. The workspace is still available.",
                     );
                   } else {
                     setSpace(refreshed.space);
@@ -262,12 +262,12 @@ export function useZenController(options: UseZenControllerOptions) {
                     setMessage("Zen presentation changed elsewhere; refreshed the current space.");
                   }
                 } else if (exitGate) {
-                  failExit("The server is behind the local exit state.");
+                  failExit("This computer is behind the local exit state.");
                 } else {
                   setMessage("Zen presentation changed elsewhere; refreshed the current space.");
                 }
               } else if (exitGate) {
-                failExit("The server state could not be refreshed.");
+                failExit("State on this computer could not be refreshed.");
               } else {
                 setSpace(previousSpace);
                 markActive(previousSpace.active);
@@ -277,7 +277,7 @@ export function useZenController(options: UseZenControllerOptions) {
               }
             } catch {
               if (exitGate) {
-                failExit("The server state could not be refreshed.");
+                failExit("State on this computer could not be refreshed.");
               } else {
                 setSpace(previousSpace);
                 markActive(previousSpace.active);
@@ -287,7 +287,7 @@ export function useZenController(options: UseZenControllerOptions) {
               }
             }
           } else if (exitGate) {
-            failExit(error instanceof Error ? error.message : "The server rejected the exit.");
+            failExit(error instanceof Error ? error.message : "This computer rejected the exit.");
           } else {
             const detail =
               error instanceof Error ? error.message : "Zen presentation update failed.";

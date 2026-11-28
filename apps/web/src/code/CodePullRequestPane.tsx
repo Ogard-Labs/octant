@@ -422,7 +422,7 @@ function CreatePullRequest(
     const listSteps = proofSource?.client.listSteps;
     const listCaptures = proofSource?.client.listCaptures;
     if (proofSource === undefined || listSteps === undefined || listCaptures === undefined) {
-      return { kind: "unavailable", message: "Browser proof is not available on this host." };
+      return { kind: "unavailable", message: "Browser proof is not available on this computer." };
     }
     try {
       const [steps, captures] = await Promise.all([

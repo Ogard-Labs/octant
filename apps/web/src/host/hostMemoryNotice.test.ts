@@ -136,10 +136,10 @@ describe("hostMemoryNotices", () => {
 describe("hostMemoryFact", () => {
   it("states the pressure and the host's size", () => {
     expect(hostMemoryFact({ pressure: "normal", processMegabytes: 612 })).toBe(
-      "Normal, host using 612 MB",
+      "Normal, Octant using 612 MB",
     );
     expect(hostMemoryFact({ pressure: "critical", processMegabytes: 4200 })).toBe(
-      "Very low, host using 4200 MB",
+      "Very low, Octant using 4200 MB",
     );
   });
 });

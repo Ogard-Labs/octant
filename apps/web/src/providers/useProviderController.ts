@@ -68,7 +68,7 @@ const PROVIDER_UNAVAILABLE = "Octant Provider service is unavailable.";
 // A browser never holds the host's bridge secret, so only the host-local
 // command or the desktop's own window can put a key in the credential store.
 const BROWSER_CANNOT_SAVE_KEYS =
-  "This window cannot save provider keys. On the host, run `octant provider key set <provider>`, or use the desktop app.";
+  "This window cannot save provider keys. On that computer, run `octant provider key set <provider>`, or use the desktop app.";
 
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
@@ -344,11 +344,11 @@ export function useProviderController(options: ProviderControllerOptions) {
       install(loaded);
       if (statusUnconfirmed) {
         setMessage(
-          "Provider credential status could not be verified. Retry from the Octant host before removing this provider.",
+          "Provider credential status could not be verified. Retry from the Octant app on that computer before removing this provider.",
         );
       } else if (cleanupFailed) {
         setMessage(
-          "Stored provider credential cleanup is still required. Retry cleanup or remove the provider from the Octant host.",
+          "Stored provider credential cleanup is still required. Retry cleanup or remove the provider from the Octant app on that computer.",
         );
       } else if (cleanupAttempted) {
         setMessage(
@@ -1376,7 +1376,7 @@ export function useProviderController(options: ProviderControllerOptions) {
                   credentialCleanupRequired.current.add(instanceId);
                   await recoverRegistryFailure(
                     recoveryError,
-                    "Stored provider credential cleanup is required. Retry cleanup or remove the provider from the Octant host.",
+                    "Stored provider credential cleanup is required. Retry cleanup or remove the provider from the Octant app on that computer.",
                   );
                   return false;
                 }
@@ -2295,7 +2295,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         if (credentialStatusUnconfirmed.current.has(instanceId)) {
           if (mounted.current) {
             setMessage(
-              "Provider credential status could not be verified. Retry from the Octant host before removing this provider.",
+              "Provider credential status could not be verified. Retry from the Octant app on that computer before removing this provider.",
             );
           }
           return false;
@@ -2356,7 +2356,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             credentialCleanupRequired.current.add(instanceId);
             if (mounted.current) {
               setMessage(
-                "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant host.",
+                "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant app on that computer.",
               );
             }
             return true;

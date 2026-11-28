@@ -107,7 +107,7 @@ export function CodeReferences(props: {
           <OctantAlert tone="warning">
             {result.status === "unsupported"
               ? result.support === "unknown"
-                ? "The host has not reported references support for this file."
+                ? "This computer has not reported references support for this file."
                 : "This server does not offer references for this file."
               : result.message}
           </OctantAlert>

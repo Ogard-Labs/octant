@@ -151,7 +151,10 @@ function SyncStoreSections(
       report: (message: string) => void = setProblem,
     ): Promise<CommandOutcome> => {
       if (client === undefined)
-        return { status: "refused", message: "Sync settings are host-only." };
+        return {
+          status: "refused",
+          message: "Sync settings are available on the computer running Octant only.",
+        };
       setBusy(true);
       setProblem(undefined);
       // A bucket refusal belongs to the save that caused it, not to whatever
@@ -193,7 +196,7 @@ function SyncStoreSections(
   if (client === undefined) {
     return (
       <SettingsSection
-        description="Choose a store and turn sync on in the Octant app on the host computer."
+        description="Choose a store and turn sync on in the Octant app on the computer running Octant."
         title="Store"
       />
     );
@@ -203,7 +206,7 @@ function SyncStoreSections(
       <SettingsSection title="Store">
         <SettingsState kind={loadFailed ? "error" : "loading"}>
           {loadFailed
-            ? "Sync settings could not be read from this host."
+            ? "Sync settings could not be read from this computer."
             : "Reading sync settings…"}
         </SettingsState>
       </SettingsSection>

@@ -68,7 +68,7 @@ describe("useCodeEditorFile when the open is refused or fails", () => {
       ["not-regular", "That is not a regular file, so it cannot be opened."],
       ["escaped", "That path leaves the checkout."],
       ["device-mismatch", "The file changed while it was being opened. Try again."],
-      ["oversized", "The host's answer was too large to read. Reconnect and retry."],
+      ["oversized", "This computer's answer was too large to read. Reconnect and retry."],
     ];
     for (const [code, expected] of named) {
       const { result, unmount } = opening(vi.fn(async () => refused(code)));

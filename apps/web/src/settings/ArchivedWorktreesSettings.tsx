@@ -65,10 +65,12 @@ export function ArchivedWorktreesSettings(props: ArchivedWorktreesSettingsProps)
 
   const body =
     client === undefined ? (
-      <SettingsState kind="empty">Worktrees are managed on the host machine.</SettingsState>
+      <SettingsState kind="empty">
+        Worktrees are managed on the computer running Octant.
+      </SettingsState>
     ) : worktrees === undefined ? (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
-        {loadFailed ? "Worktrees could not be read from this host." : "Reading worktrees…"}
+        {loadFailed ? "Worktrees could not be read from this computer." : "Reading worktrees…"}
       </SettingsState>
     ) : worktrees.length === 0 ? (
       <SettingsState kind="empty">No archived thread keeps a worktree.</SettingsState>

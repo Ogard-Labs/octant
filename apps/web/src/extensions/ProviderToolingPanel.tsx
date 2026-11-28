@@ -123,7 +123,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
       if (current !== generation.current) return;
       setLoaded({
         kind: "unavailable",
-        message: "Octant could not reach the host. Close Settings and open it again to retry.",
+        message: "Octant could not reach this computer. Close Settings and open it again to retry.",
       });
     }
   }, [account, client, props.localHost]);
@@ -160,7 +160,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
         setRefusal({
           status: "refused",
           reason: "unavailable",
-          message: "Octant could not reach the host. Nothing was run.",
+          message: "Octant could not reach this computer. Nothing was run.",
         });
       }
     },
@@ -190,7 +190,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
         setStep({
           kind: "done",
           ok: false,
-          message: "Octant could not reach the host. Check the list before trying again.",
+          message: "Octant could not reach this computer. Check the list before trying again.",
           output: "",
         });
       }

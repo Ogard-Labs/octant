@@ -305,7 +305,7 @@ describe("SideChatWorkspaceTab", () => {
       />,
     );
 
-    expect(screen.getByText("Side Chat is not available on this host.")).toBeVisible();
+    expect(screen.getByText("Side Chat is not available on this computer.")).toBeVisible();
   });
 });
 

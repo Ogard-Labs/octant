@@ -19,7 +19,7 @@ export const CODE_DELIVERY_OUTCOME_OPTIONS: ReadonlyArray<{
   {
     id: "local-implementation",
     label: "Local change",
-    detail: "Committed work that stays on this machine.",
+    detail: "Committed work that stays on this computer.",
     icon: Save,
   },
   {

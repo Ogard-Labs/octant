@@ -215,7 +215,7 @@ const MERGE_BACK_REFUSALS: Record<
   Extract<CodeForkMergeBackOutcome, { readonly status: "refused" }>["reason"],
   string
 > = {
-  unsupported: "This host cannot merge a fork's conversation back.",
+  unsupported: "This computer cannot merge a fork's conversation back.",
   "not-a-fork": "This thread is not a fork, so there is nothing to merge back.",
   "source-unavailable": "The thread this was forked from is no longer available.",
   "source-unauthorized": "This window cannot reach the thread this was forked from.",

@@ -282,7 +282,7 @@ export function PlannerProposalReviewDialog(
           {...(!current || !reviewCurrent
             ? {
                 createDisabledReason:
-                  "Refresh the changed proposal and host state before approving.",
+                  "Refresh the changed proposal and current state before approving.",
               }
             : reviewAttempt.status !== "none"
               ? {
@@ -353,7 +353,7 @@ export function PlannerProposalReviewDialog(
       </p>
       {!current || !reviewCurrent ? (
         <OctantAlert tone="warning">
-          The proposal or host state changed. Close this review and refresh before deciding.
+          The proposal or current state changed. Close this review and refresh before deciding.
         </OctantAlert>
       ) : null}
     </OctantDialog>

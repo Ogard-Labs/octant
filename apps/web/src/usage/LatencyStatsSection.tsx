@@ -16,7 +16,9 @@ export function LatencyStatsSection({
     <section aria-label="Latency" className={`${className} usage-latency`}>
       <h3>Latency</h3>
       {latencyStats.measurements.length === 0 ? (
-        <p className="usage-latency__empty">No host latency observations have been recorded.</p>
+        <p className="usage-latency__empty">
+          No latency observations have been recorded on this computer.
+        </p>
       ) : (
         <ul className="usage-latency__measurements">
           {latencyStats.measurements.map((measurement) => (

@@ -143,7 +143,7 @@ export function MoveThreadToProjectDialog(props: MoveThreadToProjectDialogProps)
       // A refusal against an unknown model may only be missing data, not a
       // policy the thread actually breaks — say which it is.
       if (props.threadModel === undefined) {
-        return "This thread's model is not known here; the host decides whether this Project's provider policy allows it.";
+        return "This thread's model is not known here; this computer decides whether this Project's provider policy allows it.";
       }
       return "This Project's provider policy does not allow this thread's provider or model.";
     }

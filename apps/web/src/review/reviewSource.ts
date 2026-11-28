@@ -402,7 +402,10 @@ export function createReviewSource(clients: ReviewSourceClients): ReviewSource {
         };
       } catch (error) {
         if (signal.aborted) throw error;
-        return { status: "unavailable", message: "The diff could not be read from the host." };
+        return {
+          status: "unavailable",
+          message: "The diff could not be read from this computer.",
+        };
       }
     },
     async loadFinishedReceipt(entry, signal) {

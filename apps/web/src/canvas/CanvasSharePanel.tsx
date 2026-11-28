@@ -67,7 +67,7 @@ const EXPIRY_CHOICES = [
 
 const DENIAL_COPY: Record<CanvasShareDenialCode, string> = {
   "malformed-request": "This share request was not valid.",
-  "sharing-disabled": "Sharing is turned off on this host.",
+  "sharing-disabled": "Sharing is turned off on this computer.",
   "consent-required": "Sharing needs every acknowledgement from you.",
   "scope-mismatch": "This canvas belongs to a different workspace.",
   "stale-version": "This canvas changed. Reopen it and share again.",
@@ -88,7 +88,7 @@ const ACCESS_COPY: Record<CanvasShareAccessOutcome, string> = {
   "denied-audience": "This share is not addressed to you.",
   "denied-deleted-source": "The canvas behind this share is gone.",
   "denied-scope-mismatch": "That request did not match this share.",
-  "denied-sharing-disabled": "Sharing is turned off on this host.",
+  "denied-sharing-disabled": "Sharing is turned off on this computer.",
 };
 
 /** Safe, metadata-free copy for a share denial; never the server message. */
@@ -299,7 +299,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
       <p className="canvas-share__description" id="canvas-share-description">
         A share is a read-only snapshot of this canvas version with credentials, file paths, and
         live sources stripped out. It stays on {computer} — nothing is uploaded, and there is no
-        link. Only someone this host can sign in may open it, until it expires or you revoke it.
+        link. Only someone {computer} can sign in may open it, until it expires or you revoke it.
       </p>
       {props.overview.sharingEnabled ? (
         <div className="canvas-share__form">
@@ -328,8 +328,8 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
             />
           </label>
           <p className="canvas-share__note">
-            This host can only authenticate you right now, so this snapshot is addressed to you on
-            this device.
+            This computer can only authenticate you right now, so this snapshot is addressed to you
+            on this device.
           </p>
           <label className="canvas-share__consent">
             <OctantCheckbox
@@ -398,7 +398,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
         </div>
       ) : (
         <p className="canvas-share__note" data-testid="canvas-share-disabled">
-          Sharing is turned off on this host. This canvas still works normally here.
+          Sharing is turned off on this computer. This canvas still works normally here.
         </p>
       )}
       <ShareStatus run={run} />

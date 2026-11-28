@@ -299,7 +299,7 @@ describe("buildAutomationDraft", () => {
     expect(result.kind).toBe("invalid");
     if (result.kind !== "invalid") return;
     expect(result.issues).toContain(
-      "The selection does not satisfy the automation contract. Match host, mode, and Project across every choice.",
+      "The selection does not satisfy the automation contract. Match computer, mode, and Project across every choice.",
     );
   });
 });

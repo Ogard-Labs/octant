@@ -92,7 +92,7 @@ export function PhoneNotificationSettings(props: PhoneNotificationSettingsProps)
     body = (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
         {loadFailed
-          ? "Phone notification settings could not be read from this host."
+          ? "Phone notification settings could not be read from this computer."
           : "Reading phone notification settings…"}
       </SettingsState>
     );

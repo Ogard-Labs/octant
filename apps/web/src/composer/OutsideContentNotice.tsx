@@ -267,7 +267,7 @@ function ReviewOutsideContentDialog(
         text:
           error instanceof ContextClientFailure && error.category === "unauthorized"
             ? REFUSAL_COPY.unauthorized
-            : "Octant could not reach the host to clear the mark. Try again.",
+            : "Octant could not reach this computer to clear the mark. Try again.",
       });
     } finally {
       setPending(false);

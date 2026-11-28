@@ -510,13 +510,17 @@ export function SafeNetworksSettings(props: SafeNetworksSettingsProps) {
 
   if (client === undefined) {
     return (
-      <SettingsState kind="empty">Safe networks are set up on the host machine.</SettingsState>
+      <SettingsState kind="empty">
+        Safe networks are set up on the computer running Octant.
+      </SettingsState>
     );
   }
   if (view === undefined) {
     return (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
-        {loadFailed ? "Safe networks could not be read from this host." : "Reading safe networks…"}
+        {loadFailed
+          ? "Safe networks could not be read from this computer."
+          : "Reading safe networks…"}
       </SettingsState>
     );
   }

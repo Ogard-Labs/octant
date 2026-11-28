@@ -744,7 +744,7 @@ describe("Settings › Sync off the host", () => {
 
     expect(
       await screen.findByText(
-        "Set up sync, join, and revoke in the Octant app on the host computer.",
+        "Set up sync, join, and revoke in the Octant app on the computer running Octant.",
       ),
     ).toBeVisible();
     const section = screen.getByRole("region", { name: "Sync status" });

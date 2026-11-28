@@ -126,7 +126,7 @@ const REFUSAL_HEADLINES: Readonly<Record<PullRequestReviewTurnRefusalReason, str
   "spend-ceiling": "Thread spend ceiling reached",
   "head-stale": "PR head moved before review finished",
   "not-effective": "Reviewer plugin disabled or untrusted",
-  unsupported: "Reviewer unavailable on this host",
+  unsupported: "Reviewer unavailable on this computer",
 };
 
 export interface PullRequestReviewStatusBannerProps {

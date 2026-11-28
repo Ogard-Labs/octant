@@ -702,7 +702,7 @@ describe("SettingsView", () => {
     const header = screen
       .getByRole("heading", { level: 1, name: "Remote access" })
       .closest("header")!;
-    expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
+    expect(within(header).getByLabelText("Scope: This computer")).toBeInTheDocument();
   });
 
   it("shows one Managed in Octant line where a Nightly client's remote access would be", () => {
@@ -757,7 +757,7 @@ describe("SettingsView", () => {
     renderSettings({ initialDeepLink: { section: "remote-access" } });
 
     const section = screen.getByRole("region", { name: "Remote access" });
-    expect(section).toHaveTextContent(/on the host computer/);
+    expect(section).toHaveTextContent(/on the computer running Octant/);
     expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
     expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
@@ -1862,7 +1862,7 @@ describe("SettingsView", () => {
       agentRunSettingsClient,
       initialDeepLink: { section: "general", setting: "resource-pause" },
     });
-    expect(await screen.findByRole("heading", { level: 1, name: "Host" })).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "This computer" })).toBeVisible();
     const page = within(screen.getByRole("main"));
     expect(page.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("Computer resources");
     await waitFor(() =>
@@ -1921,7 +1921,7 @@ describe("SettingsView", () => {
         sidebarVibrancySupported
       />,
     );
-    expect(screen.getByRole("heading", { name: "Host" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "This computer" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
     expect(
       screen.getByText("Resets this mode's panes, sidebar, and dock to defaults."),
@@ -1932,7 +1932,7 @@ describe("SettingsView", () => {
 
   it("hides native-only controls in browser mode and shows them in native mode", () => {
     const { rerender } = renderSettings({ nativeBoundsAvailable: false });
-    navigateTo("Host");
+    navigateTo("This computer");
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Reset native window bounds" }),
@@ -1950,7 +1950,7 @@ describe("SettingsView", () => {
         sidebarVibrancySupported
       />,
     );
-    navigateTo("Host");
+    navigateTo("This computer");
     expect(screen.getByRole("button", { name: "Reset native window bounds" })).toBeInTheDocument();
   });
 
@@ -2176,7 +2176,7 @@ describe("SettingsView", () => {
 
   it("hides the diagnostics export control on Host when no client is provided", () => {
     renderSettings();
-    navigateTo("Host");
+    navigateTo("This computer");
     expect(screen.queryByRole("button", { name: /export diagnostics/i })).not.toBeInTheDocument();
   });
 
@@ -2216,7 +2216,7 @@ describe("SettingsView", () => {
       })),
     };
     renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
-    navigateTo("Host");
+    navigateTo("This computer");
     const exportButton = screen.getByRole("button", { name: /export diagnostics/i });
     expect(exportButton).toBeDisabled();
 
@@ -2239,7 +2239,7 @@ describe("SettingsView", () => {
       exportSupportBundle: vi.fn(),
     };
     renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
-    navigateTo("Host");
+    navigateTo("This computer");
     expect(screen.getByRole("button", { name: "Save diagnostics…" })).toBeEnabled();
     expect(screen.getByText("Failure report")).toBeInTheDocument();
     expect(diagnosticsExportClient.readSupportBundlePreview).not.toHaveBeenCalled();
@@ -2265,7 +2265,7 @@ describe("SettingsView", () => {
       diagnosticsExportClient: diagnosticsExportClient as never,
       hostBridge: { saveSupportBundle } as never,
     });
-    navigateTo("Host");
+    navigateTo("This computer");
     fireEvent.click(screen.getByRole("button", { name: "Save diagnostics…" }));
     fireEvent.click(await screen.findByRole("button", { name: "Save file" }));
 
@@ -2425,9 +2425,9 @@ describe("SettingsView", () => {
       restore: vi.fn(),
     };
     renderSettings({ hostControlClient: hostControlClient as never });
-    navigateTo("Host");
+    navigateTo("This computer");
     expect(await screen.findByText("host-1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stop host" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop service" })).toBeEnabled();
   });
 
   it("offers the agent-downloads switch, off by default, beside the other Browser settings", async () => {
@@ -2617,9 +2617,9 @@ describe("SettingsView", () => {
 
   it("explains that host controls stay on the host when no client is available", () => {
     renderSettings();
-    navigateTo("Host");
-    expect(screen.getByText(/available on the host machine only/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Stop host" })).not.toBeInTheDocument();
+    navigateTo("This computer");
+    expect(screen.getByText(/available on the computer running Octant only/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop service" })).not.toBeInTheDocument();
   });
 
   it("mounts the GitHub section when a GitHub client is provided", async () => {
@@ -2932,7 +2932,7 @@ describe("SettingsView", () => {
     );
     fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
-    fireEvent.click(screen.getByRole("button", { name: "Host" }));
+    fireEvent.click(screen.getByRole("button", { name: "This computer" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",
     );
@@ -2956,7 +2956,7 @@ describe("SettingsView", () => {
         sidebarVibrancySupported={false}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Host" }));
+    fireEvent.click(screen.getByRole("button", { name: "This computer" }));
     await user.click(screen.getByRole("button", { name: "Reset active mode layout" }));
     expect(onResetLayout).toHaveBeenCalledOnce();
   });

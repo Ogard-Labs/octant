@@ -396,13 +396,13 @@ describe("Connectors", () => {
     const connect = screen.getByRole("button", { name: "Connect Linear" });
     expect(connect).toBeDisabled();
     expect(connect).toHaveAccessibleDescription(
-      /Requires the Octant window on this host.*Sign in with your account on that host/,
+      /Requires the Octant window on that computer.*Sign in with your account on that computer/,
     );
     expect(
-      within(connect.closest("li") as HTMLElement).getByRole("link", { name: "Host setup steps" }),
+      within(connect.closest("li") as HTMLElement).getByRole("link", { name: "Setup steps" }),
     ).toHaveAttribute("href", expect.stringContaining("-host-setup"));
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Connect from the Octant window on this host",
+      "Connect from the Octant window on that computer",
     );
   });
 });

@@ -112,7 +112,7 @@ describe("SkillFolderSettingsPanel", () => {
     );
     expect(screen.getByRole("textbox", { name: "Skill folder path" })).toBeEnabled();
     expect(screen.getByText(/Folder does not exist yet/)).toBeVisible();
-    expect(screen.getByText(/Folder cannot be read on this host/)).toBeVisible();
+    expect(screen.getByText(/Folder cannot be read on this computer/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "Choose folder…" })).toBeNull();
   });
 

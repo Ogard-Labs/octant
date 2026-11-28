@@ -320,7 +320,7 @@ describe("outside content notice", () => {
     await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear mark" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "Octant could not reach the host to clear the mark. Try again.",
+      "Octant could not reach this computer to clear the mark. Try again.",
     );
   });
 

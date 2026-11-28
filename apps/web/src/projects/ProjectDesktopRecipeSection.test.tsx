@@ -149,7 +149,7 @@ describe("ProjectDesktopRecipeSection", () => {
       ),
     );
     const list = await screen.findByRole("list", { name: "Providers that need setup" });
-    expect(list).toHaveTextContent(/Cloud desktop needs this host to keep your API key/);
+    expect(list).toHaveTextContent(/Cloud desktop needs this computer to keep your API key/);
     expect(list).toHaveTextContent(/Spaces needs its app running and signed in/);
   });
 
@@ -263,7 +263,7 @@ describe("ProjectDesktopRecipeSection", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Desktop provider" })).toHaveTextContent(
-        "cloud-desktop (not available on this host)",
+        "cloud-desktop (not available on this computer)",
       ),
     );
     expect(screen.getByRole("button", { name: "Save recipe" })).toBeDisabled();
@@ -341,7 +341,7 @@ describe("ProjectDesktopRecipeSection", () => {
     );
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Where the desktop runs" })).toHaveTextContent(
-        "own-cloud (not available on this host)",
+        "own-cloud (not available on this computer)",
       ),
     );
     await user.click(screen.getByRole("combobox", { name: "Desktop screen size" }));
@@ -403,7 +403,7 @@ describe("ProjectDesktopRecipeSection", () => {
         project={project()}
       />,
     );
-    expect(await screen.findByText(/No desktop provider is ready on this host/)).toBeTruthy();
+    expect(await screen.findByText(/No desktop provider is ready on this computer/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set recipe" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Desktop provider" })).toBeNull();
   });

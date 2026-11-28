@@ -47,12 +47,15 @@ const SUMMARY_ICONS = {
  * are unknowns, so they say so rather than converting a missing answer into a
  * negative one the status above would contradict.
  */
-const CAVEATS: Partial<Record<Exclude<FirstRunReadinessOverall, "ready">, string>> = {
-  checking:
-    "Octant is still checking this host, so it cannot say yet whether Chat can answer. You can open the composer while it finishes.",
-  "authority-unavailable":
-    "Octant cannot reach its own provider registry, so it cannot say whether Chat can answer. You can still open the composer and finish setup later in Settings.",
-};
+function readinessCaveat(overall: FirstRunReadinessOverall, computer: string): string | undefined {
+  if (overall === "checking") {
+    return `Octant is still checking ${computer}, so it cannot say yet whether Chat can answer. You can open the composer while it finishes.`;
+  }
+  if (overall === "authority-unavailable") {
+    return "Octant cannot reach its own provider registry, so it cannot say whether Chat can answer. You can still open the composer and finish setup later in Settings.";
+  }
+  return undefined;
+}
 
 /**
  * Keeps rows in the order given. Rows the order does not name follow in the
@@ -85,7 +88,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
     const { readiness } = props;
     const computer = thisComputerName(useHostPlatform());
     const SummaryIcon = SUMMARY_ICONS[readiness.overall];
-    const caveat = readiness.overall === "ready" ? undefined : CAVEATS[readiness.overall];
+    const caveat = readinessCaveat(readiness.overall, computer);
     const [showAll, setShowAll] = useState(false);
     // A switch changes its row's rank. Once the person has used one, rows stay
     // put, so the row under the pointer does not jump or fold out of sight.

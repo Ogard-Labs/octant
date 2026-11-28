@@ -36,7 +36,7 @@ export function HostDataMapView({ report }: HostDataMapViewProps) {
     <div className="host-data-map" data-setting-id="data-map" id="settings-data-map">
       <SettingsPanel
         title="Data map"
-        description="What this host stores, and where. Names and places only, never secrets. Read-only."
+        description="What this computer stores, and where. Names and places only, never secrets. Read-only."
       >
         <HostFacts report={report} />
       </SettingsPanel>
@@ -52,10 +52,10 @@ function HostFacts({ report }: { readonly report: HostDataMap }) {
     <div className="settings-panel__stack">
       <SettingsFactList
         facts={[
-          { label: "Host", value: host.displayName },
+          { label: "Computer", value: host.displayName },
           {
             label: "Kind",
-            value: host.kind === "headless" ? "Headless host" : "Desktop app",
+            value: host.kind === "headless" ? "Headless computer" : "Desktop app",
           },
           { label: "Journal", value: locationText(host.journal) },
           { label: "Projections", value: locationText(host.projections) },
@@ -72,15 +72,21 @@ function HostFacts({ report }: { readonly report: HostDataMap }) {
 function ProjectList({ report }: { readonly report: HostDataMap }) {
   if (report.projects.kind === "unknown") {
     return (
-      <SettingsPanel title="Projects" description="Storage that belongs to a Project on this host.">
+      <SettingsPanel
+        title="Projects"
+        description="Storage that belongs to a Project on this computer."
+      >
         <SettingsState kind="empty">{UNKNOWN}</SettingsState>
       </SettingsPanel>
     );
   }
   if (report.projects.projects.length === 0) {
     return (
-      <SettingsPanel title="Projects" description="Storage that belongs to a Project on this host.">
-        <SettingsState kind="empty">No Projects on this host.</SettingsState>
+      <SettingsPanel
+        title="Projects"
+        description="Storage that belongs to a Project on this computer."
+      >
+        <SettingsState kind="empty">No Projects on this computer.</SettingsState>
       </SettingsPanel>
     );
   }
@@ -159,7 +165,7 @@ function NamedLocationList(props: {
 function OutboundList(props: { readonly categories: ReadonlyArray<HostDataMapOutboundCategory> }) {
   return (
     <div>
-      <h3 className="host-data-map__subheading">What leaves this machine</h3>
+      <h3 className="host-data-map__subheading">What leaves this computer</h3>
       <SettingsFactList
         facts={props.categories.map((category) => ({
           label: CATEGORY_LABELS[category.category],
@@ -184,6 +190,6 @@ function credentialsText(credentials: HostDataMapCredentials): string {
 function outboundText(category: HostDataMapOutboundCategory): string {
   if (category.kind === "unknown") return UNKNOWN;
   return category.leavesMachine
-    ? `Leaves this machine. ${category.purpose}`
-    : `Does not leave this machine. ${category.purpose}`;
+    ? `Leaves this computer. ${category.purpose}`
+    : `Does not leave this computer. ${category.purpose}`;
 }

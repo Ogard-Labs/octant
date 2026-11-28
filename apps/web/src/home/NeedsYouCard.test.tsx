@@ -193,10 +193,10 @@ describe("the Needs you card", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Open thread" }));
     expect(onOpenAsk).toHaveBeenCalledWith(ask);
     screenRender.rerender(dashboard(1));
-    expect(await screen.findByText("A waiting offer ended when the host restarted.")).toBeVisible();
+    expect(await screen.findByText("A waiting offer ended when Octant restarted.")).toBeVisible();
     expect(screen.queryByText("Generate an image?")).toBeNull();
     screenRender.rerender(dashboard(1, ["code"]));
-    expect(screen.queryByText("A waiting offer ended when the host restarted.")).toBeNull();
+    expect(screen.queryByText("A waiting offer ended when Octant restarted.")).toBeNull();
   });
 
   it("lists each waiting approval and question with its thread, Project, wait, and text", async () => {

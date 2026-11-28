@@ -87,7 +87,7 @@ export function DesktopLeaseSettings(props: {
     try {
       show(await client.request({ kind: "set-lease-settings", ...change }));
     } catch {
-      setProblem("The host didn't take the change. Try again.");
+      setProblem("This computer didn't take the change. Try again.");
     } finally {
       setBusy(false);
     }
@@ -97,11 +97,11 @@ export function DesktopLeaseSettings(props: {
   const disabled = busy || settings === undefined;
   const status =
     loaded.status === "loading"
-      ? "Checking this host's desktop settings…"
+      ? "Checking this computer's desktop settings…"
       : loaded.status === "local-only"
         ? "Set on the computer Octant runs on."
         : loaded.status === "failed"
-          ? "This window can't ask the host about its desktop settings."
+          ? "This window can't ask this computer about its desktop settings."
           : undefined;
 
   return (
@@ -144,14 +144,14 @@ export function DesktopLeaseSettings(props: {
         </SettingRow>
         <SettingRow
           settingId="desktop-leases-on-host"
-          label="Desktops on this host"
-          description="How many desktops may run on this host itself at once, across all threads."
+          label="Desktops on this computer"
+          description="How many desktops may run on this computer itself at once, across all threads."
           more="Cloud desktops don't count."
           scope="host"
           focused={props.focusedSetting === "desktop-leases-on-host"}
         >
           <OctantSelectField
-            aria-label="Desktops on this host"
+            aria-label="Desktops on this computer"
             className="settings-view__select window-no-drag"
             disabled={disabled}
             onValueChange={(value) => void save({ hostLocalLeasesPerHost: Number(value) })}

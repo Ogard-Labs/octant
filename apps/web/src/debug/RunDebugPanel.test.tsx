@@ -591,9 +591,9 @@ describe("Run and debug panel", () => {
     await user.click(await screen.findByRole("button", { name: "Start Run the fixture" }));
     expect(await screen.findByText("Paused · breakpoint")).toBeVisible();
     session.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-    await screen.findByText("The host could not be reached.");
+    await screen.findByText("This computer could not be reached.");
     await waitFor(() =>
-      expect(screen.queryByText("The host could not be reached.")).not.toBeInTheDocument(),
+      expect(screen.queryByText("This computer could not be reached.")).not.toBeInTheDocument(),
     );
     expect(screen.getByText("Paused · breakpoint")).toBeVisible();
   });
@@ -650,7 +650,7 @@ describe("Run and debug panel", () => {
       />,
     );
 
-    expect(await screen.findByText("The session ended because the host restarted.")).toBeVisible();
+    expect(await screen.findByText("The session ended because Octant restarted.")).toBeVisible();
     await user.click(await screen.findByRole("button", { name: "Restart Run the fixture" }));
     expect(client.start).toHaveBeenCalledWith({
       threadId,
@@ -694,7 +694,7 @@ describe("Run and debug panel", () => {
       />,
     );
 
-    expect(await screen.findByText("The session ended because the host shut down.")).toBeVisible();
+    expect(await screen.findByText("The session ended because Octant shut down.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Restart/ })).not.toBeInTheDocument();
   });
 

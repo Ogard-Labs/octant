@@ -129,7 +129,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
   return (
     <SettingsSection
       className="extensions-settings__section"
-      description="Hosted services an agent can use once you connect them. Connecting adds the server to this host; nothing is fetched to show this list."
+      description="Hosted services an agent can use once you connect them. Connecting adds the server to this computer; nothing is fetched to show this list."
       title="Connectors"
     >
       <div className="extensions-settings__body">
@@ -156,9 +156,9 @@ export function ConnectorsView(props: ConnectorsViewProps) {
         </div>
         {!props.localHost ? (
           <p className="extensions-settings__state" id={`${ids}-host-setup`} role="status">
-            Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key
+            Connect from the Octant window on that computer; Settings in a browser cannot keep a key
             or run a sign-in. On that computer, open Octant → Library → Connectors, find the service
-            and choose Connect. Ask the host owner if you cannot open that window.
+            and choose Connect. Ask the computer&apos;s owner if you cannot open that window.
           </p>
         ) : null}
         {CATEGORIES.map((category) => {
@@ -212,15 +212,15 @@ export function ConnectorsView(props: ConnectorsViewProps) {
                             className="connectors__detail"
                             id={`${ids}-${entry.id}-local-reason`}
                           >
-                            Requires the Octant window on this host.{" "}
+                            Requires the Octant window on that computer.{" "}
                             {entry.auth.kind === "key" || entry.auth.kind === "command"
-                              ? "Have this service's key or login token ready; it stays in the host credential store."
+                              ? "Have this service's key or login token ready; it stays in that computer's credential store."
                               : entry.auth.kind === "sign-in"
                                 ? entry.auth.clientSetup === "registered"
-                                  ? "Register the service's sign-in app on that host, then sign in with your account."
-                                  : "Sign in with your account on that host."
-                                : "This service needs no credential; adding it still happens on the host."}{" "}
-                            <a href={`#${ids}-host-setup`}>Host setup steps</a>
+                                  ? "Register the service's sign-in app on that computer, then sign in with your account."
+                                  : "Sign in with your account on that computer."
+                                : "This service needs no credential; adding it still happens on that computer."}{" "}
+                            <a href={`#${ids}-host-setup`}>Setup steps</a>
                           </span>
                         ) : null}
                         {installed?.componentId !== undefined && entry.auth.kind === "sign-in" ? (

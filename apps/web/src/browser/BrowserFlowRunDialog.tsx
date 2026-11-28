@@ -208,7 +208,7 @@ export function BrowserFlowRunDialog(props: {
           {chosen === undefined ? null : (
             <p>
               {chosen.title} · {chosen.modelId} · {chosen.accessLabel} · {chosen.profileLabel} ·
-              this host
+              this computer
             </p>
           )}
           <p role="status">{message}</p>

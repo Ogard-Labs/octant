@@ -282,7 +282,7 @@ describe("RemoteWorkspace", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByText(/No Work threads on this host yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No Work threads on this computer yet/i)).toBeInTheDocument();
     expect(bootstrap).toHaveBeenCalledTimes(1);
     expect(navigation).not.toHaveBeenCalled();
 

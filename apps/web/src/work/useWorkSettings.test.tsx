@@ -28,7 +28,7 @@ describe("useWorkSettings", () => {
     const { result } = renderHook(() => useWorkSettings(client({ settings: undefined })));
 
     await waitFor(() => expect(result.current.status).toBe("unsupported"));
-    expect(result.current.message).toBe("Work settings are unavailable on this host.");
+    expect(result.current.message).toBe("Work settings are unavailable on this computer.");
   });
 
   it("reads the settings again when another window's save is announced", async () => {

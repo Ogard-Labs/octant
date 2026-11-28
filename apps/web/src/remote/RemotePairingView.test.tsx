@@ -194,7 +194,7 @@ describe("RemotePairingView", () => {
     ["expired", "Device credential expired"],
     ["revoked", "Device revoked"],
     ["lost-key", "Device key unavailable"],
-    ["host-changed", "Host identity changed"],
+    ["host-changed", "Computer identity changed"],
   ] as const)("renders an explicit %s re-pair state", async (reasonCode, title) => {
     const sessionClient = createMockSessionClient({
       kind: "unauthorized",
@@ -228,7 +228,7 @@ describe("RemotePairingView", () => {
       />,
     );
 
-    expect(await screen.findByText("Host incompatible")).toBeInTheDocument();
+    expect(await screen.findByText("Computer incompatible")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start over" })).toBeInTheDocument();
   });
 
@@ -278,7 +278,9 @@ describe("RemotePairingView", () => {
       expect.stringContaining(`#ticketId=${ticketId}&ticketProof=${ticketProof}`),
     );
 
-    expect(await screen.findByRole("heading", { name: "Confirm this host" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Confirm this computer" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("This Mac")).toBeInTheDocument();
   });
 
@@ -296,7 +298,7 @@ describe("RemotePairingView", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "Confirm this host" });
+    await screen.findByRole("heading", { name: "Confirm this computer" });
     await user.click(screen.getByRole("button", { name: "Pair this browser" }));
 
     await waitFor(() => {
@@ -310,7 +312,9 @@ describe("RemotePairingView", () => {
     });
 
     expect(await screen.findByText("123456")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Waiting for host approval" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Waiting for approval on that computer" }),
+    ).toBeInTheDocument();
   });
 
   it("transitions to a paired, session-pending state when the host approves", async () => {
@@ -342,7 +346,7 @@ describe("RemotePairingView", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "Confirm this host" });
+    await screen.findByRole("heading", { name: "Confirm this computer" });
     await user.click(screen.getByRole("button", { name: "Pair this browser" }));
 
     expect(await screen.findByRole("region", { name: "Remote Octant shell" })).toBeInTheDocument();
@@ -368,7 +372,7 @@ describe("RemotePairingView", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "Confirm this host" });
+    await screen.findByRole("heading", { name: "Confirm this computer" });
     await user.click(screen.getByRole("button", { name: "Pair this browser" }));
 
     expect(await screen.findByRole("alert", {}, { timeout: 5_000 })).toHaveTextContent(
@@ -414,7 +418,7 @@ describe("RemotePairingView", () => {
       />,
     );
 
-    await screen.findByRole("heading", { name: "Confirm this host" });
+    await screen.findByRole("heading", { name: "Confirm this computer" });
     await user.click(screen.getByRole("button", { name: "Pair this browser" }));
     await screen.findByText("123456");
 

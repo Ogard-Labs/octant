@@ -140,6 +140,6 @@ describe("SideChatPanel", () => {
   it("says Side Chat is unavailable on a host with no mention client", () => {
     render(<SideChatPanel renderSidecar={vi.fn()} sourceThreadId={sourceThreadId} />);
 
-    expect(screen.getByText("Side Chat is not available on this host.")).toBeVisible();
+    expect(screen.getByText("Side Chat is not available on this computer.")).toBeVisible();
   });
 });

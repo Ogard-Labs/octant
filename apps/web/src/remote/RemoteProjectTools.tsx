@@ -72,7 +72,7 @@ export function RemoteProjectTools(props: RemoteProjectToolsProps) {
     <section aria-label="Project tools" className="remote-shell__device-panel">
       <h2 className="remote-shell__section-title">Project tools</h2>
       <span className="text-xs text-muted-foreground">
-        Your own terminal and Private browser page in a Project on this host
+        Your own terminal and Private browser page in a Project on this computer
       </span>
       <OctantSelectField
         aria-label="Project"

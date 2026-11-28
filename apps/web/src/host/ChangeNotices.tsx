@@ -132,8 +132,8 @@ export function ChangeNotices(props: ChangeNoticesProps) {
             }
           >
             {confirmingRevoke.actor.kind === "agent"
-              ? "The agent's access to this host ends now."
-              : "The device loses access to this host and must pair again to return."}
+              ? "The agent's access to this computer ends now."
+              : "The device loses access to this computer and must pair again to return."}
           </OctantConfirmDialog>
         )}
       </OctantDialogPresence>
@@ -168,7 +168,7 @@ async function actLocally(
         return "This provider's keys changed again since, so Undo could remove the wrong key. Check its keys in Settings.";
       }
       if (local.undoAccessChangeNotice === undefined) {
-        return "This build cannot undo a key change from a window; act on the host itself.";
+        return "This build cannot undo a key change from a window; act on this computer directly.";
       }
       // The host journals the Undo, dismissal included: nothing more to ask.
       await local.undoAccessChangeNotice(notice.noticeId);

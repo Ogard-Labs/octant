@@ -61,7 +61,7 @@ const pickRefusalText: Partial<Record<ProductFeedbackRefusalReason, string>> = {
   "thread-unavailable":
     "This thread or its local authority is no longer available. Reconnect and pick the element again.",
   "surface-unavailable":
-    "The host cannot read this page right now, so nothing was added. A page with a sign-in field is never read.",
+    "This computer cannot read this page right now, so nothing was added. A page with a sign-in field is never read.",
   "element-unavailable": "There is no supported element at that spot. Pick another element.",
   "capture-unavailable":
     "The element could not be read and marked as page content, so nothing was added.",
@@ -74,13 +74,13 @@ const refusalText: Record<ProductFeedbackRefusalReason, string> = {
   "thread-unavailable":
     "This thread or its original local authority is no longer available. Reconnect and refresh notes.",
   "surface-unavailable":
-    "The host cannot read this page right now. Finish sign-in or choose the element again.",
+    "This computer cannot read this page right now. Finish sign-in or choose the element again.",
   "element-unavailable": "There is no supported element at that spot. Choose another element.",
   "capture-unavailable":
-    "The host could not keep this capture. Your comment stays here; choose the element again.",
+    "This computer could not keep this capture. Your comment stays here; choose the element again.",
   "note-limit-reached": "Send or remove pending notes before leaving more.",
   "preview-limit-reached":
-    "The host's preview limit is reached. Cancel an unused preview or wait for it to expire.",
+    "This computer's preview limit is reached. Cancel an unused preview or wait for it to expire.",
   "preview-expired": "This preview expired. Your comment stays here; choose the element again.",
 };
 
@@ -255,7 +255,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
       if (!current(signal)) return false;
       if (pending.some((note) => note.threadId !== owner.threadId || note.mode !== owner.mode))
         throw new Error(
-          "The host returned notes for a different thread. Refresh before continuing.",
+          "This computer returned notes for a different thread. Refresh before continuing.",
         );
       const previous = stateRef.current.owner === owner ? stateRef.current : empty(owner);
       const images = await Promise.all(
@@ -352,10 +352,10 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
         result.kind !== "feedback-updated" &&
         result.kind !== "feedback-discarded"
       )
-        throw new Error("The host returned an unexpected feedback result. Refresh notes.");
+        throw new Error("This computer returned an unexpected feedback result. Refresh notes.");
       if (result.note.threadId !== owner.threadId || result.note.mode !== owner.mode)
         throw new Error(
-          "The host returned a note for a different thread. Refresh before continuing.",
+          "This computer returned a note for a different thread. Refresh before continuing.",
         );
       const previous = stateRef.current.owner === owner ? stateRef.current : empty(owner);
       const found = previous.notes.some((note) => note.id === result.note.id);
@@ -380,7 +380,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
             ? result.kind !== "feedback-updated"
             : result.kind !== "feedback-discarded")
         )
-          throw new Error("The host did not confirm the note change. Refresh notes.");
+          throw new Error("This computer did not confirm the note change. Refresh notes.");
         return accept(result);
       }),
     [owner, perform, current, accept],
@@ -417,10 +417,10 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
             return false;
           }
           if (result.kind !== "feedback-prepared")
-            throw new Error("The host did not return an element preview.");
+            throw new Error("This computer did not return an element preview.");
           if (result.preview.threadId !== owner.threadId || result.preview.mode !== owner.mode)
             throw new Error(
-              "The host returned evidence for a different thread. Refresh before continuing.",
+              "This computer returned evidence for a different thread. Refresh before continuing.",
             );
           previewHolder.current = result.preview;
           patch({ preview: result.preview, previewExpired: false, message: undefined });
@@ -488,7 +488,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
           result.kind !== "feedback-refused"
         )
           throw new Error(
-            "The host did not confirm the captured note. Refresh notes before retrying.",
+            "This computer did not confirm the captured note. Refresh notes before retrying.",
           );
         if (!current(signal) || result === undefined || !accept(result)) return false;
         previewHolder.current = undefined;

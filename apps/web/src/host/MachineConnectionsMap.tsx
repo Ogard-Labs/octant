@@ -397,7 +397,7 @@ export function MachineConnectionsMap({
 
   return (
     <SettingsSection
-      description="How this computer reaches each machine (LAN or Tailscale) and why it may connect. Drag between two machines or select several to start a local pairing or hub join-code flow."
+      description="How this computer reaches each computer (LAN or Tailscale) and why it may connect. Drag between two computers or select several to start a local pairing or hub join-code flow."
       title="Connections map"
     >
       <div className="connections-map" data-setting-id="machine-connections-map">
@@ -434,7 +434,7 @@ export function MachineConnectionsMap({
         </div>
 
         <div
-          aria-label="Machine connections diagram"
+          aria-label="Computer connections diagram"
           className="connections-map__canvas"
           role="region"
         >
@@ -565,12 +565,12 @@ export function MachineConnectionsMap({
 
         {activePlans.length === 0 ? null : (
           <div
-            aria-label="Planned machine links"
+            aria-label="Planned computer links"
             className="connections-map__plan-panel"
             role="region"
           >
             <h3 className="connections-map__subheading">
-              {activePlans.length === 1 ? "Link machines" : "Selected pairs"}
+              {activePlans.length === 1 ? "Link computers" : "Selected pairs"}
             </h3>
             {activePlans.map((plan) => (
               <div className="connections-map__plan-row" key={`${plan.fromId}:${plan.toId}`}>

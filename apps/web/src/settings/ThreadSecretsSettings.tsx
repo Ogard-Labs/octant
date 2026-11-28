@@ -68,7 +68,7 @@ export function ThreadSecretsSettings(props: {
   const state = (empty: string) =>
     view === undefined ? (
       <SettingsState kind={unread ? "error" : "loading"}>
-        {unread ? "Secrets could not be read from this host." : "Reading secrets…"}
+        {unread ? "Secrets could not be read from this computer." : "Reading secrets…"}
       </SettingsState>
     ) : (
       <SettingsState kind="empty">{empty}</SettingsState>

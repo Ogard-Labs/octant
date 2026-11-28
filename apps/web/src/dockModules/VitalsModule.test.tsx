@@ -67,7 +67,7 @@ it("reads a thread's server over its Project's route and tells a refused window 
     </ServerCodeProjectsContext.Provider>,
   );
   await waitFor(() =>
-    expect(screen.getByText("This window may not read this host's load.")).toBeVisible(),
+    expect(screen.getByText("This window may not read this computer's load.")).toBeVisible(),
   );
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
     "http://127.0.0.1:4000/api/server-projects/resources?projectId=p1",
@@ -113,7 +113,9 @@ it("reads no host while the server Project catalog has not answered, instead of 
     </ServerCodeProjectsContext.Provider>,
   );
   expect(
-    await screen.findByText("Could not read server Projects, so this thread's host is unknown."),
+    await screen.findByText(
+      "Could not read server Projects, so where this thread runs is unknown.",
+    ),
   ).toBeVisible();
   expect(fetchMock).not.toHaveBeenCalled();
 });

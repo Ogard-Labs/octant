@@ -29,7 +29,7 @@ export default function DesktopModule(props: DesktopModuleProps) {
     return unavailable("Desktop", "A disposable desktop opens from a Code thread.");
   }
   if (client === undefined) {
-    return unavailable("Desktop", "This window has no connection to the host's desktops.");
+    return unavailable("Desktop", "This window has no connection to this computer's desktops.");
   }
   return (
     <DesktopPane client={client} key={props.subject.threadId} threadId={props.subject.threadId} />

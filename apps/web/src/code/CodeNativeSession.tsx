@@ -139,7 +139,7 @@ export function CodeNativeSession<Id extends string>(props: {
       else setOpen(false);
       await refresh();
     } catch {
-      setMessage("The host could not start this thread from that session. Try again.");
+      setMessage("This computer could not start this thread from that session. Try again.");
     } finally {
       setBusy(false);
     }

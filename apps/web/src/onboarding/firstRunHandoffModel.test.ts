@@ -79,7 +79,7 @@ describe("first-run handoff readiness", () => {
     ]);
     expect(handoff.facts[0]?.detail).toBe("No provider is configured");
     expect(handoff.facts[1]?.detail).toContain("No Code folder yet");
-    expect(handoff.facts[2]?.detail).toContain("No model this host can use in Code");
+    expect(handoff.facts[2]?.detail).toContain("No model this computer can use in Code");
     expect(handoff.ready).toBe(false);
     expect(handoff.primary).toEqual({
       kind: "setup",

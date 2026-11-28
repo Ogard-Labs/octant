@@ -64,7 +64,7 @@ export function createCodeSessionClient(options: {
       signal: AbortSignal.timeout(15_000),
       ...init,
     });
-    if (!response.ok) throw new Error("The host's live tasks are unavailable.");
+    if (!response.ok) throw new Error("This computer's live tasks are unavailable.");
     return await response.json();
   }
   return {
@@ -74,7 +74,7 @@ export function createCodeSessionClient(options: {
         await json(`/api/code-live-tasks?${query}`, { headers, cache: "no-store" }),
       );
       if (String(live.threadId) !== String(threadId)) {
-        throw new Error("The host returned another thread's live tasks.");
+        throw new Error("This computer returned another thread's live tasks.");
       }
       return live;
     },
@@ -84,7 +84,7 @@ export function createCodeSessionClient(options: {
         await json(`/api/code-native-sessions?${query}`, { headers, cache: "no-store" }),
       );
       if (String(listed.threadId) !== String(threadId)) {
-        throw new Error("The host returned another thread's sessions.");
+        throw new Error("This computer returned another thread's sessions.");
       }
       return listed;
     },

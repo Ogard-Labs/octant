@@ -100,11 +100,13 @@ export function ProtectedFilesSettings(props: ProtectedFilesSettingsProps) {
 
   const body =
     client === undefined ? (
-      <SettingsState kind="empty">Protected files are set on the host machine.</SettingsState>
+      <SettingsState kind="empty">
+        Protected files are set on the computer running Octant.
+      </SettingsState>
     ) : settings === undefined ? (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
         {loadFailed
-          ? "Protected files could not be read from this host."
+          ? "Protected files could not be read from this computer."
           : "Reading protected files…"}
       </SettingsState>
     ) : (

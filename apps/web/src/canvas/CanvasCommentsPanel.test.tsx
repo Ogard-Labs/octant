@@ -485,7 +485,7 @@ describe("CanvasCommentsPanel", () => {
     );
     await screen.findByRole("list", { name: "Comment threads" });
     await user.click(screen.getByRole("button", { name: "Resolve" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/changed on the host/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/changed on this computer/);
     expect(send.mock.calls[0]?.[0]).toMatchObject({
       kind: "canvas-comment-resolve",
       commentId,

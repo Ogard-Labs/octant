@@ -657,7 +657,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             {...(props.controller.errorMessage !== undefined
               ? { message: props.controller.errorMessage }
               : props.controller.status === "disconnected"
-                ? { message: "The host connection is unavailable." }
+                ? { message: "The connection to this computer is unavailable." }
                 : {})}
             role={props.controller.status === "disconnected" ? "alert" : "status"}
             state={props.controller.status === "disconnected" ? "disconnected" : "loading"}
@@ -2376,11 +2376,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               : {
                   sendDisabledReason: !messageQueue.available
                     ? connectionLost
-                      ? "Waiting for the host to reconnect."
-                      : "The host message queue is unavailable."
+                      ? "Waiting to reconnect to this computer."
+                      : "This computer's message queue is unavailable."
                     : messageQueue.uncertain
                       ? "Check the last queue change before sending another message."
-                      : "Waiting for the host queue…",
+                      : "Waiting for the message queue…",
                 })}
             onRemoveExtensionSelection={removeExtensionSelection}
             onRemoveAttachment={(attachmentId) => {

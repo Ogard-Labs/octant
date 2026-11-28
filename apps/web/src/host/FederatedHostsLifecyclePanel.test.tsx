@@ -97,7 +97,7 @@ describe("FederatedHostsLifecyclePanel", () => {
     const lifecycle = createLifecycle([LOCAL, LAPTOP, OFFICE]);
     render(<FederatedHostsLifecyclePanel lifecycle={lifecycle} />);
 
-    expect(await screen.findByRole("heading", { name: "Federated hosts" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Connected computers" })).toBeInTheDocument();
     expect(screen.getByText("This Mac")).toBeInTheDocument();
     expect(screen.getByText(/Ready/)).toBeInTheDocument();
     expect(screen.getByText(/device credential expired/i)).toBeInTheDocument();
@@ -194,11 +194,13 @@ describe("FederatedHostsLifecycleStrip", () => {
   it("renders attention only for non-ready remote hosts", () => {
     const lifecycle = createLifecycle([LOCAL, LAPTOP, OFFICE]);
     render(<FederatedHostsLifecycleStrip lifecycle={lifecycle} />);
-    expect(screen.getByLabelText("Federated host attention")).toHaveTextContent(
+    expect(screen.getByLabelText("Connected computer attention")).toHaveTextContent(
       /Laptop: Unauthorized/,
     );
-    expect(screen.getByLabelText("Federated host attention")).toHaveTextContent(/Office: Stale/);
-    expect(screen.getByLabelText("Federated host attention")).not.toHaveTextContent("This Mac");
+    expect(screen.getByLabelText("Connected computer attention")).toHaveTextContent(
+      /Office: Stale/,
+    );
+    expect(screen.getByLabelText("Connected computer attention")).not.toHaveTextContent("This Mac");
   });
 
   it("hides when every remote host is ready", () => {

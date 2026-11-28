@@ -61,7 +61,7 @@ export function HostNoticeToasts(props: {
       )}
       {memory === undefined ? null : (
         <OctantToast
-          action={{ label: "View host", onSelect: props.onOpenHost }}
+          action={{ label: "View this computer", onSelect: props.onOpenHost }}
           detail={memory.detail}
           // A later notice must start its own dismissal timer.
           key={memory.id}

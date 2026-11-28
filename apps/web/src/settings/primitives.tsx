@@ -17,7 +17,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 
 const SCOPE_LABELS: Readonly<Record<SettingsScope, string>> = {
   app: "This app",
-  host: "Selected host",
+  host: "This computer",
   mode: "Mode",
   project: "Project",
   thread: "Thread",

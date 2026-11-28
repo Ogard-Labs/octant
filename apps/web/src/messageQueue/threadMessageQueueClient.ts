@@ -11,7 +11,7 @@ import { sendWithTypedClaim } from "@octant/client-runtime/typed-claim";
 /** The host answered the request with this HTTP status. */
 class QueueRequestRefused extends Error {
   constructor(readonly status: number) {
-    super("The host message queue is unavailable.");
+    super("This computer's message queue is unavailable.");
   }
 }
 
@@ -48,7 +48,7 @@ export function createThreadMessageQueueClient(options: {
         snapshot.scope.mode !== scope.mode ||
         String(snapshot.scope.threadId) !== String(scope.threadId)
       ) {
-        throw new Error("The host returned a different thread's queue.");
+        throw new Error("This computer returned a different thread's queue.");
       }
       return snapshot;
     },
@@ -97,7 +97,7 @@ export function createThreadMessageQueueClient(options: {
           (result.snapshot.scope.mode !== command.scope.mode ||
             String(result.snapshot.scope.threadId) !== String(command.scope.threadId)))
       ) {
-        throw new Error("The host returned a different queue command's answer.");
+        throw new Error("This computer returned a different queue command's answer.");
       }
       return result;
     },

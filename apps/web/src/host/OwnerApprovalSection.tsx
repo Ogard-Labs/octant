@@ -42,9 +42,9 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
       setTargets(result.reading.targets);
       setMessage(
         result.reading.unavailable > 0
-          ? `${result.reading.unavailable} waiting request(s) cannot be recovered: complete supported file-action details are unavailable. Shell, credentials, Browser, publishing and Git administration stay excluded. Answer those prompts in their thread on the host.`
+          ? `${result.reading.unavailable} waiting request(s) cannot be recovered: complete supported file-action details are unavailable. Shell, credentials, Browser, publishing and Git administration stay excluded. Answer those prompts in their thread on that computer.`
           : result.reading.targets.length === 0
-            ? "No recoverable approvals are waiting on this host."
+            ? "No recoverable approvals are waiting on this computer."
             : "Choose one approval and read its full action before answering.",
       );
     } else setMessage(result.message);
@@ -67,7 +67,7 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
         : undefined;
     setMessage(
       status === "uncertain"
-        ? "The answer may have reached the runtime. It will not be retried. Check this thread on its host."
+        ? "The answer may have reached the runtime. It will not be retried. Check this thread on that computer."
         : ownerActionNotice(
             result,
             "Answer delivered once. Refresh to read any remaining approvals.",
@@ -156,7 +156,7 @@ export function OwnerApprovalSection({ spokes }: { readonly spokes: ReadonlyArra
         </>
       )}
       {message === "" ? null : <SettingsState kind="empty">{message}</SettingsState>}
-      {busy ? <p role="status">Waiting for this host and your unlock…</p> : null}
+      {busy ? <p role="status">Waiting for that computer and your unlock…</p> : null}
     </SettingsSection>
   );
 }

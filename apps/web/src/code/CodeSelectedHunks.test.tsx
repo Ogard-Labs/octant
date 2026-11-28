@@ -180,7 +180,7 @@ describe("selected hunks in current Review", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_001);
     });
-    expect(screen.getByText(/host did not finish in time/i)).toBeVisible();
+    expect(screen.getByText(/This computer did not finish in time/i)).toBeVisible();
     expect(screen.getByRole("button", { name: "Compare unstaged hunks" })).toBeEnabled();
     await act(async () => held.resolve(comparison("unstaged")));
     expect(h.operationContent).not.toHaveBeenCalled();
@@ -254,7 +254,7 @@ it("bounds a held write and never installs its late success as a fresh compariso
   await act(async () => {
     await vi.advanceTimersByTimeAsync(30_001);
   });
-  expect(screen.getByText(/host did not finish in time/i)).toBeVisible();
+  expect(screen.getByText(/This computer did not finish in time/i)).toBeVisible();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   await act(async () =>
     held.resolve(

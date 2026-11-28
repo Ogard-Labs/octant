@@ -96,7 +96,7 @@ export function ServerConnections(props: ServerConnectionsProps) {
       });
       if (result.kind === "refused") setRefusal(result.message);
     } catch {
-      setRefusal("Reconnect did not reach the host. Try again.");
+      setRefusal("Reconnect did not reach this computer. Try again.");
     } finally {
       setBusy(undefined);
       props.onChanged();

@@ -39,7 +39,7 @@ export async function openDedicatedBrowserContext(
     threadId,
     action: makeBrowserToolAction(
       scope,
-      "Open one prepared page in a host-owned isolated browser context.",
+      "Open one prepared page in an isolated browser context on this computer.",
     ),
     policy: {
       profileMode: "isolated",
@@ -53,7 +53,7 @@ export async function openDedicatedBrowserContext(
   });
   const context = snapshot.context;
   if (context === undefined || context.state !== "active") {
-    throw new Error(snapshot.failure?.message ?? "The host Browser context is unavailable.");
+    throw new Error(snapshot.failure?.message ?? "This computer's Browser context is unavailable.");
   }
   // Only the returned identity is adopted: the caller names a Browser tab after
   // it, and closing that tab is what stops the context. A context this Open

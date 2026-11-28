@@ -216,7 +216,7 @@ describe("useSessionCompaction", () => {
     await waitFor(() => expect(result.current.state).toBeUndefined());
     await act(() => result.current.compact());
     expect(result.current.errorMessage).toBe(
-      "Couldn't compact: the host did not answer. Try again.",
+      "Couldn't compact: this computer did not answer. Try again.",
     );
   });
 });

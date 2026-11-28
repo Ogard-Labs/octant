@@ -85,7 +85,7 @@ export function automationMissedRunPolicyLabel(policy: AutomationMissedRunPolicy
 const blockReasonLabels: Record<AutomationBlockReason, string> = {
   "missed-run-cap-exceeded":
     "Paused automatically: too many missed runs. Resume after reviewing the schedule.",
-  "host-mismatch": "The owning host no longer matches. Edit and resume to revalidate.",
+  "host-mismatch": "The owning computer no longer matches. Edit and resume to revalidate.",
   "project-mismatch": "The bound Project no longer matches. Edit and resume to revalidate.",
   "binding-mismatch": "The Project binding no longer matches. Edit and resume to revalidate.",
   "execution-profile-mismatch":
@@ -359,7 +359,7 @@ export const MAX_AUTOMATION_TARGET_LENGTH = 2_048;
 
 const FULL_ACCESS_ISSUE = "Automations cannot use Full access. Pick a profile that asks first.";
 const CONTRACT_ISSUE =
-  "The selection does not satisfy the automation contract. Match host, mode, and Project across every choice.";
+  "The selection does not satisfy the automation contract. Match computer, mode, and Project across every choice.";
 
 function isStrictUtcInstant(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;

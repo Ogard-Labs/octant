@@ -18,21 +18,21 @@ const METRICS: ReadonlyArray<Metric> = [
     label: "Memory in use",
     value: (sample) => sample.rssBytes,
     words: megabytes,
-    note: "The host's memory use. Highest value in each point.",
+    note: "Octant's memory use. Highest value in each point.",
   },
   {
     id: "stalls",
     label: "Event-loop stalls",
     value: (sample) => sample.eventLoopLagCount,
     words: (value) => `${value.toLocaleString("en")}`,
-    note: "Times the host was too busy to answer for too long.",
+    note: "Times Octant was too busy to answer for too long.",
   },
   {
     id: "stall-worst",
     label: "Longest stall",
     value: (sample) => sample.eventLoopLagWorstMs,
     words: (value) => `${value.toLocaleString("en")} ms`,
-    note: "The longest the host went without answering in each point.",
+    note: "The longest Octant went without answering in each point.",
   },
   {
     id: "slow-sql",
@@ -96,8 +96,8 @@ export function HostHealthSection(props: {
   if (state.status === "loading") return null;
   if (state.status === "failure") {
     return (
-      <SurfaceSection label="Host health">
-        <p className="usage-workspace__note">This host did not answer its health history.</p>
+      <SurfaceSection label="Octant health">
+        <p className="usage-workspace__note">This computer did not answer its health history.</p>
       </SurfaceSection>
     );
   }
@@ -108,10 +108,10 @@ export function HostHealthSection(props: {
   // start are all here.
   const restarts = history.restarts;
   return (
-    <SurfaceSection label="Host health">
+    <SurfaceSection label="Octant health">
       {samples.length === 0 ? (
         <p className="usage-workspace__note">
-          No samples yet. The host records one a minute and keeps {history.retentionDays} days.
+          No samples yet. Octant records one a minute and keeps {history.retentionDays} days.
         </p>
       ) : (
         <>
@@ -131,7 +131,7 @@ export function HostHealthSection(props: {
           </div>
           <OctantCollapsible className="turn-diagnostics__details" summary="Show as a table">
             <div className="usage-table-scroll">
-              <table aria-label="Host health" className="usage-table">
+              <table aria-label="Octant health" className="usage-table">
                 <thead>
                   <tr>
                     <th scope="col">{history.resolution === "hour" ? "Hour" : "Minute"}</th>

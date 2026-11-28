@@ -81,7 +81,7 @@ export function ThreadWakeups(props: {
       if (result.kind === "thread-wakeup-refused") setMessage(result.message);
       await refresh();
     } catch {
-      setMessage("The host could not change this wake-up. Try again.");
+      setMessage("This computer could not change this wake-up. Try again.");
     } finally {
       setBusyId(undefined);
     }

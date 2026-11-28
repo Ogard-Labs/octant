@@ -95,13 +95,17 @@ export function PublicLinkSettings(props: PublicLinkSettingsProps) {
   }
 
   if (client?.publicLinkSettings === undefined || client.setPublicLinkSettings === undefined) {
-    return <SettingsState kind="empty">Public links are set up on the host machine.</SettingsState>;
+    return (
+      <SettingsState kind="empty">
+        Public links are set up on the computer running Octant.
+      </SettingsState>
+    );
   }
   if (settings === undefined) {
     return (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
         {loadFailed
-          ? "Public link settings could not be read from this host."
+          ? "Public link settings could not be read from this computer."
           : "Reading public link settings…"}
       </SettingsState>
     );

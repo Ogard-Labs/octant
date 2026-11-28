@@ -40,15 +40,15 @@ export const OTHER_COMPUTER_CREATE_REFUSAL =
 export function createDestinationRefusalMessage(reason: HostRejectionReason): string {
   switch (reason) {
     case "unknown-host":
-      return "That destination host is not registered on this client.";
+      return "That destination computer is not registered on this client.";
     case "host-unavailable":
-      return "That destination host is not connected. Reconnect before creating.";
+      return "That destination computer is not connected. Reconnect before creating.";
     case "host-unauthorized":
-      return "That destination host is unauthorized. Re-pair or pick another host.";
+      return "That destination computer is unauthorized. Re-pair or pick another computer.";
     case "host-incompatible":
-      return "That destination host cannot run this create action.";
+      return "That destination computer cannot run this create action.";
     case "project-host-mismatch":
-      return "This Project is fixed to another host.";
+      return "This Project is fixed to another computer.";
   }
 }
 

@@ -19,7 +19,7 @@ const PRESSURE_LABEL: Readonly<Record<HostMemoryPressureLevel, string>> = {
 export type HostMemoryReading = Omit<HostMemoryStatus, "limits" | "effectiveLimits">;
 
 export function hostMemoryFact(memory: HostMemoryReading): string {
-  return `${PRESSURE_LABEL[memory.pressure]}, host using ${memory.processMegabytes} MB`;
+  return `${PRESSURE_LABEL[memory.pressure]}, Octant using ${memory.processMegabytes} MB`;
 }
 
 function count(value: number, singular: string, plural = `${singular}s`): string {
@@ -57,8 +57,8 @@ export function hostReliefFact(relief: NonNullable<HostMemoryStatus["lastRelief"
 function stopDetail(stop: NonNullable<HostMemoryStatus["previousStop"]>): string {
   const reading =
     stop.pressure === "normal"
-      ? `Memory looked normal at the last reading (host at ${stop.processMegabytes} MB), so the cause is not known.`
-      : `Memory was ${stop.pressure === "critical" ? "very low" : "low"} at the last reading (host at ${stop.processMegabytes} MB).`;
+      ? `Memory looked normal at the last reading (Octant at ${stop.processMegabytes} MB), so the cause is not known.`
+      : `Memory was ${stop.pressure === "critical" ? "very low" : "low"} at the last reading (Octant at ${stop.processMegabytes} MB).`;
   const record =
     stop.crashRecord === undefined
       ? ""

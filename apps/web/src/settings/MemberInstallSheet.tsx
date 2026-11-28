@@ -150,7 +150,7 @@ export function MemberInstallSheet(props: MemberInstallSheetProps) {
                 kind: "refused",
                 reason: "not-the-person",
                 message:
-                  "The host no longer accepts this window, so the install's progress cannot be read here.",
+                  "This computer no longer accepts this window, so the install's progress cannot be read here.",
               });
             } else {
               poll();

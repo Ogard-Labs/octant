@@ -31,7 +31,7 @@ export function useResolvedMaterial(
     try {
       preferenceRequest = Promise.resolve(hostBridge.setSidebarMaterialPreference(preference));
     } catch {
-      preferenceRequest = Promise.reject(new Error("Host preference request failed."));
+      preferenceRequest = Promise.reject(new Error("Window appearance preference request failed."));
     }
     void preferenceRequest.catch(() => {
       unsubscribe?.();

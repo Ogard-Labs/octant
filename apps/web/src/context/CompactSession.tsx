@@ -103,7 +103,7 @@ export function compactionAnnouncement(compaction: ComposerCompaction | undefine
 
 /** Said once the window stops following a compaction the host no longer reports on. */
 const STATE_UNKNOWN =
-  "The host stopped answering, so compaction status is unknown. It may still be running, and sending is blocked until it ends.";
+  "This computer stopped answering, so compaction status is unknown. It may still be running, and sending is blocked until it ends.";
 
 export function CompactionStatusLine(props: {
   readonly className: string;

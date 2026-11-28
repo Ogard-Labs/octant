@@ -97,7 +97,7 @@ export function ProjectProviderPolicySection(props: ProjectProviderPolicySection
           <h2 id={`provider-policy-${props.project.id}`}>Provider access</h2>
           <p>
             Choose which providers and models this {props.project.type} Project may use. New and
-            existing turns are checked by the host.
+            existing turns are checked on this computer.
           </p>
         </div>
         <span className="project-provider-policy__default">Default: allow all</span>

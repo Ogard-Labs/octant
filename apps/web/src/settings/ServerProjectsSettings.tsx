@@ -117,7 +117,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
       setActionsChanged(false);
     } catch {
       setLoadFailed(true);
-      setProblem("Server Projects could not be read from this host.");
+      setProblem("Server Projects could not be read from this computer.");
     }
   }, [client, serversClient]);
 
@@ -189,7 +189,10 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
       if (result.kind === "cloud-machines-refused")
         setResumeProblem({ projectId, message: result.message });
     } catch {
-      setResumeProblem({ projectId, message: "The machine could not be resumed from this host." });
+      setResumeProblem({
+        projectId,
+        message: "The machine could not be resumed from this computer.",
+      });
     } finally {
       setBusy(false);
       setCloudRevision((revision) => revision + 1);
@@ -202,7 +205,7 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     return (
       <SettingsState kind={loadFailed ? "error" : "loading"}>
         {loadFailed
-          ? "Server Projects could not be read from this host."
+          ? "Server Projects could not be read from this computer."
           : "Reading server Projects…"}
       </SettingsState>
     );

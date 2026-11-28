@@ -306,7 +306,7 @@ describe("a thread's background work", () => {
     );
     expect(await within(dialog).findByRole("status")).toHaveProperty(
       "textContent",
-      "The host could not stop this. Try again.",
+      "This computer could not stop this. Try again.",
     );
     expect(within(dialog).getByText("Watching pull request #372")).toBeTruthy();
   });

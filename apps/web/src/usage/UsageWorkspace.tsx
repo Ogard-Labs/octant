@@ -291,7 +291,7 @@ function RecordedUsageWorkspace(
           <>
             {controller.stale ? (
               <p aria-label="Stale usage" className="usage-workspace__stale" role="note">
-                These figures are this host's last successful read of the same query, at{" "}
+                These figures are this computer's last successful read of the same query, at{" "}
                 {new Date(dashboard.queryAt).toLocaleString()}. The latest read failed, so newer
                 usage may be missing.
               </p>
@@ -325,7 +325,7 @@ function RecordedUsageWorkspace(
               latencyStats={dashboard.latencyStats}
             />
             <p className="usage-workspace__footer">
-              Read from this host at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
+              Read from this computer at {new Date(dashboard.queryAt).toLocaleString()}. Retention,
               export, and reset live in Settings under Usage and data.
             </p>
           </>
@@ -352,7 +352,7 @@ function statusMessage(
     case "unauthorized":
       return "Usage is not authorized in this window.";
     case "unavailable":
-      return "The host is unreachable, so no usage can be read.";
+      return "This computer is unreachable, so no usage can be read.";
     case "failure":
       return "Usage could not be loaded.";
     default:
@@ -424,11 +424,11 @@ function UsageWorkspaceFilters(props: UsageWorkspaceFiltersProps) {
         />
       </label>
       <label className="usage-workspace__field">
-        <span>Host</span>
+        <span>Computer</span>
         <OctantInput
-          aria-label="Filter usage by host id"
+          aria-label="Filter usage by computer ID"
           onChange={(event) => update("hostId", event.currentTarget.value.trim())}
-          placeholder="host id"
+          placeholder="computer ID"
           type="search"
           value={props.filter.hostId ?? ""}
         />
@@ -508,7 +508,7 @@ function SummarySection({ dashboard }: { readonly dashboard: UsageDashboardRespo
         <p className="usage-workspace__excluded" role="note">
           {summary.excludedRecordCount} durable record
           {summary.excludedRecordCount === 1 ? " was" : "s were"} excluded from these totals because
-          the host could not read them as consistent measurements.
+          this computer could not read them as consistent measurements.
         </p>
       ) : null}
     </SurfaceSection>
@@ -530,7 +530,7 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
     <SurfaceSection label="Cache efficiency">
       {stats.caches.length === 0 ? null : (
         <div className="usage-table-scroll">
-          <table aria-label="Host cache hit and miss rates" className="usage-table">
+          <table aria-label="Cache hit and miss rates on this computer" className="usage-table">
             <thead>
               <tr>
                 <th scope="col">Cache</th>
@@ -615,8 +615,8 @@ function CacheSection({ stats }: { readonly stats: UsageCacheStats }) {
         </>
       )}
       <p className="usage-workspace__note">
-        Hit and miss counts are what this host has observed since it started, so they begin again
-        after a restart. Prompt-cache tokens come from the requests in the selected range.
+        Hit and miss counts are what this computer has observed since it started, so they begin
+        again after a restart. Prompt-cache tokens come from the requests in the selected range.
       </p>
     </SurfaceSection>
   );
@@ -773,7 +773,7 @@ function DetailSection(props: {
           <thead>
             <tr>
               <th scope="col">Observed</th>
-              <th scope="col">Host</th>
+              <th scope="col">Computer</th>
               <th scope="col">Provider</th>
               <th scope="col">Model</th>
               <th scope="col">Mode</th>
@@ -852,10 +852,10 @@ function DetailSection(props: {
 
 function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverage> }) {
   return (
-    <SurfaceSection label="Contributing hosts">
+    <SurfaceSection label="Contributing computers">
       {hosts.length === 0 ? (
         <p className="usage-workspace__note" role="note">
-          No host contributed usage in this range.
+          No computer contributed usage in this range.
         </p>
       ) : (
         <ul className="usage-workspace__hosts">
@@ -876,8 +876,8 @@ function HostSection({ hosts }: { readonly hosts: ReadonlyArray<UsageHostCoverag
         </ul>
       )}
       <p className="usage-workspace__note">
-        This host reports only its own usage. Other hosts are left out until multi-host composition
-        is authorized, so an absent host is not a host with zero usage.
+        This computer reports only its own usage. Other computers are left out until multi-computer
+        composition is authorized, so an absent computer is not a computer with zero usage.
       </p>
     </SurfaceSection>
   );
@@ -889,7 +889,7 @@ function AttributionSourceSection({
   readonly sources: ReadonlyArray<UsageDimensionSource>;
 }) {
   return (
-    <SurfaceSection label="What this host can attribute">
+    <SurfaceSection label="What this computer can attribute">
       <dl className="usage-workspace__sources">
         {sources.map((source) => (
           <div data-status={source.status} key={source.dimension}>

@@ -1385,7 +1385,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("desktop-leases-on-host"),
-          label: "Desktops on this host",
+          label: "Desktops on this computer",
           scope: "host",
           keywords: "disposable desktop lease limit count host local how many",
         },
@@ -1483,7 +1483,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           ["sandbox-policy-add-folder", "Add an allowed folder"],
           ["sandbox-policy-blocked-actions", "Blocked actions"],
           ["sandbox-policy-network", "Sandbox network"],
-          ["sandbox-policy-services", "Sandbox host services"],
+          ["sandbox-policy-services", "Sandbox local services"],
           ["sandbox-policy-local-services", "Local service exceptions"],
           ["sandbox-policy-credentials", "Sandbox credentials"],
         ].map(([id, label]) => ({
@@ -1906,7 +1906,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("host-backup"),
-          label: "Host snapshot",
+          label: "Snapshot",
           scope: "host",
           keywords: "snapshot backup restore before risky changes",
         },
@@ -2352,7 +2352,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("resource-refresh"),
-          label: "Refresh host load",
+          label: "Refresh computer load",
           scope: "host",
           keywords: "refresh resources hardware cpu memory load",
         },

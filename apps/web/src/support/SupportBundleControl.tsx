@@ -40,7 +40,7 @@ export function SupportBundleControl({
     try {
       setState({ kind: "review", preview: await client.readSupportBundlePreview() });
     } catch {
-      setState({ kind: "error", message: "The host could not list what a bundle holds." });
+      setState({ kind: "error", message: "This computer could not list what a bundle holds." });
     }
   };
 
@@ -83,7 +83,7 @@ export function SupportBundleControl({
     } catch {
       setState({
         kind: "error",
-        message: "The host could not build the bundle. Nothing was saved.",
+        message: "This computer could not build the bundle. Nothing was saved.",
       });
     }
   };

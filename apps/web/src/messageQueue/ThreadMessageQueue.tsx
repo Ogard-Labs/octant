@@ -9,16 +9,16 @@ import "./thread-message-queue.css";
 
 const holdMessage: Readonly<Record<ThreadMessageQueueHoldReason, string>> = {
   paused: "The queue is paused.",
-  "host-restart": "The server restarted. The queue continues when it safely can, or resume it now.",
-  "delivery-unknown":
-    "The server is checking whether the message started. It will not be sent twice.",
+  "host-restart": "Octant restarted. The queue continues when it safely can, or resume it now.",
+  "delivery-unknown": "Octant is checking whether the message started. It will not be sent twice.",
   "binding-changed": "Thread settings changed. Restore them, or remove and requeue the message.",
   "authority-revoked": "This window no longer has permission to continue the queue.",
   cancelled: "The last turn was stopped. Review the queue before resuming.",
   failed: "The last turn failed. Review the queue before resuming.",
   "thread-unavailable": "This thread is unavailable.",
   "content-unavailable": "A queued message cannot be read. Remove it and write it again.",
-  "admission-refused": "The server refused to start the message. Check the thread before resuming.",
+  "admission-refused":
+    "This computer refused to start the message. Check the thread before resuming.",
 };
 
 const QUEUE_UNAVAILABLE = "The message queue is unavailable. Your draft stays here.";
@@ -226,7 +226,7 @@ export function ThreadMessageQueue({
               )}
               {item.status !== "queued" && (
                 <span role="status">
-                  {item.status === "dispatching" ? "Starting" : "Accepted by host"}
+                  {item.status === "dispatching" ? "Starting" : "Accepted on this computer"}
                 </span>
               )}
               {item.status === "queued" && item.steering === true && (

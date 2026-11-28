@@ -151,7 +151,7 @@ export function HostSettingsSection({
       setStatusState({ kind: "ready", status });
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "The host control service is unreachable.";
+        error instanceof Error ? error.message : "Octant's background service is unreachable.";
       setStatusState((current) =>
         current.kind === "ready" ? current : { kind: "error", message },
       );
@@ -198,9 +198,9 @@ export function HostSettingsSection({
 
   if (statusState.kind === "loading") {
     return (
-      <section aria-label="Host" className="host-settings" id="settings-host">
+      <section aria-label="This computer" className="host-settings" id="settings-host">
         <Fragment key="resources">{resources}</Fragment>
-        <SettingsState kind="loading">Loading host status…</SettingsState>
+        <SettingsState kind="loading">Loading status…</SettingsState>
         {/* A status read that never settles is itself a sign of a host in
             trouble, when reset and diagnostics are most wanted. */}
         <Fragment key="maintenance">{maintenance}</Fragment>
@@ -210,7 +210,7 @@ export function HostSettingsSection({
 
   if (statusState.kind === "error") {
     return (
-      <section aria-label="Host" className="host-settings" id="settings-host">
+      <section aria-label="This computer" className="host-settings" id="settings-host">
         <Fragment key="resources">{resources}</Fragment>
         <SettingsState kind="error">{statusState.message}</SettingsState>
         <OctantButton
@@ -237,7 +237,12 @@ export function HostSettingsSection({
   const policyToggle = status.lifecycle[policyToggleAction];
 
   return (
-    <section aria-label="Host" aria-busy={refreshing} className="host-settings" id="settings-host">
+    <section
+      aria-label="This computer"
+      aria-busy={refreshing}
+      className="host-settings"
+      id="settings-host"
+    >
       <div className="settings-feedback-slot" aria-live="polite">
         {refreshMessage === undefined ? null : (
           <SettingsState kind="error">{refreshMessage}</SettingsState>
@@ -259,15 +264,15 @@ export function HostSettingsSection({
             Refresh status
           </OctantButton>
         }
-        description="The host process serving this workspace."
+        description="Octant's background service on this computer."
         title="Identity"
       >
         <SettingsFactList
           facts={[
-            { label: "Host", value: <Identifier>{status.identity.hostId}</Identifier> },
+            { label: "Computer ID", value: <Identifier>{status.identity.hostId}</Identifier> },
             { label: "Instance", value: <Identifier>{status.identity.instanceId}</Identifier> },
             { label: "Owner mode", value: OWNER_MODE_LABELS[status.identity.serviceMode] },
-            { label: "Server version", value: <Identifier>{status.versions.server}</Identifier> },
+            { label: "Octant version", value: <Identifier>{status.versions.server}</Identifier> },
             { label: "Wire version", value: <Identifier>{status.versions.wire}</Identifier> },
           ]}
         />
@@ -343,7 +348,7 @@ export function HostSettingsSection({
                     : [
                         {
                           label: "Last unexpected stop",
-                          value: `${formatMemoryEventTime(status.memory.previousStop.lastSeenAt)}, host using ${status.memory.previousStop.processMegabytes} MB`,
+                          value: `${formatMemoryEventTime(status.memory.previousStop.lastSeenAt)}, Octant using ${status.memory.previousStop.processMegabytes} MB`,
                         },
                       ]),
                 ]),
@@ -353,14 +358,14 @@ export function HostSettingsSection({
 
       {status.memory === undefined ? null : (
         <SettingsSection
-          description="When the host counts itself as low on memory and frees idle work."
+          description="When Octant counts this computer as low on memory and frees idle work."
           title="Memory"
         >
           <HostMemoryLimits client={client} memory={status.memory} onSaved={() => void refresh()} />
         </SettingsSection>
       )}
 
-      <SettingsSection description="Host services available to this app." title="Capabilities">
+      <SettingsSection description="Capabilities available on this computer." title="Capabilities">
         {status.capabilities.length === 0 ? (
           <SettingsState kind="empty">No platform capabilities reported.</SettingsState>
         ) : (
@@ -390,7 +395,7 @@ export function HostSettingsSection({
                 type="button"
                 variant="secondary"
               >
-                Stop host
+                Stop service
               </OctantButton>
               <OctantButton
                 disabled={lifecycleBusy || status.lifecycle.restart.kind === "unavailable"}
@@ -399,7 +404,7 @@ export function HostSettingsSection({
                 type="button"
                 variant="secondary"
               >
-                Restart host
+                Restart service
               </OctantButton>
             </div>
           </SettingRow>
@@ -482,7 +487,8 @@ export function HostDataSettingsSection({
         if (current)
           setDataMapState({
             kind: "error",
-            message: error instanceof Error ? error.message : "The host data map is unreachable.",
+            message:
+              error instanceof Error ? error.message : "This computer's data map is unreachable.",
           });
       },
     );
@@ -564,7 +570,7 @@ export function HostDataSettingsSection({
 
       <SettingsPanel
         title="Recovery"
-        description="Restore replaces the live data and runs only while the host is offline."
+        description="Restore replaces the live data and runs only while Octant is stopped."
       >
         <div className="settings-panel__stack">
           <div className="host-settings__controls">
@@ -595,14 +601,14 @@ export function HostDataSettingsSection({
 function DataMapPanel({ state }: { readonly state: DataMapState }) {
   if (state.kind === "loading") {
     return (
-      <SettingsPanel title="Data map" description="What this host stores, and where.">
+      <SettingsPanel title="Data map" description="What this computer stores, and where.">
         <SettingsState kind="loading">Loading data map…</SettingsState>
       </SettingsPanel>
     );
   }
   if (state.kind === "error") {
     return (
-      <SettingsPanel title="Data map" description="What this host stores, and where.">
+      <SettingsPanel title="Data map" description="What this computer stores, and where.">
         <SettingsState kind="error">{state.message}</SettingsState>
       </SettingsPanel>
     );
@@ -751,12 +757,14 @@ function ThreadRetentionPanel({
       <div className="settings-panel__stack" id="settings-thread-retention">
         <p className="host-settings__note">
           A retention window never deletes on its own. A confirmed purge removes the named thread —
-          or expired threads in a Project or on this host — from ordinary reads, including derived
-          projections and that thread's own journal events. Unsent composer drafts for those threads
-          are removed from this client. Other threads, Projects, usage, and credentials stay. SQLite
-          free pages may keep bytes until the next store rebuild.
+          or expired threads in a Project or on this computer — from ordinary reads, including
+          derived projections and that thread's own journal events. Unsent composer drafts for those
+          threads are removed from this client. Other threads, Projects, usage, and credentials
+          stay. SQLite free pages may keep bytes until the next store rebuild.
         </p>
-        <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
+        <p className="host-settings__note">
+          Default for this computer: {formatRetentionWindow(state)}.
+        </p>
         <div className="host-settings__field">
           <label htmlFor="thread-retention-scope">Scope</label>
           <OctantSelectField
@@ -765,7 +773,7 @@ function ThreadRetentionPanel({
               if (isRetentionScopeKind(value)) setScopeKind(value);
             }}
             options={[
-              { id: "host", label: "This host" },
+              { id: "host", label: "This computer" },
               { id: "project", label: "One Project" },
               { id: "thread", label: "One thread" },
             ]}
@@ -963,7 +971,7 @@ function BackupOutcomeView({ outcome }: { readonly outcome: HostBackupOutcome })
   if (outcome.kind === "failed") {
     return (
       <OctantAlert className="settings-section-line" tone="warning">
-        The backup was not created ({outcome.code}). Check the host logs.
+        The backup was not created ({outcome.code}). Check the logs on this computer.
       </OctantAlert>
     );
   }

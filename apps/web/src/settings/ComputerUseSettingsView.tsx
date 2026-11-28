@@ -223,7 +223,7 @@ export function ComputerUseSettingsView(props: {
                 ? "1 Project remembered"
                 : `${rememberedDesktopFiles.length} Projects remembered`,
         }}
-        description="Granted by “Remember for this Project” when an agent sends a file into a disposable desktop on this machine below Full access. Forget one and the next file asks again."
+        description="Granted by “Remember for this Project” when an agent sends a file into a disposable desktop on this computer below Full access. Forget one and the next file asks again."
         title="Remembered desktop files"
       >
         {rememberedDesktopFiles.length === 0 ? (
@@ -235,7 +235,7 @@ export function ComputerUseSettingsView(props: {
               const projectName = projectNames.get(String(entry.projectId)) ?? "Project";
               return (
                 <SettingRow
-                  description={`Agents in ${projectName} below Full access send files into their desktops on this machine without asking.`}
+                  description={`Agents in ${projectName} below Full access send files into their desktops on this computer without asking.`}
                   key={key}
                   label={projectName}
                   scope="host"

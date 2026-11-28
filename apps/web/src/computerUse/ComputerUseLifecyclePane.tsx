@@ -21,7 +21,7 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
     <section aria-label="Computer use" className="computer-use-lifecycle">
       <header>
         <div>
-          <p className="eyebrow">Host-controlled computer use</p>
+          <p className="eyebrow">This computer</p>
           <h3>Computer use</h3>
         </div>
         <span aria-live="polite" role="status">
@@ -38,7 +38,9 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
               outsideContent={props.view.pendingApproval.outsideContent}
             />
           )}
-          <p>This approval is bound to this host, Project, thread, provider, action, and client.</p>
+          <p>
+            This approval is bound to this computer, Project, thread, provider, action, and client.
+          </p>
           <div>
             <OctantButton disabled={props.busy} onClick={props.onApprove} type="button">
               {computerUseApproveLabel(props.view.pendingApproval)}

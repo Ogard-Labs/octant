@@ -2541,7 +2541,8 @@ function refuseCrossAuthority(
   ) {
     throw {
       category: "cross-context",
-      message: "This surface belongs to a different host. Open it in a new window to switch hosts.",
+      message:
+        "This surface belongs to a different computer. Open it in a new window to switch computers.",
       ...offer,
     };
   }

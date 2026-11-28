@@ -108,7 +108,7 @@ export function RoutineFileArrivalFields(props: {
       >
         <h4>Before enabling</h4>
         <p>
-          Set up and re-arm from a window on this host. Runs the fixed task in a new{" "}
+          Set up and re-arm from a window on this computer. Runs the fixed task in a new{" "}
           {props.mode === "code" ? "Code" : "Work"} thread, under the Project, profile, level and
           delivery you choose here.
         </p>
@@ -130,8 +130,8 @@ export function RoutineFileArrivalFields(props: {
             review; Octant cannot tell which program wrote a file.
           </li>
           <li>
-            The host must be running. After a gap, the chosen missed-run policy sees only net
-            changed files that still exist, not every missed event.
+            Octant must be running on this computer. After a gap, the chosen missed-run policy sees
+            only net changed files that still exist, not every missed event.
           </li>
           <li>
             Hidden entries, symbolic links, excluded folders and protected files are ignored; an

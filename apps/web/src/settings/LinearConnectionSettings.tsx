@@ -385,7 +385,7 @@ export function LinearConnectionSettings({
       id="settings-linear"
     >
       <SettingsSection
-        description="Linear accounts connected on the selected host."
+        description="Linear accounts connected on this computer."
         title="Linear workspaces"
       >
         {multi.indexDamaged === true ? (
@@ -396,7 +396,7 @@ export function LinearConnectionSettings({
           <>
             <SettingsFactList facts={[{ label: "State", value: STATE_LABELS.unauthorized }]} />
             {multi.remediation === undefined ? (
-              <p className="settings-section-line">Connect Linear to authorize this host.</p>
+              <p className="settings-section-line">Connect Linear to authorize this computer.</p>
             ) : (
               <p className="settings-section-line">{multi.remediation}</p>
             )}
@@ -510,8 +510,9 @@ export function LinearConnectionSettings({
               }}
               title={`Disconnect ${accountLabel(disconnectTarget.entry)}?`}
             >
-              Remove {accountLabel(disconnectTarget.entry)} from this host? Other Linear accounts
-              stay connected, and Projects bound to this workspace stay paused until you reconnect.
+              Remove {accountLabel(disconnectTarget.entry)} from this computer? Other Linear
+              accounts stay connected, and Projects bound to this workspace stay paused until you
+              reconnect.
             </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
@@ -718,13 +719,13 @@ export function LinearConnectionSettings({
       ) : null}
 
       <SettingsSection
-        description="A personal API key is stored in the same host secret store as OAuth tokens, and is verified against Linear before being added as an account."
+        description="A personal API key is stored in the same secret store on this computer as OAuth tokens, and is verified against Linear before being added as an account."
         title="Linear API key"
       >
         {unusedPersonalKey ? (
           <div className="linear-settings__controls">
             <p className="linear-settings__note">
-              A personal API key is stored on this host, not used.
+              A personal API key is stored on this computer, not used.
             </p>
             {typeof client.adoptLegacyPersonalCredential === "function" ? (
               <OctantButton
@@ -791,8 +792,8 @@ export function LinearConnectionSettings({
             </label>
             <p className="linear-settings__note">
               {personalKeyStored
-                ? "A personal API key is stored on this host. "
-                : "Stored on this host. "}
+                ? "A personal API key is stored on this computer. "
+                : "Stored on this computer. "}
               <a href={LINEAR_API_KEYS_URL} rel="noreferrer" target="_blank">
                 Create one
               </a>
@@ -899,7 +900,7 @@ function SingleAccountLinearSettings(props: SingleAccountProps) {
       id="settings-linear"
     >
       <SettingsSection
-        description="Linear authentication on the selected host."
+        description="Linear authentication on the selected computer."
         title="Linear workspace"
       >
         <SettingsFactList
@@ -981,7 +982,7 @@ function SingleAccountLinearSettings(props: SingleAccountProps) {
               }}
               title="Disconnect Linear?"
             >
-              Remove this host&apos;s Linear connection? You can reconnect later.
+              Remove this computer&apos;s Linear connection? You can reconnect later.
             </OctantConfirmDialog>
           ) : null}
         </OctantDialogPresence>
@@ -1103,7 +1104,7 @@ function SingleAccountLinearSettings(props: SingleAccountProps) {
       ) : null}
 
       <SettingsSection
-        description="A personal API key is stored in the same host secret store as OAuth tokens, and is never used as an OAuth fallback."
+        description="A personal API key is stored in the same secret store on this computer as OAuth tokens, and is never used as an OAuth fallback."
         title="Linear API key"
       >
         <div className="linear-settings__controls">
@@ -1123,8 +1124,8 @@ function SingleAccountLinearSettings(props: SingleAccountProps) {
             </label>
             <p className="linear-settings__note">
               {personalKeyStored
-                ? "A personal API key is stored on this host. "
-                : "Stored on this host. "}
+                ? "A personal API key is stored on this computer. "
+                : "Stored on this computer. "}
               <a href={LINEAR_API_KEYS_URL} rel="noreferrer" target="_blank">
                 Create one
               </a>
@@ -1196,7 +1197,7 @@ function SingleAccountLinearSettings(props: SingleAccountProps) {
         <SettingsSection tone="danger" title="Disconnect Linear">
           <div className="setgroup">
             <SettingRow
-              description="Removes Octant's Linear sign-in from this host; your Linear workspace is untouched."
+              description="Removes Octant's Linear sign-in from this computer; your Linear workspace is untouched."
               focused={props.focusedId === "linear-disconnect"}
               label="Disconnect Linear"
               scope="host"

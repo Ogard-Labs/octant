@@ -819,7 +819,7 @@ function LibraryDetail(props: LibraryDetailProps) {
             that a document is available.
           </p>
           <p className="library__note">
-            This setup connects to Paper Desktop&apos;s local address on this host.
+            This setup connects to Paper Desktop&apos;s local address on this computer.
           </p>
           <p className="library__note">
             The Paper CLI is optional for this local-address setup. If Desktop is closed or no file
@@ -1093,11 +1093,11 @@ function LibraryDetail(props: LibraryDetailProps) {
         {localSetup
           ? props.localHost
             ? "Adds this local server, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
-            : "Add the local server from the Octant window on this host."
+            : "Add the local server from the Octant window on that computer."
           : connector
             ? props.localHost
-              ? "Connect adds this server to this host, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
-              : "Connect from the Octant window on this host; a browser-hosted Settings cannot keep a key or run a sign-in."
+              ? "Connect adds this server to this computer, trusts it and turns it on after this confirmation. Tool calls still follow the thread's approval policy."
+              : "Connect from the Octant window on that computer; Settings in a browser cannot keep a key or run a sign-in."
             : reviewable
               ? "Install, trust and turn on does all three after this one confirmation. Install only adds it, and you trust it and turn it on as separate steps afterwards."
               : ref === undefined

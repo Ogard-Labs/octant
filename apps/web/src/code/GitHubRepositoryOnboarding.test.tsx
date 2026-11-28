@@ -369,7 +369,7 @@ describe("GitHubRepositoryOnboardingFlow", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Clone repository" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /verified checkout remains on the host/i,
+      /verified checkout remains on this computer/i,
     );
     fireEvent.click(screen.getByRole("button", { name: "Retry Project creation" }));
 

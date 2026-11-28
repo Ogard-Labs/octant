@@ -277,7 +277,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
           {outsideEntries.length === 0
             ? "Every provider driver here ships with Octant, so each is already installed and trusted."
             : "Bundled drivers ship with Octant, so each is already installed and trusted. Outside drivers are listed once you have trusted and switched them on under Plugins."}{" "}
-          Opening one reads what this host already knows; nothing runs until you choose a step.
+          Opening one reads what this computer already knows; nothing runs until you choose a step.
           <span
             aria-label="Provider catalog summary"
             className="endpoint-list__summary provider-catalog__summary"
@@ -288,7 +288,7 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
         </p>
       </SettingsSection>
       <SettingsSection
-        description="Coding agents installed on this host, such as Claude Code and Codex. Octant finds them and runs them for you."
+        description="Coding agents installed on this computer, such as Claude Code and Codex. Octant finds them and runs them for you."
         title="Agent runtimes"
       >
         <ul aria-label="Agent runtimes" className="endpoint-list">
@@ -698,7 +698,7 @@ function SetupSteps(
         <li className="provider-catalog__step" data-progress="current">
           <div className="provider-catalog__step-body">
             <p className="provider-catalog__sentence">
-              Octant is not offering this driver on this host, so it cannot be set up here.
+              Octant is not offering this driver on this computer, so it cannot be set up here.
             </p>
           </div>
         </li>
@@ -762,7 +762,7 @@ function CurrentStep(
             return (
               scanned !== undefined && scanned.status !== "failed" && scanned.status !== "cancelled"
             );
-          }, "Octant could not look on this host.")
+          }, "Octant could not look on this computer.")
         }
         size="sm"
         type="button"
@@ -776,9 +776,9 @@ function CurrentStep(
     case "check-host":
       sentence =
         discovery === undefined
-          ? "This window cannot look for runtimes on the host. Open Octant on the host to find it."
-          : `Octant has not looked for ${name} on this host yet. Looking reads each runtime's version under confinement; it starts no session and changes nothing.`;
-      action = scan("Look on this host");
+          ? "This window cannot look for runtimes on that computer. Open Octant on that computer to find it."
+          : `Octant has not looked for ${name} on this computer yet. Looking reads each runtime's version under confinement; it starts no session and changes nothing.`;
+      action = scan("Look on this computer");
       break;
     case "install":
       sentence = `${name} is not in the places Octant looks. Octant does not install runtimes: install it from its maker, then look again. If it is installed somewhere unusual, add it with its path on Providers & Models.`;
@@ -807,7 +807,7 @@ function CurrentStep(
     }
     case "add-endpoint":
       if (signsInFromHostTerminal) {
-        sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give your organization's access portal, account, role, and models. It takes no key; you sign in from a terminal on this host.`;
+        sentence = `Add it under Octant Harness › Model endpoints: choose ${name} in Add endpoint and give your organization's access portal, account, role, and models. It takes no key; you sign in from a terminal on this computer.`;
         action = openEndpoints;
         break;
       }
@@ -862,7 +862,7 @@ function CurrentStep(
     case "sign-in":
       if (signsInFromHostTerminal) {
         sentence =
-          "It signs in at your organization's single sign-on portal: run octant provider sign-in with its name in a terminal on this host, then check again.";
+          "It signs in at your organization's single sign-on portal: run octant provider sign-in with its name in a terminal on this computer, then check again.";
         action = (
           <CheckButton {...props} instanceId={next.instanceId} label="Check again" run={run} />
         );
@@ -903,9 +903,9 @@ function CurrentStep(
           : next.readiness === "degraded"
             ? "It answered but reported a problem. Its card has what it said; check again once it is fixed."
             : entry.source.kind === "outside"
-              ? "Octant could not start the driver or reach the service. Its card below has what the host answered."
+              ? "Octant could not start the driver or reach the service. Its card below has what this computer answered."
               : state.setup === "endpoint"
-                ? "Octant could not reach it. Its Model endpoints page has what the host answered."
+                ? "Octant could not reach it. Its Model endpoints page has what this computer answered."
                 : "Octant could not start it at its configured path. If it moved, use Locate binary… on its card below, then check again.";
       action = (
         <CheckButton

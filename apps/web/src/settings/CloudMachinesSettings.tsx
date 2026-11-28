@@ -136,7 +136,7 @@ export function CloudMachinesSettings(props: {
       void load();
       return false;
     } catch {
-      report("The cloud machine change could not be sent to this host.");
+      report("The cloud machine change could not be sent to this computer.");
       return false;
     } finally {
       setBusy(false);

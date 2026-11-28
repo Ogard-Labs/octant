@@ -165,7 +165,7 @@ describe("SecretStoresSettingsSection", () => {
   it("says linking happens on the host when this client is not on it", () => {
     render(<SecretStoresSettingsSection client={undefined} />);
     expect(
-      screen.getByText("Link a secret store in the Octant app on the host computer."),
+      screen.getByText("Link a secret store in the Octant app on the computer running Octant."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });

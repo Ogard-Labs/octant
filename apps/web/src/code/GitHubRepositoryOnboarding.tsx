@@ -79,15 +79,15 @@ type FlowPhase =
   | { readonly kind: "completed"; readonly projectName: string };
 
 const REFUSAL_FALLBACKS: Readonly<Record<GithubCloneRefusalReason, string>> = {
-  unauthorized: "GitHub is not connected on this host. Set it up in Settings.",
-  "capability-unavailable": "The GitHub repository catalogue is unavailable on this host.",
+  unauthorized: "GitHub is not connected on this computer. Set it up in Settings.",
+  "capability-unavailable": "The GitHub repository catalogue is unavailable on this computer.",
   "stale-read": "The repository facts were stale. Refresh the picker and try again.",
   "non-https-git-protocol":
-    "The host's gh Git protocol is not HTTPS. Reconfigure gh for HTTPS, then retry.",
+    "This computer's gh Git protocol is not HTTPS. Reconfigure gh for HTTPS, then retry.",
   invalid: "The clone request was invalid.",
   conflict: "Another operation already owns this repository or destination.",
   "not-found": "The repository could not be resolved on GitHub.",
-  collision: "The destination already contains something else. Resolve it on the host.",
+  collision: "The destination already contains something else. Resolve it on this computer.",
   unavailable: "The managed clone service is unavailable.",
 };
 
@@ -435,7 +435,7 @@ function FlowBody(props: FlowBodyProps) {
           </OctantAlert>
           <p className="github-onboarding__note">
             Failure code: {phase.operation.failure?.code ?? "unavailable"}. No partial checkout was
-            attached; any staging remains quarantined on the host.
+            attached; any staging remains quarantined on this computer.
           </p>
           <div className="github-onboarding__actions">
             {props.onBackToDestination === undefined ? (
@@ -503,8 +503,8 @@ function FlowBody(props: FlowBodyProps) {
       return (
         <div className="github-onboarding__body">
           <OctantAlert tone="warning">
-            Project creation failed. The verified checkout remains on the host and is never deleted;
-            retry now or attach it again later.
+            Project creation failed. The verified checkout remains on this computer and is never
+            deleted; retry now or attach it again later.
           </OctantAlert>
           <div className="github-onboarding__actions">
             <OctantButton
@@ -630,7 +630,7 @@ function ConfirmationCard(props: {
         {attach ? "Confirm attach" : "Confirm managed clone"}
       </h2>
       <dl className="github-onboarding__facts">
-        <dt>Host</dt>
+        <dt>Computer</dt>
         <dd>{props.hostName}</dd>
         <dt>Repository</dt>
         <dd>

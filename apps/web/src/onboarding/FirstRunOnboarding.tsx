@@ -548,13 +548,14 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         )}
         {controller.blockedMessage !== undefined || !answerRefused ? null : (
           <OctantAlert className="first-run__notice" tone="warning">
-            The host did not keep one of your answers, so setup shows what it holds. Answer again,
-            or press the button again to continue without it.
+            This computer did not keep one of your answers, so setup shows what it holds. Answer
+            again, or press the button again to continue without it.
           </OctantAlert>
         )}
         {controller.blockedMessage !== undefined || !controller.refused ? null : (
           <OctantAlert className="first-run__notice" tone="warning">
-            The host did not record that. Press the button again; setup is still open until it does.
+            This computer did not record that. Press the button again; setup is still open until it
+            does.
           </OctantAlert>
         )}
 

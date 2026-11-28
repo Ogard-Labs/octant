@@ -425,7 +425,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         />
         {projectOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
-            No {automationModeLabel(mode)} Projects are available on this host.
+            No {automationModeLabel(mode)} Projects are available on this computer.
           </p>
         ) : null}
       </div>

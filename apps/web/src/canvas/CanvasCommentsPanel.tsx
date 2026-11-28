@@ -364,7 +364,7 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
       setOutcome({
         kind: "unavailable",
         canvasId: props.canvasId,
-        reason: "Comments could not be loaded from the host.",
+        reason: "Comments could not be loaded from this computer.",
       });
     }
   }, [props.canvasId, props.load, onThreadsChange]);
@@ -385,12 +385,12 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
       if (result.kind === "accepted") {
         after();
       } else if (result.denialCode === "stale-version") {
-        setMessage("Comments changed on the host and were reloaded. Try again.");
+        setMessage("Comments changed on this computer and were reloaded. Try again.");
       } else {
         setMessage(result.message);
       }
     } catch {
-      setMessage("The comment could not reach the host.");
+      setMessage("The comment could not reach this computer.");
     } finally {
       setWorking(false);
       await reload();

@@ -33,7 +33,7 @@ export function providerCatalogStatus(state: ProviderCatalogState): ProviderCata
     case "check-host":
       return { tone: "unchecked", label: "Not looked for yet" };
     case "install":
-      return { tone: "off", label: "Not on this host" };
+      return { tone: "off", label: "Not on this computer" };
     case "add-detected":
       return { tone: "unchecked", label: "Found, not added" };
     case "add-endpoint":
@@ -166,7 +166,7 @@ export function providerCatalogSteps(state: ProviderCatalogState): ReadonlyArray
     check: state.ready === "yes",
   };
   const steps: ReadonlyArray<{ readonly id: ProviderCatalogStepId; readonly title: string }> = [
-    ...(findable ? [{ id: "find" as const, title: "Find it on this host" }] : []),
+    ...(findable ? [{ id: "find" as const, title: "Find it on this computer" }] : []),
     { id: "add", title: state.setup === "endpoint" ? "Add the endpoint" : "Add it to Octant" },
     { id: "turn-on", title: "Turn it on" },
     { id: "sign-in", title: "Sign in" },
