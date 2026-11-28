@@ -418,7 +418,7 @@ describe("a row for several questions asked at once", () => {
 
   it.each([
     ["a Work agent's", () => workLeadQuestion(), "Quarterly report is waiting for your answer"],
-    ["a subagent's", () => codeChildQuestion(), "Fix the parser has a subagent waiting for you"],
+    ["an agent's", () => codeChildQuestion(), "Fix the parser has an agent waiting for you"],
   ] as const)("counts %s question set too, and offers Open", async (_who, row, name) => {
     const user = userEvent.setup();
     const onOpenThread = vi.fn();
