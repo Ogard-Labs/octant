@@ -213,8 +213,9 @@ export function createExistingWorktreeCodeFileRootAuthority(options: {
             return false;
           }
         };
-      const primaryCheck = String(checkout.id) === String(thread.checkoutId);
-      if (!primaryCheck) {
+      const isLinkedCheckout =
+        thread.checkoutId !== undefined && String(checkout.id) !== String(thread.checkoutId);
+      if (isLinkedCheckout) {
         const reach = threadReachesCheckout(thread, checkout.id, "git-and-review");
         if (
           !reach.reachable ||

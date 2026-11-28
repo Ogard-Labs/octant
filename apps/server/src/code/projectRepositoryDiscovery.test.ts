@@ -38,6 +38,7 @@ import { GitService } from "./gitService";
 import { GitObservationPort } from "./gitObservationPort";
 import { GitMutationPort } from "./gitMutationPort";
 import { CodeOperationService, type CodeOperationGitPort } from "./codeOperationService";
+import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { buildDenyDefaultSeatbeltProfile } from "../process/seatbeltProfile";
 
 const execFileAsync = promisify(execFile);
@@ -496,7 +497,17 @@ describe("plain-folder binding, checkout reachability, and per-repository Git is
       historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
       summaryForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
     };
-    const git = new GitService(new GitObservationPort(), new GitMutationPort());
+    const fakeConfinement = createFakeSandboxConfinement();
+    tempRoots.push(fakeConfinement.root);
+    const gitOptions = {
+      confinement: fakeConfinement.confinement,
+      temporaryDirectory: fakeConfinement.temporaryDirectory,
+      gitExecutable: "/usr/bin/git",
+    };
+    const git = new GitService(
+      new GitObservationPort(gitOptions),
+      new GitMutationPort(undefined, gitOptions),
+    );
     const gitPort: CodeOperationGitPort = {
       observe: async ({ checkoutRoot, maxDiffBytes }) => {
         const observed = await git.observe(checkoutRoot);
