@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { decodeProjectSummary } from "@octant/contracts";
 import type {
+  IntegrationAccountsSnapshot,
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
 } from "@octant/contracts/integration";
@@ -293,5 +294,168 @@ describe("LinearConnectionSettings", () => {
 
     expect(await screen.findByText("workspace-b")).toBeInTheDocument();
     await waitFor(() => expect(listIssueFilters).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists two Linear accounts, disconnects one while keeping the other, and shows Reconnect only on an expired account", async () => {
+    const user = userEvent.setup();
+    let currentAccounts: IntegrationAccountsSnapshot = {
+      accounts: [
+        {
+          accountRef: "acct-personal",
+          state: "ready",
+          account: {
+            login: "personal",
+            displayName: "Ada Personal",
+            workspace: "Personal",
+            source: "oauth",
+            scopes: ["read", "write"],
+          },
+          capabilities: [{ operationId: "list-issues", available: true }],
+          isLegacy: true,
+        },
+        {
+          accountRef: "acct-company",
+          state: "unauthorized",
+          account: {
+            login: "company",
+            displayName: "Ada Company",
+            workspace: "Company",
+            source: "oauth",
+            scopes: ["read"],
+          },
+          capabilities: [],
+          remediation: "The Linear authorization expired. Reconnect to continue.",
+          reconnectRequired: true,
+        },
+      ],
+      oauthConfigured: true,
+      unusedPersonalCredentialStored: true,
+    };
+    const executeAuthenticationCommand = vi.fn(
+      async (command: IntegrationAuthenticationCommand) => {
+        if (command.kind === "logout" && command.accountRef !== undefined) {
+          currentAccounts = {
+            ...currentAccounts,
+            accounts: currentAccounts.accounts.filter(
+              (entry) => entry.accountRef !== command.accountRef,
+            ),
+          };
+        }
+        return unauthorizedSnapshot;
+      },
+    );
+    const adoptLegacyPersonalCredential = vi.fn(async () => {
+      currentAccounts = { ...currentAccounts, unusedPersonalCredentialStored: false };
+    });
+    const client: IntegrationClient = {
+      ...makeClient({ executeAuthenticationCommand }),
+      accountsSnapshot: vi.fn(async () => currentAccounts),
+      adoptLegacyPersonalCredential,
+    };
+
+    render(<LinearConnectionSettings client={client} />);
+    expect(await screen.findByText("Personal")).toBeVisible();
+    expect(screen.getByText("Company")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect another account" })).toBeEnabled();
+    // Only the expired Company account renders Reconnect.
+    expect(screen.getAllByRole("button", { name: "Reconnect" })).toHaveLength(1);
+    // Unused legacy personal API key offers Add as account.
+    expect(screen.getByText(/stored on this host, not used/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add as account" }));
+    expect(adoptLegacyPersonalCredential).toHaveBeenCalledOnce();
+
+    // Disconnect Company while keeping Personal connected.
+    await user.click(screen.getByRole("button", { name: "Disconnect Company" }));
+    expect(screen.getByRole("dialog", { name: "Disconnect Company?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm disconnect" }));
+    expect(executeAuthenticationCommand).toHaveBeenCalledWith({
+      kind: "logout",
+      accountRef: "acct-company",
+    });
+    await waitFor(() => expect(screen.queryByText("Company")).not.toBeInTheDocument());
+    expect(screen.getByText("Personal")).toBeVisible();
+  });
+
+  it("shows an account selector for Project mapping when multiple Linear accounts are connected", async () => {
+    const onProjectLinearTargetChange = vi.fn(async () => true);
+    const multiAccounts: IntegrationAccountsSnapshot = {
+      accounts: [
+        {
+          accountRef: "acct-personal",
+          state: "ready",
+          account: { login: "personal", workspace: "Personal", source: "oauth", scopes: ["read"] },
+          capabilities: [{ operationId: "list-issues", available: true }],
+          isLegacy: true,
+        },
+        {
+          accountRef: "acct-company",
+          state: "ready",
+          account: { login: "company", workspace: "Company", source: "oauth", scopes: ["read"] },
+          capabilities: [{ operationId: "list-issues", available: true }],
+        },
+      ],
+      oauthConfigured: true,
+    };
+    const listIssueFilters = vi.fn(async (accountRef?: string) => ({
+      teams:
+        accountRef === "acct-company"
+          ? [
+              {
+                id: "team-company-eng",
+                label: "Engineering (ENG)",
+                key: "ENG",
+                name: "Engineering",
+              },
+            ]
+          : [
+              {
+                id: "team-personal-eng",
+                label: "Engineering (ENG)",
+                key: "ENG",
+                name: "Engineering",
+              },
+            ],
+      states: [],
+      assignees: [],
+      projects: [],
+    }));
+    const client: IntegrationClient = {
+      ...makeClient(),
+      accountsSnapshot: vi.fn(async () => multiAccounts),
+      listIssueFilters,
+    };
+    const projects = [
+      decodeProjectSummary({
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "octant",
+        type: "code",
+        lifecycle: "active",
+        pinned: false,
+        rank: "1/1",
+        version: 1,
+        createdAt: "2026-11-24T00:00:00.000Z",
+        updatedAt: "2026-11-24T00:00:00.000Z",
+        binding: { canonicalRoot: "/tmp/octant" },
+        bindingRevisionId: "22222222-2222-4222-8222-222222222222",
+        codeAccessPersistence: "current-session",
+        linearTarget: {
+          accountRef: "acct-company",
+          teamId: "team-company-eng",
+          teamKey: "ENG",
+          teamName: "Engineering",
+        },
+      }),
+    ];
+
+    render(
+      <LinearConnectionSettings
+        client={client}
+        onProjectLinearTargetChange={onProjectLinearTargetChange}
+        projects={projects}
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("octant Linear account")).toBeInTheDocument());
+    expect(listIssueFilters).toHaveBeenCalledWith("acct-personal");
+    expect(listIssueFilters).toHaveBeenCalledWith("acct-company");
   });
 });

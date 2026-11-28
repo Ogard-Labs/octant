@@ -283,4 +283,40 @@ describe("Linear issue browser", () => {
       /\.linear-issues__row\[aria-pressed="true"\]:hover,\s*\.linear-issues__row\[aria-pressed="true"\]:focus-visible\s*\{\s*background:\s*var\(--accent\)/,
     );
   });
+
+  it("shows a Workspace picker when multiple Linear accounts are connected and scopes calls to the selected account", async () => {
+    const listIssues = vi.fn(async (_input?: LinearIssueListInput, _accountRef?: string) => page);
+    const listIssueFilters = vi.fn(async (_accountRef?: string) => filters);
+    render(
+      <LinearIssueBrowser
+        accounts={[
+          {
+            accountRef: "acct-personal",
+            state: "ready",
+            account: {
+              login: "personal",
+              workspace: "Personal",
+              source: "oauth",
+              scopes: ["read"],
+            },
+            capabilities: [{ operationId: "list-issues", available: true }],
+            isLegacy: true,
+          },
+          {
+            accountRef: "acct-company",
+            state: "ready",
+            account: { login: "company", workspace: "Company", source: "oauth", scopes: ["read"] },
+            capabilities: [{ operationId: "list-issues", available: true }],
+          },
+        ]}
+        getIssue={vi.fn(async () => detail)}
+        listIssueFilters={listIssueFilters}
+        listIssues={listIssues}
+        onClose={() => undefined}
+      />,
+    );
+    expect(await screen.findByLabelText("Workspace")).toBeInTheDocument();
+    await waitFor(() => expect(listIssues).toHaveBeenCalledWith({}, "acct-personal"));
+    expect(listIssueFilters).toHaveBeenCalledWith("acct-personal");
+  });
 });

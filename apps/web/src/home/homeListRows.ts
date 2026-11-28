@@ -116,15 +116,28 @@ export function assignedGithubListRow(
   };
 }
 
-export function assignedLinearListRow(row: LinearIssueRow, onOpen: (() => void) | undefined) {
+export type HomeLinearIssueRow = LinearIssueRow & {
+  readonly accountRef?: string;
+  readonly workspaceLabel?: string;
+  readonly isLegacyAccount?: boolean;
+};
+
+export function assignedLinearListRow(row: HomeLinearIssueRow, onOpen: (() => void) | undefined) {
   return {
-    id: `linear:${String(row.id)}`,
+    id:
+      row.accountRef === undefined
+        ? `linear:${String(row.id)}`
+        : `linear:${row.accountRef}:${String(row.id)}`,
     section: "needs-you",
     glyph: "issue",
     tone: "neutral",
     label: "Assigned issue",
     title: row.title,
-    meta: [row.identifier, row.state.name],
+    meta: [
+      ...(row.workspaceLabel === undefined ? [] : [row.workspaceLabel]),
+      row.identifier,
+      row.state.name,
+    ],
     ...(onOpen === undefined ? {} : { onOpen }),
   } satisfies HomeListRow;
 }
@@ -222,7 +235,7 @@ export function openIssueListRow(
 }
 
 export function openLinearListRow(
-  row: LinearIssueRow,
+  row: HomeLinearIssueRow,
   onOpen: (() => void) | undefined,
 ): HomeListRow {
   return {
