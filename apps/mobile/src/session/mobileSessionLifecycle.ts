@@ -68,12 +68,22 @@ export async function removeMobileHost(input: {
   readonly hub: Pick<MobileHostSessionHub, "syncRegistrations">;
   readonly deviceKeyStore: Pick<RemoteDeviceKeyStore, "remove">;
   readonly relayChoices: Pick<RelayChoiceStore, "forget">;
+  readonly onLastHostRemoved?: (() => Promise<void> | void) | undefined;
 }): Promise<RemoveMobileHostResult> {
   const registration = await input.registry.get(input.hostId);
   if (registration !== undefined) await input.relayChoices.forget(registration.origin);
   await input.registry.remove(input.hostId);
   const remaining = await input.registry.list();
-  if (remaining.kind === "ok") input.hub.syncRegistrations(remaining.hosts);
+  if (remaining.kind === "ok") {
+    input.hub.syncRegistrations(remaining.hosts);
+    if (remaining.hosts.length === 0) {
+      try {
+        await input.onLastHostRemoved?.();
+      } catch {
+        // Staged share cleanup retries on the next launch.
+      }
+    }
+  }
   try {
     await forgetHostCredential(input.deviceKeyStore, registration);
   } catch {
