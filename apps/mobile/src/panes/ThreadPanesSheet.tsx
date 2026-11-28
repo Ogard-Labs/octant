@@ -606,6 +606,13 @@ function UnifiedDiff(props: { readonly file: MobileDiffFile; readonly truncated?
               : "No patch lines available for this file."}
           </Text>
         }
+        ListFooterComponent={
+          props.truncated === true && lines.length > 0 ? (
+            <Text style={diffStyles.path} testID="mobile-pane-review-diff-truncated">
+              The diff was cut at the phone's limit; later lines or files may be missing.
+            </Text>
+          ) : undefined
+        }
         renderItem={({ item, index }) => {
           const at = sides.rowLines[index];
           const runs =
