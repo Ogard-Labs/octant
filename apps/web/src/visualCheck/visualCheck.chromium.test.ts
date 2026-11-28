@@ -148,7 +148,7 @@ async function compare(page: Page, actual: Buffer, baseline: Buffer): Promise<Co
 
 it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
   "draws the key screens the way their baselines say",
-  { timeout: 430_000 },
+  { timeout: 610_000 },
   async () => {
     const mode = updateMode(process.env.OCTANT_VISUAL_UPDATE);
     const update = mode !== "off";
@@ -187,7 +187,9 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
     process.once("SIGINT", stop);
     // Bounds a hung run, so it has to stay ahead of the full draw: a scene
     // list that outgrows it dies mid-shot as a closed browser, not a timeout.
-    const lifetime = setTimeout(stop, 420_000);
+    // The 74 pictures before the ground scenes took about 260 s on the CI
+    // runner, and the ground scenes add 50 more; 600 s leaves room for both.
+    const lifetime = setTimeout(stop, 600_000);
     const changed: string[] = [];
     const missing: string[] = [];
     const written: string[] = [];

@@ -53,6 +53,33 @@ export const SCENE_LIST: ReadonlyArray<SceneMeta> = [
   { id: "rail" },
   { id: "rail-beside", open: "button[aria-label^='Account menu']" },
   { id: "subagent-progress", narrow: true },
+  // The application ground under the sidebar and a workspace column; see
+  // groundScenes.tsx for what each one covers.
+  { id: "ground-builtin" },
+  { id: "ground-builtin-everywhere-strong" },
+  { id: "ground-builtin-pixelate" },
+  { id: "ground-builtin-dither-subtle" },
+  { id: "ground-builtin-ascii" },
+  { id: "ground-photo" },
+  { id: "ground-photo-everywhere-subtle-tint" },
+  { id: "ground-photo-pixelate" },
+  { id: "ground-photo-dither-strong" },
+  { id: "ground-photo-ascii-strong-tint" },
+  { id: "ground-characters" },
+  { id: "ground-characters-everywhere" },
+  { id: "ground-characters-subtle" },
+  { id: "ground-characters-everywhere-strong-tint" },
+  { id: "ground-pixels" },
+  { id: "ground-pixels-ridges-pixelate-everywhere" },
+  { id: "ground-pixels-burst-strong" },
+  { id: "ground-pixels-picture-subtle" },
+  { id: "ground-flowing" },
+  { id: "ground-flowing-everywhere-subtle" },
+  { id: "ground-none" },
+  { id: "ground-none-strong" },
+  { id: "ground-none-subtle-tint-floor" },
+  { id: "ground-reduced-transparency" },
+  { id: "ground-increased-contrast" },
 ];
 
 /** The two window sizes a scene is drawn at. */

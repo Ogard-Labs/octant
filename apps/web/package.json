@@ -10,8 +10,8 @@
     "dev": "vite",
     "test": "vitest run --testTimeout=15000",
     "typecheck": "tsc -p tsconfig.json",
-    "visual:check": "OCTANT_VISUAL_CHECK=1 vitest run --testTimeout=430000 src/visualCheck/visualCheck.chromium.test.ts",
-    "visual:update": "OCTANT_VISUAL_CHECK=1 OCTANT_VISUAL_UPDATE=1 vitest run --testTimeout=430000 src/visualCheck/visualCheck.chromium.test.ts"
+    "visual:check": "OCTANT_VISUAL_CHECK=1 vitest run --testTimeout=610000 src/visualCheck/visualCheck.chromium.test.ts",
+    "visual:update": "OCTANT_VISUAL_CHECK=1 OCTANT_VISUAL_UPDATE=1 vitest run --testTimeout=610000 src/visualCheck/visualCheck.chromium.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.6.0",
