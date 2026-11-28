@@ -16,6 +16,7 @@ export type LinearOperationRunner = (
   operationId: string,
   input: unknown,
   signal: AbortSignal,
+  accountRef?: string,
 ) => Promise<IntegrationExecutionResult>;
 
 /**
@@ -34,11 +35,12 @@ export function createTrackerIssuePort(input: {
   const githubOf = () => (input.githubIsEffective() ? reachableGithub : undefined);
   const noGithub = { status: "refused", reason: "not-connected" } as const;
   return {
-    linearWorkflow: async (issueId, signal) => {
+    linearWorkflow: async (issueId, signal, accountRef) => {
       const result = await input.linear(
         LINEAR_ISSUE_WORKFLOW_OPERATION,
         { id: issueId },
         signalOf(signal),
+        accountRef,
       );
       if (result.kind !== "ok") return linearFailure(result);
       try {
@@ -47,17 +49,23 @@ export function createTrackerIssuePort(input: {
         return { status: "failed", reason: "unavailable" };
       }
     },
-    linearSetState: async (issueId, stateId, signal) =>
+    linearSetState: async (issueId, stateId, signal, accountRef) =>
       linearWrite(
         await input.linear(
           LINEAR_ISSUE_SET_STATE_OPERATION,
           { id: issueId, stateId },
           signalOf(signal),
+          accountRef,
         ),
       ),
-    linearComment: async (issueId, body, signal) =>
+    linearComment: async (issueId, body, signal, accountRef) =>
       linearWrite(
-        await input.linear(LINEAR_ISSUE_COMMENT_OPERATION, { id: issueId, body }, signalOf(signal)),
+        await input.linear(
+          LINEAR_ISSUE_COMMENT_OPERATION,
+          { id: issueId, body },
+          signalOf(signal),
+          accountRef,
+        ),
       ),
     githubOpen: async (issue, signal) => {
       const github = githubOf();
@@ -85,11 +93,17 @@ export async function resolveLinearIdentifier(
   linear: LinearOperationRunner,
   identifier: string,
   signal: AbortSignal,
+  accountRef?: string,
 ): Promise<
   | { readonly status: "found"; readonly issueId: string }
   | { readonly status: "not-found" | "unavailable" }
 > {
-  const result = await linear(LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION, { identifier }, signal);
+  const result = await linear(
+    LINEAR_ISSUE_GET_BY_IDENTIFIER_OPERATION,
+    { identifier },
+    signal,
+    accountRef,
+  );
   // A disconnected or unauthorized Linear refuses too; that is not an answer
   // about the issue, and the person's remedy is Integrations, not the identifier.
   if (result.kind === "refused") {

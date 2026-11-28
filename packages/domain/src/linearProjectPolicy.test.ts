@@ -169,4 +169,67 @@ describe("Linear project mapping and agent read policy", () => {
     expect(formatProjectLinearTarget(TARGET)).toBe("Octant (OCT)");
     expect(formatProjectLinearTarget(TARGET_WITH_PROJECT)).toBe("Octant (OCT) · Preview 1");
   });
+
+  it("requires the same Linear account before matching a shared team key like ENG", () => {
+    const personalEng: ProjectLinearTarget = {
+      accountRef: "acct-personal",
+      teamId: "team-personal-eng",
+      teamKey: "ENG",
+      teamName: "Engineering",
+    };
+    const companyEng: ProjectLinearTarget = {
+      accountRef: "acct-company",
+      teamId: "team-company-eng",
+      teamKey: "ENG",
+      teamName: "Engineering",
+    };
+    const legacyEng: ProjectLinearTarget = {
+      teamId: "team-personal-eng",
+      teamKey: "ENG",
+      teamName: "Engineering",
+    };
+
+    const projects = [
+      { id: "p-personal", lifecycle: "active", linearTarget: personalEng },
+      { id: "p-company", lifecycle: "active", linearTarget: companyEng },
+    ];
+    expect(
+      matchProjectForLinearIssue(projects, {
+        identifier: "ENG-42",
+        teamKey: "ENG",
+        accountRef: "acct-personal",
+      })?.id,
+    ).toBe("p-personal");
+    expect(
+      matchProjectForLinearIssue(projects, {
+        identifier: "ENG-42",
+        teamKey: "ENG",
+        accountRef: "acct-company",
+      })?.id,
+    ).toBe("p-company");
+    // Without an accountRef on the issue, a target pinned to an explicit account never matches blindly.
+    expect(
+      matchProjectForLinearIssue(projects, {
+        identifier: "ENG-42",
+        teamKey: "ENG",
+      }),
+    ).toBeUndefined();
+
+    // Legacy target without accountRef matches only the legacy account, never a second account with ENG.
+    const legacyProjects = [{ id: "p-legacy", lifecycle: "active", linearTarget: legacyEng }];
+    expect(
+      matchProjectForLinearIssue(
+        legacyProjects,
+        { identifier: "ENG-42", teamKey: "ENG", accountRef: "acct-personal" },
+        { legacyAccountRef: "acct-personal" },
+      )?.id,
+    ).toBe("p-legacy");
+    expect(
+      matchProjectForLinearIssue(
+        legacyProjects,
+        { identifier: "ENG-42", teamKey: "ENG", accountRef: "acct-company" },
+        { legacyAccountRef: "acct-personal" },
+      ),
+    ).toBeUndefined();
+  });
 });

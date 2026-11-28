@@ -50,7 +50,12 @@ export function createTrackerMentionProjects(input: {
         ? {}
         : { repository: { owner: connected.owner, name: connected.repository } }),
       ...("linearTarget" in project && project.linearTarget !== undefined
-        ? { linearTeamId: project.linearTarget.teamId }
+        ? {
+            linearTeamId: project.linearTarget.teamId,
+            ...(project.linearTarget.accountRef === undefined
+              ? {}
+              : { linearAccountRef: project.linearTarget.accountRef }),
+          }
         : {}),
     };
   };

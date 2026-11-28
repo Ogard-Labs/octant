@@ -38,16 +38,19 @@ export interface TrackerIssuePort {
   readonly linearWorkflow: (
     issueId: string,
     signal?: AbortSignal,
+    accountRef?: string,
   ) => Promise<TrackerReadResult<LinearIssueWorkflow>>;
   readonly linearSetState: (
     issueId: string,
     stateId: string,
     signal?: AbortSignal,
+    accountRef?: string,
   ) => Promise<TrackerWriteResult>;
   readonly linearComment: (
     issueId: string,
     body: string,
     signal?: AbortSignal,
+    accountRef?: string,
   ) => Promise<TrackerWriteResult>;
   readonly githubOpen: (
     issue: GithubIssue,
@@ -105,14 +108,17 @@ export interface TrackerAdvanceOptions {
 export class TrackerIssueWrites {
   readonly #store: Pick<ThreadLinkedIssueStore, "list" | "writes" | "recordWrite">;
   readonly #port: TrackerIssuePort;
+  readonly #linearAccountForThread: ((threadId: string) => string | undefined) | undefined;
   readonly #threadQueues = new Map<string, Promise<unknown>>();
 
   constructor(options: {
     readonly store: Pick<ThreadLinkedIssueStore, "list" | "writes" | "recordWrite">;
     readonly port: TrackerIssuePort;
+    readonly linearAccountForThread?: (threadId: string) => string | undefined;
   }) {
     this.#store = options.store;
     this.#port = options.port;
+    this.#linearAccountForThread = options.linearAccountForThread;
   }
 
   /**
@@ -191,8 +197,9 @@ export class TrackerIssueWrites {
           notices.push({ issue, message: noticeFor(issue, result) });
         }
       };
+      const accountRef = this.#linearAccountForThread?.(threadId);
       if (!settled(stateAction)) {
-        await this.#moveState(issue, moment, signal, (result, stateId) =>
+        await this.#moveState(issue, moment, signal, accountRef, (result, stateId) =>
           record(stateAction, result, stateId === undefined ? {} : { stateId }),
         );
       }
@@ -200,7 +207,9 @@ export class TrackerIssueWrites {
         const body = `Merged in \`${mergedPullRequestUrl}\`.`;
         const result =
           issue.forge === "linear"
-            ? await this.#port.linearComment(issue.issueId, body, signal)
+            ? accountRef === undefined
+              ? await this.#port.linearComment(issue.issueId, body, signal)
+              : await this.#port.linearComment(issue.issueId, body, signal, accountRef)
             : await this.#port.githubComment(issue, body, signal);
         record("comment", result, { commentDigest: commentDigest(body) });
       }
@@ -212,6 +221,7 @@ export class TrackerIssueWrites {
     issue: LinkedIssueRef,
     moment: LinkedIssueMoment,
     signal: AbortSignal | undefined,
+    accountRef: string | undefined,
     record: (
       result:
         | TrackerWriteResult
@@ -233,7 +243,10 @@ export class TrackerIssueWrites {
       record(await this.#port.githubClose(issue, signal));
       return;
     }
-    const workflow = await this.#port.linearWorkflow(issue.issueId, signal);
+    const workflow =
+      accountRef === undefined
+        ? await this.#port.linearWorkflow(issue.issueId, signal)
+        : await this.#port.linearWorkflow(issue.issueId, signal, accountRef);
     if (workflow.status !== "read") return record(workflow);
     const choice = chooseLinearIssueState({
       moment,
@@ -242,7 +255,9 @@ export class TrackerIssueWrites {
     });
     if (choice.kind === "skip") return record({ status: "skipped", reason: choice.reason });
     record(
-      await this.#port.linearSetState(issue.issueId, choice.state.id, signal),
+      accountRef === undefined
+        ? await this.#port.linearSetState(issue.issueId, choice.state.id, signal)
+        : await this.#port.linearSetState(issue.issueId, choice.state.id, signal, accountRef),
       choice.state.id,
     );
   }
@@ -269,7 +284,11 @@ export class TrackerIssueWrites {
       this.#recordAgent(threadId, issue, "close", result);
       return result;
     }
-    const workflow = await this.#port.linearWorkflow(issue.issueId, signal);
+    const accountRef = this.#linearAccountForThread?.(threadId);
+    const workflow =
+      accountRef === undefined
+        ? await this.#port.linearWorkflow(issue.issueId, signal)
+        : await this.#port.linearWorkflow(issue.issueId, signal, accountRef);
     if (workflow.status !== "read") return workflow;
     const wanted = state.trim().toLowerCase();
     const byPosition = [...workflow.value.teamStates].sort((a, b) => a.position - b.position);
@@ -279,7 +298,10 @@ export class TrackerIssueWrites {
     if (target === undefined) {
       return { status: "unknown-state", states: byPosition.map((entry) => entry.name) };
     }
-    const result = await this.#port.linearSetState(issue.issueId, target.id, signal);
+    const result =
+      accountRef === undefined
+        ? await this.#port.linearSetState(issue.issueId, target.id, signal)
+        : await this.#port.linearSetState(issue.issueId, target.id, signal, accountRef);
     this.#recordAgent(threadId, issue, "set-state", result, { stateId: target.id });
     return result;
   }
@@ -290,9 +312,12 @@ export class TrackerIssueWrites {
     body: string,
     signal?: AbortSignal,
   ): Promise<TrackerWriteResult> {
+    const accountRef = this.#linearAccountForThread?.(threadId);
     const result =
       issue.forge === "linear"
-        ? await this.#port.linearComment(issue.issueId, body, signal)
+        ? accountRef === undefined
+          ? await this.#port.linearComment(issue.issueId, body, signal)
+          : await this.#port.linearComment(issue.issueId, body, signal, accountRef)
         : await this.#port.githubComment(issue, body, signal);
     this.#recordAgent(threadId, issue, "comment", result, { commentDigest: commentDigest(body) });
     return result;

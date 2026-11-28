@@ -72,6 +72,7 @@ const PRODUCT_PROBES = [
   { path: "/api/github/authentication", method: "GET" },
   { path: "/api/github/authentication/commands", method: "POST" },
   { path: "/api/integrations/linear/authentication", method: "GET" },
+  { path: "/api/integrations/linear/accounts", method: "GET" },
   { path: "/api/integrations/linear/authentication/commands", method: "POST" },
   { path: "/api/integrations/linear/operations", method: "POST" },
   { path: "/api/benchmarks/advice", method: "POST" },

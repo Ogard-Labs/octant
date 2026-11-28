@@ -815,13 +815,15 @@ Status: Built. Detail: [Architecture: Reading GitHub](../architecture.md#modes-c
 
 ### Linear Project mapping and reads for Code agents
 
-A Work or Code Project may bind a Linear team, and optionally a Linear project, on the host. The binding scopes the issue browser, the `Create from…` picker, Start issue and the Code agent's `octant_linear`, read-only except on the thread's linked issues (maintainer decision, 2026-11-24).
+A host may connect more than one Linear account, and a Work or Code Project may bind a Linear account, team, and optionally a Linear project on the host. The binding scopes the issue browser, the `Create from…` picker, Start issue, linked-issue writes, and the Code agent's `octant_linear`, read-only except on the thread's linked issues (maintainer decision, 2026-11-24; multi-account support, 2026-11-28).
 
-- Only a local window sets or clears the binding, journaled.
-- `octant_linear` writes only to the thread's linked issues, stays inside the bound scope, and journals outside content before returning data.
+- Each connected Linear account keeps its own vault secret id, isolated plugin runtime, origin-pinned `authorizedFetch` (`https://api.linear.app` only), and per-account routine `connectionRevision` indexed in `integrations/linear-accounts.json` (`0600`); failed identity or index writes delete newly stored secrets and a damaged index fails closed (maintainer decision, 2026-11-28).
+- Existing single-account hosts migrate lazily with `legacyRef` without moving tokens or making startup calls; omitting `accountRef` resolves only to `legacyRef` and never falls back to another account.
+- Only a local window sets or clears a Project binding, journaled on `project.linear-target-changed@1` with optional `accountRef`.
+- `octant_linear` uses the Project's bound account (never a model-supplied account), writes only to the thread's linked issues, stays inside the bound scope, and journals outside content before returning data.
 - A Code thread is linked to the issue it was created from and to the issues the person links; links change only from a local window or a host-person-paired device (maintainer decision, 2026-11-26).
 - Under the Project's Keep linked issues up to date switch, off by default, the host moves linked issues forward to In Progress, In Review and Done, never backwards, and host-started turns move nothing. Every write attempt is journaled, and a token without write access fails closed.
-- A live check against a Linear workspace with write access and a real GitHub issue is a maintainer check still owed.
+- A live check against a Linear workspace with write access, a real GitHub issue, and two real Linear workspaces (revoking one while the other keeps reading) is a maintainer check still owed.
 
 Status: Built. Since: 2026-11-24. Detail: [Host reads and commands: Linear issues](host-reads-and-commands.md#linear-issues) and [Workspace: Boards and integrations](workspace.md#boards-and-integrations).
 

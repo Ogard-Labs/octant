@@ -1190,6 +1190,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/integrations/linear/accounts",
+    methods: ["GET", "HEAD"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    // Up to 16 accounts with non-secret labels and capability lists.
+    maxResponseBytes: 16 * 1_024,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/integrations/linear/authentication/commands",
     methods: ["POST"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,

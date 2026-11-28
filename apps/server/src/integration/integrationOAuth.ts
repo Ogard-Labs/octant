@@ -89,6 +89,19 @@ export function createIntegrationOAuthHost(options: {
   readonly credentialIds: Readonly<Record<string, string>>;
   readonly fetch?: (input: Request) => Promise<Response>;
   readonly now?: () => number;
+  /**
+   * Origins that `authorizedFetch` may attach a bearer token to. When set,
+   * requests carrying a credential reference to any other origin are refused
+   * before resolving or attaching a token.
+   */
+  readonly allowedBearerOrigins?: ReadonlyArray<string>;
+  /**
+   * Optional custom token storage hook for multi-account hosts that need to
+   * probe account identity and commit an index before finalizing PKCE login.
+   */
+  readonly onTokensExchanged?: (
+    tokens: StoredOAuthTokens,
+  ) => Promise<{ readonly kind: "stored" } | { readonly kind: "refused"; readonly reason: string }>;
   readonly connectionStore?: {
     readonly read: () => IntegrationConnectionState | undefined;
     readonly write: (state: IntegrationConnectionState | undefined) => void;
@@ -104,6 +117,8 @@ export function createIntegrationOAuthHost(options: {
 }): IntegrationOAuthHost {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const now = options.now ?? Date.now;
+  const allowedBearerOrigins =
+    options.allowedBearerOrigins === undefined ? undefined : new Set(options.allowedBearerOrigins);
   const pending = new Map<string, PendingPkceSession>();
   const connectionStore = options.connectionStore;
   let connection: IntegrationConnectionState | undefined = connectionStore?.read();
@@ -168,13 +183,15 @@ export function createIntegrationOAuthHost(options: {
         reason: exchanged.kind === "failed" ? exchanged.reason : "The authorization was refused.",
       };
     }
-    if (
-      !(await writeOAuth({
-        ...exchanged.tokens,
-        clientId: session.clientId,
-        tokenEndpoint: session.tokenEndpoint,
-      }))
-    ) {
+    const storedTokens: StoredOAuthTokens = {
+      ...exchanged.tokens,
+      clientId: session.clientId,
+      tokenEndpoint: session.tokenEndpoint,
+    };
+    if (options.onTokensExchanged !== undefined) {
+      return options.onTokensExchanged(storedTokens);
+    }
+    if (!(await writeOAuth(storedTokens))) {
       return { kind: "refused", reason: "The secure credential store is unavailable." };
     }
     setConnection({
@@ -188,6 +205,9 @@ export function createIntegrationOAuthHost(options: {
     request: IntegrationPkceAuthorizationRequest,
   ): Promise<IntegrationPkceBeginResult> => {
     prunePending();
+    // Only one sign-in flow runs at a time; starting a new one cancels any
+    // previous pending session so a stale callback cannot overwrite it.
+    pending.clear();
     if (callbackListener !== undefined) {
       await callbackListener.close();
       callbackListener = undefined;
@@ -318,6 +338,12 @@ export function createIntegrationOAuthHost(options: {
     if (reference === null) return fetchImpl(input);
     const headers = new Headers(input.headers);
     headers.delete(INTEGRATION_CREDENTIAL_REF_HEADER);
+    if (
+      allowedBearerOrigins !== undefined &&
+      !isAllowedBearerOrigin(input.url, allowedBearerOrigins)
+    ) {
+      return Response.json({ error: "forbidden_origin" }, { status: 403 });
+    }
     const prepared = await resolveBearerToken(reference, { refreshIfExpired: true });
     if (prepared.kind === "invalid_grant") {
       return Response.json({ error: "invalid_grant" }, { status: 401 });
@@ -560,6 +586,14 @@ function grantedScopes(scope: string | undefined): ReadonlyArray<string> | undef
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAllowedBearerOrigin(urlText: string, allowedOrigins: ReadonlySet<string>): boolean {
+  try {
+    return allowedOrigins.has(new URL(urlText).origin);
+  } catch {
+    return false;
+  }
 }
 
 function base64Url(bytes: Buffer): string {

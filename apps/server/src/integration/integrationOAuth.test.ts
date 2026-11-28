@@ -65,7 +65,7 @@ describe("integration OAuth host", () => {
         accessToken,
         refreshToken,
         tokenType: "Bearer",
-        expiresAt: Date.now() + 60_000,
+        expiresAt: Date.now() + 600_000,
         scope: "read",
         clientId: "public-client",
         tokenEndpoint: "https://api.linear.app/oauth/token",
@@ -157,5 +157,94 @@ describe("integration OAuth host", () => {
     await expect(host.requestCredential("personal-api-key")).resolves.toMatchObject({
       kind: "refused",
     });
+  });
+
+  it("refuses to attach a bearer token to any origin outside the allowed list", async () => {
+    const vault = createMemorySecretVault();
+    await vault.put(
+      LINEAR_CREDENTIAL_IDS.oauth,
+      JSON.stringify({
+        accessToken,
+        refreshToken,
+        tokenType: "Bearer",
+        expiresAt: Date.now() + 600_000,
+        scope: "read",
+        clientId: "public-client",
+        tokenEndpoint: "https://api.linear.app/oauth/token",
+      }),
+    );
+    const seenHeaders: Array<{ readonly url: string; readonly auth: string | null }> = [];
+    const fetch = vi.fn(async (input: Request) => {
+      seenHeaders.push({ url: input.url, auth: input.headers.get("authorization") });
+      return jsonResponse({ ok: true });
+    });
+    const host = createIntegrationOAuthHost({
+      vault,
+      credentialIds: LINEAR_CREDENTIAL_IDS,
+      allowedBearerOrigins: ["https://api.linear.app"],
+      fetch,
+    });
+
+    const offOrigin = await host.authorizedFetch(
+      new Request("https://attacker.example/graphql", {
+        method: "POST",
+        headers: { "x-octant-credential-ref": LINEAR_CREDENTIAL_IDS.oauth },
+      }),
+    );
+    expect(offOrigin.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+
+    const onOrigin = await host.authorizedFetch(
+      new Request("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: { "x-octant-credential-ref": LINEAR_CREDENTIAL_IDS.oauth },
+      }),
+    );
+    expect(onOrigin.status).toBe(200);
+    expect(seenHeaders).toEqual([
+      { url: "https://api.linear.app/graphql", auth: `Bearer ${accessToken}` },
+    ]);
+  });
+
+  it("cancels an earlier pending PKCE session when a second sign-in starts", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        token_type: "Bearer",
+        expires_in: 86399,
+        scope: "read",
+      }),
+    );
+    const host = createIntegrationOAuthHost({
+      vault: createMemorySecretVault(),
+      credentialIds: LINEAR_CREDENTIAL_IDS,
+      fetch,
+    });
+    const first = await host.beginPkceAuthorization({
+      authorizationEndpoint: "https://linear.app/oauth/authorize",
+      tokenEndpoint: "https://api.linear.app/oauth/token",
+      clientId: "public-client",
+      redirectUri: "http://127.0.0.1:52693/oauth/linear/callback",
+      scopes: ["read"],
+    });
+    const second = await host.beginPkceAuthorization({
+      authorizationEndpoint: "https://linear.app/oauth/authorize",
+      tokenEndpoint: "https://api.linear.app/oauth/token",
+      clientId: "public-client",
+      redirectUri: "http://127.0.0.1:52693/oauth/linear/callback",
+      scopes: ["read"],
+    });
+    expect(first.kind).toBe("redirect");
+    expect(second.kind).toBe("redirect");
+    if (first.kind !== "redirect" || second.kind !== "redirect") return;
+    const firstState = new URL(first.authorizationUrl).searchParams.get("state") ?? "";
+    const secondState = new URL(second.authorizationUrl).searchParams.get("state") ?? "";
+    await expect(
+      host.completePkceAuthorization({ state: firstState, code: "code-1" }),
+    ).resolves.toMatchObject({ kind: "refused" });
+    await expect(
+      host.completePkceAuthorization({ state: secondState, code: "code-2" }),
+    ).resolves.toEqual({ kind: "stored" });
   });
 });
