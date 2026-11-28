@@ -57,7 +57,7 @@ export function liveStepWords(step: ThreadLiveStep): string {
     case "web":
       return /search/i.test(tool) ? "Searching the web" : "Reading a web page";
     case "agent":
-      return "Running a subagent";
+      return "Running an agent";
     default:
       return `Using ${toolDisplayName(tool)}`;
   }
