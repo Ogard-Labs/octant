@@ -23,6 +23,13 @@ export type PullRequestGuideWriterRegisterResult =
   | { readonly kind: "registered"; readonly release: () => void }
   | { readonly kind: "refused" };
 
+export type PullRequestGuideWriterRunOutcome =
+  | (Extract<PullRequestGuideWriteOutcome, { readonly status: "written" }> & {
+      /** Re-checks that the exact registration that produced these stops is still offered. */
+      readonly stillEffective: () => boolean;
+    })
+  | Exclude<PullRequestGuideWriteOutcome, { readonly status: "written" }>;
+
 interface RegistrationRecord {
   readonly identity: object;
   readonly entry: PullRequestGuideWriterRegistration;
@@ -89,14 +96,15 @@ export class PullRequestGuideWriterRegistry {
     readonly request: PullRequestGuideWriteRequest;
     readonly host: PullRequestGuideHostPort;
     readonly signal: AbortSignal;
-  }): Promise<PullRequestGuideWriteOutcome> {
+  }): Promise<PullRequestGuideWriterRunOutcome> {
     const startingRecord = this.#resolveOfferedRecord(input.writerId);
     let settled = false;
-    const isEffective = (): boolean => {
-      if (settled || startingRecord === undefined) return false;
+    const isRegistrationOffered = (): boolean => {
+      if (startingRecord === undefined) return false;
       const current = this.#resolveOfferedRecord(input.writerId);
       return current !== undefined && current.identity === startingRecord.identity;
     };
+    const isEffective = (): boolean => !settled && isRegistrationOffered();
     if (startingRecord === undefined || !isEffective()) {
       return { status: "refused", detail: "The pull request guide writer plugin is not active." };
     }
@@ -147,9 +155,11 @@ export class PullRequestGuideWriterRegistry {
     }
     if (input.signal.aborted) return { status: "cancelled" };
     // Check live activation one final time before returning proposed stops.
-    const current = this.#resolveOfferedRecord(input.writerId);
-    if (current === undefined || current.identity !== startingRecord.identity) {
+    if (!isRegistrationOffered()) {
       return { status: "refused", detail: "The pull request guide writer plugin is not active." };
+    }
+    if (outcome.status === "written") {
+      return { ...outcome, stillEffective: isRegistrationOffered };
     }
     return outcome;
   }

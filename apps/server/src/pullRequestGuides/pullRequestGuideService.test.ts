@@ -137,6 +137,7 @@ function harness(options: {
   readonly replies?: { current: string };
   readonly captureThrows?: boolean;
   readonly turnWaitsForAbort?: boolean;
+  readonly readHead?: () => Promise<string>;
 }) {
   const dir = mkdtempSync(join(tmpdir(), "octant-pr-guide-"));
   dirs.push(dir);
@@ -154,6 +155,7 @@ function harness(options: {
   const head = options.head ?? { current: HEAD_1 };
   const turns: string[] = [];
   const spend: string[] = [];
+  const recordedUsage: Array<{ readonly modelId: string }> = [];
   const runtime: Pick<
     PullRequestReviewHostRuntimePort,
     | "readCurrentHeadSha"
@@ -165,7 +167,10 @@ function harness(options: {
     | "recordUsage"
   > = {
     scratchRoot: dir,
-    readCurrentHeadSha: async () => head.current,
+    readCurrentHeadSha: async () => (options.readHead ? options.readHead() : head.current),
+    recordUsage: (entry) => {
+      recordedUsage.push({ modelId: String(entry.modelId) });
+    },
     capturePullRequestDiff: async () => {
       if (options.captureThrows === true) throw new Error("gh refused");
       return { status: "ready", capture: { snapshot: DIFF } };
@@ -230,6 +235,7 @@ function harness(options: {
     make,
     turns,
     spend,
+    recordedUsage,
     head,
     writers,
     setWriterEnabled: (enabled: boolean) => {
@@ -534,5 +540,61 @@ describe("review guides", () => {
     expect(await started.done).toEqual({ status: "failed", reason: "unavailable" });
     expect(turns).toEqual([]);
     expect(spend).toEqual(["admit", "abandon"]);
+  });
+
+  it("withholds recording a rewrite if the writer plugin is disabled during the final head check, while keeping usage recorded", async () => {
+    const replies = { current: GUIDE_REPLY };
+    let headChecks = 0;
+    let releaseFinalHeadCheck: (() => void) | undefined;
+    let finalHeadCheckStarted: (() => void) | undefined;
+    const waitingOnFinalHeadCheck = new Promise<void>((resolve) => {
+      finalHeadCheckStarted = resolve;
+    });
+    const { make, recordedUsage, setWriterEnabled } = harness({
+      route: ROUTE,
+      replies,
+      readHead: async () => {
+        headChecks += 1;
+        // Calls 1–2 are the initial guide's start and final check; call 3 is the rewrite's start;
+        // call 4 is the rewrite's final head check right before persisting.
+        if (headChecks === 4) {
+          finalHeadCheckStarted?.();
+          await new Promise<void>((resolve) => {
+            releaseFinalHeadCheck = resolve;
+          });
+        }
+        return HEAD_1;
+      },
+    });
+    const service = make();
+    const initial = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (initial.status !== "started") throw new Error("expected initial guide run");
+    expect((await initial.done).status).toBe("recorded");
+    expect(recordedUsage).toHaveLength(1);
+
+    replies.current = JSON.stringify({
+      stops: [
+        {
+          title: "Replacement stop after disablement",
+          why: "Must never replace the saved guide once the writer is turned off.",
+          needsDecision: true,
+          anchors: [{ path: "src/auth.ts", startLine: 2, endLine: 2 }],
+        },
+      ],
+    });
+    const rewrite = await service.writeForPerson(WINDOW_ID, TARGET);
+    if (rewrite.status !== "started") throw new Error("expected rewrite run");
+    await waitingOnFinalHeadCheck;
+    setWriterEnabled(false);
+    releaseFinalHeadCheck?.();
+
+    expect(await rewrite.done).toEqual({ status: "failed", reason: "unavailable" });
+    // Usage for the completed model turn is still recorded, while the saved guide stays untouched.
+    expect(recordedUsage).toHaveLength(2);
+    const read = await service.read(WINDOW_ID, TARGET, HEAD_1);
+    expect(read.status).toBe("read");
+    if (read.status === "read") {
+      expect(read.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
   });
 });

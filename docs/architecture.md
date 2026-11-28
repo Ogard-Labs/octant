@@ -16376,10 +16376,12 @@ an out-of-process confined worker launch class exists. A reviewer or guide
 writer receives one immutable request for a specific pushed PR head and one
 capability-scoped host port carrying no raw filesystem path, shell handle,
 credential, forge token, or direct host-service access. The host enforces
-effectiveness and PR head currency before and after every await, runs any model
-turn at Plan's read-only gate under the configured route without silent
-fallback, verifies anchors and run ownership before writing `CodeReviewFinding`
-or `pull-request-guide` records, caps PR publication to at most one summary
+plugin effectiveness before and after every await (including immediately before
+recording a guide), checks PR head currency when capturing the diff and again
+before persisting (reviewers also check head currency around each stage), runs
+any model turn at Plan's read-only gate under the configured route without
+silent fallback, verifies anchors and run ownership before writing
+`CodeReviewFinding` or `pull-request-guide` records, caps PR publication to at most one summary
 comment behind a default-off Project opt-in (formal forge reviews — approve or
 request changes — are structurally absent from the port), and gates blocking
 finding hand-back to the worker behind a default-off per-PR opt-in. If the head

@@ -592,6 +592,10 @@ export class PullRequestGuideService {
     // GitHub not answering is not a push.
     if (currentHead === undefined) return { status: "failed", reason: "unavailable" };
     if (currentHead !== headSha) return { status: "failed", reason: "head-stale" };
+    // Re-check activation bound to the exact writer registration right before
+    // persisting so disabling or replacing the plugin during the final head
+    // lookup still withholds publication.
+    if (!outcome.stillEffective()) return { status: "failed", reason: "unavailable" };
     const stops = validateGuideStops(outcome.stops, diff ?? { files: [] });
     // A guide with no stop says nothing, and recording it would replace the
     // saved one: a diff GitHub failed to give, or a reply whose every stop was

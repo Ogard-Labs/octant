@@ -19,7 +19,7 @@ const REFUSAL_COPY: Readonly<Record<PullRequestGuideRefusal, readonly [number, s
   "not-authorized": [403, "This window cannot reach that pull request."],
   "not-effective": [
     409,
-    "No pull request guide writer plugin is active. Enable one in Settings → Plugins first.",
+    "No pull request guide writer plugin is active. Enable one in Settings → Skills & Extensions → Installed first.",
   ],
   "no-model": [409, "Pick a guide model in this Project's settings first."],
   running: [409, "A guide is already being written for this pull request."],
