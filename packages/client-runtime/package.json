@@ -62,6 +62,7 @@
     "./goal-client": "./src/goalClient.ts",
     "./project-browser-client": "./src/projectBrowserClient.ts",
     "./project-terminal-client": "./src/projectTerminalClient.ts",
+    "./project-repositories-client": "./src/projectRepositoriesClient.ts",
     "./goal-loop-client": "./src/goalLoopClient.ts",
     "./native-harness-client": "./src/nativeHarnessClient.ts",
     "./safe-networks-client": "./src/safeNetworksClient.ts",

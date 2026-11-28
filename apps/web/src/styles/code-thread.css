@@ -316,6 +316,33 @@
   list-style: none;
 }
 
+.code-turn-files__groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.code-turn-files__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.code-turn-files__repo {
+  margin: 0;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-repository-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
 .code-turn-files__row {
   display: grid;
   grid-template-columns: var(--oct-icon-md) minmax(0, 1fr) auto;

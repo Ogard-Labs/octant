@@ -1,3 +1,4 @@
+import { decodeCodeCheckoutId, decodeCodeRepositoryId } from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
 import {
@@ -5,9 +6,11 @@ import {
   accessPosturesAtOrBelow,
   authorizeCodeOperation,
   clampTurnAccessPosture,
+  codeOperationReachScope,
   harnessAsksUnderSessionFullAccess,
   harnessAutoReviewEffective,
   inPlaceRestoreRefusalText,
+  threadReachesCheckout,
   turnBlocksInPlaceRestore,
   type InPlaceRestoreTurn,
   type CodeActor,
@@ -433,5 +436,64 @@ describe("in-place restore", () => {
     expect(inPlaceRestoreRefusalText()).toBe(
       "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
     );
+  });
+});
+
+describe("threadReachesCheckout and codeOperationReachScope", () => {
+  const primaryCheckout = decodeCodeCheckoutId("10000000-0000-4000-8000-000000000001");
+  const linkedCheckout = decodeCodeCheckoutId("10000000-0000-4000-8000-000000000002");
+  const foreignCheckout = decodeCodeCheckoutId("10000000-0000-4000-8000-000000000099");
+  const primaryRepo = decodeCodeRepositoryId(`repo_${"a".repeat(64)}`);
+  const linkedRepo = decodeCodeRepositoryId(`repo_${"b".repeat(64)}`);
+
+  const thread = {
+    checkoutId: primaryCheckout,
+    repositoryId: primaryRepo,
+    linkedCheckouts: [{ checkoutId: linkedCheckout, repositoryId: linkedRepo, label: "repo-b" }],
+  };
+
+  it("reaches primary in every scope, linked only in git-and-review, and refuses unreachable checkouts", () => {
+    expect(threadReachesCheckout(thread, primaryCheckout, "primary-only")).toEqual({
+      reachable: true,
+      role: "primary",
+      checkoutId: primaryCheckout,
+      repositoryId: primaryRepo,
+    });
+    expect(threadReachesCheckout(thread, linkedCheckout, "git-and-review")).toEqual({
+      reachable: true,
+      role: "linked",
+      checkoutId: linkedCheckout,
+      repositoryId: linkedRepo,
+      label: "repo-b",
+    });
+    expect(threadReachesCheckout(thread, linkedCheckout, "primary-only")).toEqual({
+      reachable: false,
+    });
+    expect(threadReachesCheckout(thread, foreignCheckout, "git-and-review")).toEqual({
+      reachable: false,
+    });
+  });
+
+  it("classifies diff, git, and pull-request commands as git-and-review and keeps everything else primary-only", () => {
+    for (const kind of [
+      "observe-git",
+      "stage-git",
+      "unstage-git",
+      "commit-git",
+      "push-git",
+      "create-pull-request",
+      "observe-pull-request",
+    ]) {
+      expect(codeOperationReachScope(kind)).toBe("git-and-review");
+    }
+    for (const kind of [
+      "start-provider-turn",
+      "start-terminal",
+      "run-repository-test",
+      "rewind-code-thread",
+      "run-scaffold",
+    ]) {
+      expect(codeOperationReachScope(kind)).toBe("primary-only");
+    }
   });
 });

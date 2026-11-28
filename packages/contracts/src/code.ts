@@ -371,12 +371,38 @@ const RetiredSandboxOffSwitch = Schema.optionalToOptional(Schema.Boolean, Schema
   encode: () => Option.none(),
 });
 
+export const MAX_CODE_THREAD_LINKED_CHECKOUTS = 15;
+
+/**
+ * A secondary Git checkout reachable from a multi-repository Code thread for
+ * per-repository Diff, Git, and pull-request actions. Absent on single-repo
+ * threads so their records and wire payloads stay unchanged.
+ */
+export const CodeLinkedCheckout = Schema.Struct({
+  checkoutId: CodeCheckoutId,
+  repositoryId: CodeRepositoryId,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+}).annotations(strict);
+export type CodeLinkedCheckout = typeof CodeLinkedCheckout.Type;
+
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
   bindingRevisionId: BindingRevisionId,
   repositoryId: CodeRepositoryId,
   checkoutId: CodeCheckoutId,
+  /**
+   * Additional Git checkouts reachable from this thread in a multi-repository
+   * Code Project (at most 15 beside the primary checkout). Omitted on
+   * single-repository threads so their journal records and wire shape stay
+   * unchanged.
+   */
+  linkedCheckouts: Schema.optional(
+    Schema.Array(CodeLinkedCheckout).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_CODE_THREAD_LINKED_CHECKOUTS),
+    ),
+  ),
   title: Schema.NonEmptyTrimmedString,
   /**
    * Whether the user has pinned this thread to the top of the sidebar. Optional
@@ -1665,10 +1691,27 @@ export const CodePublicEvent = Schema.Union(
   ),
 );
 export type CodePublicEvent = typeof CodePublicEvent.Type;
+export const CodePreparedLinkedCheckout = Schema.Struct({
+  checkout: CodeCheckoutIdentity,
+  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+}).annotations(strict);
+export type CodePreparedLinkedCheckout = typeof CodePreparedLinkedCheckout.Type;
+
 export const CodeCheckoutPrepared = Schema.Struct({
   kind: Schema.Literal("checkout-prepared"),
   bindingRevisionId: BindingRevisionId,
   checkout: CodeCheckoutIdentity,
+  /**
+   * Additional repositories discovered inside this Code Project's granted
+   * folders. Omitted for single-repository Projects so their wire shape stays
+   * unchanged.
+   */
+  linkedCheckouts: Schema.optional(
+    Schema.Array(CodePreparedLinkedCheckout).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_CODE_THREAD_LINKED_CHECKOUTS),
+    ),
+  ),
 }).annotations(strict);
 export type CodeCheckoutPrepared = typeof CodeCheckoutPrepared.Type;
 export const CodeWorktreeSourcePreviewed = Schema.Struct({
@@ -1960,6 +2003,17 @@ export const CodeThreadViewCleanup = Schema.Literal("cleaned-up", "cleaning-up",
 export const CodeThreadView = Schema.Struct({
   thread: CodeThread,
   checkout: CodeCheckoutIdentity,
+  /**
+   * Checkout identities for `thread.linkedCheckouts` on multi-repository
+   * threads. Omitted on single-repository threads so their wire shape stays
+   * unchanged.
+   */
+  linkedCheckouts: Schema.optional(
+    Schema.Array(CodeCheckoutIdentity).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_CODE_THREAD_LINKED_CHECKOUTS),
+    ),
+  ),
   lastSequence: GlobalSequence,
   /**
    * Present while the host has removed the thread's managed worktree folder

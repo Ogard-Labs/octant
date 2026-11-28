@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeCodeConversationPage } from "@octant/contracts/code-operations";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 
 type ChangedFiles = NonNullable<
@@ -100,5 +100,30 @@ describe("the files a Code turn changed", () => {
       />,
     );
     expect(screen.getByRole("listitem")).toHaveTextContent("Binary");
+  });
+
+  it("groups multi-repository changed files by repository and passes the file's checkout on review", async () => {
+    const user = userEvent.setup();
+    const onReviewFile = vi.fn();
+    const checkoutA = "90000000-0000-4000-8000-000000000021" as never;
+    const checkoutB = "90000000-0000-4000-8000-000000000022" as never;
+    const base = record(["src/a.ts", "src/b.ts"]);
+    render(
+      <CodeTurnChangedFilesCard
+        changedFiles={{
+          ...base,
+          files: [
+            { ...base.files[0]!, repository: "repo-a", checkoutId: checkoutA },
+            { ...base.files[1]!, repository: "repo-b", checkoutId: checkoutB },
+          ],
+        }}
+        onReviewFile={onReviewFile}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "repo-a" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "repo-b" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Review src/b.ts in repo-b" }));
+    expect(onReviewFile).toHaveBeenCalledWith("src/b.ts", checkoutB);
   });
 });

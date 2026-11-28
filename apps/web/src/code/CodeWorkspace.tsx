@@ -39,6 +39,8 @@ import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode
 import { useTabActivatedThisSession } from "../shell/TabActivation";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { CodeGitPane } from "./CodeGitPane";
+import { CodeRepositoryPicker } from "./CodeRepositoryPicker";
+import { defaultGitCheckoutId, reachableGitRepositoriesForThread } from "./threadRepositories";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
 import { CodePullRequestPane } from "./CodePullRequestPane";
@@ -1151,9 +1153,31 @@ function GitWorkspaceSurface(
     readonly offersPullRequest: boolean;
   },
 ) {
+  const activeView = props.controller.activeView;
+  const repositories = useMemo(
+    () => (activeView === undefined ? [] : reachableGitRepositoriesForThread(activeView)),
+    [activeView],
+  );
+  const defaultCheckout =
+    activeView === undefined ? props.scope.checkoutId : defaultGitCheckoutId(activeView);
+  const [selectedCheckoutId, setSelectedCheckoutId] = useState(defaultCheckout);
+  useEffect(() => {
+    setSelectedCheckoutId(defaultCheckout);
+  }, [props.scope.threadId, defaultCheckout]);
+  const effectiveCheckoutId =
+    repositories.length === 0 ||
+    repositories.some((repo) => String(repo.checkoutId) === String(selectedCheckoutId))
+      ? selectedCheckoutId
+      : defaultCheckout;
+  const effectiveScope = useMemo(
+    () => ({ threadId: props.scope.threadId, checkoutId: effectiveCheckoutId }),
+    [props.scope.threadId, effectiveCheckoutId],
+  );
   const [observation, setObservation] = useState<GitObservation>();
   const [failure, setFailure] = useState<string>();
+  const observationRequestRef = useRef(0);
   const observe = useCallback(async () => {
+    const requestId = (observationRequestRef.current += 1);
     setFailure(undefined);
     try {
       const result = await props.client.executeOperation({
@@ -1161,17 +1185,25 @@ function GitWorkspaceSurface(
         operationId: props.nextUuid() as never,
         gitOperationId: props.nextUuid() as never,
         maxDiffBytes: 1024 * 1024,
-        ...props.scope,
+        ...effectiveScope,
       });
+      if (observationRequestRef.current !== requestId) return;
       if (result.kind === "git-observed") setObservation(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
       else setFailure("Git status could not be read.");
     } catch {
+      if (observationRequestRef.current !== requestId) return;
       setFailure("Git status is unavailable. Reconnect and retry.");
     }
-  }, [props.client, props.nextUuid, props.scope]);
+  }, [props.client, props.nextUuid, effectiveScope]);
 
-  useEffect(() => void observe(), [observe]);
+  useEffect(() => {
+    setObservation(undefined);
+    void observe();
+    return () => {
+      observationRequestRef.current += 1;
+    };
+  }, [observe]);
 
   const refreshingClient = useMemo(
     (): CodeClient => ({
@@ -1187,13 +1219,23 @@ function GitWorkspaceSurface(
 
   if (failure !== undefined) {
     return (
-      <OctantEmpty
-        action={{ label: "Retry", onClick: () => void observe() }}
-        message={failure}
-        role="alert"
-        state="warning"
-        title="Git status unavailable"
-      />
+      <>
+        {repositories.length > 1 ? (
+          <CodeRepositoryPicker
+            label="Repository"
+            onSelect={setSelectedCheckoutId}
+            repositories={repositories}
+            selectedCheckoutId={effectiveCheckoutId}
+          />
+        ) : null}
+        <OctantEmpty
+          action={{ label: "Retry", onClick: () => void observe() }}
+          message={failure}
+          role="alert"
+          state="warning"
+          title="Git status unavailable"
+        />
+      </>
     );
   }
   if (observation === undefined) {
@@ -1213,17 +1255,21 @@ function GitWorkspaceSurface(
   }
   return (
     <CodeGitPane
+      key={String(effectiveScope.checkoutId)}
       client={refreshingClient}
       createGitOperationId={() => props.nextUuid() as never}
       createOperationId={() => props.nextUuid() as never}
       executionPolicy={policy}
       observation={observation}
+      {...(repositories.length > 1
+        ? { repositories, onSelectRepository: setSelectedCheckoutId }
+        : {})}
       {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
       {...(props.onOpenSurface === undefined || !props.offersPullRequest
         ? {}
         : { onReviewPullRequest: () => props.onOpenSurface!("code-pr") })}
       {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
-      scope={props.scope}
+      scope={effectiveScope}
     />
   );
 }
@@ -1239,42 +1285,98 @@ function PullRequestWorkspaceSurface(
     readonly tab: Extract<CodeTab, { readonly kind: "code-pr" }>;
   },
 ) {
+  const activeView = props.controller.activeView;
+  const repositories = useMemo(
+    () => (activeView === undefined ? [] : reachableGitRepositoriesForThread(activeView)),
+    [activeView],
+  );
+  const defaultCheckout =
+    activeView === undefined ? props.scope.checkoutId : defaultGitCheckoutId(activeView);
+  const [selectedCheckoutId, setSelectedCheckoutId] = useState(defaultCheckout);
+  useEffect(() => {
+    setSelectedCheckoutId(defaultCheckout);
+  }, [props.scope.threadId, defaultCheckout]);
+  const effectiveCheckoutId =
+    repositories.length === 0 ||
+    repositories.some((repo) => String(repo.checkoutId) === String(selectedCheckoutId))
+      ? selectedCheckoutId
+      : defaultCheckout;
+  const effectiveScope = useMemo(
+    () => ({ threadId: props.scope.threadId, checkoutId: effectiveCheckoutId }),
+    [props.scope.threadId, effectiveCheckoutId],
+  );
   const [review, setReview] = useState<CodePullRequestReview>();
   const [failure, setFailure] = useState<string>();
+  const reviewRequestRef = useRef(0);
   const observe = useCallback(async () => {
+    const requestId = (reviewRequestRef.current += 1);
     setFailure(undefined);
     try {
       const result = await props.client.executeOperation({
         kind: "observe-pull-request",
         operationId: props.nextUuid() as never,
         maxDiffBytes: 1024 * 1024,
-        ...props.scope,
+        ...effectiveScope,
       });
+      if (reviewRequestRef.current !== requestId) return;
       if (result.kind === "pull-request-review") setReview(result);
       else if (result.kind === "operation-failed") setFailure(result.failure.message);
       else setFailure("The pull request could not be read.");
     } catch {
+      if (reviewRequestRef.current !== requestId) return;
       setFailure("The pull request is unavailable. Reconnect and retry.");
     }
-  }, [props.client, props.nextUuid, props.scope]);
+  }, [props.client, props.nextUuid, effectiveScope]);
 
-  useEffect(() => void observe(), [observe]);
+  useEffect(() => {
+    setReview(undefined);
+    void observe();
+    return () => {
+      reviewRequestRef.current += 1;
+    };
+  }, [observe]);
+
+  const picker =
+    repositories.length > 1 ? (
+      <CodeRepositoryPicker
+        label="Repository"
+        onSelect={setSelectedCheckoutId}
+        repositories={repositories}
+        selectedCheckoutId={effectiveCheckoutId}
+      />
+    ) : null;
 
   if (failure !== undefined) {
     return (
-      <OctantEmpty
-        action={{ label: "Retry", onClick: () => void observe() }}
-        message={failure}
-        role="alert"
-        state="warning"
-        title="Pull request unavailable"
-      />
+      <>
+        {picker}
+        <OctantEmpty
+          action={{ label: "Retry", onClick: () => void observe() }}
+          message={failure}
+          role="alert"
+          state="warning"
+          title="Pull request unavailable"
+        />
+      </>
     );
   }
   if (review === undefined) {
-    return <p role="status">Loading linked pull request…</p>;
+    return (
+      <>
+        {picker}
+        <p role="status">Loading linked pull request…</p>
+      </>
+    );
   }
-  const policy = props.controller.activeView!.thread.executionPolicy;
+  const policy = activeView?.thread.executionPolicy;
+  if (policy === undefined) {
+    return (
+      <UnavailableProjection
+        message="This thread's execution policy is not available yet."
+        title="Pull request is unavailable"
+      />
+    );
+  }
   if (
     review.state !== "observed" &&
     decidesCodeEffectsByApproval(policy) &&
@@ -1282,30 +1384,35 @@ function PullRequestWorkspaceSurface(
   ) {
     return <ApprovalUnavailable surface="Pull request" />;
   }
+  const openSurface = props.onOpenSurface;
   return (
-    <CodePullRequestPane
-      client={props.client}
-      createOperationId={() => props.nextUuid() as never}
-      executionPolicy={policy}
-      {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
-      onRefresh={() => void observe()}
-      {...(props.browserAutomationClient === undefined
-        ? {}
-        : {
-            browserProof: {
-              client: props.browserAutomationClient,
-              threadId: decodeBrowserThreadId(String(props.scope.threadId)),
-            },
-          })}
-      review={review}
-      {...(props.onOpenSurface === undefined
-        ? {}
-        : { onNavigateWorktree: () => props.onOpenSurface!("code-git") })}
-      {...(props.approvals?.pullRequest === undefined
-        ? {}
-        : { requestApproval: props.approvals.pullRequest })}
-      scope={props.scope}
-    />
+    <>
+      {picker}
+      <CodePullRequestPane
+        key={String(effectiveScope.checkoutId)}
+        client={props.client}
+        createOperationId={() => props.nextUuid() as never}
+        executionPolicy={policy}
+        {...(props.onOpenModeMenu === undefined ? {} : { onOpenModeMenu: props.onOpenModeMenu })}
+        onRefresh={() => void observe()}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : {
+              browserProof: {
+                client: props.browserAutomationClient,
+                threadId: decodeBrowserThreadId(String(effectiveScope.threadId)),
+              },
+            })}
+        review={review}
+        {...(openSurface === undefined
+          ? {}
+          : { onNavigateWorktree: () => openSurface("code-git") })}
+        {...(props.approvals?.pullRequest === undefined
+          ? {}
+          : { requestApproval: props.approvals.pullRequest })}
+        scope={effectiveScope}
+      />
+    </>
   );
 }
 

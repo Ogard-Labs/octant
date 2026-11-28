@@ -757,6 +757,17 @@ export const CodeTurnChangedFile = Schema.Struct({
   deletions: Schema.Int.pipe(Schema.nonNegative()),
   /** Git counts no lines in a binary file; both counts are then zero. */
   binary: Schema.optional(Schema.Literal(true)),
+  /**
+   * Repository label when a turn spanned a multi-repository Code Project.
+   * Omitted on single-repository threads so their records stay unchanged.
+   */
+  repository: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  /**
+   * Checkout id of `repository` when the turn spanned linked repositories, so
+   * selecting the file opens Review on that repository's checkout. Omitted on
+   * single-repository threads.
+   */
+  checkoutId: Schema.optional(CodeCheckoutId),
 }).annotations(strict);
 export type CodeTurnChangedFile = typeof CodeTurnChangedFile.Type;
 /**

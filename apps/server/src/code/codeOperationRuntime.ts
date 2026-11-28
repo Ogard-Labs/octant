@@ -30,7 +30,7 @@ import { CodeTurnReviewCaptureScheduler } from "./codeTurnReviewCaptureScheduler
 import { boundReviewText } from "./codeReviewComparison";
 import { DEFAULT_MAX_GIT_DIFF_BYTES } from "./gitObservationPort";
 import { createHash } from "node:crypto";
-import { dirname, isAbsolute, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, sep } from "node:path";
 import {
   type AgentRun,
   type AgentRunId,
@@ -57,6 +57,7 @@ import {
   type AdoptCodeNativeSessionResult,
   type CodeNativeSessionId,
   type CodeNativeSessions,
+  type CodeCheckoutId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
   type AndroidEmulatorRequest,
@@ -254,7 +255,11 @@ import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService"
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
-import { turnChangedFiles } from "./codeTurnChangedFiles";
+import {
+  turnChangedFiles,
+  turnChangedFilesAcrossRepositories,
+  type RepositoryTreeChanges,
+} from "./codeTurnChangedFiles";
 import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./codeTurnRunner";
 import {
   carriedSentContext,
@@ -516,6 +521,7 @@ export interface CodeOperationRuntimeOptions {
   readonly providerTerminal?: CodeOperationServiceOptions["providerTerminal"];
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
+    checkoutId?: CodeCheckoutId,
   ) => Promise<GhDeliveryTarget | undefined>;
   /** The standing merge permissions the person has stored for a thread; absent reads none. */
   readonly standingMergeAllowance?: (thread: CodeThread) => ReadonlyArray<CodeMergeStandingSource>;
@@ -3647,6 +3653,17 @@ interface ActiveTurn {
   lastPersistedFailure?: string | undefined;
   /** In-flight change-list recording, so a second terminal path waits instead of skipping. */
   changedFilesRecording?: Promise<void>;
+  /**
+   * Starting working-tree snapshots across all reachable Git repositories for
+   * a multi-repository thread. Undefined on single-repository threads so their
+   * changed-files path stays identical.
+   */
+  linkedCheckpoints?: ReadonlyArray<{
+    readonly checkoutId: CodeCheckoutId;
+    readonly label: string;
+    readonly checkoutRoot: string;
+    readonly from: string;
+  }>;
   reviewCapture?: CodeTurnReviewCaptureScheduler;
   reviewLatest?: CodeTurnReviewCapture;
   reviewFinalCaptured?: boolean;
@@ -4650,7 +4667,25 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...transferredAttachments,
       ...(feedback?.attachments ?? []),
     ];
+    // Best-effort multi-repo starting snapshots so changed files at settle are
+    // grouped by repository across every reachable Git checkout.
+    let linkedCheckpoints: ActiveTurn["linkedCheckpoints"];
+    if (
+      !remoteThread &&
+      input.thread.linkedCheckouts !== undefined &&
+      input.thread.linkedCheckouts.length > 0 &&
+      mayWriteToRepository(input.thread.executionPolicy)
+    ) {
+      linkedCheckpoints = await this.#captureMultiRepoStartingCheckpoints(
+        input.windowId,
+        input.thread,
+        input.checkoutRoot,
+      );
+    }
     const active: ActiveTurn = {
+      ...(linkedCheckpoints === undefined || linkedCheckpoints.length === 0
+        ? {}
+        : { linkedCheckpoints }),
       ...(designSystem === undefined ? {} : { designSystem }),
       ...(inputGuards.length === 0
         ? {}
@@ -8110,10 +8145,111 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (final) active.reviewFinalCaptured = true;
   }
 
+  async #captureMultiRepoStartingCheckpoints(
+    windowId: WindowId,
+    thread: CodeThread,
+    primaryCheckoutRoot: string,
+  ): Promise<NonNullable<ActiveTurn["linkedCheckpoints"]>> {
+    const snapshots: Array<{
+      readonly checkoutId: CodeCheckoutId;
+      readonly label: string;
+      readonly checkoutRoot: string;
+      readonly from: string;
+    }> = [];
+    const primaryCheckout = this.#options.persistence.readCodeCheckout(thread.checkoutId);
+    if (primaryCheckout !== undefined && primaryCheckout.kind !== "plain-folder") {
+      try {
+        const captured = await this.#git.checkpoint({
+          checkoutId: String(primaryCheckout.id),
+          checkoutRoot: primaryCheckoutRoot,
+          executionPolicy: thread.executionPolicy,
+        });
+        if (captured.status === "captured") {
+          snapshots.push({
+            checkoutId: primaryCheckout.id,
+            label: basename(primaryCheckoutRoot) || primaryCheckoutRoot,
+            checkoutRoot: primaryCheckoutRoot,
+            from: captured.snapshot.worktree,
+          });
+        }
+      } catch {
+        // Best-effort evidence capture.
+      }
+    }
+    for (const linked of thread.linkedCheckouts ?? []) {
+      const checkout = this.#options.persistence.readCodeCheckout(linked.checkoutId);
+      if (checkout === undefined || checkout.availability !== "available") continue;
+      try {
+        const resolved = await this.#options.resolveCheckoutRoot(windowId, thread, checkout);
+        if (resolved === undefined) continue;
+        const captured = await this.#git.checkpoint({
+          checkoutId: String(checkout.id),
+          checkoutRoot: resolved.checkoutRoot,
+          executionPolicy: thread.executionPolicy,
+        });
+        if (captured.status === "captured") {
+          snapshots.push({
+            checkoutId: checkout.id,
+            label: linked.label,
+            checkoutRoot: resolved.checkoutRoot,
+            from: captured.snapshot.worktree,
+          });
+        }
+      } catch {
+        // Best-effort evidence capture.
+      }
+    }
+    return snapshots;
+  }
+
   async #recordChangedFiles(active: ActiveTurn): Promise<void> {
     if (active.changedFilesRecording !== undefined) return active.changedFilesRecording;
     active.changedFilesRecording = (async () => {
       try {
+        if (active.linkedCheckpoints !== undefined && active.linkedCheckpoints.length > 0) {
+          const resolveExecutionPolicy = () =>
+            this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy ??
+            active.thread.executionPolicy;
+          const groups: RepositoryTreeChanges[] = [];
+          for (const entry of active.linkedCheckpoints) {
+            const resolveAuthorizedRoot = async (): Promise<string | undefined> => {
+              const liveThread = this.#effectiveThread(active.windowId, active.thread.id);
+              if (liveThread === undefined) return undefined;
+              const liveCheckout = this.#options.persistence.readCodeCheckout(entry.checkoutId);
+              if (liveCheckout === undefined || liveCheckout.availability !== "available")
+                return undefined;
+              const resolved = await this.#options.resolveCheckoutRoot(
+                active.windowId,
+                liveThread,
+                liveCheckout,
+              );
+              return resolved?.checkoutRoot;
+            };
+            const currentRoot = await resolveAuthorizedRoot();
+            if (currentRoot === undefined || currentRoot !== entry.checkoutRoot) continue;
+            const result = await this.#git.changesSince({
+              checkoutId: String(entry.checkoutId),
+              checkoutRoot: currentRoot,
+              from: entry.from,
+              executionPolicy: resolveExecutionPolicy(),
+              resolveExecutionPolicy,
+              captureCurrent: async () => (await resolveAuthorizedRoot()) === currentRoot,
+            });
+            if (result.status !== "ready" || result.changes.length === 0) continue;
+            groups.push({
+              repository: entry.label,
+              checkoutId: entry.checkoutId,
+              changes: result.changes,
+            });
+          }
+          const changedFiles = turnChangedFilesAcrossRepositories(groups);
+          if (changedFiles === undefined) return;
+          const frame = this.#appendTurnEvent(active, {
+            event: { kind: "conversation-turn-changed-files", changedFiles },
+          });
+          active.cursor = frame.cursor;
+          return;
+        }
         if (this.#git.supportsCapturedDiff) {
           await this.#reviewScheduler(active).flush(true);
           const changedFiles =

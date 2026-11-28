@@ -287,4 +287,84 @@ describe("Project folders", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("lists discovered repositories, submodules, and workspace file folders for a Code Project", async () => {
+    const user = userEvent.setup();
+    const bridge = {
+      selectProjectRoot: vi.fn(async () => ({
+        kind: "selected" as const,
+        receiptId: RECEIPT,
+        displayName: "Shared",
+      })),
+    };
+    const onAdd = vi.fn(async () => ({ status: "changed" as const }));
+    const listRepositories = vi.fn(async () => ({
+      kind: "project-repositories" as const,
+      projectId: "80000000-0000-4000-8000-000000000001" as never,
+      bindingRevisionId: "80000000-0000-4000-8000-000000000002" as never,
+      repositories: [
+        {
+          repositoryId: `repo_${"a".repeat(64)}` as never,
+          checkoutId: "80000000-0000-4000-8000-000000000010" as never,
+          name: "api",
+          canonicalRoot: "/Users/ada/Dev/Workspace/api",
+          source: "nested" as const,
+          head: { kind: "branch" as const, name: "main" as never, oid: "a".repeat(40) },
+          submodules: [{ name: "libs/core", path: "libs/core", initialized: true }],
+        },
+        {
+          repositoryId: `repo_${"b".repeat(64)}` as never,
+          checkoutId: "80000000-0000-4000-8000-000000000011" as never,
+          name: "web",
+          canonicalRoot: "/Users/ada/Dev/Workspace/web",
+          source: "nested" as const,
+          head: { kind: "branch" as const, name: "develop" as never, oid: "b".repeat(40) },
+        },
+      ],
+      truncated: false,
+      workspaceFolders: [
+        {
+          workspaceFile: "stack.code-workspace",
+          name: "Shared",
+          path: "/Users/ada/Dev/Shared",
+          status: "available" as const,
+        },
+        {
+          workspaceFile: "stack.code-workspace",
+          name: "Keys",
+          path: "/Users/ada/.ssh",
+          status: "refused" as const,
+          reason: "A folder that holds keys or credentials cannot be added to a Project.",
+        },
+      ],
+    }));
+
+    render(
+      <ProjectFoldersSection
+        hostBridge={bridge}
+        listRepositories={listRepositories}
+        onAdd={onAdd}
+        onRemove={vi.fn()}
+        project={project([], "code")}
+      />,
+    );
+
+    const repoList = await screen.findByRole("list", { name: "Discovered repositories" });
+    expect(within(repoList).getByText("api")).toBeVisible();
+    expect(within(repoList).getByText("web")).toBeVisible();
+    expect(within(repoList).getByText("libs/core")).toBeVisible();
+    expect(screen.getByText("Main folder")).toBeVisible();
+
+    const wsList = screen.getByRole("list", { name: "Workspace file folders" });
+    expect(
+      within(wsList).getByText(
+        "A folder that holds keys or credentials cannot be added to a Project.",
+      ),
+    ).toBeVisible();
+    await user.click(
+      within(wsList).getByRole("button", { name: "Add Shared from stack.code-workspace" }),
+    );
+    expect(bridge.selectProjectRoot).toHaveBeenCalledWith("code");
+    expect(onAdd).toHaveBeenCalledWith(RECEIPT);
+  });
 });
