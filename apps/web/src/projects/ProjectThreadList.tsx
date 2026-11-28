@@ -59,6 +59,7 @@ import { useMinuteClock } from "./minuteClock";
 import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarThreadRowContent, sidebarThreadRowLabel } from "./SidebarThreadRowContent";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
+import { useWorkingRowLine } from "./useWorkingRowLine";
 import { ThreadRenameField } from "./ThreadRenameField";
 import {
   ThreadCoordinatorMenuItems,
@@ -649,6 +650,8 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
 
   const activity = threadRowActivity(props.thread);
   const unread = activity === "unread" || props.thread.unread === true;
+  // Working outranks every other status, so the row's activity alone says it.
+  const workingLine = useWorkingRowLine(props.thread, shows.status && activity === "working");
   if (props.isRenaming) {
     return (
       <ThreadRenameField
@@ -679,6 +682,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         waitingSince: props.thread.waitingSince,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
+        updatedAt: props.thread.updatedAt,
         now,
       })
     : NO_THREAD_ROW_STATE;
@@ -691,6 +695,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         ...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests }),
         ...rowCounts,
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...workingLine,
         ...(rowAge === undefined ? {} : { age: rowAge.title ?? rowAge.label }),
       })}
       className="sidebar-navigation__thread project-threads__thread justify-start"
@@ -742,6 +747,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest, morePullRequests })}
         {...rowCounts}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
+        {...workingLine}
         threadId={props.thread.threadId}
         unread={rowState.unread}
         title={props.thread.title}

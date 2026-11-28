@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { answerCodeRequest, readCodeRequests } from "./agentCodeRequests";
+import { PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE } from "@octant/contracts/pending-requests";
+import { answerCodeRequest, codeApprovalOpensThread, readCodeRequests } from "./agentCodeRequests";
 import type { OpenedLocalControlSession, LocalControlRequest } from "./localControl";
 const threadId = "00000000-0000-4000-8000-000000000001";
 const checkoutId = "00000000-0000-4000-8000-000000000002";
@@ -33,6 +34,7 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
                 {
                   ...common,
                   kind: "approval",
+                  approves: "tool-call",
                   answer: { threadId, checkoutId, approvalId: requestId },
                 },
                 {
@@ -69,6 +71,10 @@ it("reads ordinary provider approvals and questions, and answers approvals once 
   if (result.kind !== "ready") throw new Error("Code requests were unavailable");
   const requests = result.requests;
   expect(requests.map((request) => request.kind)).toEqual(["approval", "question"]);
+  expect(seen[0]).toMatchObject({
+    path: "/api/pending-requests",
+    headers: { accept: PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE },
+  });
   const approval = requests[0];
   if (approval === undefined) throw new Error("Missing approval");
   expect(await answerCodeRequest(session, approval, "always")).toContain("y or n");
@@ -148,6 +154,7 @@ it("reports a missing Code answer response instead of treating it as success", a
           {
             ...common,
             kind: "approval",
+            approves: "tool-call",
             answer: { threadId, checkoutId, approvalId: requestId },
           },
         ],
@@ -166,4 +173,50 @@ it("reports a missing Code answer response instead of treating it as success", a
   };
 
   expect(await answerCodeRequest(session, approval, "yes")).toContain("refused");
+});
+
+it("refuses to answer a move into or out of Plan with y or n, and sends the person to the thread that shows the plan", async () => {
+  const seen: LocalControlRequest[] = [];
+  const session: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "test",
+    close: async () => {},
+    send: async (request) => {
+      seen.push(request);
+      return {
+        status: 200,
+        body: {
+          requests: [
+            {
+              ...common,
+              kind: "approval",
+              approves: "level-change",
+              answer: { threadId, checkoutId, approvalId: requestId },
+            },
+            // A host that names neither subject is read as one that may change
+            // the level, so the terminal never allows a plan it cannot show.
+            {
+              ...common,
+              kind: "approval",
+              answer: { threadId, checkoutId, approvalId: requestId },
+            },
+          ],
+        },
+      };
+    },
+  };
+  const result = await readCodeRequests(session, threadId);
+  if (result.kind !== "ready") throw new Error("Code requests were unavailable");
+  expect(result.requests).toHaveLength(2);
+  seen.length = 0;
+  for (const approval of result.requests) {
+    const opens = codeApprovalOpensThread(approval);
+    expect(opens).toContain("Open this thread in the Octant app");
+    for (const text of ["y", "yes", "n"]) {
+      expect(await answerCodeRequest(session, approval, text)).toBe(opens);
+    }
+  }
+  expect(seen).toEqual([]);
+  const [levelChange] = result.requests;
+  expect(levelChange === undefined ? "" : codeApprovalOpensThread(levelChange)).toContain("Plan");
 });

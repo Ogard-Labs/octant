@@ -21,6 +21,7 @@ export function workApproval(): ApprovalPendingRequest {
     threadId: pendingIds.workThread,
     threadTitle: "Quarterly report",
     text: "Run `bun install`.",
+    approves: "tool-call",
     requestedAt: "2026-10-06T08:00:00.000Z",
     answer: { requestId: pendingIds.workRequest, expectedVersion: 3 },
   }) as ApprovalPendingRequest;
@@ -34,6 +35,7 @@ export function codeApproval(): ApprovalPendingRequest {
     threadId: pendingIds.codeThread,
     threadTitle: "Fix the parser",
     text: "Allow `bun test`?",
+    approves: "tool-call",
     requestedAt: "2026-10-06T08:01:00.000Z",
     answer: {
       threadId: pendingIds.codeThread,

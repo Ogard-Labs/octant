@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import type { CommandThread } from "./buildOctantCommands";
 import {
+  approvedOnlyInThread,
   childRequestHeadline,
   isChildPendingRequest,
   type ChildPendingRequest,
@@ -45,8 +46,9 @@ const MAX_TEXT_CHARACTERS = 64;
  * thread instead. A decision's options are short words the agent offered for
  * its next turn, and its row says the ask. A waiting subagent gets one Review
  * request command, which opens its request; it has no Approve or Deny here.
- * The agent's own approval, and a Work agent's own question, are answered in
- * its thread, so each is only the thread's row, which opens the thread.
+ * The agent's own approval, a Work agent's own question, and an approval to
+ * enter or leave Plan are answered in its thread, so each is only the
+ * thread's row, which opens the thread.
  * Nothing is listed when nothing waits, so the group never shows empty.
  */
 export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<OctantCommand> {
@@ -134,7 +136,9 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
         });
         continue;
       }
-      if (request.kind !== "approval") continue;
+      // An approval to enter or leave Plan is only the thread's row, like the
+      // agent's own approval: its card shows the plan and the level it sets.
+      if (request.kind !== "approval" || approvedOnlyInThread(request)) continue;
       const detail = `${MODE_LABEL[request.mode]} · ${shorten(request.text)}`;
       for (const decision of ["approved", "denied"] as const) {
         const verb = decision === "approved" ? "Approve" : "Deny";

@@ -1,6 +1,7 @@
 import {
   readCodeRequests,
   answerCodeRequest,
+  codeApprovalOpensThread,
   codeRequestId,
   type AgentCodeRequest,
 } from "./agentCodeRequests";
@@ -1299,7 +1300,7 @@ class AgentScreen {
           ? ""
           : `Request status unavailable: ${this.#requestReadRefusal}\n`) +
         (request.kind === "approval"
-          ? "y allow once · n deny — then Enter"
+          ? (codeApprovalOpensThread(request) ?? "y allow once · n deny — then Enter")
           : request.options.map((option, index) => `${index + 1}. ${option.label}`).join("\n") +
             "\nType an answer, then Enter.");
       this.#panel.visible = true;

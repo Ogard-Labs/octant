@@ -451,9 +451,9 @@ describe("WindowChrome", () => {
     // heavier than the 400 thread titles filed under it.
     expect(projectName).toContain("font-weight: var(--oct-weight-medium);");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
-    // A thread row spends colour on its state word and the Project's mark only:
-    // the working word takes the accent, the waiting one the warning tone, and
-    // the title is the strongest ink in the row.
+    // A thread row spends colour on its state mark and the Project's mark only:
+    // a running turn's spinner and age take the accent, a wait on the person
+    // the warning tone, and the title is the strongest ink in the row.
     expect(cssRule('.sidebar-navigation__thread-state[data-activity="working"]')).toContain(
       "var(--octant-accent-text)",
     );
@@ -464,7 +464,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".sidebar-navigation__thread-title")).toContain(
       "font-weight: var(--oct-weight-medium);",
     );
-    // The provider's mark sits small at the end of the row's last line.
+    // The provider's mark sits small at the end of the row's quiet line.
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
     expect(cssRule(".sidebar-navigation__thread-provider")).toContain("margin-inline-start: auto;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
@@ -782,7 +782,9 @@ describe("WindowChrome", () => {
     ]) {
       expect(styles).not.toContain(`${row}${shown}\n  > .sidebar-navigation__thread {`);
     }
-    expect(cssRule(`${row} .sidebar-navigation__thread-when`)).toContain("inline-size: 50px;");
+    expect(
+      cssRule(`${row} :is(.sidebar-navigation__thread-when, .sidebar-navigation__thread-state)`),
+    ).toContain("inline-size: 50px;");
     expect(cssRule(".sidebar-navigation__thread-actions")).toContain("right: 40px;");
     // At rest the only room kept is for the one always-visible overflow action
     // on a coarse pointer.

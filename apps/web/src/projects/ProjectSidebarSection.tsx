@@ -1,5 +1,8 @@
 import { CoordinatorWorkerCounts } from "./ProjectThreadList";
 import { NO_THREAD_ROW_STATE, sidebarThreadStatusIcon, threadRowState } from "./threadRowState";
+import { useWorkingRowLine } from "./useWorkingRowLine";
+import { SidebarRequestActions } from "./SidebarRequestActions";
+import { SidebarPendingRequestsContext } from "./sidebarPendingRequests";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -1675,6 +1678,9 @@ function ActivityThreadList(props: {
                   key={thread.navigationId}
                   lineageThreads={props.lineageThreads}
                   onSelectThread={props.onSelectThread}
+                  {...(props.openThreadIds === undefined
+                    ? {}
+                    : { openThreadIds: props.openThreadIds })}
                   thread={thread}
                 />
               ))}
@@ -1723,9 +1729,37 @@ function ActivityThreadButton(props: {
         waitingSince: props.thread.waitingSince,
         limited: props.thread.limited,
         shelf: props.thread.shelf,
+        updatedAt: props.thread.updatedAt,
         now,
       })
     : NO_THREAD_ROW_STATE;
+  const workingLine = useWorkingRowLine(props.thread, rowState.state?.status === "working");
+  // A thread waiting on the person that the window does not show can be
+  // answered or opened from its row; one on screen has its card in the thread.
+  // A thread whose pane sits behind a page such as Board stays open, but its
+  // card is not on screen, so the window's shown threads decide, not the open ones.
+  // Whether it waits is the thread's own fact, the one Status groups it under
+  // Needs you by, not the Status mark: a person who hides that mark still
+  // finds the thread under Needs you and can still answer it there.
+  const pendingRequests = useContext(SidebarPendingRequestsContext);
+  const onScreen =
+    pendingRequests?.shows(rowId) ??
+    (selected || props.openThreadIds?.some((candidate) => candidate === rowId) === true);
+  const answersHere = props.thread.activity === "attention" && !onScreen;
+  const listWaiting = pendingRequests?.listWaiting;
+  const waitingThreadId = props.thread.threadId;
+  const movedAt = props.thread.updatedAt;
+  useEffect(
+    () =>
+      answersHere && listWaiting !== undefined ? listWaiting(waitingThreadId, movedAt) : undefined,
+    [answersHere, listWaiting, movedAt, waitingThreadId],
+  );
+  const ask = answersHere ? pendingRequests?.forThread(props.thread.threadId) : undefined;
+  const lastLine = ask === undefined ? workingLine : { ...workingLine, activity: ask.text };
+  const openThread = () => {
+    tabs?.openAsPreview(props.thread.threadId);
+    props.onSelectThread(props.thread.navigationId);
+  };
   const hasMenu = !threadRowMenuIsEmpty(props.actions);
   const inlineActions = hasInlineActions(props.actions);
 
@@ -1739,6 +1773,7 @@ function ActivityThreadButton(props: {
         ...(pullRequest === undefined ? {} : { pullRequest, morePullRequests }),
         ...rowCounts,
         ...(rowState.label === undefined ? {} : { state: rowState.label }),
+        ...lastLine,
         ...(age === undefined ? {} : { age: age.label }),
       })}
       className="sidebar-navigation__thread activity-nav__thread justify-start"
@@ -1798,6 +1833,7 @@ function ActivityThreadButton(props: {
         {...(pullRequest === undefined ? {} : { pullRequest, morePullRequests })}
         {...rowCounts}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
+        {...lastLine}
         threadId={props.thread.threadId}
         unread={rowState.unread}
         {...(shows.status && props.thread.hiddenWorkers !== undefined
@@ -1815,20 +1851,17 @@ function ActivityThreadButton(props: {
       />
     </OctantButton>
   );
-  if (hasMenu) {
-    return (
-      <ThreadRowContextMenu
-        actions={props.actions}
-        className="activity-nav__row"
-        inlineActions={inlineActions}
-        {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
-        projectName={props.thread.projectName}
-        row={row}
-        thread={props.thread}
-      />
-    );
-  }
-  return (
+  const listed = hasMenu ? (
+    <ThreadRowContextMenu
+      actions={props.actions}
+      className="activity-nav__row"
+      inlineActions={inlineActions}
+      {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
+      projectName={props.thread.projectName}
+      row={row}
+      thread={props.thread}
+    />
+  ) : (
     <div className="activity-nav__row">
       <ThreadRowInfoPopup
         {...(parentTitle === undefined ? {} : { lineageParentTitle: parentTitle })}
@@ -1838,6 +1871,18 @@ function ActivityThreadButton(props: {
       >
         {row}
       </ThreadRowInfoPopup>
+    </div>
+  );
+  if (!answersHere) return listed;
+  return (
+    <div className="activity-nav__asking">
+      {listed}
+      <SidebarRequestActions
+        ask={ask}
+        key={ask?.key ?? "none"}
+        onOpen={openThread}
+        title={props.thread.title}
+      />
     </div>
   );
 }

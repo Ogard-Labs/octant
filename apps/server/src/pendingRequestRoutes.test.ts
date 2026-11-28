@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import {
   decodeWaitingAsk,
+  PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE,
   PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
   TurnDecisionReview,
   type WaitingAsk,
@@ -161,6 +162,21 @@ describe("pending request route", () => {
       asks: [offer],
       offerHostRun,
     });
+  });
+
+  it("says what an approval approves only to a client that asks for it, so an older one still reads the list", async () => {
+    const levelChange = decodePendingRequest({ ...codeApproval, approves: "level-change" });
+    const toolCall = decodePendingRequest({ ...workApproval, approves: "tool-call" });
+    const { route } = fixture({ code: [levelChange], work: [toolCall], chat: [] });
+    const subjects = request();
+    subjects.headers.set("accept", PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE);
+    expect((await (await route(subjects))?.json()).requests).toEqual([levelChange, toolCall]);
+    const offers = request();
+    offers.headers.set("accept", PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE);
+    for (const older of [request(), offers]) {
+      const { requests } = await (await route(older))?.json();
+      expect(requests).toEqual([codeApproval, workApproval]);
+    }
   });
 
   it("lists a finished turn's decision for a local window, oldest first among requests", async () => {

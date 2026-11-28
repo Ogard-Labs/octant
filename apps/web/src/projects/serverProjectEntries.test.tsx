@@ -20,7 +20,7 @@ function view() {
 }
 
 describe("useServerCodeProjectsSource", () => {
-  it("names each server Project by its registered alias and folder", async () => {
+  it("names each server Project by its registered alias and folder, and its server by the alias", async () => {
     const { result } = renderHook(() =>
       useServerCodeProjectsSource(
         { read: vi.fn().mockResolvedValue(view()) },
@@ -31,6 +31,7 @@ describe("useServerCodeProjectsSource", () => {
     expect(result.current.projects[0]).toMatchObject({
       name: "Service",
       location: "devbox:/home/build/service",
+      serverName: "devbox",
     });
     expect(serverProjectEntries(result.current.projects)).toMatchObject([
       { kind: "server-project", displayName: "Service", location: "devbox:/home/build/service" },
@@ -46,6 +47,7 @@ describe("useServerCodeProjectsSource", () => {
     );
     await waitFor(() => expect(result.current.projects).toHaveLength(1));
     expect(result.current.projects[0]?.location).toBe("/home/build/service");
+    expect(result.current.projects[0]?.serverName).toBeUndefined();
   });
 
   it("lists a Work Project on a server apart from the Code ones, with its threads' binding", async () => {

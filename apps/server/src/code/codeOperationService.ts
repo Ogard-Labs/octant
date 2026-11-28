@@ -105,6 +105,7 @@ import {
   type AgentRun,
   type AgentRunId,
   type MentionableThreadId,
+  type PendingApprovalSubject,
   type PendingRequest,
   type ProjectId,
   type ScaffoldEntry,
@@ -1319,6 +1320,8 @@ export type CodeTurnPendingRequest = {
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
+      /** Whether the ask is one tool call or a move into or out of Plan. */
+      readonly approves: PendingApprovalSubject;
       /** Set only when a Browser call is waiting on this site. */
       readonly browserOrigin?: string;
     }
@@ -3261,6 +3264,7 @@ export class CodeOperationService {
               ...shared,
               kind: "approval",
               text: request.summary,
+              approves: request.approves,
               ...(request.browserOrigin === undefined
                 ? {}
                 : { browserOrigin: request.browserOrigin }),

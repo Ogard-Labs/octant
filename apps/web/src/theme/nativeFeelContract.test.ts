@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -13,6 +13,15 @@ function rule(css: string, selector: string): string {
   const start = css.indexOf(`${selector} {`);
   expect(start, `${selector} is declared`).toBeGreaterThanOrEqual(0);
   return css.slice(start, css.indexOf("}", start) + 1);
+}
+
+/** The renderer's stylesheets and components, without their tests. */
+function sourceFiles(directory: string): ReadonlyArray<string> {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return /\.(css|tsx?)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
+  });
 }
 
 const octant = read("styles/octant.css");
@@ -99,6 +108,42 @@ describe("native feel", () => {
     for (const reading of [".chat-transcript", "pre", "textarea", "input"]) {
       expect(octant).toContain(reading);
     }
+  });
+
+  it("declares the hand only on a document link or a mention in text", () => {
+    // Every other control, a disclosure's summary and a choice's label
+    // included, keeps the arrow, as a native window's controls do.
+    const handAllowed: ReadonlyArray<readonly [file: string, selector: string]> = [
+      ["styles/octant.css", ":where(a[href])"],
+      ["threadReferences/thread-reference.css", ".thread-reference"],
+      ["threadReferences/thread-reference.css", ".thread-reference-link"],
+      ["trackerMentions/tracker-mention.css", ".tracker-mention"],
+      // A subagent's name in the row above the composer is drawn as an
+      // underlined link to its thread.
+      ["agents/agent-hierarchy.css", ".composer-subagents__name--link"],
+      // The questionnaire's own styles move with the questionnaire's redesign.
+      ["styles/octant.css", ".questionnaire__checkbox"],
+      ["styles/octant.css", ".questionnaire-summary summary"],
+    ];
+    const hands: Array<readonly [file: string, selector: string]> = [];
+    for (const file of sourceFiles(webRoot)) {
+      const name = relative(webRoot, file);
+      if (file.endsWith(".css")) {
+        const css = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+        for (const match of css.matchAll(/cursor:\s*pointer/g)) {
+          const before = css.slice(0, match.index);
+          const open = before.lastIndexOf("{");
+          const selector = before.slice(before.lastIndexOf("}", open) + 1, open).trim();
+          hands.push([name, selector]);
+        }
+      } else {
+        const source = readFileSync(file, "utf8");
+        if (/\bcursor-pointer\b/.test(source)) hands.push([name, "cursor-pointer"]);
+        if (/cursor:\s*["'`]pointer["'`]/.test(source)) hands.push([name, "style cursor"]);
+      }
+    }
+    const allowed = new Set(handAllowed.map(([file, selector]) => `${file} ${selector}`));
+    expect(hands.filter(([file, selector]) => !allowed.has(`${file} ${selector}`))).toEqual([]);
   });
 
   it("underlines nothing in chrome on pointer hover", () => {

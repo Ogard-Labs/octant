@@ -20,7 +20,7 @@ import {
 import { ParseResult } from "effect";
 import {
   MAX_WAITING_ASK_TEXT_LENGTH,
-  PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE,
+  PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE,
   PendingRequest,
   WaitingAsk,
   type WaitingAskKind,
@@ -608,7 +608,7 @@ async function readMobileWaitingAsks(
     const response = await transport.authenticatedFetch({
       method: "GET",
       path: "/api/pending-requests",
-      headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
+      headers: { accept: PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE },
     });
     if (!response.ok) return asks;
     const body: unknown = await response.json();

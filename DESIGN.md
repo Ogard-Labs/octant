@@ -438,7 +438,9 @@ for headings, and 700 nowhere in chrome.
 
 **Window manners.** Chrome behaves like a window, not a page: its text does not
 select (`user-select: none` on the root, with reading matter opting back in),
-controls keep the arrow and only a link in content shows the hand, nothing in
+controls keep the arrow and only a link or a mention in reading text shows the
+hand (a disclosure's summary and a choice's label keep the arrow too, and a
+contract test lists every hand), nothing in
 chrome underlines on pointer hover, there is no tap highlight and no focus edge
 on a click (see Focus), icons and links do not drag, and scroll areas draw the
 system's overlay scrollbars. The desktop app already withholds the browser's
@@ -899,37 +901,46 @@ account's 20px avatar and the folder's 14px glyph share the centre) starts at
 the inset, its label 8px after the icon, and its trailing things (a shortcut, a
 count, an age, a provider mark, the filter row's last glyph) end on the inset at
 the right. A group heading's text starts at the icon column and its count ends
-on that right edge; groups stand 8px apart, and the first stands 8px under the
-Project filter row. A thread row is up to three
-lines, one button with one accessible name ("title, Project, branch, pull
-request, status or time"):
+on that right edge; groups stand 12px apart, a step more than the rows inside
+them, and the first stands 8px under the Project filter row. A thread row is up
+to three lines, title first (maintainer decision, 2026-11-28), one button with
+one accessible name ("title, Project, branch, pull request, status or time"):
 
-- **Top line** (12px, secondary ink): the Project's 16px mark (its own icon, or
-  two initials on a rounded square in a hue derived from the Project, the one
-  colour a row spends besides its state) and name, then the branch in the mono
-  face and the muted ink, folded in the middle when long. At its end, the state
-  in words with its icon when the thread is running (Working 14m, in the accent)
-  or waiting on the person (Needs you, in the warning tone), otherwise how long
-  ago it moved (3h, 2d) in the muted ink; new activity is a named dot beside the
-  time. The Project tree names the Project in its heading, so its top line is
-  the branch alone.
-- **Title** (13px, 500, primary ink): one line with an ellipsis, the strongest
-  text in the row. A row with nothing to name on a top line carries the state or
-  the time at the end of this line.
-- **Detail line** (12px, muted ink), only when there is something for it: who
-  started the thread, a worker's coordinator, and the thread's counted marks
-  (the pull requests by state glyph and number with the rest counted, #1205 +2;
-  the stack's size; the issue it belongs to; how many other issues it wrote
-  to), each with its words in a tooltip and the row's name
-  ([Workspace: Sidebar](docs/design/workspace.md#sidebar)). The provider's 12px
-  mark ends the last line the row has. Colour is spent on the pull request's
-  state and the Project's mark only; the row's other facts keep the ink roles.
-  In a narrow sidebar the issue key truncates first.
+- **Title line** (13px, 500, primary ink): one line with an ellipsis, the
+  strongest text in the row. It ends with how the thread stands: the status
+  mark and a short age when the thread is running (the spinner and 9m, in the
+  accent), waiting on the person (a pause mark and 5m since it last moved, in
+  the warning tone) or held by a usage limit (the alert mark and the time to
+  its reset), otherwise how long ago it moved (3h, 2d) in the muted ink, with
+  new activity as a named dot beside the time. The state's words (Working 9m,
+  Needs you) are the mark's tooltip and part of the row's name, never drawn.
+- **Quiet line** (12px, muted ink), when there is something for it: the
+  Project's 12px mark (its own icon, or two initials on a rounded square in a
+  hue derived from the Project, the one colour a row spends besides its state)
+  and name, the branch in the mono face, folded in the middle when long, and
+  the thread's counted marks (the pull requests by state glyph and number with
+  the rest counted, #1205 +2; the stack's size; the issue it belongs to; how
+  many other issues it wrote to), each with its words in a tooltip and the
+  row's name ([Workspace: Sidebar](docs/design/workspace.md#sidebar)). The
+  provider's 12px mark ends this line, or the title line when the row has no
+  quiet line. The Project tree names the Project in its heading, so its quiet
+  line has no Project. In a narrow sidebar the issue key truncates first.
+- **Third line** (12px, muted ink), only when there is something for it: who
+  started the thread, a worker's coordinator, and on every Working row (while the view
+  shows Status) what the turn is doing in plain words (Running bun bench.ts, Editing
+  composerThreadDraft.ts), followed for a server Project by the server's glyph
+  and name in a hairline. The activity truncates first. A Needs-you row of a
+  thread the window does not show says here what the thread asks, and carries
+  the approval card's Allow once and Deny (small, primary and ghost) and a
+  ghost Open under it when the thread waits on one approval of one tool call,
+  or Open alone ([Workspace](docs/design/workspace.md#sidebar)).
 
-A two-line row is 48px (6 + 16 + 20 + 6) and a three-line row 64px, the text
-block centred; Compact density takes the lines to 14 and 18, so a two-line row
-is 44px. A group heading stands 8px clear of the rows above it. A thread
-with no top line and no detail is the title alone at the row height. The open thread takes
+Colour is spent on the state, the pull request's state and the Project's mark
+only; the row's other facts keep the ink roles. A row draws from two sizes, 13
+for the title and 12 for everything else. A two-line row is 48px (6, 20, 16 and 6) and a three-line row 64px, the text block centred; Compact density takes the
+lines to 18 and 14, so a two-line row is 44px. A group heading stands 12px clear
+of the rows above it. A thread with no quiet line is the title alone at the row
+height. The open thread takes
 `--oct-wash-selected` and the primary ink; a pointed-at row takes
 `--oct-wash-hover`. A thread open in another pane
 of the window carries a 2px by 14px mark in `--oct-fg-soft` at its leading edge,

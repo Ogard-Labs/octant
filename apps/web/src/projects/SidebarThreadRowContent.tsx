@@ -2,7 +2,15 @@ import type { PullRequestStackPlace, ThreadBoardPullRequestSummaries } from "@oc
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { pullRequestStateMark } from "../code/pullRequestState";
 import { stackPlaceSentence } from "../code/stackPlace";
-import { Bot, CircleDot, GitBranch, Layers, Network, type IconComponent } from "../ui/icons";
+import {
+  Bot,
+  CircleDot,
+  GitBranch,
+  Layers,
+  Network,
+  Server,
+  type IconComponent,
+} from "../ui/icons";
 import { ProjectMark } from "./ProjectMark";
 import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
 import type { ReactNode } from "react";
@@ -59,11 +67,13 @@ export function middleTruncate(label: string, limit: number = BRANCH_CHARACTERS)
   return `${characters.slice(0, head).join("")}…${characters.slice(characters.length - (keep - head)).join("")}`;
 }
 
-/** What a row says of its thread's state: a word, with an icon when it has one. */
+/** What a row says of its thread's state: a mark and a short age, with the words in its tooltip. */
 export interface SidebarThreadRowState {
   readonly status: SidebarThreadStatus;
-  /** The visible words, such as "Working 14m" or "Needs you". */
+  /** The state in words, such as "Working 14m" or "Needs you", for the tooltip. */
   readonly text: string;
+  /** The short age drawn beside the mark, such as "14m"; absent when there is none to say. */
+  readonly age?: string | undefined;
   readonly icon?: IconComponent | undefined;
 }
 
@@ -75,8 +85,12 @@ export interface SidebarThreadRowState {
 export function sidebarThreadRowLabel(input: {
   readonly title: string;
   readonly projectName?: string | undefined;
+  /** The server a server Project's thread runs on. */
+  readonly host?: string | undefined;
   readonly branch?: string | undefined;
   readonly state?: string | undefined;
+  /** What a running turn is doing, in plain words. */
+  readonly activity?: string | undefined;
   readonly age?: string | undefined;
   readonly pullRequest?: ThreadRowPullRequest | undefined;
   /** The thread's pull requests beyond `pullRequest`. */
@@ -98,6 +112,8 @@ export function sidebarThreadRowLabel(input: {
       ? undefined
       : `${input.issueKey === undefined ? "" : "and "}${issueCountWords(input.issueCount)}`,
     input.state ?? input.age,
+    input.activity,
+    input.host === undefined ? undefined : `on ${input.host}`,
   ]
     .filter((part): part is string => part !== undefined && part !== "")
     .join(", ");
@@ -107,21 +123,25 @@ export function sidebarThreadRowLabel(input: {
  * What a sidebar thread row shows, in the one shape the Project tree and the
  * Activity feed share: up to three lines.
  *
- * The top line is small and quiet and says where the thread lives: the
- * Project's mark and name (the Activity feed, where nothing else says it), then
- * the branch in the monospace face. Its end carries the thread's state in words
- * (Working 14m, Needs you) when it has one to report, and otherwise how long
- * ago it moved. The title is the strongest text in the row, on a line of its
- * own. A third line appears only when there is something to put on it: who
- * started the thread, a worker's coordinator, and the thread's counted marks
- * (its pull requests in the first one's state colour, its stack, the issue it
- * belongs to and how many others it wrote to). The provider's mark sits at the
- * end of whichever line is last.
+ * The title comes first, the strongest text in the row, and its line ends
+ * with how the thread stands: a status mark and a short age (a spinner and
+ * "9m" while a turn runs, a pause mark and "5m" while it waits on the person),
+ * or, with no state to report, how long ago it moved and a dot for new
+ * activity. The state's words stay in the tooltip and the row's accessible
+ * name. A quiet second line says where the thread lives and what it carries:
+ * the Project's small mark and name (the Activity feed, where nothing else
+ * says it), the branch in the monospace face, the counted marks (its pull
+ * requests in the first one's state colour, its stack, the issue it belongs
+ * to and how many others it wrote to), and the provider's mark at its end. A
+ * third line appears only when there is something to put on it: who started
+ * the thread, a worker's coordinator, and, while a turn runs, what it is doing
+ * in plain words ("Running bun bench.ts") with the server it runs on when its
+ * Project lives on one.
  *
  * Which facts appear is still each view's own property choice: a caller passes
  * only what its view currently shows, and an absent fact leaves no gap. A row
- * with no place to name carries its state or age at the end of the title line
- * instead of opening a line for it.
+ * with nothing for its second line keeps the provider's mark at the end of the
+ * title line instead of opening a line for it.
  */
 export function SidebarThreadRowContent(props: {
   readonly title: string;
@@ -159,23 +179,31 @@ export function SidebarThreadRowContent(props: {
   readonly checkout?: ThreadCheckoutChip;
   /** The short age, or the time a snoozed thread returns. */
   readonly age?: { readonly label: string; readonly title?: string };
-  /** The thread's state in words; it replaces the age at the end of the top line. */
+  /** The thread's state; its mark and age replace the plain age at the end of the title line. */
   readonly state?: SidebarThreadRowState;
+  /** What a running turn is doing, in plain words, on the row's last line. */
+  readonly activity?: string;
+  /** The server a server Project's running turn is on, named beside its activity. */
+  readonly host?: string;
   /** New activity: a dot with its own name beside the age. */
   readonly unread?: boolean;
   /** A coordinator's workers that its row stands for, counted beside the title. */
   readonly workerCounts?: ReactNode;
 }) {
   const startedBy = useAgentThreadName(props.threadId);
-  const hasPlace = props.projectName !== undefined || props.checkout !== undefined;
   const issueCount = props.issueCount ?? 0;
-  const hasDetail =
-    startedBy !== undefined ||
-    props.coordinatorName !== undefined ||
+  const hasQuietLine =
+    props.projectName !== undefined ||
+    props.checkout !== undefined ||
     props.pullRequest !== undefined ||
     props.stack !== undefined ||
     props.issueKey !== undefined ||
     issueCount > 0;
+  const hasDetail =
+    startedBy !== undefined ||
+    props.coordinatorName !== undefined ||
+    props.activity !== undefined ||
+    props.host !== undefined;
   const pullRequestMark =
     props.pullRequest === undefined ? undefined : pullRequestStateMark(props.pullRequest.state);
   const StateIcon = props.state?.icon;
@@ -191,7 +219,7 @@ export function SidebarThreadRowContent(props: {
         ) : StateIcon === undefined ? null : (
           <StateIcon aria-hidden="true" size={12} />
         )}
-        <span>{props.state.text}</span>
+        {props.state.age === undefined ? null : <span>{props.state.age}</span>}
       </span>
     ) : props.age === undefined && props.unread !== true ? null : (
       <span className="sidebar-navigation__thread-when">
@@ -232,7 +260,13 @@ export function SidebarThreadRowContent(props: {
     );
   return (
     <span className="sidebar-navigation__thread-copy">
-      {hasPlace ? (
+      <span className="sidebar-navigation__thread-main">
+        <span className="oct-nav-name sidebar-navigation__thread-title">{props.title}</span>
+        {props.workerCounts}
+        {trailing}
+        {hasQuietLine ? null : provider}
+      </span>
+      {hasQuietLine ? (
         <span className="sidebar-navigation__thread-context">
           {props.projectName === undefined ? null : (
             <span className="sidebar-navigation__thread-project" title={props.projectName}>
@@ -248,36 +282,6 @@ export function SidebarThreadRowContent(props: {
               <GitBranch aria-hidden="true" size={12} />
               <span className="sidebar-navigation__thread-checkout-label">
                 {middleTruncate(props.checkout.label)}
-              </span>
-            </span>
-          )}
-          {trailing}
-        </span>
-      ) : null}
-      <span className="sidebar-navigation__thread-main">
-        <span className="oct-nav-name sidebar-navigation__thread-title">{props.title}</span>
-        {props.workerCounts}
-        {hasPlace ? null : trailing}
-        {hasDetail ? null : provider}
-      </span>
-      {hasDetail ? (
-        <span className="sidebar-navigation__thread-detail">
-          {startedBy === undefined ? null : (
-            <span className="sidebar-navigation__thread-project" title={`Started by ${startedBy}`}>
-              <Bot aria-hidden="true" size={12} />
-              <span className="sidebar-navigation__thread-project-label">
-                {`Started by ${startedBy}`}
-              </span>
-            </span>
-          )}
-          {props.coordinatorName === undefined ? null : (
-            <span
-              className="sidebar-navigation__thread-project"
-              title={`Coordinator: ${props.coordinatorName}`}
-            >
-              <Network aria-hidden="true" size={12} />
-              <span className="sidebar-navigation__thread-project-label">
-                {props.coordinatorName}
               </span>
             </span>
           )}
@@ -339,6 +343,40 @@ export function SidebarThreadRowContent(props: {
             </span>
           )}
           {provider}
+        </span>
+      ) : null}
+      {hasDetail ? (
+        <span className="sidebar-navigation__thread-detail">
+          {startedBy === undefined ? null : (
+            <span className="sidebar-navigation__thread-project" title={`Started by ${startedBy}`}>
+              <Bot aria-hidden="true" size={12} />
+              <span className="sidebar-navigation__thread-project-label">
+                {`Started by ${startedBy}`}
+              </span>
+            </span>
+          )}
+          {props.coordinatorName === undefined ? null : (
+            <span
+              className="sidebar-navigation__thread-project"
+              title={`Coordinator: ${props.coordinatorName}`}
+            >
+              <Network aria-hidden="true" size={12} />
+              <span className="sidebar-navigation__thread-project-label">
+                {props.coordinatorName}
+              </span>
+            </span>
+          )}
+          {props.activity === undefined ? null : (
+            <span className="sidebar-navigation__thread-activity" title={props.activity}>
+              {props.activity}
+            </span>
+          )}
+          {props.host === undefined ? null : (
+            <span className="sidebar-navigation__thread-host" title={`On ${props.host}`}>
+              <Server aria-hidden="true" size={12} />
+              <span className="sidebar-navigation__thread-host-label">{props.host}</span>
+            </span>
+          )}
         </span>
       ) : null}
     </span>

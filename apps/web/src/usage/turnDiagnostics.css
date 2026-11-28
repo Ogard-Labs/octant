@@ -6,7 +6,6 @@
 
 .turn-diagnostics__details summary {
   color: var(--oct-muted);
-  cursor: pointer;
   font-size: var(--oct-text-xs);
 }
 

@@ -31,6 +31,7 @@ const codeApproval = {
   threadId: "code-thread",
   threadTitle: "Fix the flaky build",
   text: "Run: bun run test",
+  approves: "tool-call",
   requestedAt: at(4),
   answer: { threadId: "code-thread", checkoutId: "checkout-1", approvalId: "approval-1" },
 } as unknown as PendingRequest;
@@ -58,6 +59,7 @@ const workApproval = {
   threadId: "work-thread",
   threadTitle: "Quarterly notes",
   text: "Delete: old-draft.md",
+  approves: "tool-call",
   requestedAt: at(2),
   answer: { requestId: "work-request-1", expectedVersion: 7 },
 } as unknown as PendingRequest;
@@ -356,6 +358,44 @@ describe("the Needs you card", () => {
       expectedVersion: 7,
       resolution: { kind: "approval", approved: false },
     });
+  });
+
+  it("opens the thread for an approval to enter or leave Plan, and for one its host does not say is one tool call, and answers none of them", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    const onOpenThread = vi.fn();
+    const enterPlan = { ...codeApproval, approves: "level-change" } as unknown as PendingRequest;
+    const leavePlan = { ...workApproval, approves: "level-change" } as unknown as PendingRequest;
+    const unnamed = {
+      ...codeApproval,
+      threadId: "older-host-thread",
+      threadTitle: "Tidy the changelog",
+      approves: undefined,
+      answer: { threadId: "older-host-thread", checkoutId: "checkout-3", approvalId: "approval-3" },
+    } as unknown as PendingRequest;
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          onOpenThread,
+          pendingRequestClient: reader([enterPlan, leavePlan, unnamed]),
+        }),
+      ),
+    );
+    const card = await findCard();
+    for (const [title, request] of [
+      ["Fix the flaky build", enterPlan],
+      ["Quarterly notes", leavePlan],
+      ["Tidy the changelog", unnamed],
+    ] as const) {
+      const row = await within(card).findByRole("group", { name: `${title} is waiting for you` });
+      expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
+      expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
+      await user.click(within(row).getByRole("button", { name: "Review request" }));
+      expect(onOpenThread).toHaveBeenLastCalledWith(request);
+    }
+    expect(answerClients.codeClient.executeOperation).not.toHaveBeenCalled();
+    expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
   });
 
   it("answers a Code question with a numbered choice and keeps the response as evidence first", async () => {

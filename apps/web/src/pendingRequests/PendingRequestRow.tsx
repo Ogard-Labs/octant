@@ -12,6 +12,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { WorkerMark } from "../projects/coordinatorMarks";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
+  approvedOnlyInThread,
   childRequestHeadline,
   isChildPendingRequest,
   isFindOnlyPendingRequest,
@@ -85,6 +86,8 @@ const NO_REVIEW_REASON = {
  * words as the thread's next turn. A waiting subagent's request, and the
  * agent's own approval or Work question, are only found here: each has one
  * action, Review request, and no answer; the thread's own cards decide them.
+ * So is an approval to enter or leave Plan, whose plan and target level only
+ * the thread's card shows.
  * The row owns only its own busy state and its refusal line; it carries no
  * authority and knows nothing about the card or board that lists it.
  */
@@ -324,7 +327,7 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       ) : null}
       {open && !deferred ? (
         <div className="pending-request__actions">
-          {isFindOnlyPendingRequest(request) ? (
+          {isFindOnlyPendingRequest(request) || approvedOnlyInThread(request) ? (
             <OctantButton
               onClick={() => props.onOpenThread(request)}
               size="sm"

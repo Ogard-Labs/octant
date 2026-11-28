@@ -16,7 +16,11 @@ import {
   type WaitingAskAnswer,
   type WaitingAskAnswerClients,
 } from "./pendingRequests";
-import { usePendingRequests, type PendingRequestFreshness } from "./usePendingRequests";
+import {
+  usePendingRequests,
+  type PendingRequestFreshness,
+  type SharedPendingRequestRead,
+} from "./usePendingRequests";
 
 /** What a surface needs to list and answer the requests of the modes it speaks for. */
 export interface PendingRequestRowsSource extends PendingRequestFreshness {
@@ -29,6 +33,11 @@ export interface PendingRequestRowsSource extends PendingRequestFreshness {
   readonly modes: ReadonlyArray<OctantMode>;
   /** The clock the waits read, advanced once a minute by the shell. */
   readonly now: number;
+  /**
+   * Another surface's read to list from instead of a read of this surface's
+   * own. The rows then follow that read's signals, and `refresh` re-reads it.
+   */
+  readonly shared?: SharedPendingRequestRead;
 }
 
 /**
@@ -68,11 +77,14 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
     request: PendingRequest,
     response: PendingRequestResponse,
   ) => Promise<PendingRequestAnswerResult>;
+  /** Reads again now, or once more after the read in flight lands. */
+  readonly refresh: () => void;
 } {
-  const { read, refresh } = usePendingRequests(
-    source?.pendingRequestClient,
+  const own = usePendingRequests(
+    source?.shared === undefined ? source?.pendingRequestClient : undefined,
     source ?? NO_FRESHNESS,
   );
+  const { read, refresh } = source?.shared ?? own;
   const [refused, setRefused] = useState<ReadonlyMap<string, PendingRequestRowEntry>>(new Map());
   const modes = source?.modes;
   const answerClients = source?.answerClients;
@@ -182,6 +194,7 @@ export function usePendingRequestRows(source: PendingRequestRowsSource | undefin
   return {
     rows,
     answer,
+    refresh,
     defer,
     asks,
     answerAsk,

@@ -130,6 +130,18 @@ const PendingRequestFields = {
   requestedAt: UtcTimestamp,
 } as const;
 
+/**
+ * What a Code or Work approval approves. `tool-call` is one call the agent
+ * wants to make, and allowing it once allows only that call. `level-change`
+ * asks to enter or leave Plan: allowing it changes the level the thread's
+ * later turns run at and, when it leaves Plan, accepts the plan it hands over.
+ * Only the thread's own approval card shows that plan and the level it moves
+ * to, so a list answers a `tool-call` alone and opens the thread for anything
+ * else, including an approval from a host that names neither.
+ */
+export const PendingApprovalSubject = Schema.Literal("tool-call", "level-change");
+export type PendingApprovalSubject = typeof PendingApprovalSubject.Type;
+
 /** `resolve-work-request` / `cancel-work-request` take these two fields. */
 export const WorkPendingRequestAnswer = Schema.Struct({
   requestId: WorkRequestId,
@@ -328,9 +340,11 @@ const LeadQuestionFields = {
 } as const;
 
 export const PendingRequest = Schema.Union(
-  Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
-    strict,
-  ),
+  Schema.Struct({
+    ...WorkPendingRequestFields,
+    kind: Schema.Literal("approval"),
+    approves: Schema.optional(PendingApprovalSubject),
+  }).annotations(strict),
   Schema.Struct({
     ...WorkPendingRequestFields,
     kind: Schema.Literal("question"),
@@ -344,6 +358,7 @@ export const PendingRequest = Schema.Union(
     ...CodePendingRequestFields,
     kind: Schema.Literal("approval"),
     text: CodeApprovalSummaryText,
+    approves: Schema.optional(PendingApprovalSubject),
     /**
      * The site a Browser call is waiting to open. Present only on a Browser
      * site ask, so a client can tell it from a provider's own tool approval
@@ -460,6 +475,15 @@ export type WaitingAskKind = typeof WaitingAskKind.Type;
 /** Opt in to shared offer rows without breaking older clients' closed ask-kind list. */
 export const PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE =
   "application/vnd.octant.service-offers+json";
+
+/**
+ * Opt in to shared offer rows and to what each Code and Work approval
+ * approves (`approves`). An ask is decoded strictly even inside a lenient host
+ * answer, so a client built before the field refuses the whole list when it
+ * meets one; a host sends it only to a client that asks with this type.
+ */
+export const PENDING_REQUEST_APPROVAL_SUBJECTS_MEDIA_TYPE =
+  "application/vnd.octant.approval-subjects+json";
 
 /**
  * An ask a thread's agent raised outside its provider's own approvals and

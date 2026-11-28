@@ -311,6 +311,7 @@ const codeRequest = (id: string, title: string) =>
         threadTitle: title,
         requestedAt: now,
         kind: "approval",
+        approves: "tool-call",
         text: `Approve ${title}?`,
         answer: {
           threadId: id,

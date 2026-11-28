@@ -113,8 +113,8 @@ describe("the shell's edges and gaps", () => {
     );
     expect(rule(settings, ".setrow-label")).toContain("var(--oct-line-label)");
     expect(rule(settings, ".setrow-hint")).toContain("var(--oct-line-detail)");
-    // A thread row is three whole-pixel lines: the top line (16, 14 compact),
-    // the title (20, 18 compact) and the detail line, plus 4px above and below.
+    // A thread row is up to three whole-pixel lines: the title (20, 18
+    // compact), the quiet line (16, 14 compact) and the detail line.
     expect(rule(shell, ".sidebar-navigation__thread-title")).toContain(
       "line-height: var(--thread-line-title);",
     );
@@ -124,7 +124,7 @@ describe("the shell's edges and gaps", () => {
     expect(rule(projectThreads, ".move-thread__title")).toContain("var(--oct-line-label)");
   });
 
-  it("gives a two-line thread row 48px (44 compact) with 6px above and below, and a heading 8px of clearance", () => {
+  it("gives a two-line thread row 48px (44 compact) with 6px above and below, and a heading 12px of clearance", () => {
     // 6 + 16 + 20 + 6 = 48; compact lines of 14 and 18 make 6 + 14 + 18 + 6 = 44.
     expect(rule(shell, ".sidebar-navigation__thread")).toContain(
       "padding-block: calc(var(--oct-space-1) * 1.5);",
@@ -134,10 +134,10 @@ describe("the shell's edges and gaps", () => {
     expect(
       rule(shell, 'html[data-octant-density="compact"] .sidebar-navigation__thread'),
     ).toContain("--thread-line-title: 18px;");
-    // The heading's clearance is the list's own 8px gap; a margin on top of it
+    // The heading's clearance is the list's own 12px gap; a margin on top of it
     // made 16px between groups.
     expect(root).not.toMatch(/\.activity-nav__group:not\(:first-child\) > h2 \{/);
-    expect(rule(root, ".activity-nav")).toContain("gap: 8px;");
+    expect(rule(root, ".activity-nav")).toContain("gap: var(--oct-space-3);");
   });
 
   it("gives the Move to Project list one icon box, whether the Project has a picture or not", () => {
@@ -297,7 +297,7 @@ describe("the shell's edges and gaps", () => {
     expect(body).toContain("line-height: var(--oct-line-detail)");
   });
 
-  it("draws the title band's mark, the thread's disclosures, the rail's badge and the thinking rule in the one hairline", () => {
+  it("draws the title band's mark, the thread's disclosures and the thinking rule in the one hairline", () => {
     expect(rule(root, ".environment-mark")).toMatch(/border:\s*1px solid var\(--oct-hairline\)/);
     expect(rule(components, ".turn-activity__disclosure + .turn-activity__disclosure")).toContain(
       "1px solid var(--oct-hairline)",
@@ -305,10 +305,15 @@ describe("the shell's edges and gaps", () => {
     expect(
       rule(components, ".turn-activity__toolchain > .turn-activity__disclosure:first-child"),
     ).toContain("1px solid var(--oct-hairline)");
-    expect(rule(shell, ".sidebar-rail__badge")).toMatch(
-      /border:\s*1px solid var\(--oct-hairline\)/,
-    );
     expect(rule(shell, ".sidebar-rail__divider")).toMatch(/background:\s*var\(--oct-hairline\)/);
+  });
+
+  it("writes a rail count as a plain numeral beside its icon, with no pill, edge or fill", () => {
+    const badge = rule(shell, ".sidebar-rail__badge");
+    expect(badge).not.toMatch(/border|background|radius|padding/);
+    expect(badge).toContain("color: var(--oct-fg-2);");
+    expect(badge).toContain("font-size: var(--oct-text-xs);");
+    expect(badge).toContain("font-variant-numeric: tabular-nums;");
   });
 
   it("draws the rule beside reasoning at 1px in the strong border, which reads where the hairline did not", () => {

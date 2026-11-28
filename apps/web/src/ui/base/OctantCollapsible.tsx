@@ -47,7 +47,7 @@ export function OctantCollapsible({
       <summary
         {...summaryProps}
         className={[
-          "flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden",
+          "flex list-none items-center gap-2 [&::-webkit-details-marker]:hidden",
           summaryClassName,
         ]
           .filter(Boolean)

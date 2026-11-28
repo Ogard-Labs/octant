@@ -411,9 +411,9 @@ hairline above it and no ground of its own: the list scrolls above it, never
 under it, because an opaque ground drew a slab on the translucent sidebar (the
 narrow drawer scrolls as one column, so there the foot sticks and paints the
 drawer's opaque ground). Both headings have one form: the label, a trailing
-chevron and the count at the right edge. A running thread is listed only there, with its live
-"Working 4m"; one waiting on an approval or an answer is not working and stays
-at the top under Needs you, with its state in words. A pinned thread and a
+chevron and the count at the right edge. A running thread is listed only there, with its spinner
+and live time; one waiting on an approval or an answer is not working and stays
+at the top under Needs you, with its pause mark and how long it has waited. A pinned thread and a
 coordinator keep their place among the pins, and in the Activity feed a thread
 waiting on an approval or an answer sits under Priority whatever its read
 state. Settled rows are the compact
@@ -430,6 +430,46 @@ A mode with no threads at all shows a short first-run note in Status and the
 Activity feed instead of an empty list: "No threads yet" in the secondary ink, then
 "Start one from the composer. Your threads gather here." A search or filter
 that matched nothing keeps its own message, which says nothing was deleted.
+
+**Answering from a Needs-you row** (maintainer decision, 2026-11-28). A
+Needs-you row in Status or the Activity feed whose thread the window does not
+show, whether or not the row shows its Status mark, says on its
+third line what the thread asks, and carries its answers under it: **Allow
+once** and **Deny**, the approval card's own words, then **Open**, after the
+row and its own hover actions in keyboard order. A thread the window shows is
+the focused thread or one in another pane while the workspace is on screen. A
+page that covers the workspace, such as Board, the Inbox or Settings, keeps the
+panes behind it open but shows none of them, so their rows offer answers. The
+answers appear only when the host lists exactly one request for that thread and
+the host says it approves one tool call (`approves: "tool-call"`): not an
+approval to enter or leave Plan, which changes the level the thread's later
+turns run at and, leaving Plan, accepts a plan only the thread's card shows;
+not an approval from a host that does not say what it approves; not a
+question, a decision or a secret; not a subagent's or the agent's own approval
+(which the thread finds rather than answers elsewhere); and not a Browser site
+ask, whose site the row has no room to name. Otherwise, and in a window with no
+pending-request reader, the row offers Open alone. Allow once and Deny send the
+same answer command the thread's approval card and Home's Needs you card send,
+through the clients the thread view already holds; Allow once never remembers
+the answer for the Project, which stays on the card. The host re-checks the
+answer, and a refusal is one quiet line under the buttons until the host stops
+listing the request. The rows list from the window's own pending-request read,
+the one that counts the threads a subagent or the agent itself holds waiting,
+which re-reads on Work, Code and tool-approval changes; the sidebar does not
+follow those changes alongside it. The sidebar adds a read
+only for Chat navigation, which the window's read leaves out because a
+streaming reply moves it on every delta, and only while a waiting row the window
+does not show is listed: when Chat moved since the sidebar last read and some
+listed row offers answers, or a waiting row appears or its thread moves. A row
+does not know its mode, so a Code row that moves after Chat moved reads once
+more than it needs. A sidebar shown again after it was collapsed reads once
+when it lists a waiting row, since it cannot tell what Chat did meanwhile.
+Never on a timer. A thread the window shows offers nothing:
+its card is in the thread. A server Project's rows under On your servers keep
+the Project tree's row in every arrangement, so they offer no answers in place;
+the row opens the thread, whose card answers it. The arrangement belongs to the
+local list above them, and giving the server group the answers would mean
+moving it out of that list for one group.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -659,13 +699,18 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 The sidebar speaks about what a thread is doing now with one vocabulary, in
 descending strength: `working` (Working), `attention` (Needs attention),
 `limited` (Limited), `woke` (Snooze ended), `unread` (New activity), and
-`waiting` (Waiting).
+`waiting` (Waiting). A row draws each as a mark and a short age, never as the
+word: a spinner for Working, a pause mark for Needs you (a wait on the person
+is a pause, not a failure, so the alert mark is kept for Limited), and the age
+since the turn started, since the thread last moved, or until a limit resets
+(maintainer decision, 2026-11-28). The words stay in the tooltip and the row's
+accessible name.
 Waiting (maintainer request, 2026-11-25) is a Code thread between turns that
 still waits on a pull request: its agent's watch, or babysitting or Auto-fix it
 repairs. The host projects the earliest start of those waits as the thread's
 `waitingSince`, never while a turn runs or waits on the person, and never for a
-settled or archived thread, and the row reads "Waiting 6m" beside a
-fading-clock mark, as Working gives its elapsed time. It ranks last because a
+settled or archived thread, and the row draws a fading-clock mark and "6m"
+(its tooltip "Waiting 6m"), as Working gives its elapsed time. It ranks last because a
 watch stays on after it wakes the thread: ranked higher, every turn the watch
 started would hide behind "Waiting" and drop out of a view saved for New
 activity, so the row shows the new-activity dot until the person reads it. `@octant/contracts`
@@ -677,10 +722,11 @@ Project heading, a filter, and a sort all resolve through that policy, so they
 cannot rank the same facts differently.
 
 - **Limited** says a provider usage limit holds the thread's latest turn
-  (maintainer decision, 2026-11-26). The row says it in the warning tone with
-  the alert mark, as "Limited 2h" in the row's short form while the provider
-  named a reset still ahead, and as "Limited" when it named none or the stop is
-  a billing one, which no clock clears. It ranks below Needs you, because a
+  (maintainer decision, 2026-11-26). The row draws the alert mark in the
+  warning tone with the time until the reset ("2h", its tooltip "Limited 2h")
+  while the provider named a reset still ahead, and the mark alone, named
+  "Limited", when it named none or the stop is a billing one, which no clock
+  clears. It ranks below Needs you, because a
   question or an approval is more urgent, and above Snooze ended and New
   activity. The thread stays in the active list; the Status arrangement gives
   it no heading of its own. The host decides which stop is current by the
@@ -1332,7 +1378,10 @@ wording, and reads are specified in [Start screen](start-screen.md).
   shipped later arrives with its own default.
 - **Needs you elsewhere.** Board cards, the command palette, the Inbox, and the
   Review page read the same host list and answer in place through the same
-  commands. The desktop menu bar lists the same waiting threads but only opens
+  commands. Every one of them, and the Needs you card, answers an approval only
+  when the host says it approves one tool call; an approval to enter or leave
+  Plan, or one whose host does not say, offers Review request (in the palette,
+  only the thread's row), which opens the thread. The desktop menu bar lists the same waiting threads but only opens
   a thread; it answers nothing. See
   [Needs you across surfaces](start-screen.md#needs-you-across-surfaces).
 
@@ -3024,6 +3073,12 @@ that changes the thread's level shows, as the app's card does, the whole plan
 the agent hands over and then the level it moves to, directly above the y/n
 line. The panel ends the bottom-pinned transcript, so a long plan scrolls above
 those two lines instead of pushing them out of view.
+A Code approval is answered with y or n only when the host lists it as one
+tool call (`approves: "tool-call"`). The pending list does not carry a Code
+plan, so an approval to enter or leave Plan, or one from a host that does not
+say what it approves, shows its summary and asks the person to open the thread
+in the app, where the card shows the plan and the level it moves to; the
+terminal sends no answer for it.
 
 Submitted questionnaires collapse into an expandable, readable summary of
 the questions, selected labels, written answers, and comment. The journal
@@ -3221,20 +3276,40 @@ and carries the full date and time as its tooltip and accessible label. It is
 as an age changes, and it ends at the same edge on every row, left of the
 provider mark. The end of a row is one fixed order, never changed by hover,
 focus or an open menu: the title, then the slot (the age, or the thread's state
-in words in its place, or the row's hover actions, which fade in over the age
-inside a slot sized for them), then the provider mark. The provider mark and the
-title's truncation never move when the pointer arrives. The Project tree and the Activity feed draw the same
-row: up to three lines (see [the sidebar in DESIGN.md](../../DESIGN.md)). A small top
-line names where the thread lives, in a fixed order (the Project's mark and name,
-then the branch in the mono face) and ends with the thread's state in words
-(Working 14m, Needs you) or, with none to report, how long ago it moved. The
-title is the strongest text on a line of its own. A third line appears only for
-who started the thread, a worker's coordinator, or the thread's counted marks,
-and the provider's mark ends the last line. The Project tree's top
-line is the branch alone, because the Project is its heading. A row with no place
-to name carries its state or time at the end of the title line. The row is one
+mark and its short age in its place, or the row's hover actions, which fade in
+over the age inside a slot sized for them), with the provider mark at the end of
+the line beneath. The provider mark and the title's truncation never move when
+the pointer arrives. The Project tree and the Activity feed draw the same row:
+up to three lines, title first (maintainer decision, 2026-11-28; see [the
+sidebar in DESIGN.md](../../DESIGN.md#lists-and-rows)). The title line carries
+the thread's name, the strongest text in the row, and ends with how the thread
+stands: its status mark and a short age (a spinner and "9m" while a turn runs,
+a pause mark and "5m" while it waits on the person, the alert mark and "2h"
+while a usage limit holds it), or, with no state to report, how long ago it
+moved. The state's words ("Working 9m", "Needs you", "Limited 2h") stay in the
+mark's tooltip, and the row's accessible name says the state with its age in
+words ("Working, 9 minutes", "Needs attention, 5 minutes", "Limited, resets in
+2 hours"). A quiet second line in the meta
+ink names where the thread lives and what it carries, in a fixed order: the
+Project's 12px mark and name, the branch in the mono face, the counted marks,
+and the provider's mark at its end. A third line appears only for who started
+the thread, a worker's coordinator, or a running turn's activity. Every Working
+row, while the view shows Status, says on it what the turn is doing, in plain words made from the live step
+the host already sends ("Running bun bench.ts", "Editing
+composerThreadDraft.ts", "Reading notes.md", "Searching for useDraft"), and
+"Thinking" before the turn's first tool or from a host that reports no step;
+the step names one tool at a time, so the line never counts files. A server
+Project's working row names the server after it, its glyph and alias in a
+hairline, read from the server Project catalog the window already holds; a
+local Project names no host (maintainer decision, 2026-11-28). The activity
+truncates first, and both are read after the state in the row's accessible
+name. The Project tree's second line has no
+Project, because the Project is its heading. A row with nothing for its second
+line keeps the provider's mark at the end of the title line. The row is one
 button whose accessible name reads title, Project, branch, the counted marks,
-then state or time; a state is never colour alone.
+then state or time; a state is never colour alone. Before 2026-11-28 the place
+stood on a small top line above the title and the state was a word, which read
+as a web list rather than a Mac sidebar.
 
 The counted marks let a person scan the list for how much each thread carries
 (maintainer decision, 2026-11-26). Each is a 12px glyph and a number, and each
@@ -3412,9 +3487,9 @@ own; the framed panel (the sidebar and the stage, one outline) begins at its
 right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
-carries the places only: Home, the Inbox as an icon with its count badge (under
+carries the places only: Home, the Inbox as an icon with its count (under
 Colour the icon takes the Inbox tile's blue; the hover and current fills and
-the badge stay neutral, and under Mono and increased contrast the icon stays
+the count stay neutral, and under Mono and increased contrast the icon stays
 grey), the Board, which stands for Running, To review and Done today (three
 look-alike count icons made the rail the busiest column in the window; they
 stay as tiles in a sidebar with no rail beside it, maintainer request,
@@ -3432,7 +3507,10 @@ maintainer request, 2026-11-25). The sidebar keeps its header (modes, search, ne
 hide), the Project list with its view, filter, and Activity controls, and the
 threads; its profile row is not drawn beside the rail, whose account face is
 the same control, so nothing is offered twice. Rail icons are 16px on a 36px face, and a selected place keeps its glyph and takes the
-face's fill and the primary ink; every rail control names itself in its accessible name and in a
+face's fill and the primary ink; a count is a plain numeral at the icon's upper
+trailing shoulder (`--oct-text-xs`, `--oct-fg-2`, tabular figures, 99+ past 99)
+with no pill, edge or fill, because a bordered pill read as a web badge beside
+the native glyphs (maintainer decision, 2026-11-28); every rail control names itself in its accessible name and in a
 label that opens beside the rail on hover or keyboard focus. Destinations
 have their own marks: Inbox a tray, Running a spinner, To review a checked
 clipboard, Done today a double check, Board a kanban, Issues the issue dot,

@@ -5420,6 +5420,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             kind: "approval",
             approvalId: event.approvalId,
             summary: event.summary,
+            approves: event.action === "level-change" ? "level-change" : "tool-call",
             ...(browserOrigin === undefined ? {} : { browserOrigin }),
           });
         } else if (event.kind === "input-requested" && active.questions.has(event.requestId)) {

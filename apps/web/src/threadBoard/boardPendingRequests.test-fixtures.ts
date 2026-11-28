@@ -22,6 +22,8 @@ export function workRequest(input: {
   readonly minutesAgo: number;
   readonly requestId?: string;
   readonly options?: ReadonlyArray<{ readonly label: string }>;
+  /** What an approval approves; one tool call unless a test says otherwise. */
+  readonly approves?: "tool-call" | "level-change";
 }): PendingRequest {
   return {
     mode: "work",
@@ -30,7 +32,9 @@ export function workRequest(input: {
     threadId: input.threadId,
     threadTitle: input.threadTitle,
     text: input.text,
-    ...(input.kind === "question" ? { options: input.options ?? [] } : {}),
+    ...(input.kind === "question"
+      ? { options: input.options ?? [] }
+      : { approves: input.approves ?? "tool-call" }),
     requestedAt: minutesAgo(input.minutesAgo),
     answer: { requestId: input.requestId ?? `request-${input.threadId}`, expectedVersion: 7 },
   } as unknown as PendingRequest;
@@ -44,6 +48,8 @@ export function codeRequest(input: {
   readonly text: string;
   readonly minutesAgo: number;
   readonly options?: ReadonlyArray<{ readonly label: string }>;
+  /** What an approval approves; one tool call unless a test says otherwise. */
+  readonly approves?: "tool-call" | "level-change";
 }): PendingRequest {
   return {
     mode: "code",
@@ -52,7 +58,9 @@ export function codeRequest(input: {
     threadId: input.threadId,
     threadTitle: input.threadTitle,
     text: input.text,
-    ...(input.kind === "question" ? { options: input.options ?? [] } : {}),
+    ...(input.kind === "question"
+      ? { options: input.options ?? [] }
+      : { approves: input.approves ?? "tool-call" }),
     requestedAt: minutesAgo(input.minutesAgo),
     answer:
       input.kind === "approval"

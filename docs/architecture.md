@@ -491,7 +491,7 @@ kind's payload schema loads with its card, which lowered the gzip budget by the
 phone's React Native needs and the workspace shares, raised it by its own size
 (maintainer decision, 2026-11-25), and the
 Settled thread state raised it by 1,592 B of main entry, 187 B of CSS and 358 B
-gzipped (maintainer decision, 2026-11-24). On 2026-11-26 the gzip budget had 57 B left while several features waited to land, each already loading its own views on first use, and further cuts meant moving existing menus off the first load; the maintainer raised it once by 2,048 B so those features stop competing for the same few bytes. The budgets are exact bytes with no margin for measurement noise, because the same
+gzipped (maintainer decision, 2026-11-24). On 2026-11-26 the gzip budget had 57 B left while several features waited to land, each already loading its own views on first use, and further cuts meant moving existing menus off the first load; the maintainer raised it once by 2,048 B so those features stop competing for the same few bytes. On 2026-11-28 the refreshed sidebar rows, composer and approval card, all drawn on the first screen, came over the gzip budget, and the maintainer raised it to their measured need, re-measured against main when they land (771 B for the sidebar layer on main ad312be3b). The budgets are exact bytes with no margin for measurement noise, because the same
 source measures identically on macOS and Linux with Bun 1.4.4.
 
 The window build marks every `Schema` call pure and treats every workspace
@@ -18217,7 +18217,15 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Chat's [Agents dock](design/workspace.md#subagents) does not extend that scope. An approval a child raises still covers that request only and
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
-  open, which a provider's own approval never carries. Text keeps
+  open, which a provider's own approval never carries. Every Code and Work
+  approval also says what it approves, `approves: "tool-call"` or
+  `"level-change"` (an ask to enter or leave Plan, whose plan and target level
+  the list does not carry). A client answers only a `tool-call` from a list
+  and opens the thread for anything else, including an approval without the
+  field; the host still checks every answer. The host sends the field only to
+  a client that reads with `application/vnd.octant.approval-subjects+json`,
+  because an ask is decoded strictly and a client built before the field would
+  refuse the whole list; any other reader gets each approval without it. Text keeps
   each mode's own bounds and sanitization. A device the host's own person paired reads it as a local window does (maintainer decision, 2026-11-12); the remote action classifier names no action for it, so the route refuses every other device session. The route lists under the device's own scope, so every source answers what that
   device's own answer commands and ask routes would admit (an MCP prompt its
   own turn raised, never a local window's or the host's). A waiting

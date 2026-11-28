@@ -20,6 +20,8 @@ export interface ServerCodeProject {
   readonly name: string;
   /** `alias:folder`, or the folder alone once the server left the registry. */
   readonly location: string;
+  /** The registered server's alias; absent once the server left the registry. */
+  readonly serverName?: string;
   readonly folder?: string;
   readonly actions?: ReadonlyArray<ProjectAction>;
   /** A Code Project's own folder checkout, as the host derives it; a routine there binds it. */
@@ -107,6 +109,7 @@ export function useServerCodeProjectsSource(
             name: project.name,
             location: alias === undefined ? project.folder : `${alias}:${project.folder}`,
             folder: project.folder,
+            ...(alias === undefined ? {} : { serverName: alias }),
             ...(project.actions === undefined ? {} : { actions: project.actions }),
           };
         };

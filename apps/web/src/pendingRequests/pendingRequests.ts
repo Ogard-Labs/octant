@@ -149,6 +149,17 @@ export function isFindOnlyPendingRequest(
   );
 }
 
+/**
+ * An approval a list may not answer: one that asks to enter or leave Plan, or
+ * one whose host does not say it gates a single tool call. Allowing a level
+ * change moves the level the thread's later turns run at and, leaving Plan,
+ * accepts a plan only the thread's own card shows, so a list opens the thread
+ * for it instead of offering Approve and Deny.
+ */
+export function approvedOnlyInThread(request: PendingRequest): boolean {
+  return request.kind === "approval" && request.approves !== "tool-call";
+}
+
 const ROLE_WORD: Readonly<Record<ChildPendingRequest["child"]["role"], string>> = {
   research: "Research",
   implementation: "Implementation",
@@ -320,7 +331,7 @@ export async function answerPendingRequest(
   response: PendingRequestResponse,
 ): Promise<PendingRequestAnswerResult> {
   try {
-    if (isFindOnlyPendingRequest(request)) return NOT_DELIVERED;
+    if (isFindOnlyPendingRequest(request) || approvedOnlyInThread(request)) return NOT_DELIVERED;
     if (request.kind === "decision") {
       if (response.kind !== "choice") return NOT_DELIVERED;
       if (!request.options.some((option) => option.label === response.label)) {

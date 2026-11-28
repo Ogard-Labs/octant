@@ -104,7 +104,6 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   // Count badges and numbered marks.
   ".bell .bell-count",
   ".code-board__filter-count",
-  ".sidebar-rail__badge",
   ".first-run__rail-marker",
   ".endpoint-flow__step-number",
   ".provider-catalog__step-marker",
