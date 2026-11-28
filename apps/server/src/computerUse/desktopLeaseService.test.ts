@@ -35,7 +35,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { bundledDesktopProviders } from "./bundledDesktopProviders";
+import { bundledDesktopProviders, cuaDesktopSupportedOnPlatform } from "./bundledDesktopProviders";
 import {
   createDesktopLeaseService,
   type DesktopLeaseService,
@@ -118,6 +118,8 @@ interface HostState {
   readonly deniedScopes: Set<string>;
   /** The user Octant runs as, whose home holds a daemon-run provider's socket. */
   daemonUserId?: number;
+  platform: NodeJS.Platform;
+  hasScreen: boolean;
 }
 
 function openJournal(connection: SqliteConnection) {
@@ -145,8 +147,8 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
     journal,
     projection,
     hostTag,
-    platform: "linux",
-    hasScreen: false,
+    platform: state.platform,
+    hasScreen: state.hasScreen,
     providers: () => state.providerList?.() ?? state.providers,
     recipe: (owner) => state.recipes.get(String(owner.threadId)),
     thread: (owner) => state.threads.get(String(owner.threadId)),
@@ -188,6 +190,8 @@ function host(
     readonly executionPolicy?: ProviderExecutionPolicy;
     /** The monthly cap a person set at start, or `null` for none. */
     readonly spendCap?: number | null;
+    readonly platform?: NodeJS.Platform;
+    readonly hasScreen?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-desktop-lease-"));
@@ -205,6 +209,8 @@ function host(
     asked: [],
     askedTransfers: [],
     transferAnswers: [],
+    platform: options.platform ?? "linux",
+    hasScreen: options.hasScreen ?? false,
     whileDeciding: () => undefined,
     roots: new Map([threadA, threadB, threadC].map((threadId) => [threadId, checkout])),
     threads: new Map(
@@ -1211,19 +1217,23 @@ describe("desktop lease service", () => {
     expect(runningDesktops(fake.backend)).toBe(1);
 
     // A file leaves the machine for a placement off it, Full access included.
+    // Only Linux can verify the open handle's path; elsewhere transfer refuses `path-unverifiable`.
     state.recipes.set(threadC, inPlacement("other-machine", cloudCredential));
     const away = await acquired(service, threadC);
     writeFileSync(join(checkout, "app.bin"), "built app");
-    await expect(
-      service.transfer({
-        owner: code(threadC),
-        actor: agentOf(threadC),
-        leaseId: away,
-        path: "app.bin",
-      }),
-    ).resolves.toMatchObject({ status: "delivered" });
-    expect(state.askedTransfers.map((request) => request.asks)).toEqual(["off-machine"]);
-    expect(state.askedTransfers[0]?.provider).toMatchObject({ locality: "cloud", billed: false });
+    const transferResult = await service.transfer({
+      owner: code(threadC),
+      actor: agentOf(threadC),
+      leaseId: away,
+      path: "app.bin",
+    });
+    if (process.platform === "linux") {
+      expect(transferResult).toMatchObject({ status: "delivered" });
+      expect(state.askedTransfers.map((request) => request.asks)).toEqual(["off-machine"]);
+      expect(state.askedTransfers[0]?.provider).toMatchObject({ locality: "cloud", billed: false });
+    } else {
+      expect(transferResult).toEqual({ status: "refused", reason: "path-unverifiable" });
+    }
     await service.release({ owner: code(threadC), actor: agentOf(threadC), leaseId: away });
     expect(runningDesktops(fake.backend)).toBe(1);
 
@@ -2213,6 +2223,91 @@ describe("desktop lease service over the bundled cloud and daemon-run providers"
     expect(runningDesktops(cloud.backend)).toBe(0);
     expect(cloud.backend.calls()).toContain("verifyGone");
   });
+
+  it("loads Cua Spaces on Linux and macOS behind socket readiness, and not on Windows", async () => {
+    expect(cuaDesktopSupportedOnPlatform("linux")).toBe(true);
+    expect(cuaDesktopSupportedOnPlatform("darwin")).toBe(true);
+    expect(cuaDesktopSupportedOnPlatform("win32")).toBe(false);
+
+    const cloud = createFakeDesktopProvider({
+      id: "cloud.example",
+      locality: "cloud",
+      billed: true,
+    });
+    const spaces = spacesOf();
+    let socketReady = false;
+    const macHost = host({ platform: "darwin", hasScreen: true, providers: [cloud] });
+    macHost.state.daemonUserId = 1_000;
+    macHost.state.providerList = bundledDesktopProviders({
+      cloud: cloud.provider,
+      ...(cuaDesktopSupportedOnPlatform("darwin") ? { daemon: spaces.provider } : {}),
+      credentialStore: () => true,
+      daemonReady: () => socketReady,
+    });
+    const macService = macHost.restart();
+    await macService.start();
+
+    expect(macService.destination()).toMatchObject({
+      status: "available",
+      kind: "macos-host",
+      leasable: [
+        { providerId: "cloud.example" },
+        { providerId: "spaces.example", daemon: true, needsSetup: "daemon-not-connected" },
+      ],
+    });
+    expect(spaces.backend.calls()).toEqual([]);
+
+    macHost.state.recipes.set(threadA, onSpaces);
+    await expect(
+      macService.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toEqual({ status: "refused", reason: "needs-setup" });
+    expect(spaces.backend.calls()).toEqual([]);
+
+    socketReady = true;
+    expect(macService.destination()).toMatchObject({
+      status: "available",
+      kind: "macos-host",
+      leasable: [{ providerId: "cloud.example" }, { providerId: "spaces.example", daemon: true }],
+    });
+    await expect(
+      macService.acquire({ owner: code(threadA), actor: agentOf(threadA) }),
+    ).resolves.toMatchObject({ status: "acquired", lease: { providerId: "spaces.example" } });
+    expect(runningDesktops(spaces.backend)).toBe(1);
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "refuses artifact transfer on macOS as path-unverifiable without asking, journaling, or delivering",
+    async () => {
+      const spaces = spacesOf();
+      const macHost = host({ platform: "darwin", hasScreen: true, providers: [spaces] });
+      macHost.state.daemonUserId = 1_000;
+      macHost.state.recipes.set(threadA, onSpaces);
+      const macService = macHost.restart();
+      await macService.start();
+
+      writeFileSync(join(macHost.checkout, "app.bin"), "built app");
+      const started = await macService.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+      expect(started).toMatchObject({ status: "acquired" });
+      if (started.status !== "acquired") return;
+
+      let confirmed = false;
+      const result = await macService.transfer({
+        owner: code(threadA),
+        actor: agentOf(threadA),
+        leaseId: started.lease.leaseId,
+        path: "app.bin",
+        confirm: async () => {
+          confirmed = true;
+          return "approved";
+        },
+      });
+
+      expect(result).toEqual({ status: "refused", reason: "path-unverifiable" });
+      expect(confirmed).toBe(false);
+      expect(sentEvents(macHost.connection)).toEqual([]);
+      expect(spaces.backend.delivered()).toEqual([]);
+    },
+  );
 });
 
 describe("desktop lease service for a person's Desktop tab", () => {

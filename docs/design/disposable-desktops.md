@@ -39,7 +39,7 @@ artifact transfer, the agent's binding of `octant_computer` to a lease, the
 Desktop pane, a Code Project's stored recipe with its settings editor, the
 cloud HTTPS port, the E2B driver, the local-daemon port, recipe
 placements, and the Cua driver for this machine and the person's other
-machine exist, and a host offers E2B and, on Linux, Cua for leasing, each
+machine exist, and a host offers E2B and, on Linux and macOS, Cua for leasing, each
 listing what it still needs set up, so a recipe can name any of them (see
 [Built in slice 1](#built-in-slice-1),
 [Built in slice 2](#built-in-slice-2),
@@ -871,8 +871,9 @@ Rules this slice resolved:
   checks between them saw the checkout. So the path the kernel gives the open
   handle (`/proc/self/fd`) must be the walked path, or the read refuses
   `changed-while-read`. Node has no such query on macOS, so a read there
-  refuses `path-unverifiable`; no desktop provider runs on macOS yet, and one
-  that does needs a handle-path check there first.
+  refuses `path-unverifiable`; on macOS, Cua Spaces ships screen and input
+  first while artifact transfer stays refused until a macOS handle-path check
+  exists (maintainer decision, 2026-11-28).
 - **Hard links are accepted.** A file with more than one name is sent. Only
   something that already reaches a file can link it into the checkout, and it
   could as well copy it there; Cargo links its build outputs, so refusing
@@ -1859,27 +1860,36 @@ where Cua documents no `network` `none`.
   `cua.env.v1` protocol version. Windows has no Unix socket path here and
   offers no Cua provider.
 - The driver is loaded for teardown and listed for leasing from the first
-  start, so a recipe can name it before any lease exists; a Project uses it
-  only after a person saves a recipe that does. It is loaded on Linux hosts
-  now and on macOS once Cua is offered there. The lease service still asks
-  the daemon nothing until a Cua lease is journaled
+  start on both Linux and macOS hosts, behind the same `~/.cua/cua.sock`
+  readiness check, so a recipe can name it before any lease exists; a Project
+  uses it only after a person saves a recipe that does. Startup and passive
+  provider listing ask the daemon nothing; the host contacts Cua only when a
+  person starts a Cua lease, queries off-machine placements, or reconciles an
+  already-journaled Cua lease
   ([Built: offering E2B and Cua](#built-offering-e2b-and-cua)).
-- On macOS a Space gives a Mac without a screen its first desktop
-  provider, but [artifact transfer](#built-in-slice-3) still refuses
-  `path-unverifiable` there until a handle-path check exists for macOS. That
-  check is its own item; screen and input work without it.
+- When no Cua daemon is detected (`daemon-not-connected`), Settings shows a
+  plain "Get Cua Spaces" link (Settings › Computer use › Disposable desktops
+  and the Project desktop recipe editor); Octant never bundles, installs,
+  starts, updates, or signs it in (maintainer decision, 2026-11-28).
+- On macOS a Space gives a Mac with or without a screen a local disposable
+  desktop provider. The person's Desktop tab screen and input ship first while
+  [artifact transfer](#built-in-slice-3) — and therefore agent app launch and
+  screenshot control that require a transferred app — stays refused
+  (`path-unverifiable`) there until a handle-path check exists for macOS
+  (maintainer decision, 2026-11-28).
 
 ### Threat model additions
 
-| Risk                                                                    | Mitigation                                                                                                                                                               |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| The daemon socket can link clouds, set budgets, share Spaces, shut down | Declared method list in the driver's code, pinned by a test; no MCP or tool-call method; caller headers refused; confined tool launches get no home, so never the socket |
-| A planted or redirected socket impersonates the daemon                  | Home-relative declared path, no environment override, no symlink on any component, owner and `0600` checks, parent not writable by others, version and feature checks    |
-| A Space outlives a host that died                                       | Labels and journal-before-create; restart reconciliation; a billed placement only with the cloud's own stop, told to the person and reserved in the spend estimate (C5)  |
-| The relay reads the session                                             | Screen refused on `relay_https`; off-machine placements confirm where the Space runs                                                                                     |
-| A Space on this machine reaches the Octant server                       | QEMU VM with network `none`, verified from the create's answer (C7)                                                                                                      |
-| The daemon or Space answers with hostile or oversized data              | Port bounds on time and bytes; frames bounded before decoding; labels and names length-bounded; results taint the thread                                                 |
-| Teardown is reported but billing continues                              | Octant claims only that the person's daemon no longer lists the Space; billed spend bounded by the monthly cap; Hetzner and Azure refused (C5)                           |
+| Risk                                                                    | Mitigation                                                                                                                                                                      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The daemon socket can link clouds, set budgets, share Spaces, shut down | Declared method list in the driver's code, pinned by a test; no MCP or tool-call method; caller headers refused; confined tool launches get no home, so never the socket        |
+| A planted or redirected socket impersonates the daemon                  | Home-relative declared path, no environment override, no symlink on any component, owner and `0600` checks, parent not writable by others, version and feature checks           |
+| A Space outlives a host that died                                       | Labels and journal-before-create; restart reconciliation; a billed placement only with the cloud's own stop, told to the person and reserved in the spend estimate (C5)         |
+| The relay reads the session                                             | Screen refused on `relay_https`; off-machine placements confirm where the Space runs                                                                                            |
+| A Space on this machine reaches the Octant server                       | QEMU VM with network `none`, verified from the create's answer (C7)                                                                                                             |
+| The daemon or Space answers with hostile or oversized data              | Port bounds on time and bytes; frames bounded before decoding; labels and names length-bounded; results taint the thread                                                        |
+| Teardown is reported but billing continues                              | Octant claims only that the person's daemon no longer lists the Space; billed spend bounded by the monthly cap; Hetzner and Azure refused (C5)                                  |
+| Ancestor-directory swap during artifact transfer on macOS               | Node exposes no open-handle path query on macOS, so artifact reads refuse `path-unverifiable` before asking, journaling, or delivering until a macOS handle-path check is built |
 
 ### Rejected alternatives
 
@@ -2107,16 +2117,17 @@ Rules this sub-slice resolved:
   shell that starts the app in its own session and exits, so the
   `StartProcess` stream ends at once; a stream the daemon never ends times
   out.
-- **Octant asks the person's daemon nothing until it has a Cua lease.** The
-  driver is loaded on Linux hosts, so teardown reaches every Cua lease a host
-  ever journaled, and the lease service makes no restart listing for a
+- **Startup and passive provider listing ask the person's daemon nothing.** The
+  driver is loaded on Linux and macOS hosts, so teardown reaches every Cua lease
+  a host ever journaled, and the lease service makes no restart listing for a
   daemon-run provider until the journal holds a lease of it, so a host that
-  never leased from Cua makes no call to the socket. A listing makes the
-  daemon wait for Cua's relay, and a host that never chose Cua has nothing
-  there to find. The driver is listed from the first start rather than after
-  its first lease, because a recipe can name only a provider the host lists
-  and no first lease could otherwise happen. macOS loads it once Cua is
-  offered there.
+  never leased from Cua makes no call to the socket at startup or during
+  provider listing (Cua is contacted only when a person starts a Cua lease or
+  queries off-machine placements). A listing makes the daemon wait for Cua's
+  relay, and a host that never chose Cua has nothing there to find. The driver
+  is listed from the first start rather than after its first lease, because a
+  recipe can name only a provider the host lists and no first lease could
+  otherwise happen.
 - **The daemon a lease used is recorded and kept.** The `requested` event
   records the declared socket path and the user id whose home holds it. A
   provider that declares a daemon is never leased on a host that has no user
@@ -2639,18 +2650,21 @@ like the rest of the editor, which no paired client mounts yet
 
 ### Built: offering E2B and Cua
 
-The host now lists the E2B driver on every host and the Cua driver on every
-Linux host, so a Project's recipe can name either and its threads can lease
-from it. The maintainer asked for this on 2026-10-31, ahead of the live
-smokes, which remain the evidence for what the recordings cannot show.
+The host lists the E2B driver on every host and the Cua driver on every Linux
+and macOS host, so a Project's recipe can name either and its threads can lease
+from it. Offering both providers ahead of live smokes was asked for by the
+maintainer on 2026-10-31, and macOS Cua loading with screen and input first
+plus the plain "Get Cua Spaces" Settings link was approved on 2026-11-28; the
+live smokes remain the evidence for what the recordings cannot show.
 
 - **Listed from the first start.** `bundledDesktopProviders`
   (`apps/server/src/computerUse/bundledDesktopProviders.ts`) assembles the
-  loaded drivers: host-local when its programs were ready, E2B, and Cua. Cua
-  is no longer joined only after its first lease, which made a first lease
-  impossible. The lease service keeps its rule that a daemon-run provider is
-  asked nothing, not even a restart listing, until the journal holds a lease of
-  it, so listing the driver makes no call to the person's daemon.
+  loaded drivers: host-local on Linux when its programs were ready, E2B, and
+  Cua on Linux and macOS (`cuaDesktopSupportedOnPlatform`). Cua is no longer
+  joined only after its first lease, which made a first lease impossible. The
+  lease service keeps its rule that a daemon-run provider is asked nothing, not
+  even a restart listing, until the journal holds a lease of it, so listing the
+  driver makes no call to the person's daemon.
 - **Offering is not enabling.** A Project uses a provider only after a person
   saves a recipe that names it, and a cloud recipe also needs the person's own
   key. A billed start still asks the person first, in every posture, and the
@@ -2668,23 +2682,32 @@ smokes, which remain the evidence for what the recordings cannot show.
   provider, marks one that needs setup, disables choosing it, and lists what
   each such provider lacks under the selector in visible text, says in a
   line what each provider is (where it runs, whose account, whether it bills),
-  and starts a new recipe from the first provider that is ready. The pane's
+  and starts a new recipe from the first provider that is ready. When Cua
+  Spaces has no daemon connected (`daemon-not-connected`), both Settings ›
+  Computer use › Disposable desktops and the Project desktop recipe editor
+  show a plain "Get Cua Spaces" link (`SettingsSetupLink`) to `https://cua.ai`,
+  never bundling, installing, starting, updating, or signing it in. The pane's
   Start refusal for `needs-setup` points to those settings.
 - **Where the tool service exists.** The Computer tool service is created
   wherever any desktop provider is offered, not only where host-local is
   loaded, so a Mac with no screen of its own can bind a thread to a leased
-  cloud desktop. A Mac with a screen is unchanged.
+  cloud or Cua desktop. A Mac with a screen is unchanged.
 - **Evidence.** `desktopLeaseService.test.ts` lists both providers before
-  any lease, asks the daemon nothing until a lease is journaled, refuses a
-  start on a provider that needs setup with no provider call, still asks
-  before a billed start, and destroys the lease with its thread;
-  `desktopDaemonPort.test.ts` covers the socket reading;
-  `projectPolicy.test.ts` the recipe rule; the editor and model tests the
-  wording and the disabled choice. Rendered QA of the editor ran headless,
-  light and dark, for ready providers and for providers that need setup.
+  any lease, covers macOS Cua loading behind socket readiness and macOS
+  artifact-transfer refusal (`path-unverifiable`), asks the daemon nothing
+  until a lease is journaled, refuses a start on a provider that needs setup
+  with no provider call, still asks before a billed start, and destroys the
+  lease with its thread; `desktopArtifactRead.test.ts` verifies macOS
+  `path-unverifiable` refusal; `desktopDaemonPort.test.ts` covers the socket
+  reading and macOS user-database lookup; `projectPolicy.test.ts` covers the
+  recipe rule; `DesktopLeaseSettings.test.tsx`, `ProjectDesktopRecipeSection.test.tsx`,
+  and `desktopPaneModel.test.ts` cover the wording, the disabled choice, and
+  the plain "Get Cua Spaces" link when no daemon is found.
 - **Still owed by the maintainer.** The E2B live smoke, Cua sub-slices 2 and
-  3's live smokes, and a billed Cua run, which spends money
-  (`bun run desktop:cloud:smoke`). Offering Cua on macOS stays its own item.
+  3's live smokes (including macOS `bun run desktop:cloud:smoke cua run`,
+  `… cua kill`, `… cua restart`), and a billed Cua run, which spends money
+  (`bun run desktop:cloud:smoke`). A macOS handle-path check for artifact
+  transfer stays a follow-up.
 
 ## Rationale
 

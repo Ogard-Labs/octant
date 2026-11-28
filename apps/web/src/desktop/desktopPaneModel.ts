@@ -132,6 +132,14 @@ export function desktopWhere(
   return placement?.displayName ?? String(lease.placementId);
 }
 
+/** Official Cua Spaces page; Octant links only and never bundles, installs, or starts it. */
+export const CUA_SPACES_URL = "https://cua.ai";
+
+/** Whether a listed provider is Cua Spaces with no local daemon socket detected. */
+export function isCuaDaemonMissing(provider: LeasableDesktopProvider): boolean {
+  return String(provider.providerId) === "cua" && provider.needsSetup === "daemon-not-connected";
+}
+
 /** What setting a provider up means on this host, in one sentence a person can act on. */
 export function setupMessage(reason: DesktopProviderSetupReason, providerName: string): string {
   switch (reason) {

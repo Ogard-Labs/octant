@@ -25,11 +25,14 @@
  *   bun run desktop:cloud:smoke cua-other-machine kill
  *   bun run desktop:cloud:smoke cua-other-machine restart
  *
- * Cua needs a Linux host with Cua's daemon running as this user
- * (`cua daemon start`), signed in, and QEMU installed. `cua-other-machine`
- * also needs exactly one other machine of the same Cua account online and
- * set up with `cua host setup --provide-spaces`, with QEMU installed there;
- * its recipe names that machine, as a person would in the recipe editor.
+ * Cua needs a Linux or macOS host with Cua's daemon running as this user
+ * (`cua daemon start` or Cua Spaces.app), signed in, and a local Space runtime
+ * installed. On macOS, artifact transfer refuses `path-unverifiable` until a
+ * macOS handle-path check exists; screen and input still run.
+ * `cua-other-machine` also needs exactly one other machine of the same Cua
+ * account online and set up with `cua host setup --provide-spaces`, with QEMU
+ * installed there; its recipe names that machine, as a person would in the
+ * recipe editor.
  *
  * `run` acquires a desktop as a person who confirmed its provider,
  * placement, and machine, as a billed or off-machine one asks, reads a frame,
@@ -325,35 +328,39 @@ const sent = await service.transfer({
   path: "octant-smoke-app",
   confirm: async () => "approved",
 });
-step("agent's send-file", sent, sent.status === "delivered");
+const macOsRefusedTransfer =
+  process.platform === "darwin" && sent.status === "refused" && sent.reason === "path-unverifiable";
+step("agent's send-file", sent, sent.status === "delivered" || macOsRefusedTransfer);
 const control = async (command: unknown) =>
   service.control({ ...agentCaller, command: decodeComputerControlCommand(command) });
-const launched = await control({ operation: "launch", appId: "octant-smoke-app" });
-step("agent's launch", launched, controlAnswered(launched));
-const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
-const observation =
-  observed.status === "answered" && observed.result.kind === "observation"
-    ? observed.result
-    : undefined;
-step(
-  "agent's observe",
-  observation === undefined ? observed : { image: observation.image?.data.length },
-  observation?.image !== undefined,
-);
-if (observation !== undefined) {
-  const clicked = await control({
-    operation: "click",
-    observationId: observation.observationId,
-    x: 50,
-    y: 50,
-  });
-  step("agent's click", clicked, controlAnswered(clicked));
-  const typed = await control({
-    operation: "type",
-    observationId: observation.observationId,
-    text: "typed",
-  });
-  step("agent's type", typed, controlAnswered(typed));
+if (!macOsRefusedTransfer) {
+  const launched = await control({ operation: "launch", appId: "octant-smoke-app" });
+  step("agent's launch", launched, controlAnswered(launched));
+  const observed = await control({ operation: "observe", appId: "octant-smoke-app", windowId: 1 });
+  const observation =
+    observed.status === "answered" && observed.result.kind === "observation"
+      ? observed.result
+      : undefined;
+  step(
+    "agent's observe",
+    observation === undefined ? observed : { image: observation.image?.data.length },
+    observation?.image !== undefined,
+  );
+  if (observation !== undefined) {
+    const clicked = await control({
+      operation: "click",
+      observationId: observation.observationId,
+      x: 50,
+      y: 50,
+    });
+    step("agent's click", clicked, controlAnswered(clicked));
+    const typed = await control({
+      operation: "type",
+      observationId: observation.observationId,
+      text: "typed",
+    });
+    step("agent's type", typed, controlAnswered(typed));
+  }
 }
 
 const extended = await service.extend({ ...caller, leaseId, byMinutes: 10 });

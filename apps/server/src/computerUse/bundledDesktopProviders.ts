@@ -16,6 +16,15 @@ export interface BundledDesktopProvidersInput {
 }
 
 /**
+ * Platforms where the bundled Cua Spaces provider can reach the person's local
+ * daemon over its Unix socket (`~/.cua/cua.sock`). Windows has no Unix socket
+ * path here and offers no Cua provider.
+ */
+export function cuaDesktopSupportedOnPlatform(platform: NodeJS.Platform): boolean {
+  return platform === "linux" || platform === "darwin";
+}
+
+/**
  * The desktop drivers a host loads, and which of them it offers.
  *
  * Every bundled driver is listed from the first start, a daemon-run one

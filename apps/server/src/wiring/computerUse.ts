@@ -63,7 +63,10 @@ import {
   createDesktopDaemonPort,
   desktopDaemonSocketReady,
 } from "../computerUse/desktopDaemonPort";
-import { bundledDesktopProviders } from "../computerUse/bundledDesktopProviders";
+import {
+  bundledDesktopProviders,
+  cuaDesktopSupportedOnPlatform,
+} from "../computerUse/bundledDesktopProviders";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
 import {
@@ -258,10 +261,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   // lease exists. The lease service asks the daemon nothing, not even a
   // restart listing, until this host has journaled a Cua lease, and whether
   // the daemon is there is read from its socket without connecting.
-  const cuaDesktop =
-    process.platform === "linux"
-      ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
-      : undefined;
+  const cuaDesktop = cuaDesktopSupportedOnPlatform(process.platform)
+    ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
+    : undefined;
   let cuaDaemonReady = false;
   const refreshCuaDaemonReady = () => {
     if (cuaDesktop === undefined) return;
@@ -432,7 +434,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     clearInterval(desktopLeaseTimer);
   };
   // The tool service exists wherever a send can bind a destination: this
-  // Mac's screen, or a desktop a Linux host can lease.
+  // Mac's screen, or a desktop this host can lease.
   const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
   let shellServiceRef:
     | Pick<ShellService, "rememberComputerUseApp" | "rememberDesktopFileTransfer">
