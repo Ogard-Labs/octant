@@ -296,4 +296,71 @@ describe("fleetUpdatePolicy", () => {
       currentVersion: "2.1.300",
     });
   });
+
+  it("plans standalone headless and remote desktop updates before this local app without skipping headless hosts", () => {
+    const plan = planFleetUpdate([
+      {
+        hostId: "local",
+        displayName: "This Mac",
+        kind: "local",
+        connectionState: "ready",
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "local-app",
+          status: "available",
+          currentVersion: "0.1.0",
+          availableVersion: "0.2.0",
+          ring: "stable",
+        },
+        providers: [],
+      },
+      {
+        hostId: "standalone-1",
+        displayName: "Ubuntu Server",
+        kind: "remote",
+        isHeadless: true,
+        connectionState: "ready",
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "standalone-headless",
+          currentVersion: "0.1.0",
+          toVersion: "0.2.0",
+          ring: "stable",
+          requestId: "11111111-1111-4111-8111-111111111111",
+          storeMigration: true,
+          state: "update-available",
+        },
+        providers: [],
+      },
+      {
+        hostId: "remote-desktop-1",
+        displayName: "Office Mac",
+        kind: "remote",
+        isHeadless: false,
+        connectionState: "ready",
+        actsAsHostPerson: true,
+        currentVersion: "0.1.0",
+        octant: {
+          kind: "remote-desktop",
+          currentVersion: "0.1.0",
+          availableVersion: "0.2.0",
+          ring: "stable",
+          requestId: "22222222-2222-4222-8222-222222222222",
+          state: "update-available",
+        },
+        providers: [],
+      },
+    ]);
+
+    expect(plan.hasRemoteServerUpdates).toBe(true);
+    expect(plan.hasLocalAppUpdate).toBe(true);
+    expect(plan.steps.map((s) => `${s.phase}:${s.hostId}`)).toEqual([
+      "remote-octant-host-control:standalone-1",
+      "remote-octant-host-control:remote-desktop-1",
+      "local-app:local",
+    ]);
+    expect(plan.machines.every((m) => m.skipReason !== ("headless" as string))).toBe(true);
+  });
 });

@@ -408,3 +408,21 @@ export {
   createWindowsDesktopLauncher,
   type WindowsDesktopLauncher,
 } from "./windowsDesktopLauncher";
+export {
+  clearHostUpdatePendingFile,
+  clearHostUpdateResultFile,
+  decodeHostUpdateContextFile,
+  decodeHostUpdatePendingFile,
+  decodeHostUpdateResultFile,
+  HostUpdateContextFile,
+  HostUpdatePendingFile,
+  HostUpdateResultFile,
+  HostUpdateTerminalOutcome,
+  isPathConfinedWithin,
+  readHostUpdateContextFile,
+  readHostUpdatePendingFile,
+  readHostUpdateResultFile,
+  writeHostUpdateContextFile,
+  writeHostUpdatePendingFile,
+  writeHostUpdateResultFile,
+} from "./hostUpdateResult";

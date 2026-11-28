@@ -178,6 +178,9 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
     path: "/api/providers/commands",
     timeoutMs: PAIRED_COMPUTER_REQUEST_LIMITS.providerCommandTimeoutMs,
   },
+  // Intent-only host-owned Octant updates on person-paired computers; the
+  // remote host refuses every restricted, hub-introduced, or agent session.
+  { method: "POST", path: "/api/host-control/update" },
   { method: "GET", path: "/api/pending-requests" },
   // Listing and answering a thread's MCP tool approvals, which Needs you opens
   // there; the host answers only its own person's device.

@@ -373,6 +373,7 @@ describe("a window's request to a paired computer", () => {
         "POST /api/projects/commands",
         "GET /api/providers/bootstrap",
         "POST /api/providers/commands",
+        "POST /api/host-control/update",
         "GET /api/pending-requests",
         "POST /api/extensions/tool-approvals",
         "POST /api/hub/guest",
@@ -961,5 +962,23 @@ describe("reaching a paired computer through its hub when away", () => {
     } finally {
       timeoutSpy.mockRestore();
     }
+  });
+
+  it("allows POST /api/host-control/update on the paired-computer channel", async () => {
+    const updateRes = await ask({
+      origin: ORIGIN,
+      method: "POST",
+      path: "/api/host-control/update",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "status" }),
+    });
+    expect(updateRes.answer.status).toBe("answered");
+
+    const getRefused = await ask({
+      origin: ORIGIN,
+      method: "GET",
+      path: "/api/host-control/update",
+    });
+    expect(getRefused.answer.status).toBe("refused");
   });
 });

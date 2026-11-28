@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   acquireHostRuntimeOwner,
@@ -240,6 +240,8 @@ try {
             hostControl: {
               servicePolicy: new ServicePolicyStore({ path: paths.servicePolicyPath }),
               requestOwnerStop: stop,
+              stateDirectory: paths.stateDirectory,
+              installRoot: process.env.OCTANT_INSTALL_ROOT ?? join(paths.stateDirectory, "install"),
               readServiceLog: async () => (await hostLogs.read({ limit: 200 })).entries,
             },
             serve,

@@ -209,6 +209,11 @@ const LOCAL_HOST_ACTIONS = new Set([
   // to start as stopping is.
   "host.service.drain",
   "host.service.restart",
+  // Asking this host to check and apply a newer signed release of Octant.
+  // Only the host's own person (a local window or a person-paired Full device)
+  // may request it; lower access levels, hub-introduced devices, agents, and
+  // peers are refused.
+  "host.service.update",
   "host.service.enable",
   "host.service.disable",
   "host.service.status",

@@ -27,6 +27,7 @@ export type HeadlessInstallErrorCode =
   | "incompatible-downgrade"
   | "backup-required"
   | "owner-stop-refused"
+  | "restore-failed"
   | "data-confinement"
   | "confirmation-mismatch";
 
@@ -261,26 +262,32 @@ export async function upgradeHeadlessArtifact(
     return { outcome: "upgraded", fromVersion, toVersion, storeMigration };
   }
 
-  // Failed health: stop the unhealthy candidate before touching the store.
+  // Failed health: stop the unhealthy candidate before touching the store, then
+  // restore the verified backup (when migrated) and switch `current` back under
+  // exclusive maintenance ownership. If restore fails, leave Octant stopped and
+  // never restart the older build against a partially migrated store.
   await ports.stopService();
-  if (backup !== undefined) {
-    try {
-      await ports.restoreStore(backup.path);
-    } catch {
-      // The store may be partially migrated and the restore failed, so the
-      // older binary must never be restarted against it.
-      return {
-        outcome: "recovery-required",
-        fromVersion,
-        toVersion,
-        backupPath: backup.path,
-        guidance: `Octant is stopped. Restore the store manually from ${backup.path} with the offline database CLI, then restart.`,
-      };
+  let rollbackFailed = false;
+  await withMaintenanceOwner(ports, async () => {
+    if (backup !== undefined) {
+      try {
+        await ports.restoreStore(backup.path);
+      } catch {
+        rollbackFailed = true;
+        return;
+      }
     }
+    await switchCurrentLink(options.installRoot, current.versionRoot);
+  });
+  if (rollbackFailed && backup !== undefined) {
+    return {
+      outcome: "recovery-required",
+      fromVersion,
+      toVersion,
+      backupPath: backup.path,
+      guidance: `Octant is stopped. Restore the store manually from ${backup.path} with the offline database CLI, then restart.`,
+    };
   }
-  await withMaintenanceOwner(ports, () =>
-    switchCurrentLink(options.installRoot, current.versionRoot),
-  );
   await ports.startService();
   return { outcome: "rolled-back", fromVersion, toVersion, storeRestored: backup !== undefined };
 }

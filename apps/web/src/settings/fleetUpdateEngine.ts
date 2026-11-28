@@ -2,13 +2,19 @@ import { askRemoteSessionStanding, createRemoteProductFetch } from "@octant/clie
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { HostFederationTransports } from "@octant/client-runtime/host-federation-transports";
 import {
+  createHostUpdateClient,
+  HostUpdateClientError,
+  type HostUpdateClient,
+} from "@octant/client-runtime/host-update-client";
+import {
   createProviderClient,
   ProviderClientFailure,
   type ProviderClient,
 } from "@octant/client-runtime/provider-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
-import { LOCAL_HOST_ID, type ProviderInstanceId } from "@octant/contracts";
+import { LOCAL_HOST_ID, type AggregateId, type ProviderInstanceId } from "@octant/contracts";
 import type { AppUpdateState } from "@octant/contracts/app-updates";
+import type { HostUpdateStatus } from "@octant/contracts/host-update";
 import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type {
   MemberBuildDownload,
@@ -75,6 +81,7 @@ export interface FleetUpdateInventorySnapshot {
     string,
     Pick<ProviderClient, "bootstrap" | "execute">
   >;
+  readonly remoteHostControlClients: ReadonlyMap<string, Pick<HostUpdateClient, "update">>;
   readonly sshServersById: ReadonlyMap<string, ShieldServer>;
 }
 
@@ -355,6 +362,200 @@ function sshInventoryFromPlan(
   };
 }
 
+const MANUAL_UPDATE_REQUIRED_MESSAGE =
+  "Update this computer once by hand, then it can update from here.";
+const INCOMPATIBLE_PROTOCOL_MESSAGE = "This computer's protocol range does not cover this app.";
+
+function newRequestId(): AggregateId {
+  return crypto.randomUUID() as AggregateId;
+}
+
+async function prepareHostControlOctantInventory(input: {
+  readonly client: Pick<HostUpdateClient, "update">;
+  readonly currentVersion: string | undefined;
+  readonly signal?: AbortSignal | undefined;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly pollMs: number;
+}): Promise<{
+  readonly octant: Extract<
+    FleetUpdateOctantInventory,
+    { readonly kind: "standalone-headless" | "remote-desktop" }
+  >;
+  readonly isHeadless: boolean;
+}> {
+  const version = input.currentVersion;
+  if (version === undefined) {
+    return {
+      octant: {
+        kind: "standalone-headless",
+        state: "manual-update-required",
+        message: MANUAL_UPDATE_REQUIRED_MESSAGE,
+      },
+      isHeadless: true,
+    };
+  }
+  const requestId = newRequestId();
+  let status: HostUpdateStatus;
+  try {
+    status = await input.client.update({
+      action: "prepare",
+      requestId,
+      expectedCurrentVersion: version,
+    });
+  } catch (error) {
+    if (error instanceof HostUpdateClientError) {
+      if (error.statusCode === 404 || error.statusCode === 405) {
+        return {
+          octant: {
+            kind: "standalone-headless",
+            currentVersion: version,
+            state: "manual-update-required",
+            message: MANUAL_UPDATE_REQUIRED_MESSAGE,
+          },
+          isHeadless: true,
+        };
+      }
+      if (error.statusCode === 403 || error.statusCode === 401) {
+        return {
+          octant: {
+            kind: "standalone-headless",
+            currentVersion: version,
+            state: "no-permission",
+          },
+          isHeadless: true,
+        };
+      }
+    }
+    return {
+      octant: {
+        kind: "standalone-headless",
+        currentVersion: version,
+        state: "unavailable",
+        message: "Octant could not check updates on this computer.",
+      },
+      isHeadless: true,
+    };
+  }
+
+  for (
+    let attempt = 0;
+    attempt < MAX_DOWNLOAD_POLLS && status.state === "preparing";
+    attempt += 1
+  ) {
+    if (input.signal?.aborted) break;
+    await input.sleep(input.pollMs);
+    try {
+      status = await input.client.update({ action: "status", requestId });
+    } catch {
+      break;
+    }
+  }
+
+  return mapHostControlStatusToInventory(status, version, String(requestId));
+}
+
+function mapHostControlStatusToInventory(
+  status: HostUpdateStatus,
+  fallbackVersion: string,
+  fallbackRequestId: string,
+): {
+  readonly octant: Extract<
+    FleetUpdateOctantInventory,
+    { readonly kind: "standalone-headless" | "remote-desktop" }
+  >;
+  readonly isHeadless: boolean;
+} {
+  const currentVersion = status.fromVersion ?? fallbackVersion;
+  const requestId = status.requestId === undefined ? fallbackRequestId : String(status.requestId);
+
+  if (status.hostKind === "desktop") {
+    if (status.state === "update-available" && status.toVersion !== undefined) {
+      return {
+        octant: {
+          kind: "remote-desktop",
+          currentVersion,
+          availableVersion: status.toVersion,
+          ...(status.ring === undefined ? {} : { ring: status.ring }),
+          requestId,
+          state: "update-available",
+        },
+        isHeadless: false,
+      };
+    }
+    if (status.state === "up-to-date") {
+      return {
+        octant: {
+          kind: "remote-desktop",
+          currentVersion,
+          ...(status.ring === undefined ? {} : { ring: status.ring }),
+          state: "up-to-date",
+        },
+        isHeadless: false,
+      };
+    }
+    const state =
+      status.failureReason === "already-updating"
+        ? "already-updating"
+        : status.failureReason === "unsupported-install" || status.failureReason === "not-writable"
+          ? "manual-update-required"
+          : "unavailable";
+    return {
+      octant: {
+        kind: "remote-desktop",
+        currentVersion,
+        ...(status.ring === undefined ? {} : { ring: status.ring }),
+        state,
+        ...(status.message === undefined ? {} : { message: status.message }),
+      },
+      isHeadless: false,
+    };
+  }
+
+  if (status.state === "update-available" && status.toVersion !== undefined) {
+    return {
+      octant: {
+        kind: "standalone-headless",
+        currentVersion,
+        toVersion: status.toVersion,
+        ...(status.ring === undefined ? {} : { ring: status.ring }),
+        requestId,
+        ...(status.storeMigration === undefined ? {} : { storeMigration: status.storeMigration }),
+        state: "update-available",
+      },
+      isHeadless: true,
+    };
+  }
+  if (status.state === "up-to-date") {
+    return {
+      octant: {
+        kind: "standalone-headless",
+        currentVersion,
+        ...(status.ring === undefined ? {} : { ring: status.ring }),
+        state: "up-to-date",
+      },
+      isHeadless: true,
+    };
+  }
+  const state =
+    status.failureReason === "ring-no-headless-build"
+      ? "ring-no-headless-build"
+      : status.failureReason === "already-updating"
+        ? "already-updating"
+        : status.failureReason === "unsupported-install"
+          ? "manual-update-required"
+          : "unavailable";
+  return {
+    octant: {
+      kind: "standalone-headless",
+      currentVersion,
+      ...(status.ring === undefined ? {} : { ring: status.ring }),
+      state,
+      ...(status.message === undefined ? {} : { message: status.message }),
+    },
+    isHeadless: true,
+  };
+}
+
 /**
  * Collect the fleet update inventory across this computer, every connected
  * paired or hub computer, and every over-SSH headless server installed by this
@@ -368,6 +569,7 @@ export async function collectFleetUpdateInventory(
   const pollMs = sources.pollMs ?? DEFAULT_POLL_MS;
   const sleep = sources.sleep ?? ((ms: number) => defaultSleep(ms, signal));
   const remoteProviderClients = new Map<string, Pick<ProviderClient, "bootstrap" | "execute">>();
+  const remoteHostControlClients = new Map<string, Pick<HostUpdateClient, "update">>();
   const sshServersById = new Map<string, ShieldServer>();
 
   // 1. Read local desktop update state (refreshing check if desktop bridge supports it).
@@ -497,8 +699,19 @@ export async function collectFleetUpdateInventory(
 
       let actsAsHostPerson = false;
       let providers: ReadonlyArray<FleetUpdateProviderInventoryItem> = [];
+      let preparedHostControl:
+        | {
+            readonly octant: Extract<
+              FleetUpdateOctantInventory,
+              { readonly kind: "standalone-headless" | "remote-desktop" }
+            >;
+            readonly isHeadless: boolean;
+          }
+        | undefined;
       const slot = sources.hostFederationTransports?.get(hostId);
       const transport = sources.hostFederationTransports?.remoteTransportFor(hostId);
+      const currentVersion =
+        snapshot.serverBuildVersion ?? slot?.serverBuildVersion ?? matchedSsh?.octant.fromVersion;
 
       if (
         snapshot.state === "ready" &&
@@ -509,32 +722,61 @@ export async function collectFleetUpdateInventory(
         const { standing } = await askRemoteSessionStanding(transport);
         actsAsHostPerson = standing.actsAsHostPerson;
         if (actsAsHostPerson) {
+          const productFetch = createRemoteProductFetch({ bridge: slot.bridge });
           const remoteClient = createProviderClient({
             baseUrl: REMOTE_CLIENT_BASE_URL,
-            fetch: createRemoteProductFetch({ bridge: slot.bridge }),
+            fetch: productFetch,
             windowCapability: "",
           });
           remoteProviderClients.set(hostId, remoteClient);
-          providers = await readProvidersInventory({ client: remoteClient });
+          const providersPromise = readProvidersInventory({ client: remoteClient });
+          if (matchedSsh === undefined) {
+            const hostUpdateClient = createHostUpdateClient({
+              baseUrl: REMOTE_CLIENT_BASE_URL,
+              fetch: productFetch,
+              windowCapability: "",
+            });
+            remoteHostControlClients.set(hostId, hostUpdateClient);
+            const [resolvedProviders, resolvedHostControl] = await Promise.all([
+              providersPromise,
+              prepareHostControlOctantInventory({
+                client: hostUpdateClient,
+                currentVersion,
+                signal,
+                sleep,
+                pollMs,
+              }),
+            ]);
+            providers = resolvedProviders;
+            preparedHostControl = resolvedHostControl;
+          } else {
+            providers = await providersPromise;
+          }
         }
       }
-
-      const currentVersion =
-        snapshot.serverBuildVersion ?? slot?.serverBuildVersion ?? matchedSsh?.octant.fromVersion;
 
       const octant: FleetUpdateOctantInventory =
         matchedSsh !== undefined
           ? matchedSsh.octant
-          : {
-              kind: "standalone-headless",
-              ...(currentVersion === undefined ? {} : { currentVersion }),
-            };
+          : preparedHostControl !== undefined
+            ? preparedHostControl.octant
+            : {
+                kind: "standalone-headless",
+                ...(currentVersion === undefined ? {} : { currentVersion }),
+              };
+
+      const isHeadless =
+        matchedSsh !== undefined
+          ? true
+          : preparedHostControl !== undefined
+            ? preparedHostControl.isHeadless
+            : false;
 
       return {
         hostId,
         displayName: snapshot.displayName,
         kind: "remote",
-        ...(matchedSsh !== undefined ? { isHeadless: true } : {}),
+        isHeadless,
         connectionState: snapshot.state,
         ...(snapshot.through === undefined ? {} : { through: snapshot.through }),
         actsAsHostPerson,
@@ -565,6 +807,7 @@ export async function collectFleetUpdateInventory(
   return {
     hosts: [...remoteHosts, ...unmatchedSshHosts, localHost],
     remoteProviderClients,
+    remoteHostControlClients,
     sshServersById,
   };
 }
@@ -791,6 +1034,191 @@ async function runSshMemberStep(input: {
     sleep: input.sleep,
     pollMs: input.pollMs,
   });
+}
+
+function remoteHostSnapshot(
+  lifecycle: FleetUpdateSources["hostFederationLifecycle"],
+  hostId: string,
+) {
+  return lifecycle?.list().find((item) => String(item.hostId) === hostId);
+}
+
+function hostIsProtocolIncompatible(
+  lifecycle: FleetUpdateSources["hostFederationLifecycle"],
+  hostId: string,
+): boolean {
+  return remoteHostSnapshot(lifecycle, hostId)?.state === "incompatible";
+}
+
+async function runHostControlUpdateStep(input: {
+  readonly step: Extract<FleetUpdateStep, { readonly phase: "remote-octant-host-control" }>;
+  readonly client: Pick<HostUpdateClient, "update"> | undefined;
+  readonly hostFederationLifecycle: FleetUpdateSources["hostFederationLifecycle"];
+  readonly drain: MemberUpdateDrain;
+  readonly reprepareFirst: boolean;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly pollMs: number;
+}): Promise<{
+  readonly status: "succeeded" | "failed" | "waiting-for-work";
+  readonly message: string;
+}> {
+  const { step, client, drain } = input;
+  if (client === undefined) {
+    return {
+      status: "failed",
+      message: `Cannot reach ${step.hostDisplayName} to start the update.`,
+    };
+  }
+
+  let requestId = (input.reprepareFirst ? newRequestId() : step.requestId) as AggregateId;
+  if (input.reprepareFirst) {
+    let prepared: HostUpdateStatus;
+    try {
+      prepared = await client.update({
+        action: "prepare",
+        requestId,
+        expectedCurrentVersion: step.fromVersion,
+      });
+      for (
+        let attempt = 0;
+        attempt < MAX_DOWNLOAD_POLLS && prepared.state === "preparing";
+        attempt += 1
+      ) {
+        await input.sleep(input.pollMs);
+        prepared = await client.update({ action: "status", requestId });
+      }
+    } catch (error) {
+      if (
+        error instanceof HostUpdateClientError &&
+        (error.statusCode === 404 || error.statusCode === 405)
+      ) {
+        return { status: "failed", message: MANUAL_UPDATE_REQUIRED_MESSAGE };
+      }
+      return {
+        status: "failed",
+        message: `Octant could not prepare an update on ${step.hostDisplayName}.`,
+      };
+    }
+    if (prepared.state === "up-to-date") {
+      return {
+        status: "succeeded",
+        message: `${step.hostDisplayName} is already up to date.`,
+      };
+    }
+    if (prepared.state !== "update-available") {
+      return {
+        status: "failed",
+        message:
+          prepared.message ?? `Octant could not prepare an update on ${step.hostDisplayName}.`,
+      };
+    }
+  }
+
+  let status: HostUpdateStatus;
+  try {
+    status = await client.update({
+      action: "start",
+      requestId,
+      expectedCurrentVersion: step.fromVersion,
+      drain,
+    });
+  } catch (error) {
+    if (
+      error instanceof HostUpdateClientError &&
+      (error.statusCode === 404 || error.statusCode === 405)
+    ) {
+      return { status: "failed", message: MANUAL_UPDATE_REQUIRED_MESSAGE };
+    }
+    return {
+      status: "failed",
+      message: `Octant could not start updating ${step.hostDisplayName}.`,
+    };
+  }
+
+  let sawInstalling = status.state === "installing";
+
+  for (let attempt = 0; attempt < MAX_UPDATE_POLLS; attempt += 1) {
+    const snapshot = remoteHostSnapshot(input.hostFederationLifecycle, step.hostId);
+    if (snapshot?.state === "incompatible") {
+      return { status: "failed", message: INCOMPATIBLE_PROTOCOL_MESSAGE };
+    }
+    if (status.state === "updated") {
+      return {
+        status: "succeeded",
+        message: `${step.hostDisplayName} runs Octant ${status.toVersion ?? step.toVersion}.`,
+      };
+    }
+    if (status.state === "installing") {
+      sawInstalling = true;
+      // Remote desktop updates report `installing` as soon as the native
+      // updater accepts relaunch, before the replacement host reconnects.
+      // Keep observing until the replacement host confirms both the target
+      // version and protocol compatibility.
+      if (snapshot?.state === "ready" && snapshot.serverBuildVersion === step.toVersion) {
+        return {
+          status: "succeeded",
+          message: `${step.hostDisplayName} runs Octant ${step.toVersion}.`,
+        };
+      }
+    }
+    if (status.state === "waiting-for-work") {
+      return {
+        status: "waiting-for-work",
+        message:
+          status.message ??
+          `${step.hostDisplayName} is waiting for running work to finish before relaunching.`,
+      };
+    }
+    if (
+      status.state === "rolled-back" ||
+      status.state === "recovery-required" ||
+      status.state === "refused" ||
+      status.state === "failed"
+    ) {
+      return {
+        status: "failed",
+        message:
+          status.message ??
+          `${step.hostDisplayName} could not finish updating and stayed on ${step.fromVersion}.`,
+      };
+    }
+    await input.sleep(input.pollMs);
+    try {
+      status = await client.update({ action: "status", requestId });
+      if (status.state === "installing") sawInstalling = true;
+      // If the host restarted onto the new version and reports idle on the new version,
+      // treat that as completed after checking protocol compatibility.
+      if (status.state === "idle" && status.fromVersion === step.toVersion) {
+        if (hostIsProtocolIncompatible(input.hostFederationLifecycle, step.hostId)) {
+          return { status: "failed", message: INCOMPATIBLE_PROTOCOL_MESSAGE };
+        }
+        return {
+          status: "succeeded",
+          message: `${step.hostDisplayName} runs Octant ${step.toVersion}.`,
+        };
+      }
+    } catch {
+      // Transient disconnect while the remote computer restarts; keep polling.
+      const nextSnapshot = remoteHostSnapshot(input.hostFederationLifecycle, step.hostId);
+      if (nextSnapshot?.state === "incompatible") {
+        return { status: "failed", message: INCOMPATIBLE_PROTOCOL_MESSAGE };
+      }
+      if (
+        sawInstalling &&
+        nextSnapshot?.state === "ready" &&
+        nextSnapshot.serverBuildVersion === step.toVersion
+      ) {
+        return {
+          status: "succeeded",
+          message: `${step.hostDisplayName} runs Octant ${step.toVersion}.`,
+        };
+      }
+    }
+  }
+  return {
+    status: "failed",
+    message: `Timed out waiting for ${step.hostDisplayName} to confirm Octant ${step.toVersion}.`,
+  };
 }
 
 async function waitForStagedLocalAppUpdate(
@@ -1022,40 +1450,59 @@ export async function runFleetUpdatePlan(
     }),
   );
 
-  // Phase 2: remote Octant servers over SSH — run concurrently per server so
-  // one server failing or rolling back never stops another.
-  const sshSteps = input.plan.steps.filter(
-    (step): step is Extract<FleetUpdateStep, { readonly phase: "remote-octant-ssh" }> =>
-      step.phase === "remote-octant-ssh",
+  // Phase 2: remote Octant updates (over-SSH headless servers, standalone
+  // headless hosts, and remote desktop apps) — run concurrently per computer so
+  // one computer failing or rolling back never stops another.
+  const remoteOctantSteps = input.plan.steps.filter(
+    (
+      step,
+    ): step is Extract<
+      FleetUpdateStep,
+      { readonly phase: "remote-octant-ssh" | "remote-octant-host-control" }
+    > => step.phase === "remote-octant-ssh" || step.phase === "remote-octant-host-control",
   );
   let anyRemoteServerFailed = false;
   await Promise.allSettled(
-    sshSteps.map(async (step) => {
+    remoteOctantSteps.map(async (step) => {
       updateState(step.stepId, { status: "running" });
-      let outcome: { readonly status: "succeeded" | "failed"; readonly message: string };
+      let outcome: {
+        readonly status: "succeeded" | "failed" | "waiting-for-work";
+        readonly message: string;
+      };
       try {
-        outcome = await runSshMemberStep({
-          step,
-          client: input.sources.shieldServersClient,
-          drain: input.drain,
-          reprepareFirst: false,
-          sleep,
-          pollMs,
-        });
+        outcome =
+          step.phase === "remote-octant-ssh"
+            ? await runSshMemberStep({
+                step,
+                client: input.sources.shieldServersClient,
+                drain: input.drain,
+                reprepareFirst: false,
+                sleep,
+                pollMs,
+              })
+            : await runHostControlUpdateStep({
+                step,
+                client: input.inventory.remoteHostControlClients.get(step.hostId),
+                hostFederationLifecycle: input.sources.hostFederationLifecycle,
+                drain: input.drain,
+                reprepareFirst: false,
+                sleep,
+                pollMs,
+              });
       } catch (error) {
         outcome = {
           status: "failed",
           message:
             error instanceof Error
               ? error.message
-              : `Octant could not finish updating ${step.alias}.`,
+              : `Octant could not finish updating ${step.hostDisplayName}.`,
         };
       }
-      if (outcome.status === "failed") anyRemoteServerFailed = true;
+      if (outcome.status !== "succeeded") anyRemoteServerFailed = true;
       updateState(step.stepId, {
         status: outcome.status,
         message: outcome.message,
-        retryable: outcome.status === "failed",
+        retryable: outcome.status !== "succeeded",
       });
     }),
   );
@@ -1124,6 +1571,22 @@ export async function retryFleetUpdateStep(input: {
       status: outcome.status,
       message: outcome.message,
       retryable: outcome.status === "failed",
+    };
+  }
+  if (input.step.phase === "remote-octant-host-control") {
+    const outcome = await runHostControlUpdateStep({
+      step: input.step,
+      client: input.inventory.remoteHostControlClients.get(input.step.hostId),
+      hostFederationLifecycle: input.sources.hostFederationLifecycle,
+      drain: input.drain,
+      reprepareFirst: true,
+      sleep,
+      pollMs,
+    });
+    return {
+      status: outcome.status,
+      message: outcome.message,
+      retryable: outcome.status !== "succeeded",
     };
   }
   const outcome = await runLocalAppStep({

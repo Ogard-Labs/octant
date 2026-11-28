@@ -46,6 +46,7 @@ export * from "./hostClient";
 export * from "./hostResourceClient";
 export * from "./threadSearchClient";
 export * from "./hostControlClient";
+export * from "./hostUpdateClient";
 export * from "./hostFederationRegistry";
 export * from "./localHostDisplayName";
 export * from "./machineChangeClient";

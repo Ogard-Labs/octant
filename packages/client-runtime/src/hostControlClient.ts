@@ -57,9 +57,6 @@ export interface HostControlClient {
 
 export class HostControlClientError extends Error {
   override readonly name = "HostControlClientError";
-  constructor(message: string) {
-    super(message);
-  }
 }
 
 export type HostExportClientResult =

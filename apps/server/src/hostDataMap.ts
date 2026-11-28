@@ -256,8 +256,9 @@ function composeOutbound(
       : {
           kind: "known",
           category: "update-checks",
-          leavesMachine: false,
-          purpose: "This headless host does not check for desktop app updates.",
+          leavesMachine: true,
+          purpose:
+            "Only when you ask to update this headless host, it checks the signed release feed for its ring and system. No automatic check runs.",
         };
   const speechModel: HostDataMapOutboundCategory = {
     kind: "known",

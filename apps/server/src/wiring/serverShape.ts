@@ -169,6 +169,8 @@ export interface StartOctantServerOptions {
   readonly hostControl?: {
     readonly servicePolicy?: HostControlServicePolicyPort;
     readonly requestOwnerStop?: () => void;
+    readonly stateDirectory?: string;
+    readonly installRoot?: string;
     /** The newest host service log lines, for the support bundle. */
     readonly readServiceLog?: () => Promise<
       ReadonlyArray<{

@@ -47,6 +47,8 @@ function stepLabel(step: FleetUpdateStep): string {
       }`;
     case "remote-octant-ssh":
       return `${step.hostDisplayName} · Octant ${step.fromVersion} → ${step.toVersion}`;
+    case "remote-octant-host-control":
+      return `${step.hostDisplayName} · Octant ${step.fromVersion} → ${step.toVersion}`;
     case "local-app":
       return `${step.hostDisplayName} · Octant${
         step.toVersion === undefined ? "" : ` → ${step.toVersion}`
@@ -55,7 +57,11 @@ function stepLabel(step: FleetUpdateStep): string {
 }
 
 function machineVersionSummary(machine: FleetUpdateMachinePlan): string {
-  if (machine.octantAction === "local-app" || machine.octantAction === "remote-octant-ssh") {
+  if (
+    machine.octantAction === "local-app" ||
+    machine.octantAction === "remote-octant-ssh" ||
+    machine.octantAction === "remote-octant-host-control"
+  ) {
     const from = machine.currentVersion ?? "current";
     const to = machine.targetOctantVersion;
     return to === undefined ? `Octant ${from} · Update ready` : `Octant ${from} → ${to}`;
