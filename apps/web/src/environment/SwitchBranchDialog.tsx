@@ -165,7 +165,7 @@ export function SwitchBranchDialog(props: SwitchBranchDialogProps) {
       <p id={descriptionId}>
         {dirty
           ? "This checkout has the uncommitted changes listed below. Commit them in Git, or stash them before switching. Nothing is committed or discarded without a choice."
-          : `Move this task's checkout from ${props.currentBranch} to another local branch.`}
+          : `Move this thread's checkout from ${props.currentBranch} to another local branch.`}
       </p>
       {dirty ? (
         pendingEntries.length === 0 ? null : (

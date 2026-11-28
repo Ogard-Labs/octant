@@ -227,7 +227,7 @@ export function EnvironmentRoutines(props: {
             { value: "follow-up", label: "Follow up later", disabled: busy },
             ...(mode === "chat"
               ? []
-              : [{ value: "routine", label: "New routine", disabled: busy }]),
+              : [{ value: "routine", label: "New automation", disabled: busy }]),
             ...(props.onSetGoal === undefined ? [] : [{ value: "goal", label: "Set a goal…" }]),
           ]}
           onValueChange={(value) =>
@@ -240,7 +240,7 @@ export function EnvironmentRoutines(props: {
           selectionMode="action"
           trigger={<Plus aria-hidden="true" size={16} />}
           triggerClassName="environment-menu-trigger"
-          triggerLabel="Add a routine"
+          triggerLabel="Add an automation"
           value=""
         />
       }
@@ -250,9 +250,9 @@ export function EnvironmentRoutines(props: {
       summary={
         routines.length === 0
           ? undefined
-          : `${String(routines.length)} ${routines.length === 1 ? "routine" : "routines"}`
+          : `${String(routines.length)} ${routines.length === 1 ? "automation" : "automations"}`
       }
-      title="Routines"
+      title="Automations"
     >
       {opened?.kind === "follow-up" ? (
         <FollowUpPicker
@@ -276,7 +276,7 @@ export function EnvironmentRoutines(props: {
       ) : null}
       {message === undefined ? null : <OctantAlert tone="warning">{message}</OctantAlert>}
       {shown.length === 0 ? null : (
-        <ul aria-label="Routines in this Project" className="environment-routines__list">
+        <ul aria-label="Automations in this Project" className="environment-routines__list">
           {shown.map((summary) => {
             const place = placeOf(summary, threadId);
             const label = PLACE_LABEL[place];

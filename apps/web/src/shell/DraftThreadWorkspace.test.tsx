@@ -1257,7 +1257,7 @@ describe("DraftThreadWorkspace", () => {
     );
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Draft brief");
     await user.click(screen.getByRole("button", { name: /^Working folder:/ }));
-    await user.click(await screen.findByRole("combobox", { name: "Task working folder" }));
+    await user.click(await screen.findByRole("combobox", { name: "Thread working folder" }));
     await user.click(await screen.findByRole("option", { name: "Shared notes 日本語" }));
     await user.clear(screen.getByLabelText("Subfolder within working folder"));
     await user.type(screen.getByLabelText("Subfolder within working folder"), "資料 folder");

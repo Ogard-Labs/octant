@@ -109,7 +109,7 @@ describe("a finished child's delivered result", () => {
       </ThreadSubagentsContext>,
     );
 
-    expect(screen.getByText("Research subagent finished · worked 48s")).toBeVisible();
+    expect(screen.getByText("Research agent finished · worked 48s")).toBeVisible();
     expect(screen.queryByRole("article")).not.toBeInTheDocument();
     expect(screen.queryByText("MATRIX-A1")).not.toBeInTheDocument();
 
@@ -121,14 +121,14 @@ describe("a finished child's delivered result", () => {
       "aria-expanded",
       "true",
     );
-    const card = screen.getByRole("article", { name: "Research subagent finished" });
+    const card = screen.getByRole("article", { name: "Research agent finished" });
     expect(card).toHaveTextContent("MATRIX-A1");
     expect(within(card).getByRole("button", { name: "Details" })).toBeVisible();
   });
 
   it("omits the run time when the child's times are not known", () => {
     render(<ChildResultCards text={finished} />);
-    expect(screen.getByText("Research subagent finished")).toBeVisible();
+    expect(screen.getByText("Research agent finished")).toBeVisible();
   });
 
   it("omits the run time for a later generation, whose run times span every generation", () => {
@@ -137,7 +137,7 @@ describe("a finished child's delivered result", () => {
         <ChildResultCards text={finished} />
       </ThreadSubagentsContext>,
     );
-    expect(screen.getByText("Research subagent finished")).toBeVisible();
+    expect(screen.getByText("Research agent finished")).toBeVisible();
     expect(screen.queryByText(/worked/)).not.toBeInTheDocument();
   });
 
@@ -147,7 +147,7 @@ describe("a finished child's delivered result", () => {
         <ChildResultCards text={ended} />
       </ThreadSubagentsContext>,
     );
-    expect(screen.getByRole("article", { name: "Implement subagent failed" })).toHaveTextContent(
+    expect(screen.getByRole("article", { name: "Implement agent failed" })).toHaveTextContent(
       "Claude authentication is required.",
     );
     expect(screen.queryByRole("button", { name: "Show result" })).not.toBeInTheDocument();
@@ -172,7 +172,7 @@ describe("ChildResultCards", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Show result" }));
-    const card = screen.getByRole("article", { name: "Research subagent finished" });
+    const card = screen.getByRole("article", { name: "Research agent finished" });
     // The names the model picker uses, not the ids the host recorded.
     expect(card).toHaveTextContent("Claude Code · Haiku 4.5");
     expect(card).not.toHaveTextContent("Claude Code · haiku");
@@ -189,7 +189,7 @@ describe("ChildResultCards", () => {
     render(<ChildResultCards providerGroups={[]} text={finished} />);
     await userEvent.click(screen.getByRole("button", { name: "Show result" }));
 
-    expect(screen.getByRole("article", { name: "Research subagent finished" })).toHaveTextContent(
+    expect(screen.getByRole("article", { name: "Research agent finished" })).toHaveTextContent(
       "haiku",
     );
     expect(screen.queryByText(provider)).not.toBeInTheDocument();
@@ -198,7 +198,7 @@ describe("ChildResultCards", () => {
   it("says why a subagent stopped instead of presenting a result", () => {
     render(<ChildResultCards text={ended} />);
 
-    const card = screen.getByRole("article", { name: "Implement subagent failed" });
+    const card = screen.getByRole("article", { name: "Implement agent failed" });
     expect(card).toHaveTextContent("Claude authentication is required.");
     expect(card).not.toHaveTextContent(/Outcome:/);
   });
@@ -239,12 +239,12 @@ describe("a child result steered into a running turn", () => {
       />,
     );
     const delivered = screen.getByRole("article", {
-      name: "Subagent results delivered into the running turn",
+      name: "Agent results delivered into the running turn",
     });
     expect(within(delivered).getByText("Delivered into the running turn")).toBeTruthy();
     await userEvent.click(within(delivered).getByRole("button", { name: "Show result" }));
     expect(
-      within(delivered).getByRole("article", { name: "Research subagent finished" }),
+      within(delivered).getByRole("article", { name: "Research agent finished" }),
     ).toHaveTextContent("MATRIX-A1");
   });
 

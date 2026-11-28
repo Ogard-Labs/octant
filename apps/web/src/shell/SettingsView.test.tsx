@@ -246,9 +246,7 @@ describe("SettingsView", () => {
       agentRunSettingsClient,
       initialDeepLink: { section: "harness" },
     });
-    expect(
-      await screen.findByRole("switch", { name: "Let the agent start helper agents" }),
-    ).toBeChecked();
+    expect(await screen.findByRole("switch", { name: "Let threads start agents" })).toBeChecked();
     expect(screen.getByRole("button", { name: "Octant Harness" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -259,7 +257,7 @@ describe("SettingsView", () => {
   it("does not render the helper-agent posture without an AgentRunSettingsClient", () => {
     renderSettings({ initialDeepLink: { section: "harness" } });
     expect(
-      screen.queryByRole("switch", { name: "Let the agent start helper agents" }),
+      screen.queryByRole("switch", { name: "Let threads start agents" }),
     ).not.toBeInTheDocument();
   });
 
@@ -530,7 +528,7 @@ describe("SettingsView", () => {
       "Coordinators",
       "Pull requests",
       "Waiting",
-      "Routines",
+      "Automations",
     ]);
   });
 

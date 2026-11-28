@@ -62,7 +62,7 @@ click (continuing existing sessions is already built per provider).
 
 The existing first-run readiness view, **Your first task**, includes an optional
 **Explore capabilities** card. It adds no setup step, progress count or readiness
-requirement, and appears on no New task or Code Home surface by itself.
+requirement, and appears on no New thread or Code Home surface by itself.
 
 The card explains Browser, Computer use, helper agents and person memory. Browser
 names tool-transport support from the selected model's current host observation,
@@ -107,10 +107,10 @@ Chat, Work and Code share one start screen, a top-anchored column: the
 question, the composer directly under it, then the mode's own prompt
 suggestions (Code's four cards; Chat's starter chips only before its first
 thread; Work has none) and [the list](#the-list). The page scrolls. **Home** is
-where a mode lands with nothing chosen (its welcome tab), and a **New task** is
+where a mode lands with nothing chosen (its welcome tab), and a **New thread** is
 the same page with its Project named in the question. The question and the
 composer stand at one height and one width in every mode, on Home and in a
-draft, so pressing New task, choosing a Project or switching mode moves nothing
+draft, so pressing New thread, choosing a Project or switching mode moves nothing
 (a draft's pane starts under its own header, so its column starts one title
 band lower). One stylesheet rule places the column for all three. Once a thread
 exists its composer is docked at the pane's foot. Earlier, Chat and Work put
@@ -119,15 +119,15 @@ that left two layouts, and a Code draft's bare question over a docked composer
 threw the composer down the page when a Project was chosen (maintainer request,
 2026-11-16: the Code layout is used for all three).
 Switching to a mode opens no draft of its own,
-and a New task draft left with no text or images counts as nothing chosen:
+and a New thread draft left with no text or images counts as nothing chosen:
 switching to the mode gives its pane back to Home, while a draft with text
-stays as New task. No start screen has tabs or action tiles:
+stays as New thread. No start screen has tabs or action tiles:
 adding a folder lives in the composer's Project picker, a terminal in the
 workspace tools, and what is running or waiting for review in the sidebar.
 
 ### The list
 
-Under the composer a start screen (Home and New task, in every mode) shows
+Under the composer a start screen (Home and New thread, in every mode) shows
 **one calm list**, not a wall of cards. The list, the suggestions and everything
 below end on the composer's own edges at every reading width. Its sections come
 in a fixed order and each is drawn only while it has rows:
@@ -372,7 +372,7 @@ Inside an embedding card these lines stay to one line each. The opinion is advic
 an option or changes the order. A decision can also be
 deferred with the same controls as a question, so it drops below the active
 requests until the chosen time or **Bring back now**. A subagent waiting on an approval or question is a row too, headed "Research
-subagent needs your approval" or "Review subagent asked a question" (the
+agent needs your approval" or "Review agent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
 thread on its Agents tab with that child selected; it offers no Approve, Deny,
@@ -555,7 +555,7 @@ checkout's head does not replace that branch. The pull request, check, branch,
 and repository are already written in; the rollup carries no failure text, so
 the draft quotes none. Sending, switching the draft's Project, or starting a
 new draft lets go of that branch, wherever the new draft is started: the
-sidebar's New task, the command palette, thread search, or the menu bar's Start
+sidebar's New thread, the command palette, thread search, or the menu bar's Start
 new agent all start the same clean draft. A pull request from a fork offers no
 Start a fix, since its branch is not in the Project. It does not start a turn; the person sends
 it. Opening the card reads the same cached snapshot
@@ -591,7 +591,7 @@ without figures, and leaving the start screen cancels the reads in flight.
 ### Activity timeframes
 
 Code Home's start screen carries an **Activity** section below the card
-area; the New task draft and the other modes' starts share the card
+area; the New thread draft and the other modes' starts share the card
 registry but never the panel. The section holds four cards — **Pull
 requests merged**, **Issues closed**, **Releases published** and
 **Successful runs** — each counting work over a named timeframe against
@@ -774,7 +774,7 @@ the fixed proposal text directly under them in the composer. Rendered review
 showed the question above a fixed proposal read as an invitation to write a
 different task.
 
-**Home** is where a mode lands with nothing chosen, and a **New task** is the
+**Home** is where a mode lands with nothing chosen, and a **New thread** is the
 same page with its Project named: the same question and composer in every
 mode, then the mode's prompt suggestions (Code's cards; Chat's one row of
 outline starter chips only before its first thread; Work has none) and the
@@ -897,7 +897,7 @@ provider list does not scroll past its introduction; Tab then reaches the
 step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
-in a later session with no ready instance, the New task composer in Work and
+in a later session with no ready instance, the New thread composer in Work and
 Code shows a primary **Set up a provider** action that opens Providers &
 Models and returns to the same draft. The action leaves once any instance is
 ready; the model picker takes its place. Profile,

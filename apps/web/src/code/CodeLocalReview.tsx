@@ -166,7 +166,7 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
           result.threadId !== props.scope.threadId ||
           result.checkoutId !== props.scope.checkoutId
         )
-          throw new Error("Local findings are unavailable for this task and checkout.");
+          throw new Error("Local findings are unavailable for this thread and checkout.");
         setAssessments(result.findings);
         if (result.truncated)
           setNotice(
@@ -224,7 +224,7 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
       : `Tests ${checks.result.state}${checks.result.state !== "completed" ? "" : ` · ${checks.result.verdict}`}`;
   const checksNote =
     checks?.result === undefined
-      ? "No recorded test result is available for this task."
+      ? "No recorded test result is available for this thread."
       : "Latest recorded checks. This result is not bound to the displayed comparison; recheck Tests after the correction turn.";
   const findingCount = loading ? undefined : assessments.length;
   useEffect(() => {
@@ -361,8 +361,8 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
               saved.status === "refused"
                 ? saved.message
                 : saved.status === "unpersisted"
-                  ? "Added to this task’s draft in this window, but it could not be saved. Nothing was sent or queued."
-                  : "Added to this task’s saved draft. Existing text is kept. Open its composer to edit and send when ready; nothing was sent, queued or approved.",
+                  ? "Added to this thread’s draft in this window, but it could not be saved. Nothing was sent or queued."
+                  : "Added to this thread’s saved draft. Existing text is kept. Open its composer to edit and send when ready; nothing was sent, queued or approved.",
             );
           } catch {
             if (sameScope())

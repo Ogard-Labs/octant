@@ -175,7 +175,7 @@ export function ComputerUseSetup(
           settingId="computer-use-test"
           label="Working test"
           description="After you approve, Octant captures and clicks a temporary test window, then closes it."
-          more="Each app a task uses still needs approval."
+          more="Each app a thread uses still needs approval."
           scope="host"
         >
           <div className="settings-view__actions">

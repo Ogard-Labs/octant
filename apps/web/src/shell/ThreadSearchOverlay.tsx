@@ -329,7 +329,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
               variant="ghost"
             >
               <SquarePen aria-hidden="true" size={14} />
-              <span>{props.mode === "chat" ? "New chat" : "New task"}</span>
+              <span>{props.mode === "chat" ? "New chat" : "New thread"}</span>
             </OctantButton>
           )}
           {props.onNewProject === undefined ? null : (

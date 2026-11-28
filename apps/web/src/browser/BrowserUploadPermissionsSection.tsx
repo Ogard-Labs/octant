@@ -118,7 +118,7 @@ export function BrowserUploadPermissionsSection(props: {
       if (result.kind === "upload-permission-granted") {
         setReview(undefined);
         setEditing(false);
-        setNotice("Upload manifest granted. It grants no account access and starts no routine.");
+        setNotice("Upload manifest granted. It grants no account access and starts no automation.");
       }
       if (result.kind === "upload-permission-revoked")
         setNotice(
@@ -161,7 +161,7 @@ export function BrowserUploadPermissionsSection(props: {
         scope="host"
         settingId="browser-upload-permissions"
         focused={props.focusedSetting === "browser-upload-permissions"}
-        description="Permit exact file contents from an approved folder for one routine, profile and HTTPS site."
+        description="Permit exact file contents from an approved folder for one automation, profile and HTTPS site."
         more="Account access stays separate."
       >
         <div className="host-settings__controls">
@@ -195,7 +195,7 @@ export function BrowserUploadPermissionsSection(props: {
       ) : null}
       {loaded && targets.length === 0 ? (
         <SettingsState kind="empty">
-          No eligible local Work or Code routine in this Project. Reviewing a manifest starts
+          No eligible local Work or Code automation in this Project. Reviewing a manifest starts
           nothing.
         </SettingsState>
       ) : null}
@@ -231,7 +231,7 @@ export function BrowserUploadPermissionsSection(props: {
       <OctantDialogPresence>
         {!editing ? null : (
           <OctantConfirmDialog
-            children="Review one routine’s exact files and limits before granting upload permission."
+            children="Review one automation’s exact files and limits before granting upload permission."
             title={
               review === undefined ? "Review recurring upload files" : "Grant this upload manifest?"
             }
@@ -261,11 +261,11 @@ export function BrowserUploadPermissionsSection(props: {
                 {review === undefined ? (
                   <>
                     <label>
-                      Routine
+                      Automation
                       <OctantSelectField
-                        aria-label="Upload routine"
+                        aria-label="Upload automation"
                         value={targetId}
-                        placeholder="Choose a routine"
+                        placeholder="Choose an automation"
                         onValueChange={(value) => {
                           setTargetId(value);
                           setFolderId("");
@@ -372,7 +372,7 @@ export function BrowserUploadPermissionsSection(props: {
                   </>
                 ) : (
                   <dl className="grid min-w-0 gap-2">
-                    <dt>Routine</dt>
+                    <dt>Automation</dt>
                     <dd>{review.permission.target.label}</dd>
                     <dt>Model</dt>
                     <dd>{review.permission.target.modelId}</dd>
@@ -410,7 +410,7 @@ export function BrowserUploadPermissionsSection(props: {
                 )}
                 <p>
                   Each admitted file consumes quota, including a later cancellation. Permission ends
-                  on revocation, changed routine authority or host restart. Revoking closes an
+                  on revocation, changed automation authority or host restart. Revoking closes an
                   affected page but cannot recall data already given to the site. This manifest
                   grants no account access, downloads or other files.
                 </p>

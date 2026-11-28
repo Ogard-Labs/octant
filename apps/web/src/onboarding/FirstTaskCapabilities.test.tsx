@@ -37,7 +37,7 @@ function props(): FirstTaskCapabilitiesProps {
 
 it("reads current host settings instead of claiming the default is on", async () => {
   render(<FirstTaskCapabilities {...props()} />);
-  expect(await screen.findByLabelText("Helper agents status")).toHaveTextContent("Off");
+  expect(await screen.findByLabelText("Agents status")).toHaveTextContent("Off");
   expect(await screen.findByLabelText("Person memory status")).toHaveTextContent("Off");
   expect(screen.getByLabelText("Computer use status")).toHaveTextContent("Off");
   expect(screen.getByLabelText("Browser status")).toHaveTextContent(
@@ -48,7 +48,7 @@ it("reads current host settings instead of claiming the default is on", async ()
 it("previews and dismissal perform no capability change", async () => {
   const input = props();
   render(<FirstTaskCapabilities {...input} />);
-  for (const title of ["Browser", "Computer use", "Helper agents", "Person memory"]) {
+  for (const title of ["Browser", "Computer use", "Agents", "Person memory"]) {
     await userEvent.click(screen.getByRole("button", { name: title }));
     expect(screen.getByRole("img", { name: `Static ${title} preview` })).toBeVisible();
   }
@@ -60,8 +60,8 @@ it("previews and dismissal perform no capability change", async () => {
 it("uses existing settings destinations and offers no mutation controls", async () => {
   const input = props();
   render(<FirstTaskCapabilities {...input} />);
-  await userEvent.click(screen.getByRole("button", { name: "Helper agents" }));
-  await userEvent.click(screen.getByRole("button", { name: "Review helper agent settings" }));
+  await userEvent.click(screen.getByRole("button", { name: "Agents" }));
+  await userEvent.click(screen.getByRole("button", { name: "Review agent settings" }));
   expect(input.onOpenSettings).toHaveBeenCalledWith({
     section: "harness",
     setting: "subagent-creation-posture",
@@ -90,7 +90,7 @@ it("keeps failed host reads unknown and read-only surfaces free of settings acti
     />,
   );
   expect(await screen.findByLabelText("Person memory status")).toHaveTextContent("Not reported");
-  expect(screen.getByLabelText("Helper agents status")).toHaveTextContent("Not reported");
+  expect(screen.getByLabelText("Agents status")).toHaveTextContent("Not reported");
   expect(screen.getByLabelText("Browser status")).toHaveTextContent("Not reported");
   expect(screen.queryByRole("button", { name: /Review/ })).toBeNull();
 });
@@ -130,7 +130,7 @@ it("reports enabled settings and missing native permissions without starting an 
     expect(screen.getByLabelText("Person memory status")).toHaveTextContent("On"),
   );
   expect(screen.getByLabelText("Computer use status")).toHaveTextContent("Permissions needed");
-  expect(screen.getByLabelText("Helper agents status")).toHaveTextContent("Automatic");
+  expect(screen.getByLabelText("Agents status")).toHaveTextContent("Automatic");
   expect(getComputerUseStatus).toHaveBeenCalledOnce();
 });
 
@@ -156,7 +156,7 @@ it("drops a previous host's answers before replacement readers respond", async (
     />,
   );
   expect(screen.getByLabelText("Person memory status")).toHaveTextContent("Not reported");
-  expect(screen.getByLabelText("Helper agents status")).toHaveTextContent("Not reported");
+  expect(screen.getByLabelText("Agents status")).toHaveTextContent("Not reported");
 });
 
 it("resumes pending setup and never asks macOS when enabling was refused", async () => {

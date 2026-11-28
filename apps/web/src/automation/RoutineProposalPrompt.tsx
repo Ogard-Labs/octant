@@ -137,13 +137,13 @@ export function RoutineProposalPrompt(props: {
     pending.trigger.kind === "weekly-local"
       ? `${routineScheduleLabel(pending.trigger)} (${pending.trigger.timeZone})`
       : routineScheduleLabel(pending.trigger);
-  const label = followUp ? "Follow-up proposal" : "Routine proposal";
+  const label = followUp ? "Follow-up proposal" : "Automation proposal";
   return (
     <section aria-label="Suggested by the agent" className={`follow-up-cards ${props.className}`}>
       <article aria-label={label} className="follow-up-card">
         <div className="follow-up-card__head">
           <span className="follow-up-card__kind">
-            {followUp ? "Follow-up here · suggested" : "Routine · suggested"}
+            {followUp ? "Follow-up here · suggested" : "Automation · suggested"}
           </span>
           <OctantIconButton
             disabled={busy}
@@ -172,7 +172,7 @@ export function RoutineProposalPrompt(props: {
             size="xs"
             type="button"
           >
-            {followUp ? "Schedule follow-up" : "Create routine"}
+            {followUp ? "Schedule follow-up" : "Create automation"}
           </OctantButton>
         </div>
       </article>
@@ -194,10 +194,10 @@ function RoutineChangeCard(props: {
   const followUp = request.targetPolicy === "same-thread";
   const action =
     request.change === "pause"
-      ? "Pause routine"
+      ? "Pause automation"
       : followUp
         ? "Cancel follow-up"
-        : "Archive routine";
+        : "Archive automation";
   const summary =
     request.change === "pause"
       ? "It stops until you resume it in Automations."

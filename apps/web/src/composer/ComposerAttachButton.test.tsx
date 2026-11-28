@@ -59,7 +59,7 @@ describe("Composer thread actions", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
+    await user.click(screen.getByRole("button", { name: "Add attachment or thread action" }));
     expect(await screen.findByRole("menuitem", { name: "Choose file…" })).toBeVisible();
     expect(
       screen.getByRole("menuitem", { name: "Use Canvas instead of Claude artifacts" }),

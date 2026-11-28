@@ -155,7 +155,7 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
 function waitingOn(requests: ReadonlyArray<PendingRequest>): string {
   const direct = requests.filter((request) => !isChildPendingRequest(request));
   const subagent = direct.length < requests.length;
-  if (direct.length === 0) return "waiting on a subagent";
+  if (direct.length === 0) return "waiting on an agent";
   const approval = direct.some(
     (request) => request.kind === "approval" || request.kind === "lead-approval",
   );
@@ -170,7 +170,7 @@ function waitingOn(requests: ReadonlyArray<PendingRequest>): string {
         : question
           ? "waiting on your answer"
           : "waiting on your decision";
-  return subagent ? `${text} and a subagent` : text;
+  return subagent ? `${text} and an agent` : text;
 }
 
 function waited(elapsedMs: number): string {

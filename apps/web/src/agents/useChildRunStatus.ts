@@ -230,7 +230,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
           if (mounted.current) {
             setFailure({
               parentThreadId,
-              message: "Subagents could not be stopped. They are still running.",
+              message: "Agents could not be stopped. They are still running.",
             });
             refresh();
           }
@@ -242,7 +242,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
         if (mounted.current) {
           setFailure({
             parentThreadId,
-            message: "Subagents could not be stopped. They are still running.",
+            message: "Agents could not be stopped. They are still running.",
           });
         }
         return false;
@@ -276,7 +276,7 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
         if (mounted.current) refresh();
       } catch {
         if (mounted.current) {
-          setFailure({ parentThreadId, message: "The subagent could not be marked reviewed." });
+          setFailure({ parentThreadId, message: "The agent could not be marked reviewed." });
         }
       }
     },

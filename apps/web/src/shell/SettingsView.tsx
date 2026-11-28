@@ -2039,7 +2039,7 @@ function ActiveSectionContent({
           )}
           <SettingsSection
             title="Background Browser ownership"
-            description="Keep the host's native Browser running for newly reviewed task permissions after its windows close."
+            description="Keep the host's native Browser running for newly reviewed thread permissions after its windows close."
           >
             <div className="setgroup">
               <SettingRow
@@ -2048,7 +2048,7 @@ function ActiveSectionContent({
                 settingId="persistent-browser-owner"
                 focused={focusedSetting === settingId("persistent-browser-owner")}
                 description="Keeps the agent's Browser running after the last window closes."
-                more="It starts no task, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
+                more="It starts no thread, copies no sign-ins, and adds no permission. Turning it off or quitting Octant ends it."
               >
                 <OctantSwitch
                   checked={props.settings.persistentBrowserOwner}
@@ -3671,7 +3671,7 @@ function UsageSettingsSection(props: {
           description="When a provider's usage limit stops a turn you sent and says when it resets, schedule the resume at that reset."
           focused={props.focusedSetting === settingId("usage-limit-resume-by-default")}
           label="Resume at reset by default"
-          more="Never for a billing problem, a turn a routine or an agent started, or a provider that refuses Octant's own continuations."
+          more="Never for a billing problem, a turn an automation or an agent started, or a provider that refuses Octant's own continuations."
           scope="host"
           settingId="usage-limit-resume-by-default"
         >

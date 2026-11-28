@@ -43,8 +43,8 @@ describe("EnvironmentSubagents", () => {
     );
 
     expect(await screen.findByText("None")).toBeVisible();
-    expect(screen.getByText("Subagents")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Subagents/ })).toBeNull();
+    expect(screen.getByText("Agents")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Agents/ })).toBeNull();
     expect(screen.queryByText(/They appear when the agent hands off part of its work/)).toBeNull();
   });
 
@@ -60,9 +60,9 @@ describe("EnvironmentSubagents", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /^Subagents/ }));
+    await user.click(screen.getByRole("button", { name: /^Agents/ }));
     expect(screen.queryByText(/They appear when the agent hands off part of its work/)).toBeNull();
-    expect(screen.getByText("Reading subagents…")).toBeVisible();
+    expect(screen.getByText("Reading agents…")).toBeVisible();
   });
 
   it("lists each running subagent with its provider mark and opens the chosen one in Agents", async () => {

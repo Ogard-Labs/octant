@@ -303,7 +303,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
           aria-label={
             pendingQuestion.source === undefined
               ? "Question from the lead"
-              : "Question from a subagent"
+              : "Question from an agent"
           }
           className="native-harness-question"
           noValidate

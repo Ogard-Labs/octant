@@ -59,7 +59,7 @@ export type BrowserElementPick =
 
 const pickRefusalText: Partial<Record<ProductFeedbackRefusalReason, string>> = {
   "thread-unavailable":
-    "This task or its local authority is no longer available. Reconnect and pick the element again.",
+    "This thread or its local authority is no longer available. Reconnect and pick the element again.",
   "surface-unavailable":
     "The host cannot read this page right now, so nothing was added. A page with a sign-in field is never read.",
   "element-unavailable": "There is no supported element at that spot. Pick another element.",
@@ -72,7 +72,7 @@ const EMPTY_NOTES: ReadonlyArray<ProductFeedbackNote> = Object.freeze([]);
 const EMPTY_CROPS: Readonly<Record<string, string>> = Object.freeze({});
 const refusalText: Record<ProductFeedbackRefusalReason, string> = {
   "thread-unavailable":
-    "This task or its original local authority is no longer available. Reconnect and refresh notes.",
+    "This thread or its original local authority is no longer available. Reconnect and refresh notes.",
   "surface-unavailable":
     "The host cannot read this page right now. Finish sign-in or choose the element again.",
   "element-unavailable": "There is no supported element at that spot. Choose another element.",
@@ -254,7 +254,9 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
       );
       if (!current(signal)) return false;
       if (pending.some((note) => note.threadId !== owner.threadId || note.mode !== owner.mode))
-        throw new Error("The host returned notes for a different task. Refresh before continuing.");
+        throw new Error(
+          "The host returned notes for a different thread. Refresh before continuing.",
+        );
       const previous = stateRef.current.owner === owner ? stateRef.current : empty(owner);
       const images = await Promise.all(
         pending.map(async (note) => {
@@ -353,7 +355,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
         throw new Error("The host returned an unexpected feedback result. Refresh notes.");
       if (result.note.threadId !== owner.threadId || result.note.mode !== owner.mode)
         throw new Error(
-          "The host returned a note for a different task. Refresh before continuing.",
+          "The host returned a note for a different thread. Refresh before continuing.",
         );
       const previous = stateRef.current.owner === owner ? stateRef.current : empty(owner);
       const found = previous.notes.some((note) => note.id === result.note.id);
@@ -418,7 +420,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
             throw new Error("The host did not return an element preview.");
           if (result.preview.threadId !== owner.threadId || result.preview.mode !== owner.mode)
             throw new Error(
-              "The host returned evidence for a different task. Refresh before continuing.",
+              "The host returned evidence for a different thread. Refresh before continuing.",
             );
           previewHolder.current = result.preview;
           patch({ preview: result.preview, previewExpired: false, message: undefined });
@@ -516,7 +518,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
   const update = useCallback(
     (note: ProductFeedbackNote, change: Parameters<ProductFeedback["update"]>[1]) => {
       if (note.threadId !== owner.threadId || note.mode !== owner.mode) {
-        patch({ message: "This note belongs to a different task. Refresh notes." });
+        patch({ message: "This note belongs to a different thread. Refresh notes." });
         return Promise.resolve(false);
       }
       return mutate(
@@ -533,7 +535,7 @@ export function useProductFeedback(options: ProductFeedbackOptions): ProductFeed
   const discard = useCallback(
     async (note: ProductFeedbackNote) => {
       if (note.threadId !== owner.threadId || note.mode !== owner.mode) {
-        patch({ message: "This note belongs to a different task. Refresh notes." });
+        patch({ message: "This note belongs to a different thread. Refresh notes." });
         return;
       }
       await mutate({

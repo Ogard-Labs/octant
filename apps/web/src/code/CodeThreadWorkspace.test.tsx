@@ -1754,7 +1754,7 @@ describe("CodeThreadWorkspace", () => {
       .getByText("Waiting · Mistral Vibe resume identity does not match this Project.")
       .closest('[role="status"]');
     expect(status).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "New task in this Project" }));
+    await user.click(screen.getByRole("button", { name: "New thread in this Project" }));
     expect(onNewThreadInProject).toHaveBeenCalledWith(projectId);
     expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
   });
@@ -1793,7 +1793,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: "New task in this Project" }),
+      screen.queryByRole("button", { name: "New thread in this Project" }),
     ).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Follow-up message"), "Queue this instead");
     // A busy wait offers to queue the follow-up, where a parked one sends it.

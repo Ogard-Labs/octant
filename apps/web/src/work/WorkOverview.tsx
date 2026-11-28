@@ -109,7 +109,7 @@ export interface WorkOverviewProps {
 }
 
 const SECTIONS = [
-  { key: "workflowsAndThreads", title: "Recent tasks" },
+  { key: "workflowsAndThreads", title: "Recent threads" },
   { key: "folder", title: "In the folder" },
   { key: "filesAndArtifacts", title: "Produced by Octant" },
   { key: "approvals", title: "Approvals" },
@@ -313,7 +313,7 @@ export function WorkOverview(props: WorkOverviewProps) {
         ) : null}
         <form noValidate ref={composerForm} onSubmit={(event) => void submit(event)}>
           <label className="sr-only" htmlFor="work-overview-quick-start">
-            Start a new task
+            Start a new thread
           </label>
           <WorkImageAttachmentChips images={images} />
           <OctantTextarea
@@ -330,7 +330,7 @@ export function WorkOverview(props: WorkOverviewProps) {
               }
               images.consumePaste(event.clipboardData);
             }}
-            placeholder="Describe the next task…"
+            placeholder="Start a new thread…"
             rows={3}
             value={draft}
           />
@@ -359,7 +359,7 @@ export function WorkOverview(props: WorkOverviewProps) {
             type="submit"
             variant="secondary"
           >
-            Start task
+            Start thread
           </OctantButton>
         </form>
       </section>
@@ -451,7 +451,7 @@ function WorkStatusCard({ status }: { readonly status: WorkProjectStatus }) {
       actions={
         <span className="work-status__updated">
           {!status.hasStatusFile
-            ? "No STATUS.md yet — the first task creates it"
+            ? "No STATUS.md yet — the first thread creates it"
             : status.lastUpdatedOn === undefined
               ? "Undated"
               : `Last updated ${status.lastUpdatedOn}${status.stale ? " · stale" : ""}`}

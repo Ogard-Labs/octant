@@ -136,7 +136,7 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
           <p>
             Named commands like Run, Test, or Dev. Each shows as a button in this Project's header
             and in the command palette. Review its folder and branch before starting a dedicated run
-            with output, exit status and Stop beside the task.
+            with output, exit status and Stop beside the thread.
           </p>
         </div>
       </div>
@@ -197,7 +197,7 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
                 }
               />
               <span>
-                I reviewed this command and folder; prepare new worktrees automatically with task
+                I reviewed this command and folder; prepare new worktrees automatically with thread
                 access. Secrets and the parent environment are not copied.
               </span>
             </label>

@@ -45,7 +45,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
   };
 
   return (
-    <section aria-label="Describe a routine" className="routine-composer">
+    <section aria-label="Describe an automation" className="routine-composer">
       <label className="routine-composer__label" htmlFor="routine-composer-request">
         <Sparkles aria-hidden="true" size={14} />
         What do you want automated?
@@ -59,7 +59,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
         value={request}
       />
 
-      <ul aria-label="Routine suggestions" className="routine-composer__suggestions">
+      <ul aria-label="Automation suggestions" className="routine-composer__suggestions">
         {ROUTINE_REQUEST_SUGGESTIONS.map((suggestion) => (
           <li key={suggestion.label}>
             <OctantButton
@@ -88,7 +88,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
             type="button"
             variant="secondary"
           >
-            {draft.needsSchedule ? "Review and add a schedule" : "Review this routine"}
+            {draft.needsSchedule ? "Review and add a schedule" : "Review this automation"}
           </OctantButton>
         </div>
       )}

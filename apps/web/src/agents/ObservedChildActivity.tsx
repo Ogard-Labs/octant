@@ -21,10 +21,10 @@ export type ObservedChildClient = Pick<
 >;
 
 const STEERING_REFUSALS = {
-  "not-found": "The subagent already finished.",
-  "not-live": "The turn that started this subagent is no longer running.",
-  unsupported: "This provider cannot do that for this subagent now.",
-  unauthorized: "This window cannot steer subagents of this thread.",
+  "not-found": "The agent already finished.",
+  "not-live": "The turn that started this agent is no longer running.",
+  unsupported: "This provider cannot do that for this agent now.",
+  unauthorized: "This window cannot steer agents of this thread.",
 } as const;
 
 /**
@@ -62,7 +62,7 @@ function ObservedChildSteering(props: {
           : STEERING_REFUSALS[result.reason],
       );
     } catch {
-      setNotice("Could not move the helper to the background. Try again.");
+      setNotice("Could not move the agent to the background. Try again.");
     } finally {
       setBusy(false);
     }
@@ -75,7 +75,7 @@ function ObservedChildSteering(props: {
       const result = await messageObserved({ ...target, message });
       if (result.status === "queued") {
         setDraft("");
-        setNotice("Sent. The subagent reads it with its next tool call.");
+        setNotice("Sent. The agent reads it with its next tool call.");
       } else {
         setNotice(STEERING_REFUSALS[result.reason]);
       }
@@ -89,7 +89,7 @@ function ObservedChildSteering(props: {
     <>
       {backgroundObserved === undefined ? null : (
         <OctantButton
-          aria-label={`Send subagent to the background: ${label}`}
+          aria-label={`Send agent to the background: ${label}`}
           disabled={busy}
           onClick={() => void background()}
           size="xs"
@@ -100,7 +100,7 @@ function ObservedChildSteering(props: {
       )}
       {messageObserved === undefined ? null : (
         <form
-          aria-label={`Message subagent: ${label}`}
+          aria-label={`Message agent: ${label}`}
           className="composer-subagents__message"
           noValidate
           onSubmit={(event) => {
@@ -112,7 +112,7 @@ function ObservedChildSteering(props: {
             aria-label={`Message for ${label}`}
             maxLength={4096}
             onChange={(event) => setDraft(event.target.value)}
-            placeholder="Message this subagent"
+            placeholder="Message this agent"
             value={draft}
           />
           <OctantButton disabled={busy || draft.trim() === ""} size="xs" type="submit">
@@ -130,10 +130,10 @@ function ObservedChildSteering(props: {
 }
 
 const STOP_REFUSALS = {
-  "not-found": "The subagent already finished.",
-  "not-live": "The turn that started this subagent is no longer running.",
-  unsupported: "This provider cannot stop one subagent on its own.",
-  unauthorized: "This window cannot stop subagents of this thread.",
+  "not-found": "The agent already finished.",
+  "not-live": "The turn that started this agent is no longer running.",
+  unsupported: "This provider cannot stop one agent on its own.",
+  unauthorized: "This window cannot stop agents of this thread.",
 } as const;
 
 /**
@@ -164,13 +164,13 @@ function ObservedChildStop(props: {
           : { kind: "refused", message: STOP_REFUSALS[result.reason] },
       );
     } catch {
-      setState({ kind: "refused", message: "The subagent could not be stopped. Try again." });
+      setState({ kind: "refused", message: "The agent could not be stopped. Try again." });
     }
   };
   return (
     <>
       <OctantButton
-        aria-label={`Stop subagent: ${props.child.task ?? props.child.childAgentId}`}
+        aria-label={`Stop agent: ${props.child.task ?? props.child.childAgentId}`}
         disabled={state.kind === "requesting" || state.kind === "requested"}
         onClick={() => void stop()}
         size="xs"
@@ -274,7 +274,7 @@ export function ObservedChildDetail(props: {
       <div className="agent-run-detail__nav">
         <OctantButton onClick={props.onBack} size="xs" variant="ghost">
           <ArrowLeft aria-hidden="true" size={12} />
-          Subagents
+          Agents
         </OctantButton>
       </div>
       <header className="agent-run-detail__header">
@@ -315,7 +315,7 @@ export function ObservedChildDetail(props: {
           // only, folded, as plain text.
           <OctantCollapsible
             className="agent-observation__final"
-            summary="Final summary from the subagent"
+            summary="Final summary from the agent"
           >
             <p className="whitespace-pre-wrap">{child.finalSummary}</p>
           </OctantCollapsible>

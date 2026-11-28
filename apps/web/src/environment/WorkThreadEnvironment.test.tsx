@@ -147,7 +147,7 @@ describe("WorkThreadEnvironment", () => {
     expect(screen.queryByRole("region", { name: "Goal" })).not.toBeInTheDocument();
     expect(screen.queryByText("Keep working on this unattended")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Add a routine" }));
+    await user.click(screen.getByRole("button", { name: "Add an automation" }));
     await user.click(await screen.findByRole("menuitem", { name: "Set a goal…" }));
 
     expect(await screen.findByRole("region", { name: "Goal" })).toBeVisible();

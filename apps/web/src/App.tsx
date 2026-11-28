@@ -8980,7 +8980,7 @@ function LaunchedShell(
         const providerInstanceId = workProviderChoice?.instanceId;
         const modelId = workProviderChoice?.modelId;
         if (providerInstanceId === undefined || modelId === undefined) {
-          setDraftError("No provider is available. Configure a provider before starting a task.");
+          setDraftError("No provider is available. Configure a provider before starting a thread.");
           return false;
         }
         const onServer = serverWorkProject !== undefined;
@@ -9001,7 +9001,7 @@ function LaunchedShell(
           ...(terminalSession === undefined || onServer ? {} : { terminalSession }),
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
-          setDraftError("The task could not be created.");
+          setDraftError("The thread could not be created.");
           return false;
         }
         await linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
@@ -10659,7 +10659,7 @@ function LaunchedShell(
                                   ? {}
                                   : { mainFolder: serverActionsProject.folder })}
                                 defaultFolderLabel={
-                                  activeMode === "work" ? "Task folder" : "Active server checkout"
+                                  activeMode === "work" ? "Thread folder" : "Active server checkout"
                                 }
                                 onRun={(action, folder) =>
                                   void runProjectAction(

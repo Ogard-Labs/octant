@@ -315,9 +315,9 @@ describe("a waiting subagent row", () => {
       />,
     );
     const row = screen.getByRole("group", {
-      name: "Quarterly report has a subagent waiting for you",
+      name: "Quarterly report has an agent waiting for you",
     });
-    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).getByText("Research agent needs your approval")).toBeInTheDocument();
     expect(within(row).getByText(/Collect last quarter's figures\./)).toBeInTheDocument();
     expect(within(row).getByText("shell: bun run collect")).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
@@ -344,7 +344,7 @@ describe("a waiting subagent row", () => {
         request={codeChildQuestion()}
       />,
     );
-    expect(screen.getByText("Review subagent asked a question")).toBeInTheDocument();
+    expect(screen.getByText("Review agent asked a question")).toBeInTheDocument();
     await user.tab();
     await user.keyboard("1");
     expect(onAnswer).not.toHaveBeenCalled();

@@ -172,7 +172,7 @@ describe("HubWebhooksSection", () => {
       },
     });
     expect(
-      screen.getByText(/GitHub · \/hooks\/A+ · 2 waiting for the routine/),
+      screen.getByText(/GitHub · \/hooks\/A+ · 2 waiting for the automation/),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Rotate Deploys" }));
     expect(calls.some((call) => call.operation === "webhook-rotate")).toBe(false);

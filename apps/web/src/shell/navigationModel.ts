@@ -397,8 +397,8 @@ export function buildChatThreadNavigation(
 
 const descriptors = {
   "new-chat": { id: "new-chat", label: "New chat" },
-  "new-work-thread": { id: "new-work-thread", label: "New task" },
-  "new-code-thread": { id: "new-code-thread", label: "New task" },
+  "new-work-thread": { id: "new-work-thread", label: "New thread" },
+  "new-code-thread": { id: "new-code-thread", label: "New thread" },
   inbox: { id: "inbox", label: "Inbox" },
   todos: { id: "todos", label: "To-dos" },
   automations: { id: "automations", label: "Automations" },

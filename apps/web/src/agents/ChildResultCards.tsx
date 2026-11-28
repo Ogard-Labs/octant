@@ -71,8 +71,8 @@ function ChildResultCard(
   const scope = useResultQuoteScope();
   const label =
     block.kind === "raw"
-      ? "a subagent result"
-      : `the ${subagentRoleWord(block.role).toLowerCase()} subagent (generation ${block.generation})`;
+      ? "an agent result"
+      : `the ${subagentRoleWord(block.role).toLowerCase()} agent (generation ${block.generation})`;
   const target =
     scope?.target?.row === props.rowKey && scope?.target?.block === props.blockKey
       ? scope.target
@@ -96,9 +96,9 @@ function ChildResultCard(
   );
   if (block.kind === "raw") {
     return (
-      <article aria-label="Subagent result" className="child-result">
+      <article aria-label="Agent result" className="child-result">
         <header className="child-result__head">
-          <span className="child-result__title">Subagent result</span>
+          <span className="child-result__title">Agent result</span>
         </header>
         {resultText(block.text)}
       </article>
@@ -121,14 +121,14 @@ function ChildResultCard(
   const attribution = [providerName, model].filter((part) => part !== undefined).join(" · ");
   const card = (
     <article
-      aria-label={`${role} subagent ${state}`}
+      aria-label={`${role} agent ${state}`}
       className="child-result"
       data-outcome={finished ? "finished" : "stopped"}
     >
       <header className="child-result__head">
         <SubagentStatusIcon lifecycleStatus={lifecycle} />
         <span className="child-result__title">
-          {role} subagent {state}
+          {role} agent {state}
         </span>
         <span className="child-result__attribution">{attribution}</span>
       </header>
@@ -200,7 +200,7 @@ function FinishedResult(props: {
     <div className="child-result-quiet">
       <p className="child-result-quiet__line">
         <span>
-          {props.role} subagent finished{ran === "" ? "" : ` · worked ${ran}`}
+          {props.role} agent finished{ran === "" ? "" : ` · worked ${ran}`}
         </span>
         <OctantButton
           aria-controls={id}
@@ -282,7 +282,7 @@ export function SteeredChildResults(
     <>
       {props.steered.map((entry) => (
         <article
-          aria-label="Subagent results delivered into the running turn"
+          aria-label="Agent results delivered into the running turn"
           className="turn-child-result"
           data-steered="true"
           key={`${String(entry.delivery.runId)}:${entry.steeredAt}`}

@@ -62,7 +62,7 @@ export function EnvironmentRoutineForm(props: {
     const schedule = routineScheduleFormValue(trigger);
     const found = [
       ...(name.length === 0 || name.length > MAX_AUTOMATION_NAME_LENGTH
-        ? ["Name the routine."]
+        ? ["Name the automation."]
         : []),
       ...(prompt.length === 0 || prompt.length > MAX_AUTOMATION_PROMPT_LENGTH
         ? ["Say what each run should do."]
@@ -89,7 +89,7 @@ export function EnvironmentRoutineForm(props: {
         missedRunPolicy,
       });
     } catch {
-      setIssues(["Check the schedule: it is not one a routine can use."]);
+      setIssues(["Check the schedule: it is not one an automation can use."]);
       return;
     }
     setIssues([]);
@@ -98,7 +98,7 @@ export function EnvironmentRoutineForm(props: {
 
   return (
     <form
-      aria-label="New routine"
+      aria-label="New automation"
       className="environment-routine-form"
       noValidate
       onSubmit={(event) => {
@@ -146,7 +146,7 @@ export function EnvironmentRoutineForm(props: {
       </p>
       <div className="environment-routine__actions">
         <OctantButton className="window-no-drag" disabled={props.busy} size="sm" type="submit">
-          Create routine
+          Create automation
         </OctantButton>
         <OctantButton
           className="window-no-drag"

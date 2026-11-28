@@ -154,7 +154,7 @@ createRoot(document.getElementById("root")).render(<main className="settings-pan
               scale,
             );
           await page.getByRole("button", { name: "New download manifest…" }).click();
-          await page.getByRole("combobox", { name: "Download routine" }).click();
+          await page.getByRole("combobox", { name: "Download automation" }).click();
           await page.getByRole("option", { name: "Collect daily report" }).click();
           await page.getByRole("combobox", { name: "Download account profile" }).click();
           await page.getByRole("option", { name: "Personal", exact: true }).click();

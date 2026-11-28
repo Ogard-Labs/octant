@@ -1713,7 +1713,7 @@ function terminalRecoveryFailureCategory(error: unknown): string | undefined {
 function ApprovalUnavailable(props: { readonly surface: string }) {
   return (
     <OctantEmpty
-      detail="Approvals are unavailable in this window. Reopen the task in the desktop app to continue."
+      detail="Approvals are unavailable in this window. Reopen the thread in the desktop app to continue."
       icon={<TriangleAlert size={16} />}
       layout="line"
       title={`${props.surface} approval unavailable`}

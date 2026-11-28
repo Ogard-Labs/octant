@@ -113,7 +113,7 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
             triggerClassName={octantButtonClassName({ variant: "secondary", size: "icon" })}
             triggerDisabled={props.busy === true}
             triggerLabel={
-              threadActions.length === 0 ? "Add attachment" : "Add attachment or task action"
+              threadActions.length === 0 ? "Add attachment" : "Add attachment or thread action"
             }
             triggerTitle={threadActions.length === 0 ? "Add attachment" : "Add"}
             value=""

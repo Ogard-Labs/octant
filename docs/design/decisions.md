@@ -3181,7 +3181,7 @@ Every start screen shows one question, its composer, and one calm list under the
 
 - The composer paints first. Cards read only what the window's own authority returns, and never show fake rows.
 - Answers, Open, Stop and Start a fix use the commands the open thread uses; Start a fix only opens a draft.
-- Chat, Work and Code share one top-anchored start screen, so New task, choosing a Project or switching mode moves nothing (maintainer request, 2026-11-16).
+- Chat, Work and Code share one top-anchored start screen, so New thread, choosing a Project or switching mode moves nothing (maintainer request, 2026-11-16).
 - The list is laid out from its first frame and nothing above a section moves while it loads (maintainer request, 2026-11-15).
 - A start screen has no dock ([Right dock and thread tools](#right-dock-and-thread-tools)).
 
