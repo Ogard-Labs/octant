@@ -232,7 +232,17 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
             hostStatus.push.reason === "no-credentials" ? "host-no-credentials" : "host-push-off",
             props.hostLabel,
           )
-        : undefined;
+        : hostStatus?.status === "ready" &&
+            hostStatus.push.status === "available" &&
+            hostStatus.push.platforms !== undefined &&
+            !hostStatus.push.platforms[props.permission.platform]
+          ? formatEnableRefusal(
+              props.permission.platform === "ios"
+                ? "host-missing-ios-credential"
+                : "host-missing-android-credential",
+              props.hostLabel,
+            )
+          : undefined;
 
   return (
     <View style={styles.panel} testID="mobile-push-panel">

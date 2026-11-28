@@ -165,6 +165,65 @@ describe("turning phone notifications on for a computer", () => {
     }
   });
 
+  it("refuses registration when the host lacks a credential for this phone's platform, while allowing hub delivery without platforms", async () => {
+    const androidOnAppleOnly = recordingHost({
+      getStatus: async () =>
+        Response.json({ status: "available", platforms: { ios: true, android: false } }),
+    });
+    const androidBook = memoryBook();
+    const androidResult = await enablePhoneNotifications({
+      transport: androidOnAppleOnly.transport,
+      deviceId,
+      permission: permission({ platform: "android" }),
+      book: androidBook,
+    });
+    expect(androidResult).toEqual({
+      status: "refused",
+      reason: "host-missing-android-credential",
+    });
+    expect(formatEnableRefusal("host-missing-android-credential", "Studio Mac")).toBe(
+      "Add a Google service account in Settings › General on Studio Mac to notify Android devices.",
+    );
+    expect(androidOnAppleOnly.bodies).toHaveLength(0);
+    expect(await androidBook.list()).toEqual([]);
+
+    const iosOnGoogleOnly = recordingHost({
+      getStatus: async () =>
+        Response.json({ status: "available", platforms: { ios: false, android: true } }),
+    });
+    const iosBook = memoryBook();
+    const iosResult = await enablePhoneNotifications({
+      transport: iosOnGoogleOnly.transport,
+      deviceId,
+      permission: permission({ platform: "ios" }),
+      book: iosBook,
+    });
+    expect(iosResult).toEqual({
+      status: "refused",
+      reason: "host-missing-ios-credential",
+    });
+    expect(formatEnableRefusal("host-missing-ios-credential", "Studio Mac")).toBe(
+      "Add an Apple push key in Settings › General on Studio Mac to notify iPhones and iPads.",
+    );
+    expect(iosOnGoogleOnly.bodies).toHaveLength(0);
+    expect(await iosBook.list()).toEqual([]);
+
+    // Hub-delegated spoke returns `{ status: "available" }` without `platforms`: still registers.
+    const spokeHost = recordingHost({
+      getStatus: async () => Response.json({ status: "available" }),
+    });
+    const spokeBook = memoryBook();
+    const spokeResult = await enablePhoneNotifications({
+      transport: spokeHost.transport,
+      deviceId,
+      permission: permission({ platform: "android" }),
+      book: spokeBook,
+    });
+    expect(spokeResult).toEqual({ status: "registered" });
+    expect(spokeHost.bodies).toHaveLength(1);
+    expect(await spokeBook.list()).toHaveLength(1);
+  });
+
   it("asks the computer for nothing when permission is denied, build is unavailable, token is missing, or deviceId is absent", async () => {
     const cases = [
       { reason: "unavailable", deviceId, overrides: { available: false } },

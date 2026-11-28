@@ -15,6 +15,8 @@ export type EnablePhoneNotificationsRefusalReason =
   | "update-host"
   | "host-push-off"
   | "host-no-credentials"
+  | "host-missing-ios-credential"
+  | "host-missing-android-credential"
   | "host-hub-push-off"
   | "host-rejected"
   | "host-unreachable";
@@ -68,6 +70,18 @@ async function registerWithComputer(input: {
       return { status: "refused", reason: "host-no-credentials" };
     }
     return { status: "refused", reason: "host-push-off" };
+  }
+  if (
+    hostStatus.push.platforms !== undefined &&
+    !hostStatus.push.platforms[input.permission.platform]
+  ) {
+    return {
+      status: "refused",
+      reason:
+        input.permission.platform === "ios"
+          ? "host-missing-ios-credential"
+          : "host-missing-android-credential",
+    };
   }
   if (input.isCancelled()) return { status: "cancelled" };
   await input.permission.allowHost?.(input.transport.hostId);
@@ -326,6 +340,10 @@ export function formatEnableRefusal(
       return `Turn on Phone notifications in Settings › General on ${hostLabel}.`;
     case "host-no-credentials":
       return `Add an Apple push key or Google service account in Settings › General on ${hostLabel}.`;
+    case "host-missing-ios-credential":
+      return `Add an Apple push key in Settings › General on ${hostLabel} to notify iPhones and iPads.`;
+    case "host-missing-android-credential":
+      return `Add a Google service account in Settings › General on ${hostLabel} to notify Android devices.`;
     case "host-hub-push-off":
       return `Turn on the push sender on ${hostLabel}'s hub, or add push credentials in Settings › General on ${hostLabel}.`;
     case "host-rejected":

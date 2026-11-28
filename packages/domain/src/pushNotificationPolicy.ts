@@ -184,10 +184,12 @@ export function buildPushAlert(input: PushAlertBuildInput): CheckedPushMessageV2
     input.source === "thread"
       ? { threadId: input.threadId, mode: input.mode }
       : input.source === "automation"
-        ? {
-            ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-            ...(input.mode === undefined ? {} : { mode: input.mode }),
-          }
+        ? input.threadId === undefined
+          ? {}
+          : {
+              threadId: input.threadId,
+              ...(input.mode === undefined ? {} : { mode: input.mode }),
+            }
         : {};
 
   if (input.heldSecrets.status === "unavailable") {

@@ -633,8 +633,12 @@ export class AutomationNotificationDeliveryService {
       sequence: input.sequence,
       occurredAt: input.occurredAt,
       heldSecrets: input.heldSecrets,
-      ...(mode === undefined ? {} : { mode }),
-      ...(input.run.threadId === undefined ? {} : { threadId: String(input.run.threadId) }),
+      ...(input.run.threadId === undefined
+        ? {}
+        : {
+            threadId: String(input.run.threadId),
+            ...(mode === undefined ? {} : { mode }),
+          }),
       ...(displayName === undefined ? {} : { displayName }),
     });
   }

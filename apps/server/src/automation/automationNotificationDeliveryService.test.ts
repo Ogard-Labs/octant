@@ -244,6 +244,80 @@ describe("AutomationNotificationDeliveryService", () => {
     expect(JSON.stringify(delivered)).not.toContain("super-secret");
   });
 
+  it("omits mode when an automation fails before creating its thread so phone parsers keep the alert", async () => {
+    const { journal } = createJournal();
+    const uuid = sharedUuid();
+    const preferences = new AutomationNotificationPreferencesStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    preferences.update({
+      enabled: true,
+      waiting: true,
+      approvalNeeded: true,
+      failure: true,
+      completion: true,
+      expectedVersion: 0 as never,
+    });
+    const deliveries = new AutomationNotificationDeliveryStore({
+      journal,
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const tokens = destinationsOf([
+      {
+        hostId,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        platform: "ios",
+        token: "apns-token-pre-thread",
+        now,
+        threadTitles: true,
+      },
+    ]);
+    const transport = createRecordingPushDeliveryTransport();
+    const service = new AutomationNotificationDeliveryService({
+      ...standing,
+      preferences,
+      deliveries,
+      tokens,
+      transport,
+      clock: () => now as never,
+    });
+
+    const base = automationRunFixture();
+    const failedBeforeThread: AutomationRun = {
+      ...base,
+      lifecycle: "failed",
+      failure: {
+        reason: "thread-creation-failed",
+        message: "Repository could not be opened",
+      },
+    };
+    expect(failedBeforeThread.threadId).toBeUndefined();
+
+    service.observeRunStatusChanged({
+      run: failedBeforeThread,
+      previousLifecycle: "dispatching",
+    });
+
+    await vi.waitFor(() => {
+      expect(transport.sent.length).toBe(1);
+    });
+    const sent = transport.sent[0]?.message;
+    expect(sent?.type).toBe("alert");
+    if (sent?.type === "alert") {
+      expect(sent.alert.kind).toBe("failure");
+      expect(sent.alert.threadId).toBeUndefined();
+      expect(sent.alert.mode).toBeUndefined();
+      expect(sent.alert.title).toBe(
+        `Automation failed: ${failedBeforeThread.definitionSnapshot.displayName}`,
+      );
+    }
+  });
+
   it("delivers to all standing phones and records remote.push-delivery-recorded@1 per device when the run has a threadId", async () => {
     const { connection, journal } = createJournal();
     const uuid = sharedUuid();

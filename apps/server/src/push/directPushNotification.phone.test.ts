@@ -124,6 +124,46 @@ describe("phone native direct v2 push parsers", () => {
         }),
       ).toEqual({ status: "placeholder" });
 
+      // Automation alert without a threadId omits mode and links to the host.
+      const preThreadAutomation = buildPushAlert({
+        source: "automation",
+        kind: "failure",
+        hostId,
+        mode: "code",
+        computerLabel: "Studio Mac",
+        displayName: "Nightly check",
+        threadTitles: true,
+        collapseId,
+        sequence: 2,
+        occurredAt,
+        heldSecrets: { status: "ready", values: [] },
+      });
+      if (preThreadAutomation.type !== "alert") throw new Error("expected alert");
+      expect(
+        run({
+          octant: {
+            v: 2,
+            kind: preThreadAutomation.alert.kind,
+            hostId: preThreadAutomation.alert.hostId,
+            ...(preThreadAutomation.alert.threadId === undefined
+              ? {}
+              : { threadId: preThreadAutomation.alert.threadId }),
+            ...(preThreadAutomation.alert.mode === undefined
+              ? {}
+              : { mode: preThreadAutomation.alert.mode }),
+          },
+          title: preThreadAutomation.alert.title,
+          body: preThreadAutomation.alert.body,
+        }),
+      ).toEqual({
+        status: "parsed",
+        hostId,
+        kind: "failure",
+        title: "Automation failed: Nightly check",
+        body: "On Studio Mac",
+        deepLink: `octant://hosts/${hostId}`,
+      });
+
       // Device-joined and move-waiting deep links.
       expect(
         run({

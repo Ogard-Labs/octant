@@ -243,6 +243,8 @@ describe("buildPushAlert", () => {
       "Automation failed: Nightly review",
     );
     expect(automation.type === "alert" && automation.alert.body).toBe("On Studio Mac");
+    expect(automation.type === "alert" && automation.alert.threadId).toBeUndefined();
+    expect(automation.type === "alert" && automation.alert.mode).toBeUndefined();
     expect(JSON.stringify(automation)).not.toContain("automationId");
     expect(JSON.stringify(automation)).not.toContain("automationRunId");
   });
