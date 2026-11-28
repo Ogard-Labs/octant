@@ -69,7 +69,7 @@ describe("TurnSubagentRows", () => {
         />
       </ThreadSubagentsProvider>,
     );
-    const list = await screen.findByRole("list", { name: "Subagents" });
+    const list = await screen.findByRole("list", { name: "Agents" });
     const rows = within(list).getAllByRole("button");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveAccessibleName(
@@ -109,7 +109,7 @@ describe("TurnSubagentRows", () => {
         </ReplyDetailContext.Provider>
       </ThreadSubagentsProvider>,
     );
-    const list = await screen.findByRole("list", { name: "Subagents" });
+    const list = await screen.findByRole("list", { name: "Agents" });
     expect(
       within(list)
         .getAllByRole("listitem")
@@ -143,8 +143,8 @@ describe("TurnSubagentRows", () => {
         <ThreadSubagentsTray client={trayOwn.client} threadId={threadId} />
       </ThreadSubagentsProvider>,
     );
-    await screen.findByRole("list", { name: "Subagents" });
-    expect(await screen.findByRole("button", { name: /Subagents,/ })).toBeVisible();
+    await screen.findByRole("list", { name: "Agents" });
+    expect(await screen.findByRole("button", { name: /Agents,/ })).toBeVisible();
     expect(pane.parentSummary).toHaveBeenCalled();
     expect(trayOwn.parentSummary).not.toHaveBeenCalled();
   });

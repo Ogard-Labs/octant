@@ -96,7 +96,7 @@ describe("NativeHarnessEgressCard", () => {
     renderCard(fake);
     expect(await screen.findByText("registry.npmjs.org")).toBeInTheDocument();
     expect(screen.getByText("collector.example.com:8443")).toBeInTheDocument();
-    expect(screen.getByText(/subagent 00000000/)).toBeInTheDocument();
+    expect(screen.getByText(/agent 00000000/)).toBeInTheDocument();
     expect(fake.egressCommand).not.toHaveBeenCalled();
 
     await user.click(screen.getByLabelText("Allow collector.example.com:8443"));

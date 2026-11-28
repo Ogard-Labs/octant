@@ -92,7 +92,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   { value: "octant-tools", label: "Octant tools" },
   { value: "mcp", label: "MCP" },
   { value: "tool-results", label: "Tool results" },
-  { value: "subagent-results", label: "Subagent results" },
+  { value: "subagent-results", label: "Agent results" },
   { value: "reserves", label: "Reserves" },
 ];
 

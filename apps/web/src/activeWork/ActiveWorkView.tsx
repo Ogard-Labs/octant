@@ -24,7 +24,7 @@ const SECTION_ROWS = 25;
 const KIND_LABEL: Readonly<Record<ActiveWorkKind, string | undefined>> = {
   thread: undefined,
   coordinator: "Coordinator",
-  subagent: "Subagent",
+  subagent: "Agent",
   "routine-run": "Automation run",
 };
 
@@ -173,7 +173,7 @@ function ActiveWorkRowItem(props: {
         executing={row.board.reason === "executing"}
         status={row.board.status}
       />
-      <span className="active-work__title">{row.title ?? "Subagent"}</span>
+      <span className="active-work__title">{row.title ?? "Agent"}</span>
       <span className="active-work__reason oct-meta">
         {row.board.status === "waiting" ? threadBoardStatusReasonLabel(row.board.reason) : null}
       </span>

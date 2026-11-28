@@ -1367,7 +1367,7 @@ describe("the quiet Reply detail levels", () => {
         )}
       </ThreadSubagentsContext.Provider>,
     );
-    const list = screen.getByRole("list", { name: "Subagents" });
+    const list = screen.getByRole("list", { name: "Agents" });
     expect(within(list).getByText("Pick a fixture")).toBeVisible();
     expect(within(list).queryByText("Inspect parser")).toBeNull();
     await user.click(screen.getByRole("button", { name: "1 step hidden" }));

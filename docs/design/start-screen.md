@@ -372,7 +372,7 @@ Inside an embedding card these lines stay to one line each. The opinion is advic
 an option or changes the order. A decision can also be
 deferred with the same controls as a question, so it drops below the active
 requests until the chosen time or **Bring back now**. A subagent waiting on an approval or question is a row too, headed "Research
-subagent needs your approval" or "Review subagent asked a question" (the
+agent needs your approval" or "Review agent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
 thread on its Agents tab with that child selected; it offers no Approve, Deny,

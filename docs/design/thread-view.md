@@ -723,18 +723,18 @@ for the pane (maintainer request, 2026-11-17).
 A result the host delivers into the parent thread is a turn the person did
 not write, so it never renders as their right-aligned bubble. It is a
 left-aligned child-result card in the thread's measure: a status mark and
-"<Role> subagent finished" (or the state it stopped in), the provider and
+"<Role> agent finished" (or the state it stopped in), the provider and
 model, the task in meta ink, then the reply as Markdown, folded after about
 eight lines behind Show full result. A child that finished is not drawn as that
 card at rest: its delivered result reads as one quiet centred line, "<Role>
-subagent finished · worked 48s" (the run time by the rows' rule, left out when
+agent finished · worked 48s" (the run time by the rows' rule, left out when
 no times are known), with the reply behind Show result, a disclosure that opens
 the card in place and works from the keyboard. A subagent that stopped or
 failed keeps the full card and gives the host's recorded reason in place of a
 reply. Run ID, generation and provider ID sit behind a Details disclosure in
 the opened card. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
-"Subagent result" head. A turn the host composed to carry a side-task
+"Agent result" head. A turn the host composed to carry a side-task
 child's report back renders the same way but honestly attributed: a
 left-aligned "Report from side task" card naming the task and its outcome
 (finished, failed, or cancelled), the reply as Markdown when one was kept,
@@ -773,7 +773,7 @@ on request rather than presented as unsupported navigation links.
 
 A subagent Octant started opens as a thread of its own, in a pane beside the
 thread that started it; the next subagent of that thread opens in the same pane
-(maintainer decision, 2026-11-26). Its header reads "Subagent
+(maintainer decision, 2026-11-26). Its header reads "Agent
 of" and then the parent thread's title, which leads back to that thread. Under
 it are the task as the title, and the state mark and word, the role, the
 model and the age. The transcript reads like any thread:

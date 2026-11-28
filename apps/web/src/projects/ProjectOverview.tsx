@@ -975,7 +975,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-models`}
                 label="Models"
-                summary="Models this Project's coordinators and helpers use"
+                summary="Models this Project's coordinators and agents use"
               >
                 <ProjectModelRolesSection
                   {...props.modelRoles}

@@ -1620,9 +1620,9 @@ describe("WorkspaceView subagent tray", () => {
       />,
     );
 
-    const tray = await screen.findByRole("group", { name: "Subagents" });
+    const tray = await screen.findByRole("group", { name: "Agents" });
     expectTrayInComposer(tray);
-    const toggle = within(tray).getByRole("button", { name: /Subagents,/ });
+    const toggle = within(tray).getByRole("button", { name: /Agents,/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     await user.click(toggle);
     await user.click(within(tray).getByRole("button", { name: /^collect evidence\. Working/ }));
@@ -1773,7 +1773,7 @@ describe("WorkspaceView subagent tray", () => {
         mode="work"
       />,
     );
-    expectTrayInComposer(await screen.findByRole("group", { name: "Subagents" }));
+    expectTrayInComposer(await screen.findByRole("group", { name: "Agents" }));
   });
 
   it("shows a Code thread's working subagent in its composer", async () => {
@@ -1783,9 +1783,9 @@ describe("WorkspaceView subagent tray", () => {
         agentRunClient={agentRunClient()}
       />,
     );
-    const tray = await screen.findByRole("group", { name: "Subagents" }, { timeout: 5_000 });
+    const tray = await screen.findByRole("group", { name: "Agents" }, { timeout: 5_000 });
     expectTrayInComposer(tray);
-    await userEvent.click(within(tray).getByRole("button", { name: /Subagents,/ }));
+    await userEvent.click(within(tray).getByRole("button", { name: /Agents,/ }));
     expect(tray).toHaveTextContent("collect evidence");
   });
 });

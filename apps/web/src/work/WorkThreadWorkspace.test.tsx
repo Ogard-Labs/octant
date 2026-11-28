@@ -2406,10 +2406,10 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    const entry = await screen.findByRole("article", { name: "Subagent results" });
+    const entry = await screen.findByRole("article", { name: "Agent results" });
     await userEvent.click(within(entry).getByRole("button", { name: "Show result" }));
     expect(
-      within(entry).getByRole("article", { name: "Research subagent finished" }),
+      within(entry).getByRole("article", { name: "Research agent finished" }),
     ).toHaveTextContent("MATRIX-A3");
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
   });

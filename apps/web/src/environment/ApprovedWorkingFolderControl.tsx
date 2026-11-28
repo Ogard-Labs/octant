@@ -59,7 +59,7 @@ export function ApprovedWorkingFolderControl(props: {
       : selected === undefined
         ? "Working folder unavailable. Choose a current Project folder."
         : selected.kind === "extra" && props.code
-          ? "Shared folder, outside the helper's worktree. Git, changed files and Review cover the Code checkout only."
+          ? "Shared folder, outside the agent's worktree. Git, changed files and Review cover the Code checkout only."
           : props.inline === true
             ? "Use . for the whole folder, or a path inside it."
             : "Provider, terminal, saved actions and new Work artifacts use this folder. Choose another root in a new thread.";

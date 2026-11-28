@@ -80,7 +80,7 @@ export function AutomationEventSourceStatus(props: {
           {source.reason === "busy-input"
             ? "Events arrived during automation activity and need review."
             : source.reason === "activity-history-limit"
-              ? "This automation may still be active. Finish and review its threads and helpers. If its history is full, archive it and make a new one."
+              ? "This automation may still be active. Finish and review its threads and agents. If its history is full, archive it and make a new one."
               : source.reason === "routine-output"
                 ? "Events may come from automation output and need review."
                 : source.reason === "automatic-start-limit"

@@ -2509,7 +2509,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     <article
                       aria-label={
                         delivered
-                          ? "Subagent results"
+                          ? "Agent results"
                           : reportDelivery
                             ? "Report from side task"
                             : followUpPrompt !== undefined

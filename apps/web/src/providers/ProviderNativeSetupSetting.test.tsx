@@ -65,7 +65,7 @@ describe("Run a key provider as itself", () => {
     render(<ProviderNativeSetupSetting disabled={false} instance={codex} onChange={onChange} />);
     const toggle = screen.getByRole("switch", { name: "Run Codex work as itself" });
     expect(toggle).toBeChecked();
-    expect(rowOf(toggle)).toHaveTextContent(/its own\s+subagents, web search and fetch, skills/i);
+    expect(rowOf(toggle)).toHaveTextContent(/its own\s+agents, web search and fetch, skills/i);
     // The sentence stays short; what the setup covers waits behind More, closed.
     expect(rowOf(toggle)?.querySelector(".setrow-hint")).not.toHaveTextContent(/web search/);
     expect(rowOf(toggle)?.querySelector(".setrow-more:not([open])")).toHaveTextContent(
@@ -124,7 +124,7 @@ describe("Run a key provider as itself", () => {
       />,
     );
     expect(rowOf(screen.getByRole("switch", { name: "Run Vibe as itself" }))).toHaveTextContent(
-      /Vibe doesn’t say which tool its subagents ask to run/,
+      /Vibe doesn’t say which tool its agents ask to run/,
     );
     expect(rowOf(screen.getByRole("switch", { name: "Run Vibe as itself" }))).toHaveTextContent(
       /work in Work and Code outside Plan, at every level there/,
@@ -157,7 +157,7 @@ describe("Run a key provider as itself", () => {
     expect(
       rowOf(screen.getByRole("switch", { name: "Run Codex work as itself" })),
     ).toHaveTextContent(
-      /Not available for Codex yet: its own subagents, web search and fetch, skills/,
+      /Not available for Codex yet: its own agents, web search and fetch, skills/,
     );
   });
 

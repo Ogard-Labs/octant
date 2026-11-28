@@ -119,7 +119,7 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await screen.findByRole("region", { name: "Observed child" });
-    await user.click(screen.getByRole("button", { name: "Subagents" }));
+    await user.click(screen.getByRole("button", { name: "Agents" }));
     await user.click(await screen.findByRole("button", { name: /^Inspect parser\. / }));
     expect(
       screen.getByText(/Started by its provider\. Octant can watch it but not control it\./),
@@ -151,7 +151,7 @@ describe("AgentRunHierarchy", () => {
           parentThreadId={parentThreadId}
         />,
       );
-      await waitFor(() => expect(screen.getByText(/No subagents yet/)).toBeVisible());
+      await waitFor(() => expect(screen.getByText(/No agents yet/)).toBeVisible());
       await act(async () => vi.advanceTimersByTimeAsync(30_000));
       expect(screen.getByRole("button", { name: /^Inspect parser\. / })).toBeVisible();
       await act(async () => vi.advanceTimersByTimeAsync(2_000));
@@ -454,11 +454,11 @@ describe("AgentRunHierarchy", () => {
 
   it("offers no way to start a subagent by hand; only the thread's agent starts one", async () => {
     render(<AgentRunHierarchy client={emptyClient()} parentThreadId={parentThreadId} />);
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Agents" })).toBeVisible());
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /New/ })).not.toBeInTheDocument();
     expect(
-      screen.getByText(/They appear here when the agent hands off part of its work/),
+      screen.getByText(/They appear here when the thread hands off part of its work/),
     ).toBeVisible();
   });
 
@@ -501,7 +501,7 @@ describe("AgentRunHierarchy", () => {
         creationPosture="automatic"
       />,
     );
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Subagents" })).toBeVisible());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Agents" })).toBeVisible());
     await user.click(screen.getByRole("button", { name: /Verify the packaged child/ }));
     await user.click(screen.getByRole("button", { name: "Mark reviewed" }));
 
@@ -619,7 +619,7 @@ describe("AgentRunHierarchy", () => {
       <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="off" />,
     );
     // The loading state has a heading too, so wait for the words themselves.
-    expect(await screen.findAllByText("Subagents are turned off")).not.toHaveLength(0);
+    expect(await screen.findAllByText("Agents are turned off")).not.toHaveLength(0);
     expect(screen.getByText("Turn them on in Settings.")).toBeVisible();
   });
 
@@ -655,7 +655,7 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: /Draft the release notes/ }));
-    await user.click(screen.getByRole("button", { name: "Cancel this subagent" }));
+    await user.click(screen.getByRole("button", { name: "Cancel this agent" }));
 
     expect(cancel).toHaveBeenCalledWith({ runId, scope: "subtree" });
     await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
@@ -710,7 +710,7 @@ describe("AgentRunHierarchy", () => {
     // The host answers only once the child has taken the note at its next step.
     // The form closes on send, so the page says the note is on its way, then that it landed.
     expect(
-      await screen.findByText("Sending your note. The helper reads it at its next step."),
+      await screen.findByText("Sending your note. The agent reads it at its next step."),
     ).toBeVisible();
     act(() => deliver?.());
     expect(await screen.findByText("Steering note delivered.")).toBeVisible();
@@ -766,7 +766,7 @@ describe("AgentRunHierarchy", () => {
     act(() => answers[0]?.({ kind: "run-updated", run: {} as never }));
     await waitFor(() => expect(screen.queryByText("Steering note delivered.")).toBeNull());
     expect(
-      screen.getByText("Sending your note. The helper reads it at its next step."),
+      screen.getByText("Sending your note. The agent reads it at its next step."),
     ).toBeVisible();
 
     act(() => answers[1]?.({ kind: "run-updated", run: {} as never }));
@@ -835,9 +835,9 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await waitFor(() =>
-      expect(screen.getByText(/They appear here when the agent hands off/)).toBeVisible(),
+      expect(screen.getByText(/They appear here when the thread hands off/)).toBeVisible(),
     );
-    expect(screen.queryByText("Subagents are turned off")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agents are turned off")).not.toBeInTheDocument();
     expect(settingsClient.current).toHaveBeenCalled();
   });
 
@@ -852,12 +852,12 @@ describe("AgentRunHierarchy", () => {
     render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
 
     await user.click(await screen.findByRole("button", { name: /Trace the flaky test/ }));
-    const page = screen.getByRole("region", { name: "Subagent" });
+    const page = screen.getByRole("region", { name: "Agent" });
     expect(within(page).getByRole("heading", { name: "Trace the flaky test" })).toBeVisible();
     expect(client.conversation).toHaveBeenCalledWith(runId);
 
-    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
-    expect(screen.queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Back to agents" }));
+    expect(screen.queryByRole("region", { name: "Agent" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Working · 1" })).toBeVisible();
   });
 
@@ -885,16 +885,16 @@ describe("AgentRunHierarchy", () => {
     render(<AgentRunHierarchy client={client} parentThreadId={parentThreadId} />);
 
     await user.click(await screen.findByRole("button", { name: "Graph" }));
-    const graph = screen.getByRole("group", { name: "Subagent graph" });
+    const graph = screen.getByRole("group", { name: "Agent graph" });
     await user.click(within(graph).getByRole("button", { name: /Contrast check/ }));
 
-    const page = screen.getByRole("region", { name: "Subagent" });
+    const page = screen.getByRole("region", { name: "Agent" });
     expect(page).toHaveTextContent("Runs after Color tokens");
     expect(page).toHaveTextContent("Starts when the runs it comes after finish.");
 
-    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
+    await user.click(screen.getByRole("button", { name: "Back to agents" }));
 
-    expect(screen.getByRole("group", { name: "Subagent graph" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Agent graph" })).toBeInTheDocument();
   });
 
   describe("on a coordinator", () => {
@@ -945,17 +945,17 @@ describe("AgentRunHierarchy", () => {
       );
 
       expect(await screen.findByRole("button", { name: /Add dark mode/ })).toHaveTextContent(
-        "Working · 1 subagent · 1 working",
+        "Working · 1 agent · 1 working",
       );
       expect(coordinatorGraph).toHaveBeenCalledWith(String(parentThreadId));
 
       await user.click(screen.getByRole("button", { name: "Graph" }));
-      const graph = screen.getByRole("group", { name: "Subagents of Add dark mode" });
+      const graph = screen.getByRole("group", { name: "Agents of Add dark mode" });
       await user.click(within(graph).getByRole("button", { name: /Color tokens/ }));
 
       expect(onOpenWorker).toHaveBeenCalledWith(workerThreadId);
       // A worker's subagent has no page here: its conversation is never asked for.
-      expect(screen.queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Agent" })).not.toBeInTheDocument();
     });
 
     it("says the answer is partial when the host read only the most recently changed workers", async () => {
@@ -976,7 +976,7 @@ describe("AgentRunHierarchy", () => {
       // "handed off nothing"; the section says its subagents were not read.
       expect(
         await within(section).findByText(
-          "Subagents are shown for the most recently changed workers only.",
+          "Agents are shown for the most recently changed workers only.",
         ),
       ).toBeVisible();
       expect(within(section).getByRole("button", { name: /An older worker/ })).toHaveTextContent(
@@ -1012,7 +1012,7 @@ describe("AgentRunHierarchy", () => {
 
       const section = await screen.findByRole("region", { name: "Workers" });
       expect(
-        await within(section).findByText("This window cannot read the workers' subagents."),
+        await within(section).findByText("This window cannot read the workers' agents."),
       ).toBeVisible();
       expect(within(section).getByRole("button", { name: /Add dark mode/ })).toHaveTextContent(
         "Working",
@@ -1089,7 +1089,7 @@ describe("AgentRunHierarchy", () => {
 
     await user.click(await screen.findByRole("button", { name: /Summarize the release/ }));
 
-    const conversation = screen.getByRole("log", { name: "Subagent conversation" });
+    const conversation = screen.getByRole("log", { name: "Agent conversation" });
     await waitFor(() => expect(within(conversation).getByText("ships")).toBeVisible());
     expect(within(conversation).getByText("ships").tagName).toBe("STRONG");
     expect(conversation).toHaveTextContent("The reply was truncated.");
@@ -1126,7 +1126,7 @@ describe("AgentRunHierarchy", () => {
 
     await user.click(await screen.findByRole("button", { name: /Say hello/ }));
 
-    const conversation = screen.getByRole("log", { name: "Subagent conversation" });
+    const conversation = screen.getByRole("log", { name: "Agent conversation" });
     await waitFor(() => expect(within(conversation).getByText("Hello, Henrik!")).toBeVisible());
   });
 
@@ -1146,12 +1146,12 @@ describe("AgentRunHierarchy", () => {
     await user.click(await screen.findByRole("button", { name: /Probe the cache/ }));
 
     await waitFor(() =>
-      expect(screen.getByRole("log", { name: "Subagent conversation" })).toHaveTextContent(
-        "This subagent left no reply to show.",
+      expect(screen.getByRole("log", { name: "Agent conversation" })).toHaveTextContent(
+        "This agent left no reply to show.",
       ),
     );
     expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Cancel this subagent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel this agent" })).not.toBeInTheDocument();
   });
 
   it("stays on the subagent another surface asked for, even when the tool remounts, until the reader goes back", async () => {
@@ -1172,14 +1172,14 @@ describe("AgentRunHierarchy", () => {
       />
     );
     const first = render(tool());
-    expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Agent" })).toBeVisible();
     // The dock re-keys the tool body once the new tab has its id.
     first.unmount();
     render(tool());
-    expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Agent" })).toBeVisible();
     expect(onRequestedViewHandled).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Back to subagents" }));
+    await user.click(screen.getByRole("button", { name: "Back to agents" }));
     expect(onRequestedViewHandled).toHaveBeenCalledTimes(1);
   });
 });

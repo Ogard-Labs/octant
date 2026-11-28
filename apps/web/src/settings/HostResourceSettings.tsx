@@ -195,8 +195,8 @@ export function HostResourceSettings({
     },
     {
       key: "maxAgents",
-      label: "Helper agents",
-      description: "Maximum Octant-managed helpers across the host.",
+      label: "Agents",
+      description: "Maximum Octant-managed agents across the host.",
       more: "Per-thread limits still apply.",
       min: 1,
       max: 16,
@@ -293,7 +293,7 @@ export function HostResourceSettings({
         </SettingRow>
         <SettingRow
           label="New work"
-          description="Pause blocks new commands and helpers; running ones keep going."
+          description="Pause blocks new commands and agents; running ones keep going."
           scope="host"
           settingId="resource-pause"
           focused={focusedSetting === "resource-pause"}
@@ -363,8 +363,8 @@ export function HostResourceSettings({
                   </span>
                   <span>
                     Last reading: up to {snapshot.commands} command groups, {snapshot.workers} total
-                    test workers and {snapshot.agents} helper agents. {snapshot.activeCommands}{" "}
-                    commands running; {snapshot.queuedCommands} waiting.
+                    test workers and {snapshot.agents} agents. {snapshot.activeCommands} commands
+                    running; {snapshot.queuedCommands} waiting.
                   </span>
                   <span>{REASONS[snapshot.reason]}</span>
                 </>

@@ -4232,8 +4232,8 @@ function SubagentTab(props: {
   if (view.agentRunClient === undefined) {
     return (
       <OctantEmpty
-        eyebrow="Subagent"
-        message="This window cannot read subagents."
+        eyebrow="Agent"
+        message="This window cannot read agents."
         state="warning"
         title={tab.title}
       />
@@ -4268,7 +4268,7 @@ function SubagentTab(props: {
     (tab.mode === "chat" && view.onOpenChatThread !== undefined) ||
     (workParent !== undefined && view.onOpenWorkThread !== undefined);
   return (
-    <Suspense fallback={<OctantEmpty state="loading" title="Loading subagent" />}>
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading agent" />}>
       <SubagentThread
         client={view.agentRunClient}
         parentThreadId={tab.parentThreadId}

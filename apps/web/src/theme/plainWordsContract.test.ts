@@ -110,10 +110,18 @@ function readableSentences(path: string): ReadonlyArray<Sentence> {
 
 const sentences = productSources(webRoot).flatMap(readableSentences);
 
-// The host's own reason text, which the Agents page compares and replaces with
-// its own sentence before anything is shown.
+// Host-authored sentences that the renderer compares or parses and replaces
+// with its own copy before anything is shown.
 const COMPARED_NEVER_SHOWN: ReadonlyArray<string> = [
   "Managed AgentRun turn exceeded its runtime deadline.",
+  "A subagent you delegated has finished.",
+  "A subagent you delegated ended without completing.",
+];
+
+// Sentences where "helper" names Git's own credential helper rather than an
+// agent started by a thread.
+const HELPER_NOT_AN_AGENT: ReadonlyArray<{ readonly where: RegExp; readonly text: RegExp }> = [
+  { where: /^settings\/ProtectedFilesSettings\.tsx:/, text: /\bcredential helper\b/i },
 ];
 
 // Sentences where "task" names something distinct from an Octant thread:
@@ -208,7 +216,7 @@ const SAYS_WHAT_THE_TITLE_CANNOT: ReadonlyArray<string> = [
 
 describe("the interface says things in plain words", () => {
   // DESIGN.md, Voice: the word "target" does not appear in the interface. What
-  // a thread or a routine is for is its delivery; where it goes is a
+  // a thread or an automation is for is its delivery; where it goes is a
   // destination, a Project or a thread.
   it("never says target", () => {
     expect(sentencesSaying(/\b(re)?target(s|ed|ing)?\b/i)).toEqual([]);
@@ -232,6 +240,16 @@ describe("the interface says things in plain words", () => {
   // DESIGN.md, Voice: thread, never "task" when it means a thread.
   it("calls threads thread, never task", () => {
     expect(sentencesSaying(/\btasks?\b/i, TASK_NOT_A_THREAD)).toEqual([]);
+  });
+
+  // DESIGN.md, Voice: Agents, never "subagent", "helper", or "child agent" for
+  // an agent a thread starts. Coordinator "workers" (full peer threads a
+  // coordinator starts, docs/design/coordinator-threads.md) and "test workers"
+  // keep their distinct names, as does Git's own credential helper.
+  it("calls delegated agents Agents, never subagent, helper, or child agent", () => {
+    expect(
+      sentencesSaying(/\b(subagents?|helpers?|child agents?)\b/i, HELPER_NOT_AN_AGENT),
+    ).toEqual([]);
   });
 
   // DESIGN.md, Plain words: a loading state is its title alone. A message

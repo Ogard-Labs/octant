@@ -83,16 +83,21 @@ same stylesheets and described in
 
 **Voice.** The same words, face and hierarchy travel to every surface.
 Sentence case everywhere, product nouns keep their capital (Project, Chat,
-Work, Code, Environment); nothing is uppercase except a monospace identifier
-that already is. One title per page; a section note or row description is one
-sentence. Numbers use English separators ("1,024", "4.1k"); dates follow the
-locale. An empty state's title has no closing period. Copy about the host
-says "this Mac" and "Keychain" only when the host reports macOS, "this
-computer" and "credential store" otherwise. Vocabulary: `Project`, `thread`,
-`checkout`, `worktree`, `base branch`, `Environment`, `mode` (Auto / Ask first
-/ Accept edits / Plan / Full access), `delivery` (Investigation / Local
-implementation / Pull request / Merged). The word "target" does not appear in
-the interface.
+Work, Code, Environment, Agents, Automations); nothing is uppercase except a
+monospace identifier that already is. One title per page; a section note or row
+description is one sentence. Numbers use English separators ("1,024", "4.1k");
+dates follow the locale. An empty state's title has no closing period. Copy
+about the host says "this Mac" and "Keychain" only when the host reports macOS,
+"this computer" and "credential store" otherwise. Vocabulary: `Project`,
+`thread`, `Agents`, `Automations`, `checkout`, `worktree`, `base branch`,
+`Environment`, `mode` (Auto / Ask first / Accept edits / Plan / Full access),
+`delivery` (Investigation / Local implementation / Pull request / Merged).
+Octant calls one thing by one name: Automations are never "routines", threads
+are never "tasks" (keeping `side tasks`, the agent's `Tasks` list, `To-dos`,
+background tasks, and run prompts distinct), and agents a thread starts are
+`Agents` rather than "subagents", "helpers", or "child agents" (keeping
+coordinator `workers` and `test workers` distinct). The word "target" does not
+appear in the interface.
 
 **Plain words.** A sentence in the interface says what the person is waiting
 for, what happened, or what to do next, in the words they use for it. It never

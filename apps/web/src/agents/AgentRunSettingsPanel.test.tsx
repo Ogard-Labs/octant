@@ -15,7 +15,7 @@ function baseSettings(
 }
 
 function toggle() {
-  return screen.getByRole("switch", { name: "Let the agent start helper agents" });
+  return screen.getByRole("switch", { name: "Let threads start agents" });
 }
 
 describe("AgentRunSettingsPanel", () => {
@@ -26,7 +26,7 @@ describe("AgentRunSettingsPanel", () => {
     };
     render(<AgentRunSettingsPanel client={client} />);
     await waitFor(() => expect(toggle()).toBeChecked());
-    expect(screen.getByText(/hand work to a helper/)).toBeVisible();
+    expect(screen.getByText(/hand work to an agent/)).toBeVisible();
   });
 
   it("offers only on or off, with no choice to start helper agents by hand", async () => {

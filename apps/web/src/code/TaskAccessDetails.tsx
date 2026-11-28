@@ -81,7 +81,7 @@ const CAPABILITY = {
   approvals: "Approval requests",
   appManagedTools: "Octant-managed tools",
   nativeWebResearch: "Runtime web research",
-  nativeChildAgents: "Runtime child agents",
+  nativeChildAgents: "Runtime agents",
   forceStop: "Force stop",
 } as const;
 

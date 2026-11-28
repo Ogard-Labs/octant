@@ -252,9 +252,9 @@ const SECTIONS: ReadonlyArray<{ readonly title: string; readonly rows: ReadonlyA
         {
           key: "childRunWaitLimitSeconds",
           id: "child-run-wait-limit",
-          label: "Longest wait for a helper, in seconds",
+          label: "Longest wait for an agent, in seconds",
           description:
-            "How long an agent may wait for a helper agent in one call before it hears the helper is still working.",
+            "How long a thread may wait for an agent in one call before it hears the agent is still working.",
           defaultValue: DEFAULT_CHILD_RUN_WAIT_LIMIT_SECONDS,
           max: MAX_CHILD_RUN_WAIT_LIMIT_SECONDS_SETTING,
         },

@@ -106,7 +106,7 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
       action: "Review computer use settings",
     },
     {
-      title: "Helper agents",
+      title: "Agents",
       Icon: Users,
       state:
         current?.helperPosture === "automatic"
@@ -118,9 +118,9 @@ export function FirstTaskCapabilities(props: FirstTaskCapabilitiesProps) {
               : "Not reported",
       description:
         "The thread's agent can delegate bounded work when its provider and current policy allow it.",
-      preview: "Main thread → Research helper → Findings",
+      preview: "Main thread → Research agent → Findings",
       settings: { section: "harness", setting: "subagent-creation-posture" },
-      action: "Review helper agent settings",
+      action: "Review agent settings",
     },
     {
       title: "Person memory",

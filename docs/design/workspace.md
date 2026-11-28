@@ -2315,10 +2315,10 @@ Needs attention and Did not succeed; the latest-run line carries the outcome.
 
 Environment belongs to a
 thread as a context-aware dock tab opened from the thread header's tool row. Its
-Subagents row counts the active thread's server-authored child AgentRuns
+Agents row counts the active thread's server-authored child AgentRuns
 (working, to review, done) and opens into the full list, working and finished;
 a row opens that subagent in the Agents dock, where reading, steering, and every
-other AgentRun control stay. A compact, collapsible Subagents card sits above
+other AgentRun control stay. A compact, collapsible Agents card sits above
 the composer in normal layout, as wide as the message surface. Its head counts each
 state (failed, waiting, to review, working, done) and keeps failures, waits and
 unreviewed results first while collapsed; a result the parent already received is
@@ -2428,7 +2428,7 @@ some computers, it reads, lists and names only those (maintainer decision,
   asking window or device already lists there
   ([Architecture: Active work read](../architecture.md#security-and-authority)). A
   subagent's task shows only where the Agents page's own rule lets the window
-  read that run; elsewhere the row reads "Subagent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a wait for room, a slot or siblings under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
+  read that run; elsewhere the row reads "Agent" under its thread. A subagent the host will start by itself is In progress, like a queued one: one waiting for room under the subagent limit, for a free request slot, or for siblings that are themselves on their way. One that needs a person is Waiting: a wait for room, a slot or siblings under a paused parent, one held since a restart until it is resumed, one whose sibling must be retried, one whose pool named no eligible model (it must be requested again), and any other wait.
 - **Opening** a row makes the choice the sidebar makes. A Code thread on a
   paired computer opens in that computer's Code start screen, as under "On your
   other computers"; a Work or Chat thread there cannot be shown by that screen,
@@ -3686,9 +3686,9 @@ opens Review, and the thread's pull request with its checks in words.
 **Outputs** lists the documents and Canvases the window knows the thread has
 (those it had when opened and those its turns wrote since, never a deleted
 file), newest first and at most five, each a row that opens it in Document or
-Canvas, with the count at the title's right. **Subagents** lists the
+Canvas, with the count at the title's right. **Agents** lists the
 runs the thread's agent handed work to, from the same read and cadence as the
-Environment tab's Subagents row: each running one a spinner, task, and how long
+Environment tab's Agents row: each running one a spinner, task, and how long
 it has run, with the running count at the title's right, and the finished ones
 folded under one "N finished" row; each row shows its run time at the trailing
 edge in a fixed-width slot, by the same rule as the transcript's subagent rows
@@ -3984,7 +3984,7 @@ no meter, no zero and no summary. It never estimates. A Compact session button
 sits at its foot where the thread offers one, through the composer's own
 confirmation and host path (maintainer request, 2026-11-16).
 
-**Subagents in Environment.** The Subagents row carries the working, to
+**Agents in Environment.** The Agents row carries the working, to
 review and done counts. It opens by itself when a subagent starts working and
 then stays as the person left it; it never closes by itself, so the rows and
 the result lines do not vanish when the last run ends. Open, it holds one 28px
@@ -4001,7 +4001,7 @@ steering a subagent belong in Agents (maintainer request, 2026-11-16).
 request and no changes shows only what is true and what can be started
 (maintainer request, 2026-11-16). Local servers is a row only while a server
 runs on this computer, and Computer use only while a session exists; Running's
-folded summary says "Nothing running" otherwise. Subagents stays as "None", and
+folded summary says "Nothing running" otherwise. Agents stays as "None", and
 with nothing to open it is a plain row with no chevron and no button, as is any
 group whose opened body would only repeat its value. Pull requests is absent
 when the Project is not on GitHub (Delivery's summary says "Not on GitHub");

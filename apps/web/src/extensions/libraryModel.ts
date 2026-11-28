@@ -201,7 +201,7 @@ const CAPABILITY_FACTS: Readonly<Record<Capability, CapabilityFact>> = {
     level: "medium",
   },
   agents: {
-    ability: "Adds helper agents",
+    ability: "Adds agents",
     cost: "Starts agents that run under the same mode",
     level: "medium",
   },

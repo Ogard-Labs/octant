@@ -159,7 +159,7 @@ command, in minutes, 10, up to 1,440, whose description says a secret held
 for the command is deleted when the time runs out; Longest
 Browser wait, in minutes, 10, up to 60, under Strict only, whose description
 says outside Strict there is no wait limit and a Claude Code
-thread still ends one tool call at eleven minutes; Longest wait for a helper,
+thread still ends one tool call at eleven minutes; Longest wait for an agent,
 in seconds, 120, up to 3,600), then **Automations** with the switch **Start
 agent-created automations active at Full access**, on, whose description reads
 "An automation an agent suggests while its thread runs at Full access starts

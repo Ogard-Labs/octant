@@ -3179,7 +3179,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     return withRowHandoff(
                       row.handoff,
                       <article
-                        aria-label={reportDelivery ? "Report from side task" : "Subagent results"}
+                        aria-label={reportDelivery ? "Report from side task" : "Agent results"}
                         className="turn-child-result"
                       >
                         {reportDelivery ? (
