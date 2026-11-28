@@ -1040,6 +1040,65 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("keeps the command a call was asked to run on replay after its progress and completion", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000037",
+      digest: "e".repeat(64),
+      byteLength: 9,
+    });
+    const toolCallId = "89000000-0000-4000-8000-000000000064";
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Bash",
+      state: "started",
+      argument: "bun test apps/web/src/composer",
+    });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Bash",
+      state: "running",
+      summary: "Tool is running.",
+    });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Bash",
+      state: "completed",
+      summary: "Tool completed.",
+    });
+    append(stateEvent("completed"));
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(turn?.steps).toEqual([
+      {
+        kind: "tool",
+        toolCallId,
+        toolName: "Bash",
+        state: "completed",
+        summary: "Tool completed.",
+        argument: "bun test apps/web/src/composer",
+      },
+    ]);
+    fixture.connection.close();
+  });
+
   it("stops recording steps at the bound and says the turn had more", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

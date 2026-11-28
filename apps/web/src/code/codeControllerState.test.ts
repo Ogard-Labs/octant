@@ -2,6 +2,7 @@ import type {
   ProviderContextBreakdown,
   AggregateVersion,
   CodeCommand,
+  CodeOperationEvent,
   CodeThreadId,
   ProviderInstanceId,
   ProviderModelId,
@@ -13,6 +14,8 @@ import {
   providerRequestFromEvent,
   totalTurnUsage,
 } from "./codeControllerState";
+import { applyActivityEvent } from "./transcriptActivity";
+import { EMPTY_TURN_ACTIVITY } from "../transcript/turnActivity";
 
 const threadId = "00000000-0000-4000-8000-000000000001" as CodeThreadId;
 const expectedVersion = 1 as AggregateVersion;
@@ -126,42 +129,45 @@ describe("providerRequestFromEvent", () => {
 });
 
 describe("approvalCallPreview", () => {
-  const activity = new Map([
-    [
-      "turn-1",
-      {
-        reasoning: "",
-        rows: [
-          {
-            kind: "tool" as const,
-            id: "call-6",
-            toolName: "Read",
-            state: "completed" as const,
-            summary: "apps/web/src/composer/ThreadComposer.tsx",
-          },
-          {
-            kind: "tool" as const,
-            id: "call-7",
-            toolName: "Bash",
-            state: "started" as const,
-            summary: "bun test apps/web/src/composer\n",
-          },
-        ],
-      },
-    ],
-  ]);
+  // The rows as the journal builds them: the Codex adapter's start names the
+  // command, and the progress line after it says only that the tool runs.
+  const fold = (...events: ReadonlyArray<Extract<CodeOperationEvent, { kind: "tool-activity" }>>) =>
+    new Map([
+      [
+        "turn-1",
+        events.reduce(
+          (activity, event) => applyActivityEvent(activity, event),
+          EMPTY_TURN_ACTIVITY,
+        ),
+      ],
+    ]);
+  const started = (argument?: string) =>
+    ({
+      kind: "tool-activity",
+      toolCallId: "call-7",
+      toolName: "Bash",
+      state: "started",
+      ...(argument === undefined ? {} : { argument }),
+    }) satisfies Extract<CodeOperationEvent, { kind: "tool-activity" }>;
+  const running = {
+    kind: "tool-activity",
+    toolCallId: "call-7",
+    toolName: "Bash",
+    state: "running",
+    summary: "Tool is running.",
+  } satisfies Extract<CodeOperationEvent, { kind: "tool-activity" }>;
 
-  it("reads the gated call's own line from the turn that holds it", () => {
+  it("shows the command the gated call was asked to run, not its progress text", () => {
+    const activity = fold(started("bun test apps/web/src/composer"), running);
     expect(approvalCallPreview(activity, "call-7")).toBe("bun test apps/web/src/composer");
   });
 
-  it("keeps a file call's whole path, which the row's own preview shortens to a name", () => {
-    expect(approvalCallPreview(activity, "call-6")).toBe(
-      "apps/web/src/composer/ThreadComposer.tsx",
-    );
+  it("names nothing when the call's row carries only progress text", () => {
+    expect(approvalCallPreview(fold(started(), running), "call-7")).toBeUndefined();
   });
 
   it("names nothing when the approval names no call, or a call no turn holds", () => {
+    const activity = fold(started("bun test apps/web/src/composer"));
     expect(approvalCallPreview(activity, undefined)).toBeUndefined();
     expect(approvalCallPreview(activity, "call-9")).toBeUndefined();
   });

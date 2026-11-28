@@ -3611,8 +3611,11 @@ describe("CodeThreadWorkspace", () => {
                     kind: "tool",
                     id: "call-7",
                     toolName: "Bash",
-                    state: "started",
-                    summary: "bun test apps/web/src/composer",
+                    state: "running",
+                    // The progress line a Codex call carries; the well shows
+                    // the command the call's start named instead.
+                    summary: "Tool is running.",
+                    argument: "bun test apps/web/src/composer",
                   },
                 ],
               },

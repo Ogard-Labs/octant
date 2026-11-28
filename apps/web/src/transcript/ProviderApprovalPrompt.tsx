@@ -9,7 +9,7 @@ export interface ProviderApprovalPromptProps {
   readonly summary: string;
   /** Why the thread asks, from its mode, on one quiet line under the question. */
   readonly reason?: string;
-  /** The call the ask gates (a command's line, a file's name), shown in a well. */
+  /** The call the ask gates (a command's line, a checkout-relative path), shown in a well. */
   readonly command?: string;
   readonly onAnswer: (decision: "approved" | "denied") => void;
   /**

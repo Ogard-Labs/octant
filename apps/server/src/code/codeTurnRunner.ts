@@ -44,6 +44,7 @@ import {
   outsideContentRecordedOnly,
   refusesFullAccessSandbox,
 } from "@octant/domain/guardrail-policy";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { Effect, Fiber, Schema, Scope, Stream } from "effect";
 import type {
@@ -204,6 +205,11 @@ export interface CodeTurnEvent {
   readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
+  /**
+   * What a started tool was asked to do, as the runtime's start named it;
+   * only on a `tool` start. `text` is the call's progress or result wording.
+   */
+  readonly argument?: string;
   /**
    * Set when the adapter folded stored or replayed output into this event:
    * `occurredAt` names the batch, not the instant, so timing ignores it.
@@ -1272,14 +1278,20 @@ function normalizeProviderEvent(
       return Effect.succeed({ ...base, category: "message", text: text(event.text) });
     case "reasoning-delta":
       return Effect.succeed({ ...base, category: "reasoning", text: text(event.text) });
-    case "tool-start":
+    case "tool-start": {
+      // The adapter already reduced it to one line; the host redacts again
+      // before it is journaled, as every consumer of a start's argument does.
+      const argument =
+        event.argument === undefined ? undefined : summarizeStepArgument(event.argument);
       return Effect.succeed({
         ...base,
         category: "tool",
         toolCallId: text(event.toolCallId),
         toolName: text(event.toolName),
         status: "started",
+        ...(argument === undefined ? {} : { argument }),
       });
+    }
     case "tool-progress":
       return Effect.succeed({
         ...base,

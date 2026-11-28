@@ -1531,8 +1531,8 @@ is costly to render mounts only while open.
   mark: `summary` (the ask), `detail` (one line saying why the thread asks;
   a provider approval derives it from the thread's mode, "This thread asks
   before it runs commands or changes files."), `context` (for a provider
-  approval, the call it gates in a well, when the call drew a tool row to read
-  it from), then `actions` and `error`. `label` names the group.
+  approval, the call it gates in a well, when that call's start named what it
+  runs), then `actions` and `error`. `label` names the group.
 - **Tokens.** The card: 1px hairline, `--oct-radius-md`, `--octant-card`, 12px
   padding, 8px gaps, 14px at 1.45; the mark in muted ink, centred on the
   question's first line; the question at medium weight, the reason 13px

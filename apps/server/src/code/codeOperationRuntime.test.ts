@@ -6379,6 +6379,46 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("journals what a started call was asked to run apart from its progress text", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(22);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    // The Codex adapter's start: the command on the start, then a progress
+    // line that says only that the tool runs.
+    for (const runtimeEvent of [
+      providerEvent({
+        kind: "tool-start",
+        toolCallId: "call-7",
+        toolName: "Bash",
+        argument: "bun test apps/web/src/composer",
+      }),
+      providerEvent({ kind: "tool-progress", toolCallId: "call-7", message: "Tool is running." }),
+    ]) {
+      await Effect.runPromise(Queue.offer(queue, runtimeEvent));
+    }
+
+    await vi.waitFor(async () => {
+      const events = await operationEvents(fixture.runtime, startOperation);
+      const tool = events.filter((event) => event.kind === "tool-activity");
+      expect(tool).toEqual([
+        expect.objectContaining({ state: "started", argument: "bun test apps/web/src/composer" }),
+        expect.objectContaining({ state: "running", summary: "Tool is running." }),
+      ]);
+      expect(tool[1]).not.toHaveProperty("argument");
+    });
+    fixture.close();
+  });
+
   it("times a tool call around the person's approval wait and journals the reasoning total", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

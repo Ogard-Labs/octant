@@ -37,7 +37,6 @@ import { foldCodeTurnUsage } from "@octant/domain";
 import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
-import { toolKind } from "../transcript/toolKinds";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
 export type CodeProviderRequest =
@@ -773,13 +772,13 @@ async function readConversationText(
 }
 
 /**
- * The line of the call an approval gates, read from the tool row that call
- * already drew (a command's first line, a file's whole path), so the card shows
- * what would run without a read of its own. A row's own preview shortens a path
- * to its file's name, which is too little to consent to ("Edit .env" in which
- * folder?), so the well keeps the path. Nothing when the approval names no call
- * or no turn on screen holds it: the card then asks without a well rather than
- * guess from a neighbouring row.
+ * The line of the call an approval gates, read from what that call's start
+ * named it to do (a command's line, a file's checkout-relative path), so the
+ * card shows what would run without a read of its own. Never the row's
+ * summary: that is progress or result text, and a Codex call's reads "Tool is
+ * running.". Nothing when the approval names no call, no turn on screen holds
+ * it, or its start named nothing: the card then asks without a well rather
+ * than guess.
  */
 function approvalCallPreview(
   activity: ReadonlyMap<string, TurnActivity>,
@@ -790,15 +789,7 @@ function approvalCallPreview(
     const row = turn.rows.find(
       (candidate) => candidate.kind === "tool" && candidate.id === toolCallId,
     );
-    if (row?.kind !== "tool") continue;
-    const line = row.summary
-      ?.split("\n")
-      .map((part) => part.trim())
-      .find((part) => part.length > 0);
-    if (line === undefined) return undefined;
-    const kind = toolKind(row.toolName);
-    // "Edit: apps/server/.env" names the verb the row's icon already shows.
-    return kind === "read" || kind === "edit" ? line.replace(/^[A-Za-z]+:\s+/, "") : line;
+    if (row?.kind === "tool") return row.argument;
   }
   return undefined;
 }

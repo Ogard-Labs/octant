@@ -1984,6 +1984,14 @@ const ToolEvent = Schema.Struct({
   toolName: boundedNonEmptyText(255),
   state: Schema.Literal("started", "running", "completed", "failed"),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+  /**
+   * What the call was asked to do, as the runtime's start named it: one
+   * redacted, bounded line (a command, a checkout-relative path). It is kept
+   * apart from `summary`, which is progress or result text ("Tool is
+   * running."), so an approval can show the call it gates. Only on the start;
+   * absent when the runtime named none and in journals written before it.
+   */
+  argument: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
   /** A page the call published outside this host; the transcript links to it. */
   published: Schema.optional(ThreadPublishedPage),
   /** The pull requests and issues the call wrote to; they link the thread. */
@@ -2640,6 +2648,8 @@ export const CodeConversationStep = Schema.Union(
     toolName: boundedNonEmptyText(255),
     state: Schema.Literal("started", "running", "completed", "failed"),
     summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+    /** What the call was asked to do, kept from its start (see `tool-activity`). */
+    argument: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
     published: Schema.optional(ThreadPublishedPage),
     outsideContent: Schema.optional(ToolOutsideContentMark),
     routine: Schema.optional(ThreadRoutineReceipt),
