@@ -174,7 +174,7 @@ function harness(options: {
     },
     capturePullRequestDiff: async () => {
       if (options.captureThrows === true) throw new Error("gh refused");
-      return { status: "ready", capture: { snapshot: DIFF } };
+      return { status: "ready", capture: { snapshot: { ...DIFF, headSha: head.current } } };
     },
     inspectRoute: () => ({ status: "ready" }),
     // A fake turn: no provider is reached and nothing is billed.
@@ -774,7 +774,7 @@ describe("review guides", () => {
           title: "Post-rename guide stop",
           why: "Written on the stable node-ID aggregate after replaying legacy history.",
           needsDecision: false,
-          anchors: [],
+          anchors: [{ path: "src/auth.ts", startLine: 2, endLine: 2 }],
         },
       ],
     });
@@ -787,6 +787,92 @@ describe("review guides", () => {
     expect(latestRead.status).toBe("read");
     if (latestRead.status === "read") {
       expect(latestRead.view.guide?.stops[0]?.title).toBe("Post-rename guide stop");
+      expect(latestRead.view.guide?.stops[0]?.anchors).toEqual([
+        { path: "src/auth.ts", startLine: 2, endLine: 2 },
+      ]);
     }
+  });
+
+  it("adopts a duplicate link's live guide bucket on merge without restart and ignores client-supplied pullRequestNodeId", async () => {
+    const { make, pullRequestLinks } = harness({ route: ROUTE });
+    const original: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const duplicate: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+    const otherPr: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("other"),
+      number: 10,
+    };
+
+    // Two links exist before backfill; the second lacks a node ID and records a live guide.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+    const service = make({ withLinks: true });
+    const started = await service.writeForPerson(WINDOW_ID, duplicate);
+    if (started.status !== "started") throw new Error("expected duplicate-link guide run");
+    expect((await started.done).status).toBe("recorded");
+
+    // Backfilling the same GitHub node ID merges the duplicate link into the surviving link.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_merged9",
+      baseRepositoryNodeId: "R_kgDO_merged",
+      threadIds: [THREAD_ID],
+    });
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_merged9",
+      baseRepositoryNodeId: "R_kgDO_merged",
+      threadIds: [THREAD_ID],
+    });
+
+    // Without restarting the service, the surviving link reads the merged duplicate's guide.
+    const liveRead = await service.read(WINDOW_ID, duplicate, HEAD_1);
+    expect(liveRead.status).toBe("read");
+    if (liveRead.status === "read") {
+      expect(liveRead.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
+
+    // A client passing a forged pullRequestNodeId on another PR target must not read the first PR's guide.
+    const forgedRead = await service.read(
+      WINDOW_ID,
+      { ...otherPr, pullRequestNodeId: "PR_kwDO_merged9" as never },
+      HEAD_1,
+    );
+    expect(forgedRead.status).toBe("read");
+    if (forgedRead.status === "read") {
+      expect(forgedRead.view.guide).toBeUndefined();
+    }
+    expect(original.number).toBe(9);
   });
 });

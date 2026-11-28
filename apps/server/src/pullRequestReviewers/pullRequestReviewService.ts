@@ -710,12 +710,14 @@ export class PullRequestReviewService {
       readonly canonicalTarget?: PullRequestReviewTarget;
       readonly pullRequestNodeId?: string;
     },
+    trustTargetNodeId = false,
   ): ResolvedPullRequestReviewIdentity {
     const resolved = resolvePullRequestReviewIdentity({
       target,
       pullRequestLinks: this.#pullRequestLinks,
       canonicalTarget: authority?.canonicalTarget,
       pullRequestNodeId: authority?.pullRequestNodeId,
+      trustTargetNodeId,
     });
     for (const fromKey of resolved.adoptKeys) {
       this.#mergeBuckets(fromKey, resolved.bucketKey);
@@ -1183,7 +1185,7 @@ export class PullRequestReviewService {
       return undefined;
     }
 
-    const resolved = this.#resolveIdentity(observation.target);
+    const resolved = this.#resolveIdentity(observation.target, undefined, true);
     const target = resolved.target;
     const targetKey = resolved.bucketKey;
     const writeKey = resolved.writeKey;
@@ -1590,7 +1592,7 @@ export class PullRequestReviewService {
             this.#projectSettingsFor(target.projectId).postSummaryComment,
 
           postSummaryComment: async ({ body }, signal) => {
-            const currentIdentity = this.#resolveIdentity(target);
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
             const currentFold = this.#runFoldForKey(currentIdentity.bucketKey);
             if (currentFold.publishedCommentHeads.has(observation.headSha)) {
               return { status: "refused", reason: "already-posted" };
@@ -1623,7 +1625,7 @@ export class PullRequestReviewService {
           },
 
           isSendBlockingFindingsEnabled: () => {
-            const currentIdentity = this.#resolveIdentity(target);
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
             return this.#prSettingsForKey(currentIdentity.bucketKey, currentIdentity.target)
               .sendBlockingFindingsToWorker;
           },
@@ -1631,7 +1633,7 @@ export class PullRequestReviewService {
           handBackBlockingFindings: async ({
             findings,
           }): Promise<PullRequestReviewHandBackResult> => {
-            const currentIdentity = this.#resolveIdentity(target);
+            const currentIdentity = this.#resolveIdentity(target, undefined, true);
             const currentFold = this.#runFoldForKey(currentIdentity.bucketKey);
             if (currentFold.handedBackHeads.has(observation.headSha)) {
               return { status: "refused", reason: "already-handed-back" };
@@ -1714,7 +1716,7 @@ export class PullRequestReviewService {
         },
       });
 
-      const finalIdentity = this.#resolveIdentity(target);
+      const finalIdentity = this.#resolveIdentity(target, undefined, true);
       const completedAt = decodeTimestamp(this.#clock());
       const record = this.#outcomeToRecord({
         reviewId,
@@ -2199,11 +2201,10 @@ export class PullRequestReviewService {
         this.#prSettingsAggregateVersions.set(aggregateKey, aggregateVersion);
         const payload = envelope.payload as PullRequestReviewPullRequestSettingsEvent;
         const key = resolveReplayBucketKey(payload.target);
-        const previous = this.#prSettings.get(key);
         this.#prSettings.set(key, {
           target: payload.target,
           sendBlockingFindingsToWorker: payload.sendBlockingFindingsToWorker,
-          version: decodeAggregateVersion((previous?.version ?? 0) + 1),
+          version: decodeAggregateVersion(aggregateVersion),
           updatedAt: decodeTimestamp(envelope.occurredAt),
         });
         this.#prSettingsOrder.set(key, sequence);

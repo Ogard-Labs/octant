@@ -211,13 +211,26 @@ export function resolvePullRequestReviewIdentity(input: {
   readonly pullRequestLinks?: PullRequestLinkReader | undefined;
   readonly canonicalTarget?: PullRequestReviewTarget | undefined;
   readonly pullRequestNodeId?: string | undefined;
+  /**
+   * Only true for host-internal targets (such as board observations or
+   * server-resolved thread PRs). Client-supplied targets must never supply an
+   * authoritative node ID because repository authorization checks the
+   * submitted display coordinates.
+   */
+  readonly trustTargetNodeId?: boolean | undefined;
 }): ResolvedPullRequestReviewIdentity {
+  const trustedTargetNodeId =
+    input.trustTargetNodeId === true ? input.target.pullRequestNodeId : undefined;
   const suppliedNodeId = parsePullRequestNodeId(
-    input.pullRequestNodeId ??
-      input.canonicalTarget?.pullRequestNodeId ??
-      input.target.pullRequestNodeId,
+    input.pullRequestNodeId ?? input.canonicalTarget?.pullRequestNodeId ?? trustedTargetNodeId,
   );
-  const lookupTarget = input.canonicalTarget ?? input.target;
+  const rawLookup = input.canonicalTarget ?? input.target;
+  const lookupTarget: PullRequestReviewTarget = {
+    projectId: rawLookup.projectId,
+    repositoryOwner: rawLookup.repositoryOwner,
+    repositoryName: rawLookup.repositoryName,
+    number: rawLookup.number,
+  };
   const link = input.pullRequestLinks?.resolveLink({
     projectId: lookupTarget.projectId,
     repositoryOwner: lookupTarget.repositoryOwner,
@@ -249,12 +262,33 @@ export function resolvePullRequestReviewIdentity(input: {
       adoptKeys.push(linkKey);
     }
     if (input.pullRequestLinks !== undefined) {
+      for (const mergedId of input.pullRequestLinks.mergedLinkIdsForLink(link.linkId)) {
+        const mergedLinkKey = `${String(link.projectId)}:link:${String(mergedId)}`;
+        if (seen.has(mergedLinkKey)) continue;
+        seen.add(mergedLinkKey);
+        adoptKeys.push(mergedLinkKey);
+      }
       for (const alias of input.pullRequestLinks.displayAliasesForLink(link.linkId)) {
         const legacyKey = pullRequestDisplayLookupKey(
           link.projectId,
           alias.repositoryOwner,
           alias.repositoryName,
           alias.number,
+        );
+        if (seen.has(legacyKey)) continue;
+        if (aliasClaimedByEarlierLink(input.pullRequestLinks, link, legacyKey)) continue;
+        seen.add(legacyKey);
+        adoptKeys.push(legacyKey);
+      }
+      for (const repoAlias of input.pullRequestLinks.repositoryAliasesFor(link.projectId, {
+        owner: link.repositoryOwner,
+        name: link.repositoryName,
+      })) {
+        const legacyKey = pullRequestDisplayLookupKey(
+          link.projectId,
+          repoAlias.owner,
+          repoAlias.name,
+          link.number,
         );
         if (seen.has(legacyKey)) continue;
         if (aliasClaimedByEarlierLink(input.pullRequestLinks, link, legacyKey)) continue;
@@ -271,21 +305,35 @@ export function resolvePullRequestReviewIdentity(input: {
       : { ...lookupTarget, pullRequestNodeId: suppliedNodeId };
   const bucketKey = pullRequestReviewTargetKey(canonicalTarget);
   const adoptKeys: string[] = [];
+  const seen = new Set<string>([bucketKey]);
+  const maybeAdoptLegacy = (candidate: string) => {
+    if (seen.has(candidate)) return;
+    if (
+      input.pullRequestLinks !== undefined &&
+      legacyKeyClaimedByAnyLink(input.pullRequestLinks, canonicalTarget.projectId, candidate)
+    ) {
+      return;
+    }
+    seen.add(candidate);
+    adoptKeys.push(candidate);
+  };
   if (suppliedNodeId !== undefined) {
-    const seen = new Set<string>([bucketKey]);
-    for (const candidate of [
-      pullRequestReviewLegacyTargetKey(input.target),
-      pullRequestReviewLegacyTargetKey(lookupTarget),
-    ]) {
-      if (seen.has(candidate)) continue;
-      if (
-        input.pullRequestLinks !== undefined &&
-        legacyKeyClaimedByAnyLink(input.pullRequestLinks, canonicalTarget.projectId, candidate)
-      ) {
-        continue;
-      }
-      seen.add(candidate);
-      adoptKeys.push(candidate);
+    maybeAdoptLegacy(pullRequestReviewLegacyTargetKey(input.target));
+    maybeAdoptLegacy(pullRequestReviewLegacyTargetKey(lookupTarget));
+  }
+  if (input.pullRequestLinks !== undefined) {
+    for (const repoAlias of input.pullRequestLinks.repositoryAliasesFor(canonicalTarget.projectId, {
+      owner: String(canonicalTarget.repositoryOwner),
+      name: String(canonicalTarget.repositoryName),
+    })) {
+      maybeAdoptLegacy(
+        pullRequestDisplayLookupKey(
+          canonicalTarget.projectId,
+          repoAlias.owner,
+          repoAlias.name,
+          canonicalTarget.number,
+        ),
+      );
     }
   }
   return {

@@ -292,12 +292,14 @@ export class PullRequestGuideService {
       readonly canonicalTarget?: PullRequestReviewTarget;
       readonly pullRequestNodeId?: string;
     },
+    trustTargetNodeId = false,
   ): ResolvedPullRequestReviewIdentity {
     const resolved = resolvePullRequestReviewIdentity({
       target,
       pullRequestLinks: this.#options.pullRequestLinks,
       canonicalTarget: authority?.canonicalTarget,
       pullRequestNodeId: authority?.pullRequestNodeId,
+      trustTargetNodeId,
     });
     for (const fromKey of resolved.adoptKeys) {
       this.#mergeFolds(fromKey, resolved.bucketKey);
@@ -536,7 +538,7 @@ export class PullRequestGuideService {
       .then((result) => {
         if (result.status === "failed") {
           try {
-            const latest = this.#resolveIdentity(target);
+            const latest = this.#resolveIdentity(target, undefined, true);
             this.#append(
               latest.bucketKey,
               latest.writeKey,
@@ -712,7 +714,7 @@ export class PullRequestGuideService {
     // saved one: a diff GitHub failed to give, or a reply whose every stop was
     // malformed, keeps what the person had.
     if (stops.length === 0) return { status: "failed", reason: "invalid-output" };
-    const latest = this.#resolveIdentity(target);
+    const latest = this.#resolveIdentity(target, undefined, true);
     this.#append(latest.bucketKey, latest.writeKey, PULL_REQUEST_GUIDE_EVENT_NAMES.recorded, {
       kind: "pull-request-guide-recorded",
       guideId: input.guideId,

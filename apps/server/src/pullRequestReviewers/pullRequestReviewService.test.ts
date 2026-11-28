@@ -1399,6 +1399,7 @@ describe("second-model pull request reviewer service", () => {
       LOCAL_ACTOR,
     );
     expect(updated.status).toBe("ok");
+    const updatedVersion = updated.status === "ok" ? updated.view.settings.version : undefined;
     currentHead = HEAD_2;
     const secondReview = await replayed.reviewPullRequestHead({
       target: afterRename,
@@ -1418,7 +1419,156 @@ describe("second-model pull request reviewer service", () => {
     expect(finalView.status).toBe("ok");
     if (finalView.status === "ok") {
       expect(finalView.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(finalView.view.settings.version).toBe(updatedVersion);
       expect(finalView.view.latestReview?.reviewId).toBe(secondReview?.reviewId);
     }
+  });
+
+  it("adopts a merged duplicate link's live review history without repeating a review, preserves unlinked hand-back settings via repository aliases, and ignores forged client node IDs", async () => {
+    const h = createHarness({ currentHeadSha: () => HEAD_1 });
+    const first: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const duplicate: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+    const unlinkedOld: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("unlinked-old"),
+      number: 15,
+    };
+    const unlinkedNew: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("unlinked-new"),
+      number: 15,
+    };
+    const otherPr: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("other"),
+      number: 22,
+    };
+
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+
+    const service = h.makeService({ withLinks: true });
+    await service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await service.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: duplicate, sendBlockingFindingsToWorker: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const review = await service.reviewPullRequestHead({
+      target: duplicate,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(review?.status).toBe("completed");
+
+    // Backfill merges the duplicate link into the surviving link while the service stays live.
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_dup9",
+      baseRepositoryNodeId: "R_kgDO_dup",
+      threadIds: [THREAD_ID],
+    });
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_dup9",
+      baseRepositoryNodeId: "R_kgDO_dup",
+      threadIds: [THREAD_ID],
+    });
+
+    // Live queries see the merged review and setting, and re-observing HEAD_1 does not repeat the review.
+    const liveView = await service.queryPullRequestSettings(WINDOW_ID, duplicate, THREAD_ID);
+    expect(liveView.status).toBe("ok");
+    if (liveView.status === "ok") {
+      expect(liveView.view.settings.sendBlockingFindingsToWorker).toBe(true);
+      expect(liveView.view.latestReview?.reviewId).toBe(review?.reviewId);
+    }
+    expect(
+      await service.reviewPullRequestHead({
+        target: duplicate,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      }),
+    ).toBeUndefined();
+
+    // A client passing a forged pullRequestNodeId on another PR target must never read the first PR's data.
+    const forgedView = await service.queryPullRequestSettings(
+      WINDOW_ID,
+      { ...otherPr, pullRequestNodeId: "PR_kwDO_dup9" as never },
+      THREAD_ID,
+    );
+    expect(forgedView.status).toBe("ok");
+    if (forgedView.status === "ok") {
+      expect(forgedView.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(forgedView.view.latestReview).toBeUndefined();
+    }
+
+    // Unlinked PR hand-back setting follows a proven same-repository alias rename.
+    await service.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: unlinkedOld, sendBlockingFindingsToWorker: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    h.pullRequestLinks.recordRepositoryAlias({
+      projectId: PROJECT_ID,
+      baseRepositoryNodeId: "R_kgDO_unlinked",
+      canonicalOwner: "acme",
+      canonicalName: "unlinked-new",
+      aliasOwner: "acme",
+      aliasName: "unlinked-old",
+    });
+    const unlinkedRenamed = await service.queryPullRequestSettings(
+      WINDOW_ID,
+      unlinkedNew,
+      THREAD_ID,
+    );
+    expect(unlinkedRenamed.status).toBe("ok");
+    if (unlinkedRenamed.status === "ok") {
+      expect(unlinkedRenamed.view.settings.sendBlockingFindingsToWorker).toBe(true);
+    }
+    expect(first.number).toBe(9);
   });
 });

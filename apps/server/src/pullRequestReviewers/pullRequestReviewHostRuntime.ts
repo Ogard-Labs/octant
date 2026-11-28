@@ -207,6 +207,14 @@ export function createPullRequestReviewHostRuntime(
       signal,
     );
     if (summary.status !== "read" || summary.state !== "open") return undefined;
+    // Fail closed if GitHub reports a different PR node ID for reused coordinates.
+    if (
+      target.pullRequestNodeId !== undefined &&
+      summary.pullRequestNodeId !== undefined &&
+      summary.pullRequestNodeId !== target.pullRequestNodeId
+    ) {
+      return undefined;
+    }
     return summary;
   };
 

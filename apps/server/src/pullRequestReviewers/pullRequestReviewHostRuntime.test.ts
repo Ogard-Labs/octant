@@ -191,6 +191,7 @@ function makeFakeGhCommand(options: {
   readonly baseSha?: string;
   readonly headSha: string;
   readonly diff: string;
+  readonly pullRequestNodeId?: string;
 }): GhCommandPort {
   return {
     run: async (args) => {
@@ -198,11 +199,12 @@ function makeFakeGhCommand(options: {
       if (
         args[0] === "pr" &&
         args[1] === "view" &&
-        args.includes("state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable")
+        args.includes("id,state,headRefName,baseRefName,headRefOid,baseRefOid,mergeable")
       ) {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
+            ...(options.pullRequestNodeId === undefined ? {} : { id: options.pullRequestNodeId }),
             state: "OPEN",
             headRefName: "feature/harden-auth",
             baseRefName: options.baseBranch,
@@ -254,6 +256,7 @@ function makeProductionHarness(options: {
   readonly ghBaseBranch: string;
   readonly ghBaseSha?: string;
   readonly ghDiff: string;
+  readonly ghPullRequestNodeId?: string;
   readonly replyText: string;
   readonly reportUsage?: boolean;
   readonly tickClockOnOperationFrame?: boolean;
@@ -576,6 +579,9 @@ function makeProductionHarness(options: {
       ...(options.ghBaseSha === undefined ? {} : { baseSha: options.ghBaseSha }),
       headSha: HEAD_SHA,
       diff: options.ghDiff,
+      ...(options.ghPullRequestNodeId === undefined
+        ? {}
+        : { pullRequestNodeId: options.ghPullRequestNodeId }),
     }),
     providerDataDirectory: dir,
     connection: db,
@@ -666,6 +672,7 @@ function makeProductionHarness(options: {
 
   return {
     service,
+    runtime: host.runtime,
     codeOperationService,
     journal,
     savedFindings,
@@ -942,5 +949,28 @@ describe("pull request review host runtime integration with ReviewFindingService
       }
     )?.reconciliation;
     expect(reconciliation?.providerReported).toBe(false);
+  });
+
+  it("fails closed on head reads when GitHub reports a different pull request node ID for reused coordinates", async () => {
+    const harness = makeProductionHarness({
+      localHeadSha: HEAD_SHA,
+      ghBaseBranch: "main",
+      ghDiff: MAIN_DIFF,
+      ghPullRequestNodeId: "PR_kwDO_replacement42",
+      replyText: JSON.stringify({ findings: [] }),
+    });
+    const controller = new AbortController();
+    expect(
+      await harness.runtime.readCurrentHeadSha(
+        { ...TARGET, pullRequestNodeId: "PR_kwDO_original42" as never },
+        controller.signal,
+      ),
+    ).toBeUndefined();
+    expect(
+      await harness.runtime.readCurrentHeadSha(
+        { ...TARGET, pullRequestNodeId: "PR_kwDO_replacement42" as never },
+        controller.signal,
+      ),
+    ).toBe(HEAD_SHA);
   });
 });
