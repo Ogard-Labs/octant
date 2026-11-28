@@ -1,15 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir } from "node:fs/promises";
+import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import { sep } from "node:path";
+import { decodeUtcTimestamp } from "@octant/contracts";
+import type { HostUpdateFailureReason, HostUpdateStep } from "@octant/contracts/host-control";
 import {
   acquireHostRuntimeOwner,
   deriveHostRuntimeHostId,
+  isPathConfinedWithin,
   readHostRuntimeProcessStart,
+  readHostUpdateContextFile,
   requestHostRuntimeControl,
+  writeHostUpdateResultFile,
   type HeadlessArtifactRuntimeFacts,
   type HostRuntimeControlResponse,
   type HostRuntimeLocalControlRequest,
   type HostRuntimePaths,
+  type HostUpdateContextFile,
+  type HostUpdateResultFile,
 } from "@octant/host-runtime";
 import {
   HeadlessInstallError,
@@ -21,6 +28,7 @@ import {
   type HeadlessBackupReceipt,
   type HeadlessUpgradePorts,
 } from "./artifactInstall";
+import { OfflineStoreRestoreError, restoreOfflineStoreBackup } from "./offlineStoreRestore";
 import { createUserServiceManager } from "./serviceManager";
 
 // The `octant server install|upgrade|uninstall` command layer: flag
@@ -33,6 +41,8 @@ interface HeadlessArtifactCliPlacement {
   readonly installRoot: string;
   /** The person said they built this themselves, so no release signature is required. */
   readonly selfBuilt: boolean;
+  /** Context file written by the out-of-service upgrade runner; incompatible with `--self-built`. */
+  readonly updateContextPath?: string;
 }
 
 export type HeadlessArtifactCliCommand =
@@ -60,7 +70,12 @@ export function resolveHeadlessArtifactCliCommand(
   const action = positional[0];
   if (action === "install" || action === "upgrade") {
     for (const name of Object.keys(flags)) {
-      if (name !== "artifact" && name !== "install-root" && name !== "self-built") {
+      const allowed =
+        name === "artifact" ||
+        name === "install-root" ||
+        name === "self-built" ||
+        (action === "upgrade" && name === "update-context");
+      if (!allowed) {
         return undefined;
       }
     }
@@ -69,11 +84,16 @@ export function resolveHeadlessArtifactCliCommand(
     if (installRoot !== undefined && typeof installRoot !== "string") return undefined;
     const selfBuilt = flags["self-built"];
     if (selfBuilt !== undefined && selfBuilt !== true) return undefined;
+    const updateContextPath = flags["update-context"];
+    if (updateContextPath !== undefined && typeof updateContextPath !== "string") return undefined;
+    // Remote / out-of-service host upgrades never allow `--self-built`.
+    if (updateContextPath !== undefined && selfBuilt === true) return undefined;
     return {
       action,
       artifactRoot: flags.artifact,
       installRoot: installRoot ?? defaults.installRoot,
       selfBuilt: selfBuilt === true,
+      ...(updateContextPath === undefined ? {} : { updateContextPath }),
     };
   }
   if (action === "uninstall") {
@@ -180,29 +200,80 @@ export async function runHeadlessArtifactCliCommand(
       return 0;
     }
     if (command.action === "upgrade") {
-      const report = await upgradeHeadlessArtifact({
-        artifactRoot: command.artifactRoot,
-        installRoot: command.installRoot,
-        runtime: options.runtime,
-        signature: signaturePolicy(command.selfBuilt),
-        ports: options.ports,
-      });
-      if (report.outcome === "upgraded") {
-        stdout.write(
-          `Octant upgraded from ${report.fromVersion} to ${report.toVersion}` +
-            (report.storeMigration ? " with a store migration.\n" : ".\n"),
-        );
-        return 0;
-      }
-      if (report.outcome === "rolled-back") {
+      const updateContext =
+        command.updateContextPath === undefined
+          ? undefined
+          : await loadConfinedUpdateContext(command.updateContextPath, options.stateDirectory);
+      if (command.updateContextPath !== undefined && updateContext === undefined) {
         stderr.write(
-          `Octant ${report.toVersion} failed its health check and was rolled back to ${report.fromVersion}` +
-            (report.storeRestored ? "; the store was restored from the verified backup.\n" : ".\n"),
+          "The update context file could not be read or is outside the state directory.\n",
         );
         return 1;
       }
-      stderr.write(`${report.guidance}\n`);
-      return 1;
+      // Out-of-service host updates always verify release signatures.
+      const effectiveSignature: HeadlessArtifactSignaturePolicy =
+        updateContext !== undefined ? { kind: "release-keys" } : signaturePolicy(command.selfBuilt);
+      try {
+        const report = await upgradeHeadlessArtifact({
+          artifactRoot: command.artifactRoot,
+          installRoot: command.installRoot,
+          runtime: options.runtime,
+          signature: effectiveSignature,
+          ports: options.ports,
+        });
+        if (updateContext !== undefined) {
+          await finalizeUpdateContext(updateContext, options.stateDirectory, {
+            outcome:
+              report.outcome === "upgraded"
+                ? "updated"
+                : report.outcome === "rolled-back"
+                  ? "rolled-back"
+                  : "recovery-required",
+            step:
+              report.outcome === "upgraded"
+                ? "health-check"
+                : report.outcome === "rolled-back"
+                  ? "roll-back"
+                  : "roll-back",
+            ...(report.outcome === "rolled-back"
+              ? {
+                  failureReason: "health-check-failed" as const,
+                  storeRestored: report.storeRestored,
+                }
+              : report.outcome === "recovery-required"
+                ? { failureReason: "restore-failed" as const, storeRestored: false }
+                : {}),
+          });
+        }
+        if (report.outcome === "upgraded") {
+          stdout.write(
+            `Octant upgraded from ${report.fromVersion} to ${report.toVersion}` +
+              (report.storeMigration ? " with a store migration.\n" : ".\n"),
+          );
+          return 0;
+        }
+        if (report.outcome === "rolled-back") {
+          stderr.write(
+            `Octant ${report.toVersion} failed its health check and was rolled back to ${report.fromVersion}` +
+              (report.storeRestored
+                ? "; the store was restored from the verified backup.\n"
+                : ".\n"),
+          );
+          return 1;
+        }
+        stderr.write(`${report.guidance}\n`);
+        return 1;
+      } catch (error) {
+        if (updateContext !== undefined) {
+          const mapped = mapUpgradeErrorToResult(error);
+          await finalizeUpdateContext(updateContext, options.stateDirectory, {
+            outcome: "failed",
+            step: mapped.step,
+            failureReason: mapped.failureReason,
+          });
+        }
+        throw error;
+      }
     }
     const report = await uninstallHeadlessArtifact({
       installRoot: command.installRoot,
@@ -243,10 +314,96 @@ export type MaintenanceAcquisition =
   | { readonly kind: "owner"; readonly release: () => Promise<void> }
   | { readonly kind: "attached" };
 
+async function loadConfinedUpdateContext(
+  contextPath: string,
+  stateDirectory: string | undefined,
+): Promise<HostUpdateContextFile | undefined> {
+  if (stateDirectory === undefined || !isPathConfinedWithin(stateDirectory, contextPath)) {
+    return undefined;
+  }
+  const context = await readHostUpdateContextFile(contextPath);
+  if (context === undefined || !isPathConfinedWithin(stateDirectory, context.resultPath)) {
+    return undefined;
+  }
+  return context;
+}
+
+async function finalizeUpdateContext(
+  context: HostUpdateContextFile,
+  stateDirectory: string | undefined,
+  terminal: {
+    readonly outcome: HostUpdateResultFile["outcome"];
+    readonly step: HostUpdateStep;
+    readonly failureReason?: HostUpdateFailureReason;
+    readonly storeRestored?: boolean;
+  },
+): Promise<void> {
+  const result: HostUpdateResultFile = {
+    schemaVersion: 1,
+    requestId: context.requestId,
+    actor: context.actor,
+    hostKind: context.hostKind,
+    fromVersion: context.fromVersion,
+    toVersion: context.toVersion,
+    ring: context.ring,
+    drain: context.drain,
+    storeMigration: context.storeMigration,
+    outcome: terminal.outcome,
+    step: terminal.step,
+    ...(terminal.failureReason === undefined ? {} : { failureReason: terminal.failureReason }),
+    ...(terminal.storeRestored === undefined ? {} : { storeRestored: terminal.storeRestored }),
+    completedAt: decodeUtcTimestamp(new Date().toISOString()),
+  };
+  await writeHostUpdateResultFile(context.resultPath, result);
+  if (stateDirectory !== undefined) {
+    if (
+      context.cleanupWorkDir !== undefined &&
+      isPathConfinedWithin(stateDirectory, context.cleanupWorkDir)
+    ) {
+      await rm(context.cleanupWorkDir, { force: true, recursive: true }).catch(() => undefined);
+    }
+    if (
+      context.cleanupLaunchdPlist !== undefined &&
+      isPathConfinedWithin(stateDirectory, context.cleanupLaunchdPlist)
+    ) {
+      await rm(context.cleanupLaunchdPlist, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+function mapUpgradeErrorToResult(error: unknown): {
+  readonly step: HostUpdateStep;
+  readonly failureReason: HostUpdateFailureReason;
+} {
+  if (error instanceof HeadlessInstallError) {
+    switch (error.code) {
+      case "artifact-unsigned":
+        return { step: "verify", failureReason: "untrusted-signature" };
+      case "artifact-rejected":
+        return { step: "verify", failureReason: "build-unverified" };
+      case "incompatible-downgrade":
+        return { step: "verify", failureReason: "downgrade-refused" };
+      case "backup-required":
+        return { step: "swap", failureReason: "backup-required" };
+      case "owner-stop-refused":
+        return { step: "swap", failureReason: "owner-stop-refused" };
+      case "restore-failed":
+        return { step: "roll-back", failureReason: "restore-failed" };
+      default:
+        return { step: "swap", failureReason: "install-failed" };
+    }
+  }
+  return { step: "swap", failureReason: "install-failed" };
+}
+
 export interface CreateLocalHeadlessUpgradePortsOptions {
   readonly control: LocalControl;
   readonly serviceManager: LocalServiceControl;
   readonly acquireMaintenance: () => Promise<MaintenanceAcquisition>;
+  /** Confined host data directory used for offline store backup restore during rollback. */
+  readonly dataDirectory?: string;
+  /** Test seam for offline store restore; defaults to verified SQLite restore inside `dataDirectory`. */
+  readonly restoreStore?: (backupPath: string) => Promise<void>;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly healthAttempts?: number;
 }
@@ -295,14 +452,31 @@ export function createLocalHeadlessUpgradePorts(
       }
       return "unready";
     },
-    restoreStore: async () => {
-      // The CLI package has no offline restore engine; fail closed so the
-      // coordinator reports recovery-required with operator guidance instead
-      // of guessing at a destructive restore.
-      throw new HeadlessInstallError(
-        "backup-required",
-        "Offline store restore must run through the server database CLI while Octant is stopped.",
-      );
+    restoreStore: async (backupPath: string) => {
+      if (options.restoreStore !== undefined) {
+        await options.restoreStore(backupPath);
+        return;
+      }
+      if (options.dataDirectory === undefined) {
+        throw new HeadlessInstallError(
+          "restore-failed",
+          "Offline store restore requires a confined Octant data directory.",
+        );
+      }
+      try {
+        await restoreOfflineStoreBackup({
+          dataDirectory: options.dataDirectory,
+          backupPath,
+        });
+      } catch (error) {
+        if (error instanceof OfflineStoreRestoreError) {
+          throw new HeadlessInstallError("restore-failed", error.message);
+        }
+        throw new HeadlessInstallError(
+          "restore-failed",
+          "Octant could not restore the store from the verified backup.",
+        );
+      }
     },
   };
 }
@@ -311,6 +485,7 @@ export function createLocalHeadlessUpgradePorts(
 export function createHostHeadlessUpgradePorts(paths: HostRuntimePaths): HeadlessUpgradePorts {
   const serviceManager = createUserServiceManager({ paths, uid: paths.uid });
   return createLocalHeadlessUpgradePorts({
+    dataDirectory: paths.dataDirectory,
     control: { request: (request) => requestHostRuntimeControl(paths, request) },
     serviceManager: {
       start: async () => {

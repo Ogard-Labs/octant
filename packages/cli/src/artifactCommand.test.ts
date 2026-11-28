@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   encodeHeadlessArtifactManifest,
   HEADLESS_ARTIFACT_MANIFEST_FILENAME,
@@ -593,11 +594,142 @@ describe("createLocalHeadlessUpgradePorts", () => {
     await expect(localPorts({ responses: {} }).ports.observeHealth()).resolves.toBe("unready");
   });
 
-  it("fails closed on restore and refuses maintenance when an owner is still attached", async () => {
+  it("fails closed on restore without a data directory and refuses maintenance when an owner is still attached", async () => {
     const fixture = localPorts({ responses: {}, maintenance: "attached" });
     await expect(fixture.ports.restoreStore("/data/b")).rejects.toThrow();
     await expect(fixture.ports.acquireMaintenanceOwner()).rejects.toMatchObject({
       code: "owner-stop-refused",
     });
+  });
+
+  it("refuses --self-built combined with --update-context", () => {
+    expect(
+      resolveHeadlessArtifactCliCommand(
+        ["upgrade"],
+        { artifact: "/a", "update-context": "/state/ctx.json", "self-built": true },
+        defaults,
+      ),
+    ).toBeUndefined();
+    expect(
+      resolveHeadlessArtifactCliCommand(
+        ["upgrade"],
+        { artifact: "/a", "update-context": "/state/ctx.json" },
+        defaults,
+      ),
+    ).toEqual({
+      action: "upgrade",
+      artifactRoot: "/a",
+      installRoot: "/default/install",
+      selfBuilt: false,
+      updateContextPath: "/state/ctx.json",
+    });
+  });
+
+  it("restores a verified SQLite backup on migrated rollback and stays stopped when restore fails", async () => {
+    const base = temporaryRoot("octant-cmd-migrated-rb-");
+    const installRoot = join(base, "install");
+    const dataDirectory = join(base, "data");
+    mkdirSync(dataDirectory, { recursive: true });
+    const dbPath = join(dataDirectory, "octant.sqlite3");
+    const backupPath = join(dataDirectory, "octant.sqlite3.backup-pre-upgrade");
+
+    const seedDb = (path: string, migrationVersion: number) => {
+      const db = new DatabaseSync(path);
+      try {
+        db.exec(
+          "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY); CREATE TABLE event_journal (global_sequence INTEGER PRIMARY KEY);",
+        );
+        db.prepare("INSERT INTO schema_migrations (version) VALUES (?)").run(migrationVersion);
+        db.prepare("INSERT INTO event_journal (global_sequence) VALUES (1)").run();
+      } finally {
+        db.close();
+      }
+    };
+    seedDb(backupPath, 1);
+    seedDb(dbPath, 2);
+
+    await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot,
+        selfBuilt: true,
+      },
+      runtime,
+      dataDirectory,
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr: collector(),
+    });
+
+    const started: string[] = [];
+    const ports = createLocalHeadlessUpgradePorts({
+      dataDirectory,
+      control: {
+        request: async (req) => {
+          if (req.type === "backup") {
+            return {
+              ok: true,
+              backup: {
+                outcome: "created",
+                path: backupPath,
+                migrationVersion: 1,
+                journalHead: 1,
+                byteLength: 4_096,
+              },
+            };
+          }
+          if (req.type === "stop") return { ok: true };
+          return undefined;
+        },
+      },
+      serviceManager: {
+        start: async () => void started.push("start"),
+        stop: async () => void started.push("stop"),
+      },
+      acquireMaintenance: async () => ({ kind: "owner", release: async () => undefined }),
+      sleep: async () => undefined,
+      healthAttempts: 1,
+    });
+
+    const stderr = collector();
+    const rolledBack = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "upgrade",
+        artifactRoot: writeArtifact({ version: "1.1.0", storeVersion: 2 }),
+        installRoot,
+        selfBuilt: true,
+      },
+      runtime,
+      dataDirectory,
+      ports,
+      stdout: collector(),
+      stderr,
+    });
+    expect(rolledBack).toBe(1);
+    expect(stderr.text()).toContain("store was restored from the verified backup");
+    expect(readlinkSync(join(installRoot, "current"))).toBe(join(installRoot, "versions", "1.0.0"));
+    expect(started).toEqual(["start", "stop", "start"]);
+
+    // Now corrupt the backup: migrated rollback must stay stopped (no second start) and report recovery.
+    writeFileSync(backupPath, "corrupt-bytes");
+    started.length = 0;
+    const failedStderr = collector();
+    const recoveryRequired = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "upgrade",
+        artifactRoot: writeArtifact({ version: "1.2.0", storeVersion: 2 }),
+        installRoot,
+        selfBuilt: true,
+      },
+      runtime,
+      dataDirectory,
+      ports,
+      stdout: collector(),
+      stderr: failedStderr,
+    });
+    expect(recoveryRequired).toBe(1);
+    expect(failedStderr.text()).toContain("Octant is stopped.");
+    expect(started).toEqual(["start", "stop"]);
   });
 });
