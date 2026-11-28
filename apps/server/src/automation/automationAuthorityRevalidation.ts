@@ -167,6 +167,39 @@ export function revalidateAutomationAuthority(input: {
 }
 
 /**
+ * True when an authority refusal can clear only after the person edits or
+ * replaces the routine definition (never by re-enabling a provider or
+ * extension). Routines with a recoverable refusal keep the shared webhook
+ * acknowledgement barrier so re-enabling cannot expose >32 fresh deliveries.
+ */
+export function isPermanentAutomationAuthorityFailure(input: {
+  readonly result: AutomationAuthorityRevalidationResult;
+  readonly facts: AutomationAuthorityLiveFacts;
+}): boolean {
+  if (input.result.kind === "ok") return false;
+  switch (input.result.reason) {
+    case "host-mismatch":
+    case "full-access-ineligible":
+    case "binding-mismatch":
+    case "execution-profile-mismatch":
+    case "delivery-target-invalid":
+      return true;
+    case "project-mismatch":
+      return (
+        input.facts.serverProject === undefined ||
+        input.facts.serverProject.kind === "removed" ||
+        input.facts.serverProject.serverRegistered
+      );
+    case "provider-capability-mismatch":
+      return input.facts.providerInstance === undefined;
+    case "authority-mismatch":
+      return !input.facts.authorityDigestMatches || input.facts.extensionTrustMatches;
+    default:
+      return false;
+  }
+}
+
+/**
  * A routine in a Project on a server runs as a person-started turn there
  * would, so it is refused whenever such a turn would be: the person removed
  * the Project, or its server left the registry. Reaching the server is the

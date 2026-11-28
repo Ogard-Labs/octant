@@ -69,6 +69,13 @@ interface AutomationEventSourcesOptions {
   readonly scheduler: Pick<AutomationSchedulerService, "commitEventObservation">;
   readonly sources: IntegrationEventSourceProvider;
   readonly current: (definition: AutomationDefinition) => boolean;
+  /**
+   * Whether an enabled sibling routine still holds the shared acknowledgement
+   * barrier. Defaults to `current`; host wiring keeps the barrier across
+   * recoverable failures (such as a temporarily disabled provider) so
+   * re-enabling never exposes an unbounded backlog.
+   */
+  readonly blocksSharedAcknowledgements?: (definition: AutomationDefinition) => boolean;
   readonly activity?: (definition: AutomationDefinition) => "quiet" | "busy" | "unknown";
   readonly now: () => UtcTimestamp;
   readonly monotonic: () => number;
@@ -318,11 +325,12 @@ export class AutomationEventSources {
       input.source.capacityKey !== undefined ? input.source.capacityKey() : input.source.identity;
     if (capacityKey === undefined) return [];
 
+    const holdsBarrier = this.#options.blocksSharedAcknowledgements ?? this.#options.current;
     for (const other of this.#options.projection.listDefinitions()) {
       if (
         String(other.id) === String(input.definition.id) ||
         other.lifecycle !== "enabled" ||
-        !this.#options.current(other) ||
+        !holdsBarrier(other) ||
         other.trigger.kind !== "integration-event" ||
         other.trigger.integrationId !== input.trigger.integrationId ||
         other.trigger.sourceId !== input.trigger.sourceId

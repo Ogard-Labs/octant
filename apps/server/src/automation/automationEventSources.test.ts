@@ -28,7 +28,15 @@ import { AutomationEventStore } from "./automationEventStore";
 import { hydrateAutomationProjection } from "./automationProjection";
 import { AutomationSchedulerService } from "./automationSchedulerService";
 import { AutomationCommandService } from "./automationCommandService";
-import { buildAutomationRunForOccurrence } from "./automationRunIdentity";
+import {
+  buildAutomationAuthorityFactsFromHost,
+  isPermanentAutomationAuthorityFailure,
+  revalidateAutomationAuthority,
+} from "./automationAuthorityRevalidation";
+import {
+  buildAutomationRunForOccurrence,
+  captureAutomationDefinitionSnapshot,
+} from "./automationRunIdentity";
 import { AutomationEventSources, prepareAutomationEventDefinition } from "./automationEventSources";
 import { reconcileAutomationEventObservation } from "./automationEventSourceState";
 import {
@@ -442,12 +450,57 @@ describe("durable routine integration polling", () => {
       return created.automation;
     };
     let wakes = 0;
-    const staleRoutineIds = new Set<string>();
+    const staleProjectRoutineIds = new Set<string>();
+    const disabledProviderRoutineIds = new Set<string>();
+    const evaluateAuthority = (
+      definition: (typeof projection)["listDefinitions"] extends () => ReadonlyArray<infer D>
+        ? D
+        : never,
+    ) => {
+      const snapshot = captureAutomationDefinitionSnapshot(definition);
+      const run = {
+        definitionSnapshot: snapshot,
+        authoritySnapshot: {
+          ...snapshot.authorityProfile,
+          capturedAt: now(),
+        },
+      };
+      const facts = buildAutomationAuthorityFactsFromHost({
+        hostId: String(definition.hostId),
+        project: staleProjectRoutineIds.has(String(definition.id))
+          ? undefined
+          : ({
+              id: definition.projectId,
+              type: definition.mode,
+              lifecycle: "active",
+              version: definition.projectVersion,
+              binding: { canonicalRoot: directory },
+              bindingHistory: [
+                {
+                  revisionId: AUTOMATION_TEST_IDS.bindingRevision,
+                  currentBinding: { canonicalRoot: directory },
+                },
+              ],
+            } as never),
+        providerInstance: {
+          id: definition.executionProfile.providerInstanceId,
+          enabled: !disabledProviderRoutineIds.has(String(definition.id)),
+        } as never,
+        providerSupportsModel: true,
+        executionProfileMatches: true,
+        authorityDigestMatches: true,
+        codeBindingMatches: true,
+        workBindingMatches: true,
+      });
+      return { facts, result: revalidateAutomationAuthority({ definition, run, facts }) };
+    };
     const sources = new AutomationEventSources({
       projection,
       scheduler,
       sources: provider,
-      current: (definition) => !staleRoutineIds.has(String(definition.id)),
+      current: (definition) => evaluateAuthority(definition).result.kind === "ok",
+      blocksSharedAcknowledgements: (definition) =>
+        !isPermanentAutomationAuthorityFailure(evaluateAuthority(definition)),
       now,
       monotonic: () => elapsed,
       wake: () => {
@@ -487,7 +540,11 @@ describe("durable routine integration polling", () => {
         activeSecret = secret;
       },
       invalidateAuthority: (automationId: AutomationId) => {
-        staleRoutineIds.add(String(automationId));
+        staleProjectRoutineIds.add(String(automationId));
+      },
+      setProviderDisabled: (automationId: AutomationId, disabled: boolean) => {
+        if (disabled) disabledProviderRoutineIds.add(String(automationId));
+        else disabledProviderRoutineIds.delete(String(automationId));
       },
     };
   }
@@ -681,6 +738,39 @@ describe("durable routine integration polling", () => {
 
     // Healthy routine claims delivery-0 and frees its slot even though stale can no longer poll.
     await f.poll(healthy.id, 60_000);
+    expect(f.deliver(16)).toEqual({ status: "accepted" });
+    expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
+    f.sources.stop();
+  });
+
+  it("keeps the shared webhook acknowledgement barrier while one sibling's provider is temporarily disabled so re-enabling never overflows its pending list", async () => {
+    const f = await webhookFixture();
+    const paused = await f.createRoutine({ pollMinutes: 60 });
+    const healthy = await f.createRoutine({
+      id: "44444444-4444-4444-8444-444444444444" as AutomationId,
+      pollMinutes: 1,
+    });
+
+    // First routine baselines an empty endpoint, then its provider is temporarily turned off.
+    await f.poll(paused.id);
+    f.setProviderDisabled(paused.id, true);
+
+    // 16 deliveries fill the endpoint; the second routine baselines all 16, but frees zero slots
+    // because the first routine's disabled provider is recoverable and still holds the barrier.
+    for (let i = 0; i < 16; i += 1) expect(f.deliver(i)).toEqual({ status: "accepted" });
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+    await f.poll(healthy.id, 60_000);
+    expect(f.projection.getEventSource(healthy.id)?.baselineReady).toBe(true);
+    expect(f.deliver(16)).toEqual({ status: "refused", kind: "busy" });
+
+    // Re-enabling the first routine's provider leaves it with at most 16 fresh deliveries (never >32
+    // or needs-rearm). Claiming delivery-0 frees exactly that 1 slot because both routines have now
+    // finished with delivery-0.
+    f.setProviderDisabled(paused.id, false);
+    await f.poll(paused.id);
+    const checkpoint = f.projection.getEventSource(paused.id);
+    expect(checkpoint?.phase).toBe("watching");
+    expect(checkpoint?.pending).toHaveLength(15);
     expect(f.deliver(16)).toEqual({ status: "accepted" });
     expect(f.deliver(17)).toEqual({ status: "refused", kind: "busy" });
     f.sources.stop();
