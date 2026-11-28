@@ -207,6 +207,26 @@ export function parseMobileUnifiedDiff(text: string): ReadonlyArray<MobileDiffFi
         }
       }
     }
+    if (lines.length === 0 && file.binaryContent !== true) {
+      if (file.previousPath !== undefined) {
+        lines.push({
+          kind: "meta",
+          text: `${file.copied ? "Copied" : "Renamed"} from ${file.previousPath}`,
+        });
+      }
+      if (file.modeChange !== undefined) {
+        lines.push({
+          kind: "meta",
+          text: `Mode changed: ${file.modeChange.oldMode} → ${file.modeChange.newMode}`,
+        });
+      }
+      if (file.emptyFile) {
+        lines.push({
+          kind: "meta",
+          text: file.change === "deleted" ? "Empty file deleted" : "Empty file added",
+        });
+      }
+    }
     return {
       path: file.path,
       additions: file.additions,

@@ -91,7 +91,7 @@ export interface ParsedDiffFile {
   readonly modified: string;
   /** True when the diff carried no textual hunks (binary or metadata only). */
   readonly binary: boolean;
-  /** True only when the diff carried binary or non-empty blob content with no textual hunks. */
+  /** True only when Git explicitly reported a binary patch (`Binary files ...` or `GIT binary patch`). */
   readonly binaryContent?: true;
   /** The changed regions in order, as git printed them. */
   readonly hunks: ReadonlyArray<DiffHunk>;
@@ -126,6 +126,7 @@ interface FileAccumulator {
   modified: string[];
   sawHunk: boolean;
   sawBinaryContent: boolean;
+  sawExplicitBinary: boolean;
   hunks: HunkAccumulator[];
   source?: { start: number; end: number; headerEnd: number };
 }
@@ -164,6 +165,7 @@ function newAccumulator(): FileAccumulator {
     modified: [],
     sawHunk: false,
     sawBinaryContent: false,
+    sawExplicitBinary: false,
     hunks: [],
   };
 }
@@ -375,7 +377,7 @@ function finish(accumulator: FileAccumulator, index: number): ParsedDiffFile | u
     original: accumulator.original.join("\n"),
     modified: accumulator.modified.join("\n"),
     binary: !accumulator.sawHunk,
-    ...(!accumulator.sawHunk && accumulator.sawBinaryContent
+    ...(!accumulator.sawHunk && accumulator.sawExplicitBinary
       ? { binaryContent: true as const }
       : {}),
     hunks: accumulator.hunks.map(({ oldNext: _oldNext, newNext: _newNext, ...hunk }) => hunk),
@@ -480,6 +482,7 @@ export function parseUnifiedDiff(
     if (!accumulator.sawHunk) {
       if (line.startsWith("Binary files ") || line === "GIT binary patch") {
         accumulator.sawBinaryContent = true;
+        accumulator.sawExplicitBinary = true;
         continue;
       }
       const indexMatch = CONTENT_INDEX.exec(line);

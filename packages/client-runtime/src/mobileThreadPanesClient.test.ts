@@ -88,7 +88,7 @@ describe("phone thread panes", () => {
     ]);
   });
 
-  it("distinguishes mode-only and empty-file patches from real binary patches", () => {
+  it("distinguishes mode-only, empty-file, and truncated text patches from real binary patches", () => {
     const metadataAndBinary = [
       "diff --git a/scripts/run.sh b/scripts/run.sh",
       "old mode 100644",
@@ -98,12 +98,15 @@ describe("phone thread panes", () => {
       "index 0000000..e69de29",
       "diff --git a/assets/icon.png b/assets/icon.png",
       "Binary files a/assets/icon.png and b/assets/icon.png differ",
+      "diff --git a/src/truncated.ts b/src/truncated.ts",
+      "index 1111111..2222222 100644",
     ].join("\n");
     const files = parseMobileUnifiedDiff(metadataAndBinary);
-    expect(files.map((file) => [file.path, file.binary, file.lines.length])).toEqual([
-      ["scripts/run.sh", false, 0],
-      ["empty.txt", false, 0],
-      ["assets/icon.png", true, 0],
+    expect(files.map((file) => [file.path, file.binary, file.lines])).toEqual([
+      ["scripts/run.sh", false, [{ kind: "meta", text: "Mode changed: 100644 → 100755" }]],
+      ["empty.txt", false, [{ kind: "meta", text: "Empty file added" }]],
+      ["assets/icon.png", true, []],
+      ["src/truncated.ts", false, []],
     ]);
   });
 
