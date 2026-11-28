@@ -710,7 +710,10 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, "vendor", "README.md"), "untracked parent\n");
     const port = new GitMutationPort(undefined, confinedOptions());
 
-    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual([]);
+    expect(await port.uncopyableNestedChanges({ checkoutRoot: repository })).toEqual({
+      submodules: [],
+      nestedRepositories: [],
+    });
   });
 
   it("checks a folder named like a Git pathspec as itself, not as the path it spells", async () => {
