@@ -60,6 +60,66 @@ describe("phone thread panes", () => {
     ]);
   });
 
+  it("decodes tab-delimited space paths, quoted Git paths, and final-newline markers", () => {
+    const specialDiff = [
+      "diff --git a/docs/Getting Started.md b/docs/Getting Started.md",
+      "index 1111111..2222222 100644",
+      "--- a/docs/Getting Started.md\t",
+      "+++ b/docs/Getting Started.md\t",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "\\ No newline at end of file",
+      "+old",
+      'diff --git "a/notes/caf\\303\\251.txt" "b/notes/caf\\303\\251.txt"',
+      "index 1111111..2222222 100644",
+      '--- "a/notes/caf\\303\\251.txt"',
+      '+++ "b/notes/caf\\303\\251.txt"',
+      "@@ -1,1 +1,2 @@",
+      " hello",
+      "+world",
+    ].join("\n");
+    const files = parseMobileUnifiedDiff(specialDiff);
+    expect(files.map((file) => file.path)).toEqual(["docs/Getting Started.md", "notes/café.txt"]);
+    expect(files[0]?.lines).toEqual([
+      { kind: "hunk", text: "@@ -1,1 +1,1 @@" },
+      { kind: "removed", text: "-old" },
+      { kind: "meta", text: "\\ No newline at end of file" },
+      { kind: "added", text: "+old" },
+    ]);
+  });
+
+  it("distinguishes mode-only, empty-file, and truncated text patches from real binary patches", () => {
+    const metadataAndBinary = [
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      "diff --git a/empty.txt b/empty.txt",
+      "new file mode 100644",
+      "index 0000000..e69de29",
+      "diff --git a/removed-empty.txt b/removed-empty.txt",
+      "deleted file mode 100644",
+      "index e69de29..0000000",
+      "diff --git a/assets/icon.png b/assets/icon.png",
+      "Binary files a/assets/icon.png and b/assets/icon.png differ",
+      "diff --git a/src/truncated.ts b/src/truncated.ts",
+      "index 1111111..2222222 100644",
+      "diff --git a/src/truncated-new.ts b/src/truncated-new.ts",
+      "new file mode 100644",
+      "diff --git a/src/truncated-deleted.ts b/src/truncated-deleted.ts",
+      "deleted file mode 100644",
+    ].join("\n");
+    const files = parseMobileUnifiedDiff(metadataAndBinary);
+    expect(files.map((file) => [file.path, file.binary, file.lines])).toEqual([
+      ["scripts/run.sh", false, [{ kind: "meta", text: "Mode changed: 100644 → 100755" }]],
+      ["empty.txt", false, [{ kind: "meta", text: "Empty file added" }]],
+      ["removed-empty.txt", false, [{ kind: "meta", text: "Empty file deleted" }]],
+      ["assets/icon.png", true, []],
+      ["src/truncated.ts", false, []],
+      ["src/truncated-new.ts", false, []],
+      ["src/truncated-deleted.ts", false, []],
+    ]);
+  });
+
   it("reads uncommitted changes by observing Git and resolving the diff it handed back", async () => {
     const paths: string[] = [];
     const transport = transportAnswering(({ path, body }) => {

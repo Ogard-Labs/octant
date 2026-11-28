@@ -430,7 +430,10 @@ function ReviewPane(props: {
             accessory="none"
           />
         </ListSection>
-        <UnifiedDiff file={opened} />
+        <UnifiedDiff
+          file={opened}
+          truncated={changes.status === "ready" && changes.value.truncated}
+        />
       </View>
     );
   }
@@ -458,7 +461,15 @@ function ReviewPane(props: {
             files.map((file, index) => (
               <ListRow
                 detail={
-                  file.binary ? "Binary file" : file.withoutDiff === true ? "New file" : undefined
+                  file.binary
+                    ? "Binary file"
+                    : file.withoutDiff === true
+                      ? "New file"
+                      : file.lines.length === 0
+                        ? changes.value.truncated
+                          ? "Cut at phone's limit"
+                          : "No patch lines"
+                        : undefined
                 }
                 key={file.path}
                 label={file.path}
@@ -506,7 +517,7 @@ function ReviewPane(props: {
  * A virtualized list so a large change stays smooth; long lines wrap rather
  * than scroll sideways, and each row carries its old and new line numbers.
  */
-function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
+function UnifiedDiff(props: { readonly file: MobileDiffFile; readonly truncated?: boolean }) {
   const { colors } = useTheme();
   // Line heights and the gutter follow the system text size, as the digits do,
   // so a number never wraps and a line never clips at the largest size.
@@ -588,6 +599,20 @@ function UnifiedDiff(props: { readonly file: MobileDiffFile }) {
             {props.file.path} {diffstatText(props.file.additions, props.file.deletions)}
           </Text>
         }
+        ListEmptyComponent={
+          <Text style={diffStyles.path} testID="mobile-pane-review-diff-empty">
+            {props.truncated === true
+              ? "The diff was cut at the phone's limit; this file's patch is not available."
+              : "No patch lines available for this file."}
+          </Text>
+        }
+        ListFooterComponent={
+          props.truncated === true && lines.length > 0 ? (
+            <Text style={diffStyles.path} testID="mobile-pane-review-diff-truncated">
+              The diff was cut at the phone's limit; later lines or files may be missing.
+            </Text>
+          ) : undefined
+        }
         renderItem={({ item, index }) => {
           const at = sides.rowLines[index];
           const runs =
@@ -619,6 +644,7 @@ const DIFF_KIND_WORDS = {
   removed: "Removed line",
   context: "Line",
   hunk: "Section",
+  meta: "Note",
 } as const;
 
 /**
@@ -628,7 +654,7 @@ const DIFF_KIND_WORDS = {
 function diffRowLabel(line: NumberedDiffLine): string {
   const number = line.newNumber ?? line.oldNumber;
   const head = DIFF_KIND_WORDS[line.kind];
-  const text = line.kind === "hunk" ? line.text : line.text.slice(1);
+  const text = line.kind === "hunk" || line.kind === "meta" ? line.text : line.text.slice(1);
   return number === undefined ? `${head}: ${text}` : `${head} ${number}: ${text}`;
 }
 
@@ -652,7 +678,7 @@ function DiffRow(props: {
       ? diff.addedText
       : line.kind === "removed"
         ? diff.removedText
-        : line.kind === "hunk"
+        : line.kind === "hunk" || line.kind === "meta"
           ? diff.hunkText
           : null;
   return (
@@ -669,7 +695,7 @@ function DiffRow(props: {
           {line.newNumber ?? ""}
         </Text>
       </View>
-      {runs === undefined || line.kind === "hunk" ? (
+      {runs === undefined || line.kind === "hunk" || line.kind === "meta" ? (
         <Text style={[diff.line, ink]}>{line.text}</Text>
       ) : (
         // The mark keeps the diff ink; the code takes its syntax colours, and

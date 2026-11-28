@@ -80,6 +80,7 @@ export function numberedDiffLines(
       newNext = header?.[2] === undefined ? undefined : Number(header[2]);
       return line;
     }
+    if (line.kind === "meta") return line;
     if (oldNext === undefined || newNext === undefined) return line;
     if (line.kind === "removed") return { ...line, oldNumber: oldNext++ };
     if (line.kind === "added") return { ...line, newNumber: newNext++ };
