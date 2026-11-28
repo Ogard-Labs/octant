@@ -148,8 +148,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
       ? ""
       : `${selectedHost?.hostKeyFingerprint ?? ""}:${selected.hostId}:${selected.mode}:${selected.threadId}`;
   const [prompt, setPrompt] = useState(() => drafts.read(draftKey));
-  const { handoffVersion, takeThreadHandoff, completeStagedShare } = useMobileShare();
+  const { handoffVersion, takeThreadHandoff, completeStagedShare, releaseStagedShare } =
+    useMobileShare();
   const activeShareIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    return () => {
+      const unsentShareId = activeShareIdRef.current;
+      if (unsentShareId !== undefined) {
+        activeShareIdRef.current = undefined;
+        releaseStagedShare(unsentShareId);
+      }
+    };
+  }, [draftKey, releaseStagedShare]);
   // A send can land after this screen is gone, on the draft or on a later screen
   // of the same thread, so the words are cleared by what was sent.
   const sentPrompt = (next: string) => {

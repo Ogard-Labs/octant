@@ -99,12 +99,21 @@ export async function sendSharedNewChat(input: {
         ? { attachmentIds: uploaded.uploaded.map((item) => item.id) }
         : {}),
     });
-    await input.onCleanupStaged();
-    const view = await loadMobileChatThread(input.transport, threadId);
-    const updated = view.thread;
-    return {
-      status: "sent",
-      row: {
+    await input.onCleanupStaged().catch(() => undefined);
+    let row: MobileInboxRow = {
+      hostId: input.transport.hostId,
+      mode: "chat",
+      threadId,
+      title: thread.title,
+      status: "active",
+      freshness: thread.updatedAt,
+      version: thread.version,
+      providerInstanceId: String(thread.providerInstanceId),
+    };
+    try {
+      const view = await loadMobileChatThread(input.transport, threadId);
+      const updated = view.thread;
+      row = {
         hostId: input.transport.hostId,
         mode: "chat",
         threadId: String(updated.id),
@@ -113,8 +122,12 @@ export async function sendSharedNewChat(input: {
         freshness: updated.updatedAt,
         version: updated.version,
         providerInstanceId: String(updated.providerInstanceId),
-      },
-    };
+      };
+    } catch {
+      // The host already accepted the turn; preserve send success with the
+      // created thread identity so a reload failure cannot trigger a duplicate send.
+    }
+    return { status: "sent", row };
   } catch (cause) {
     return {
       status: "refused",

@@ -44,6 +44,8 @@ export interface ShareContextValue {
   }) => PendingThreadShareHandoff | undefined;
   /** Deletes the staged share on disk once the person taps Send and it succeeds. */
   readonly completeStagedShare: (shareId: string) => void;
+  /** Releases an unsent composer reservation when the thread composer closes so staged items reappear. */
+  readonly releaseStagedShare: (shareId: string) => void;
   /** Notice about a malformed or tampered staged share that was swept and removed. */
   readonly stagingNotice: string | undefined;
   readonly dismissStagingNotice: () => void;
@@ -53,6 +55,7 @@ const NOOP_CONTEXT: ShareContextValue = {
   handoffVersion: 0,
   takeThreadHandoff: () => undefined,
   completeStagedShare: () => undefined,
+  releaseStagedShare: () => undefined,
   stagingNotice: undefined,
   dismissStagingNotice: () => undefined,
 };
@@ -179,6 +182,18 @@ export function ShareProvider(props: {
     [fs],
   );
 
+  const releaseStagedShare = useCallback(
+    (shareId: string) => {
+      if (!inComposerRef.current.delete(shareId)) return;
+      if (pendingHandoffRef.current?.shareId === shareId) {
+        pendingHandoffRef.current = undefined;
+        setPendingHandoff(undefined);
+      }
+      void inspectStaging();
+    },
+    [inspectStaging],
+  );
+
   const handleNewChatSent = useCallback(
     (shareId: string, row: MobileInboxRow) => {
       completeStagedShare(shareId);
@@ -250,10 +265,11 @@ export function ShareProvider(props: {
       handoffVersion,
       takeThreadHandoff,
       completeStagedShare,
+      releaseStagedShare,
       stagingNotice,
       dismissStagingNotice: () => setStagingNotice(undefined),
     }),
-    [completeStagedShare, handoffVersion, stagingNotice, takeThreadHandoff],
+    [completeStagedShare, handoffVersion, releaseStagedShare, stagingNotice, takeThreadHandoff],
   );
 
   return (

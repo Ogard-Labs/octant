@@ -479,6 +479,62 @@ describe("Send to… execution, composer handoff, and stale computer refusal", (
     expect(olderHostRefused.status).toBe("refused");
   });
 
+  it("preserves New chat send success when reloading the created thread fails after the turn was accepted", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000111";
+    const cleanupSpy = vi.fn(async () => undefined);
+    const transport = makeTransport(HOST_READY.hostId, (request) => {
+      if (request.method === "POST" && request.path === "/api/chat/commands") {
+        const payload = JSON.parse(String(request.body ?? "{}")) as { readonly kind?: string };
+        if (payload.kind === "create-chat-thread") {
+          return new Response(
+            JSON.stringify({
+              kind: "thread-created",
+              thread: {
+                id: threadId,
+                title: "Shared note",
+                createdAt: "2026-11-28T12:00:00.000Z",
+                updatedAt: "2026-11-28T12:00:01.000Z",
+                version: 1,
+                lifecycle: "active",
+                providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                modelId: "m1",
+                researchEnabled: false,
+                researchRouting: "automatic",
+                personalityInstructions: "Be clear.",
+              },
+            }),
+          );
+        }
+        return new Response(JSON.stringify({ kind: "turn-accepted" }));
+      }
+      // Subsequent thread reload fails with 503.
+      return new Response("temporarily unavailable", { status: 503 });
+    });
+
+    const result = await sendSharedNewChat({
+      hostId: HOST_READY.hostId,
+      hostLabel: HOST_READY.label,
+      health: {
+        hostId: HOST_READY.hostId,
+        label: HOST_READY.label,
+        origin: "https://a",
+        kind: "ready",
+      },
+      transport,
+      standing: { actsAsHostPerson: true },
+      prompt: "Shared note",
+      attachments: [],
+      onCleanupStaged: cleanupSpy,
+    });
+
+    expect(result.status).toBe("sent");
+    if (result.status === "sent") {
+      expect(result.row.threadId).toBe(threadId);
+      expect(result.row.title).toBe("Shared note");
+    }
+    expect(cleanupSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the host remote route policy free of any new share route", () => {
     const policy = readFileSync(
       join(repoRoot, "apps", "server", "src", "remoteRoutePolicy.ts"),
