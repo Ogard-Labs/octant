@@ -348,6 +348,9 @@ export function findWrongAdapterBoundaryViolations(
 const RAW_INTERACTIVE_COLLECTION_ROLE =
   /\brole\s*=\s*(?:["'](radiogroup|listbox|combobox|option)["']|\{\s*[^}\n]*["'](radiogroup|listbox|combobox|option)["'][^}\n]*\})/g;
 
+const RAW_INTERACTIVE_COLLECTION_PROP_ROLE =
+  /\brole\s*:\s*["'](radiogroup|listbox|combobox|option)["']/g;
+
 /**
  * Radio groups, listboxes, comboboxes, and options must come from shared
  * adapters under apps/web/src/ui/base so every surface shares one keyboard and
@@ -389,6 +392,21 @@ export function findRawInteractiveCollectionViolations(
           : "OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox";
       violations.push(
         `${normalized}:${String(line)} renders raw role="${role}" on <${tag}>; use ${replacement}.`,
+      );
+    }
+    RAW_INTERACTIVE_COLLECTION_PROP_ROLE.lastIndex = 0;
+    for (const match of searchable.matchAll(RAW_INTERACTIVE_COLLECTION_PROP_ROLE)) {
+      const index = match.index ?? 0;
+      if (isInsideJsString(searchable, index)) continue;
+      const role = match[1];
+      if (role === undefined) continue;
+      const line = source.slice(0, index).split("\n").length;
+      const replacement =
+        role === "radiogroup"
+          ? "OctantRadioGroup"
+          : "OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox";
+      violations.push(
+        `${normalized}:${String(line)} passes raw role: "${role}"; use ${replacement}.`,
       );
     }
   }

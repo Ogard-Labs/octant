@@ -196,6 +196,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
+  const [galleryResetKey, setGalleryResetKey] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const library = props.library;
   const background = props.background;
@@ -380,6 +381,11 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     try {
       await library.remove(String(photo.id));
       setPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
+      // Base UI's RadioGroup composite tracks its roving tab stop by numeric
+      // index and does not revalidate when an earlier item unmounts; remounting
+      // the group on removal re-derives the tab stop from the surviving checked
+      // (or first) photo.
+      setGalleryResetKey((current) => current + 1);
       setStatus(PHOTO_REMOVED);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "The photo could not be removed.");
@@ -583,6 +589,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               <OctantRadioGroup
                 aria-label="Photos on this host"
                 className="settings-app-background__gallery-row"
+                key={galleryResetKey}
                 onValueChange={(next) => {
                   const photo = photos.find((candidate) => String(candidate.id) === next);
                   if (photo !== undefined) pick(photo);

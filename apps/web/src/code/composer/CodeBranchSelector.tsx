@@ -46,6 +46,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
   const listId = useId();
   const [open, setOpen] = useState(props.startOpen === true);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
   const { onOpen } = props;
 
@@ -55,6 +56,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    setActiveIndex(-1);
     onOpen?.();
   }, [open, onOpen]);
 
@@ -66,15 +68,16 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
   }, [props.refs, query]);
 
   const listbox = useOctantListbox({
+    activeIndex,
     allowHomeEnd: false,
     count: filtered.length,
-    initialActiveIndex: -1,
     onActivate: (index) => {
       const ref = filtered[index];
       if (ref === undefined) return;
       props.onSelectRef(ref);
       setOpen(false);
     },
+    onActiveIndexChange: setActiveIndex,
   });
   const activeOptionId =
     listbox.activeIndex >= 0 ? `${listId}-option-${String(listbox.activeIndex)}` : undefined;

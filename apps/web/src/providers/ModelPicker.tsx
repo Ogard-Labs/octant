@@ -6,7 +6,7 @@ import type {
   PickerModel,
   PickerSection,
 } from "@octant/domain";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { filterModelPickerGroups } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -34,6 +34,7 @@ interface FlatOption {
 }
 
 export function ModelPicker(props: ModelPickerProps) {
+  const listId = useId();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -42,6 +43,16 @@ export function ModelPicker(props: ModelPickerProps) {
     [props.groups, query],
   );
   const flatOptions = useMemo(() => flattenOptions(filtered), [filtered]);
+  const optionIdByKey = useMemo(() => {
+    const ids = new Map<string, string>();
+    flatOptions.forEach((option, index) => {
+      ids.set(
+        modelOptionKey(option.providerInstanceId, option.modelId),
+        `${listId}-option-${String(index)}`,
+      );
+    });
+    return ids;
+  }, [flatOptions, listId]);
   const listbox = useOctantListbox({
     activeIndex,
     allowSpaceActivate: true,
@@ -57,6 +68,11 @@ export function ModelPicker(props: ModelPickerProps) {
     onActiveIndexChange: setActiveIndex,
   });
   const effectiveActive = listbox.activeIndex;
+  const activeOption = effectiveActive >= 0 ? flatOptions[effectiveActive] : undefined;
+  const activeOptionId =
+    activeOption === undefined
+      ? undefined
+      : optionIdByKey.get(modelOptionKey(activeOption.providerInstanceId, activeOption.modelId));
 
   const empty = filtered.length === 0;
   return (
@@ -82,6 +98,7 @@ export function ModelPicker(props: ModelPickerProps) {
         </p>
       ) : (
         <OctantListbox
+          activeDescendantId={activeOptionId}
           aria-label={props.ariaLabel ?? "Model picker"}
           className={`model-picker__listbox${props.narrow === true ? " model-picker--narrow" : ""}`}
           onKeyDown={(event) => {
@@ -111,6 +128,7 @@ export function ModelPicker(props: ModelPickerProps) {
                     group={group}
                     key={String(group.instance.id)}
                     nested
+                    optionIdByKey={optionIdByKey}
                     selectedProviderInstanceId={props.selectedProviderInstanceId}
                     selectedModelId={props.selectedModelId}
                     activeProviderInstanceId={
@@ -133,6 +151,7 @@ export function ModelPicker(props: ModelPickerProps) {
               <ProviderGroupView
                 group={block.group}
                 key={String(block.group.instance.id)}
+                optionIdByKey={optionIdByKey}
                 selectedProviderInstanceId={props.selectedProviderInstanceId}
                 selectedModelId={props.selectedModelId}
                 activeProviderInstanceId={
@@ -185,6 +204,7 @@ function umbrellaBlocks(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<Umbre
 function ProviderGroupView(props: {
   readonly group: PickerGroup;
   readonly nested?: boolean;
+  readonly optionIdByKey: ReadonlyMap<string, string>;
   readonly selectedProviderInstanceId?: ProviderInstanceId | undefined;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly activeProviderInstanceId?: ProviderInstanceId | undefined;
@@ -243,6 +263,7 @@ function ProviderGroupView(props: {
       {group.sections.map((section) => (
         <SectionView
           key={section.id}
+          optionIdByKey={props.optionIdByKey}
           section={section}
           providerInstanceId={group.instance.id}
           selectedModelId={
@@ -264,6 +285,7 @@ function ProviderGroupView(props: {
 function SectionView(props: {
   readonly section: PickerSection;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly optionIdByKey: ReadonlyMap<string, string>;
   readonly selectedModelId?: ProviderModelId | undefined;
   readonly activeModelId?: ProviderModelId | undefined;
   readonly disabled: boolean;
@@ -277,6 +299,9 @@ function SectionView(props: {
       <ul className="model-picker__options">
         {props.section.models.map((picker) => {
           const modelId = picker.model.id;
+          const optionId = props.optionIdByKey.get(
+            modelOptionKey(props.providerInstanceId, modelId),
+          );
           const capabilities = picker.badges.filter((badge) => !shared.has(badge.kind));
           const unavailable = picker.unavailableReason !== undefined;
           const selected =
@@ -290,6 +315,7 @@ function SectionView(props: {
                 aria-disabled={unavailable}
                 className={`model-picker__option${active ? " model-picker__option--active" : ""}`}
                 disabled={props.disabled || unavailable}
+                id={optionId}
                 onClick={() =>
                   props.onSelect({ providerInstanceId: props.providerInstanceId, modelId })
                 }
@@ -358,6 +384,10 @@ function sharedBadgeKinds(models: ReadonlyArray<PickerModel>): ReadonlySet<Model
     }
   }
   return shared;
+}
+
+function modelOptionKey(providerInstanceId: ProviderInstanceId, modelId: ProviderModelId): string {
+  return `${String(providerInstanceId)}\0${String(modelId)}`;
 }
 
 function flattenOptions(groups: ReadonlyArray<PickerGroup>): ReadonlyArray<FlatOption> {

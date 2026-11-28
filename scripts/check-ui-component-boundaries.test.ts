@@ -277,6 +277,11 @@ describe("UI component boundary check", () => {
           '  return <div role="radiogroup"><input role="combobox" /><ul role="listbox"><li role="option" /></ul></div>;',
           "}",
         ].join("\n"),
+        "apps/web/src/composer/SlashMenu.ts": [
+          "export function menu() {",
+          '  return createElement("ul", { role: "listbox" }, createElement("button", { role: "option" }));',
+          "}",
+        ].join("\n"),
         "apps/web/src/ui/base/OctantListbox.tsx":
           '<div role="listbox"><button role="option" /></div>',
         "apps/web/src/composer/ThreadInfo.tsx":
@@ -289,6 +294,8 @@ describe("UI component boundary check", () => {
         ].join("\n"),
       }),
     ).toEqual([
+      'apps/web/src/composer/SlashMenu.ts:2 passes raw role: "listbox"; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
+      'apps/web/src/composer/SlashMenu.ts:2 passes raw role: "option"; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
       'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="radiogroup" on <div>; use OctantRadioGroup.',
       'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="combobox" on <input>; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',
       'apps/web/src/palette/CustomPicker.tsx:2 renders raw role="listbox" on <ul>; use OctantListbox, OctantListboxOption, OctantListboxInput, or OctantCombobox.',

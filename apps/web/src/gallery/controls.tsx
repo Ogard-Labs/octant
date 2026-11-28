@@ -14,7 +14,12 @@ import {
   OctantComboboxTrigger,
 } from "../ui/base/OctantCombobox";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantListbox, OctantListboxInput, OctantListboxOption } from "../ui/base/OctantListbox";
+import {
+  OctantListbox,
+  OctantListboxInput,
+  OctantListboxOption,
+  useOctantListbox,
+} from "../ui/base/OctantListbox";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantRadioGroup, OctantRadioGroupItem } from "../ui/base/OctantRadioGroup";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
@@ -659,21 +664,68 @@ function Labels() {
         adapters={["OctantListbox", "OctantListboxInput", "OctantListboxOption"]}
         props="searchable combobox input paired with a shared listbox"
       >
-        <div className="gallery-field-width">
-          <OctantListboxInput
-            aria-label="Filter choices"
-            controlsId="gallery-listbox-sample"
-            defaultValue=""
-            expanded
-            placeholder="Filter choices"
-          />
-          <OctantListbox aria-label="Choices" id="gallery-listbox-sample" navigation="roving">
-            <OctantListboxOption selected>First choice</OctantListboxOption>
-            <OctantListboxOption>Second choice</OctantListboxOption>
-          </OctantListbox>
-        </div>
+        <GalleryListboxSpecimen />
       </Specimen>
     </>
+  );
+}
+
+const GALLERY_LISTBOX_CHOICES = [
+  { id: "first", label: "First choice" },
+  { id: "second", label: "Second choice" },
+  { id: "third", label: "Third choice" },
+] as const;
+
+function GalleryListboxSpecimen() {
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string>("first");
+  const visible = GALLERY_LISTBOX_CHOICES.filter((choice) =>
+    choice.label.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+  const controller = useOctantListbox({
+    allowHomeEnd: false,
+    count: visible.length,
+    onActivate: (index) => {
+      const choice = visible[index];
+      if (choice !== undefined) setSelectedId(choice.id);
+    },
+    onDismiss: () => setQuery(""),
+  });
+  const activeChoice = controller.activeIndex >= 0 ? visible[controller.activeIndex] : undefined;
+  const activeOptionId =
+    activeChoice === undefined ? undefined : `gallery-listbox-sample-${activeChoice.id}`;
+
+  return (
+    <div className="gallery-field-width">
+      <OctantListboxInput
+        activeDescendantId={activeOptionId}
+        aria-label="Filter choices"
+        controlsId="gallery-listbox-sample"
+        expanded={visible.length > 0}
+        onChange={(event) => {
+          setQuery(event.currentTarget.value);
+          controller.setActiveIndex(0);
+        }}
+        onKeyDown={(event) => {
+          controller.handleKeyDown(event);
+        }}
+        placeholder="Filter choices"
+        value={query}
+      />
+      <OctantListbox aria-label="Choices" id="gallery-listbox-sample">
+        {visible.map((choice, index) => (
+          <OctantListboxOption
+            active={index === controller.activeIndex}
+            id={`gallery-listbox-sample-${choice.id}`}
+            key={choice.id}
+            onClick={() => setSelectedId(choice.id)}
+            selected={selectedId === choice.id}
+          >
+            {choice.label}
+          </OctantListboxOption>
+        ))}
+      </OctantListbox>
+    </div>
   );
 }
 

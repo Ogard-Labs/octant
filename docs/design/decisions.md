@@ -2824,6 +2824,7 @@ There is one runtime theme authority and one owned control layer. Feature code p
 - There is one interaction primitive backend, and the `--octant-*` roles stay the theme source.
 - Menus share one row recipe and a 360px maximum (maintainer request, 2026-11-16); desktop context and dropdown menus are native.
 - The spinner, keyboard hint and status dot are one adapter each, and list pages with several facts per row draw one shared table, each held by a contract test (maintainer requests, 2026-11-25).
+- Radio groups, listboxes, and comboboxes share one keyboard and roving-tabindex model through `OctantRadioGroup`, `OctantListbox`, and `OctantCombobox`, held by `ui:check`.
 - A visual check in CI fails a pull request that changes a key screen; the `design change` label passes it, and a person commits the new pictures; CI never pushes (maintainer request, 2026-11-18).
 
 Status: Built. Detail: [DESIGN.md: Source of truth and CSS layers](../../DESIGN.md#source-of-truth-and-css-layers), [Enforcement](../../DESIGN.md#enforcement), [Spacing](../../DESIGN.md#spacing), [Menus](../../DESIGN.md#menus), [Components](../../DESIGN.md#components), [Lists and rows](../../DESIGN.md#lists-and-rows) and [Component gallery](../../DESIGN.md#component-gallery).

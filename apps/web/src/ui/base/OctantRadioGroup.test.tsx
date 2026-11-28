@@ -119,4 +119,84 @@ describe("OctantRadioGroup", () => {
     expect(input).toHaveFocus();
     expect(custom).toHaveAttribute("aria-checked", "true");
   });
+
+  it("does not select all text when refocusing a nested custom-answer field", async () => {
+    const user = userEvent.setup();
+    function TextareaGroup() {
+      const [value, setValue] = useState("custom");
+      const [text, setText] = useState("Use the existing project");
+      return (
+        <div>
+          <OctantRadioGroup aria-label="Decision" onValueChange={setValue} value={value}>
+            <OctantRadioGroupItem value="a">Option A</OctantRadioGroupItem>
+            <OctantRadioGroupItem value="custom">Write another answer</OctantRadioGroupItem>
+            <textarea
+              aria-label="Your answer"
+              onChange={(event) => setText(event.target.value)}
+              value={text}
+            />
+          </OctantRadioGroup>
+          <button type="button">Note</button>
+        </div>
+      );
+    }
+
+    render(<TextareaGroup />);
+
+    const textarea = screen.getByRole("textbox", { name: "Your answer" }) as HTMLTextAreaElement;
+    const note = screen.getByRole("button", { name: "Note" });
+
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    note.focus();
+    expect(note).toHaveFocus();
+
+    // Refocusing the textarea fires RadioGroup's onFocus; Base UI's
+    // CompositeRoot would otherwise select the entire value on focus.
+    textarea.focus();
+    expect(textarea).toHaveFocus();
+    expect(textarea.selectionStart).toBe(textarea.value.length);
+    expect(textarea.selectionEnd).toBe(textarea.value.length);
+    await user.keyboard(".");
+    expect(textarea).toHaveValue("Use the existing project.");
+  });
+
+  it("selects a focused unchecked radio option on Enter without overriding caller key handling", async () => {
+    const user = userEvent.setup();
+    let blockedEnter = false;
+    function UncheckedGroup() {
+      const [value, setValue] = useState("");
+      return (
+        <OctantRadioGroup aria-label="Choices" onValueChange={setValue} value={value}>
+          <OctantRadioGroupItem value="first">First</OctantRadioGroupItem>
+          <OctantRadioGroupItem
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                blockedEnter = true;
+              }
+            }}
+            value="second"
+          >
+            Second
+          </OctantRadioGroupItem>
+        </OctantRadioGroup>
+      );
+    }
+
+    render(<UncheckedGroup />);
+    const first = screen.getByRole("radio", { name: "First" });
+    const second = screen.getByRole("radio", { name: "Second" });
+
+    await user.tab();
+    expect(first).toHaveFocus();
+    expect(first).toHaveAttribute("aria-checked", "false");
+    await user.keyboard("{Enter}");
+    expect(first).toHaveAttribute("aria-checked", "true");
+
+    second.focus();
+    await user.keyboard("{Enter}");
+    expect(blockedEnter).toBe(true);
+    expect(second).toHaveAttribute("aria-checked", "false");
+  });
 });

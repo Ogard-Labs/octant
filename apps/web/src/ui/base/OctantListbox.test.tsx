@@ -164,4 +164,71 @@ describe("OctantListbox", () => {
     await user.keyboard("{Escape}");
     expect(onDismiss).toHaveBeenCalledOnce();
   });
+
+  it("leaves Shift+Enter untouched so multiline composers can insert newlines while a list is open", async () => {
+    const user = userEvent.setup();
+    const onChoose = vi.fn();
+    render(<ComboboxFixture onChoose={onChoose} onDismiss={vi.fn()} />);
+
+    const input = screen.getByRole("combobox", { name: "Filter items" });
+    await user.click(input);
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    expect(onChoose).not.toHaveBeenCalled();
+
+    await user.keyboard("{Enter}");
+    expect(onChoose).toHaveBeenCalledWith("alpha");
+  });
+
+  it("scrolls the active option into view when virtual focus lives on OctantListboxInput", async () => {
+    const user = userEvent.setup();
+    function InputOwnedFixture() {
+      const listId = useId();
+      const controller = useOctantListbox({
+        count: ITEMS.length,
+        initialActiveIndex: -1,
+        isIndexDisabled: (index) => {
+          const item = ITEMS[index];
+          return item !== undefined && "disabled" in item && item.disabled === true;
+        },
+      });
+      const active = controller.activeIndex >= 0 ? ITEMS[controller.activeIndex] : undefined;
+      return (
+        <div>
+          <OctantListboxInput
+            activeDescendantId={active === undefined ? undefined : `${listId}-${active.id}`}
+            aria-label="Filter projects"
+            controlsId={listId}
+            expanded
+            onKeyDown={(event) => {
+              controller.handleKeyDown(event);
+            }}
+            value=""
+            onChange={() => undefined}
+          />
+          <OctantListbox aria-label="Projects" id={listId}>
+            {ITEMS.map((item, index) => (
+              <OctantListboxOption
+                active={index === controller.activeIndex}
+                disabled={"disabled" in item && item.disabled}
+                id={`${listId}-${item.id}`}
+                key={item.id}
+              >
+                {item.label}
+              </OctantListboxOption>
+            ))}
+          </OctantListbox>
+        </div>
+      );
+    }
+
+    render(<InputOwnedFixture />);
+    const gamma = screen.getByRole("option", { name: "Gamma" });
+    const scrollIntoView = vi.fn();
+    gamma.scrollIntoView = scrollIntoView;
+
+    const input = screen.getByRole("combobox", { name: "Filter projects" });
+    await user.click(input);
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
 });

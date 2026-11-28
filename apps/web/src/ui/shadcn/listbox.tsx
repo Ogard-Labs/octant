@@ -219,7 +219,7 @@ export function useListboxController(options: ListboxControllerOptions): Listbox
           : (options.allowSpaceActivate ?? false);
 
       if (
-        event.key === "Enter" ||
+        (event.key === "Enter" && !event.shiftKey) ||
         (options.allowTabActivate === true && event.key === "Tab" && !event.shiftKey) ||
         (spaceAllowed && event.key === " ")
       ) {
@@ -581,6 +581,12 @@ export function ListboxComboboxInput({
   className,
   ...props
 }: ListboxComboboxInputProps) {
+  // Keep the highlighted option visible when virtual focus lives on the input.
+  useEffect(() => {
+    if (activeDescendantId === undefined) return;
+    document.getElementById(activeDescendantId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeDescendantId]);
+
   return (
     <Input
       aria-controls={controlsId}

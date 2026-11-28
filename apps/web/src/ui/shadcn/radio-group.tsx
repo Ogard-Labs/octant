@@ -46,6 +46,7 @@ export type ShadcnRadioGroupProps<Value extends string = string> = RadioGroupPro
 export function RadioGroup<Value extends string = string>({
   appearance = "bare",
   className,
+  onFocus,
   onKeyDown,
   onKeyDownCapture,
   ...props
@@ -58,17 +59,33 @@ export function RadioGroup<Value extends string = string>({
         className,
       )}
       data-slot="radio-group"
+      onFocus={(event) => {
+        onFocus?.(event);
+        // Base UI's CompositeRoot selects all text inside any descendant native
+        // input on focus; prevent that so refocusing a custom-answer field never
+        // overwrites the person's text on the next keystroke.
+        if (isEditableTarget(event.target)) {
+          event.preventBaseUIHandler();
+        }
+      }}
       onKeyDownCapture={(event) => {
         onKeyDownCapture?.(event);
         if (
           isEditableTarget(event.target) &&
           (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End")
         ) {
-          event.stopPropagation();
+          event.preventBaseUIHandler();
         }
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event);
+        if (
+          isEditableTarget(event.target) &&
+          (event.key.startsWith("Arrow") || event.key === "Home" || event.key === "End")
+        ) {
+          event.preventBaseUIHandler();
+          return;
+        }
         handleRadioGroupHomeEnd(event);
       }}
       {...props}
@@ -88,6 +105,8 @@ export type RadioGroupItemProps<Value extends string = string> = Omit<
 export function RadioGroupItem<Value extends string = string>({
   appearance = "bare",
   className,
+  disabled,
+  onKeyDown,
   size,
   variant,
   ...props
@@ -105,7 +124,27 @@ export function RadioGroupItem<Value extends string = string>({
     <RadioPrimitive.Root<Value>
       className={cn(buttonStyle, className)}
       data-slot="radio-group-item"
+      disabled={disabled}
       nativeButton
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        // Base UI's RadioRoot suppresses Enter even on native buttons; restore
+        // Enter selection for focused radio choices unless the caller already
+        // handled the key (for example closing an ink-picker popover).
+        if (
+          !event.defaultPrevented &&
+          disabled !== true &&
+          event.key === "Enter" &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey &&
+          !event.nativeEvent.isComposing
+        ) {
+          event.preventDefault();
+          event.currentTarget.click();
+        }
+      }}
       render={<button type="button" />}
       {...props}
     />
