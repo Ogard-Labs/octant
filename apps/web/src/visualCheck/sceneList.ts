@@ -126,9 +126,32 @@ export interface VisualShot {
   readonly tolerance: number;
 }
 
-/** Every picture the check takes, each with the tolerance it is compared at. */
-export function visualShots(): ReadonlyArray<VisualShot> {
-  return SCENE_LIST.flatMap((scene) =>
+/** One of the equal parts the check's pictures are split into, counted from 1. */
+export interface VisualShard {
+  readonly index: number;
+  readonly count: number;
+}
+
+/**
+ * Which part of the pictures this run draws, from `OCTANT_VISUAL_SHARD`
+ * ("1/2"). Anything else draws them all: a typo must never leave pictures
+ * unchecked by quietly drawing none.
+ */
+export function visualShard(value: string | undefined): VisualShard | undefined {
+  const match = /^(\d+)\/(\d+)$/.exec(value ?? "");
+  if (match === null) return undefined;
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  return count >= 1 && index >= 1 && index <= count ? { index, count } : undefined;
+}
+
+/**
+ * Every picture the check takes, each with the tolerance it is compared at;
+ * with a shard, every count-th picture starting at its index, so the shards
+ * together take each picture exactly once.
+ */
+export function visualShots(shard?: VisualShard): ReadonlyArray<VisualShot> {
+  const all = SCENE_LIST.flatMap((scene) =>
     (["light", "dark"] as const).flatMap((scheme) =>
       [WIDE, ...(scene.narrow === true ? [NARROW] : [])].map((size) => ({
         name: `${scene.id}-${scheme}-${String(size.width)}`,
@@ -139,4 +162,7 @@ export function visualShots(): ReadonlyArray<VisualShot> {
       })),
     ),
   );
+  return shard === undefined
+    ? all
+    : all.filter((_, position) => position % shard.count === shard.index - 1);
 }

@@ -6,7 +6,7 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { createServer } from "vite";
 import { expect, it } from "vitest";
 import { verifyPairedDraftPurge } from "./pairedDraftPurge.test-support";
-import { updateMode, visualShots, WIDE } from "./sceneList";
+import { updateMode, visualShard, visualShots, WIDE } from "./sceneList";
 
 /**
  * Draws the key screens in a pinned Chromium and compares each picture with
@@ -20,6 +20,7 @@ import { updateMode, visualShots, WIDE } from "./sceneList";
  *   OCTANT_VISUAL_UPDATE=all     write every baseline
  *   OCTANT_QA_ARTIFACTS          where actual, baseline and diff pictures go
  *   OCTANT_BROWSER_EXECUTABLE    a browser to use instead of playwright's own Chromium
+ *   OCTANT_VISUAL_SHARD          draw only one part of the pictures, e.g. "1/2"
  */
 
 /**
@@ -214,7 +215,7 @@ it.runIf(process.env.OCTANT_VISUAL_CHECK === "1")(
         readonly noise?: string;
         readonly failures: ReadonlyArray<string>;
       }
-      const allShots = visualShots();
+      const allShots = visualShots(visualShard(process.env.OCTANT_VISUAL_SHARD));
       const outcomes: Array<ShotOutcome | undefined> = Array.from({ length: allShots.length });
       let nextIndex = 0;
       const ownedBrowser = browser;

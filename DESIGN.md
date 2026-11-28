@@ -2122,13 +2122,14 @@ numbers for the character field, bundled fonts and no motion, with no host
 behind them. A picture fails when more than 50 of
 its pixels differ by more than 24 in any channel (6 for the ground scenes,
 whose faint ASCII field would vanish inside 24), or its size changes. The run
-then uploads the `visual-check` artifact with the actual, baseline and diff
+then uploads `visual-check-1` and `visual-check-2` artifacts (the pictures are
+drawn in two halves at once, reported as one `Visual check`) with the actual, baseline and diff
 pictures (differences in red). It does not cover the packaged app, the native
 material itself, the transcript, other screens, or anything that moves.
 
 An intended change never blocks a pull request: add the `design change` label.
 The run then draws the new pictures in update mode, uploads them as the
-`visual-check` artifact, lists the changed ones in its job summary and passes. It
+`visual-check-<half>` artifacts, lists the changed ones in its job summary and passes. It
 pushes nothing: a person (or the agent running the pull request) runs
 `bun scripts/visual-baselines-from-ci.ts <run id>` with that run's id, which
 downloads the artifact and copies each new picture over its baseline, reviews
