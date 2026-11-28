@@ -413,7 +413,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             // Untitled, it read as a page the counter had forgotten.
             <header className="first-run__step-header">
               <h3 className="first-run__step-title" ref={stepHeading} tabIndex={-1}>
-                Your first task
+                Your first thread
               </h3>
             </header>
           ) : (
@@ -525,9 +525,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
           {handoffOpen || step !== "model" ? null : (
             <FirstRunModelStep
-              ariaLabel={`Model for new ${MODE_LABEL[mode]} tasks`}
+              ariaLabel={`Model for new ${MODE_LABEL[mode]} threads`}
               groups={modeGroups}
-              intro={`New ${MODE_LABEL[mode]} tasks start with this model. You can change it in the composer for any task, and existing threads keep whatever they were given.`}
+              intro={`New ${MODE_LABEL[mode]} threads start with this model. You can change it in the composer for any thread, and existing threads keep whatever they were given.`}
               onOpenProviderSettings={leaveForProviderSettings}
               onSelect={(selection) => track(props.onSelectModel(mode, selection))}
               unsetNote="No model is chosen. Octant will start with a ready model and show you which one it chose."

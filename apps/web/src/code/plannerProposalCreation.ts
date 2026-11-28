@@ -109,9 +109,9 @@ export async function createPlannerProposalTask(
           message: `${result.message} Creation did not start. Refresh the proposal's current version before explicitly approving again. No first message was sent.`,
         };
       message =
-        result.status === "refused" ? result.message : "The host did not confirm task creation.";
+        result.status === "refused" ? result.message : "The host did not confirm thread creation.";
     } catch {
-      message = "The approval reply was lost. The task may already have been created.";
+      message = "The approval reply was lost. The thread may already have been created.";
     }
   // Creation can precede a concurrent-decline refusal. This read never creates
   // or starts work, and a missing reply never submits another creation.
@@ -123,7 +123,7 @@ export async function createPlannerProposalTask(
     )
       return {
         status: "unconfirmed",
-        message: `${message} The submitted task exists; inspect it before continuing. No first message was sent from this approval.`,
+        message: `${message} The submitted thread exists; inspect it before continuing. No first message was sent from this approval.`,
         existingThread: existing.thread,
       };
   } catch {
@@ -131,6 +131,6 @@ export async function createPlannerProposalTask(
   }
   return {
     status: "unconfirmed",
-    message: `${message} Check the Project for submitted task ${String(submittedId)}. Approval stays blocked until the host proves the prior attempt settled. No first message was sent from this approval.`,
+    message: `${message} Check the Project for submitted thread ${String(submittedId)}. Approval stays blocked until the host proves the prior attempt settled. No first message was sent from this approval.`,
   };
 }

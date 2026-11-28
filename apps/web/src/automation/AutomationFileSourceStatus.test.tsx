@@ -126,7 +126,7 @@ describe("file input status and person review", () => {
         batchDigest: held.reviewDigest,
         disposition: "skip",
       },
-      "Input skipped and routine re-armed.",
+      "Input skipped and automation re-armed.",
     );
   });
   it("does not reuse a displayed choice after the host observation changes", async () => {

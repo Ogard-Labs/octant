@@ -74,7 +74,7 @@ export function SubagentThread(props: {
       setErrorMessage(
         error instanceof AgentRunClientFailure
           ? error.message
-          : "This subagent is unavailable. Reconnect and try again.",
+          : "This agent is unavailable. Reconnect and try again.",
       );
       setStatus((current) => (current === "ready" ? current : "error"));
     }
@@ -132,7 +132,7 @@ export function SubagentThread(props: {
 
   const lineage = (
     <p className="subagent-thread__lineage">
-      <span>Subagent of</span>
+      <span>Agent of</span>
       {props.onOpenParent === undefined ? (
         <span className="subagent-thread__parent">{props.parentTitle ?? "its thread"}</span>
       ) : (
@@ -150,18 +150,18 @@ export function SubagentThread(props: {
   );
 
   if (status === "loading") {
-    return <OctantEmpty state="loading" title="Loading subagent" />;
+    return <OctantEmpty state="loading" title="Loading agent" />;
   }
   if (row === undefined) {
     return (
-      <section aria-label="Subagent" className="subagent-thread">
+      <section aria-label="Agent" className="subagent-thread">
         <header className="subagent-thread__header thread-column">{lineage}</header>
         <OctantEmpty
-          eyebrow="Subagent"
+          eyebrow="Agent"
           message={
             status === "error"
-              ? (errorMessage ?? "This subagent could not be read.")
-              : "This subagent is no longer listed for its thread, or this window cannot read it."
+              ? (errorMessage ?? "This agent could not be read.")
+              : "This agent is no longer listed for its thread, or this window cannot read it."
           }
           state="warning"
           title={`${props.title} is unavailable`}
@@ -201,7 +201,7 @@ export function SubagentThread(props: {
     if (sending || message.length === 0 || message.length > MAX_MESSAGE_CHARACTERS) return;
     setSending(true);
     setErrorMessage(undefined);
-    setNotice(canSteer ? "Sending your note. The subagent reads it at its next step." : undefined);
+    setNotice(canSteer ? "Sending your note. The agent reads it at its next step." : undefined);
     const refusal = canSteer
       ? await controls.steer({ ...command, message })
       : await controls.resume({ ...command, message });
@@ -220,11 +220,11 @@ export function SubagentThread(props: {
       ? undefined
       : heldBeforeStart
         ? "It has not started yet. You can message it once it runs."
-        : "This subagent cannot take a message now.";
+        : "This agent cannot take a message now.";
   // A command carries at most this much; the draft stays so it can be shortened.
   const tooLong =
     message.length > MAX_MESSAGE_CHARACTERS
-      ? `This message is ${String(message.length - MAX_MESSAGE_CHARACTERS)} characters over the ${String(MAX_MESSAGE_CHARACTERS)} a subagent takes. Shorten it to send.`
+      ? `This message is ${String(message.length - MAX_MESSAGE_CHARACTERS)} characters over the ${String(MAX_MESSAGE_CHARACTERS)} an agent takes. Shorten it to send.`
       : undefined;
   const actions: ThreadComposerActions = canSteer
     ? {
@@ -238,7 +238,7 @@ export function SubagentThread(props: {
           onSend: () => void send(),
         },
         stop: {
-          ariaLabel: "Stop this subagent",
+          ariaLabel: "Stop this agent",
           onStop: () => {
             void controls.cancel({ runId: row.runId }).then((refusal) => {
               if (refusal !== undefined) setErrorMessage(refusal);
@@ -249,7 +249,7 @@ export function SubagentThread(props: {
     : {
         kind: "send",
         send: {
-          ariaLabel: canResume ? "Continue this subagent" : "Send",
+          ariaLabel: canResume ? "Continue this agent" : "Send",
           disabled:
             sending ||
             message.length === 0 ||
@@ -261,7 +261,7 @@ export function SubagentThread(props: {
       };
 
   return (
-    <section aria-label="Subagent" className="subagent-thread">
+    <section aria-label="Agent" className="subagent-thread">
       <header className="subagent-thread__header thread-column">
         {lineage}
         <h1 className="subagent-thread__title">{row.task}</h1>
@@ -273,7 +273,7 @@ export function SubagentThread(props: {
       </header>
       <div
         aria-busy={conversation.loading}
-        aria-label="Subagent conversation"
+        aria-label="Agent conversation"
         className="subagent-thread__transcript transcript-scroll"
         role="log"
       >
@@ -294,7 +294,7 @@ export function SubagentThread(props: {
                   </div>
                 </article>
               ) : item.kind === "reply" ? (
-                <article aria-label="Subagent reply" className="turn-agent">
+                <article aria-label="Agent reply" className="turn-agent">
                   <AssistantMessageBody
                     body={item.text}
                     streaming={active && index === items.length - 1}
@@ -390,7 +390,7 @@ export function SubagentThread(props: {
               }}
             >
               <ThreadComposer
-                ariaLabel="Message this subagent"
+                ariaLabel="Message this agent"
                 input={
                   <ComposerInput
                     aria-label={canSteer ? "Steering note" : "Message to continue it"}

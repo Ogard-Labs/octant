@@ -171,7 +171,7 @@ export function TurnSubagentRows(props: {
   const now = useNow(live);
   if (rows.length === 0) return null;
   return (
-    <ul aria-label="Subagents" className="turn-subagents">
+    <ul aria-label="Agents" className="turn-subagents">
       {rows.map((row) => {
         const name = subagentName(row);
         const latest = subagentLatestLine(row);

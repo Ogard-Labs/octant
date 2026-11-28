@@ -156,7 +156,7 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
         detail={
           pending.script === undefined
             ? browserApprovalDetail(pending)
-            : `Task: ${props.threadTitle}. ${browserApprovalDetail(pending)}`
+            : `Thread: ${props.threadTitle}. ${browserApprovalDetail(pending)}`
         }
         context={
           pending.script === undefined ? undefined : (

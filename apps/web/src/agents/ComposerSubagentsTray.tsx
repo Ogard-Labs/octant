@@ -177,7 +177,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
 
   return (
     <div
-      aria-label="Subagents"
+      aria-label="Agents"
       className="composer-subagents"
       data-open={open ? "true" : "false"}
       data-stale={stale ? "true" : "false"}
@@ -187,14 +187,14 @@ export function SubagentsTray(props: SubagentsTrayProps) {
         <OctantButton
           aria-expanded={open}
           aria-controls={open ? listId : undefined}
-          aria-label={`Subagents, ${count}. ${open ? "Hide" : "Show"} them`}
+          aria-label={`Agents, ${count}. ${open ? "Hide" : "Show"} them`}
           className="composer-subagents__toggle"
           onClick={toggle}
           size="xs"
           type="button"
           variant="ghost"
         >
-          <span className="composer-subagents__label">Subagents</span>
+          <span className="composer-subagents__label">Agents</span>
           {waitingOn === undefined ? (
             <span className="composer-subagents__count">{count}</span>
           ) : null}
@@ -205,7 +205,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
         )}
         {props.onOpenSubagent === undefined ? null : (
           <OctantButton
-            aria-label={`View all ${total} subagents in Agents`}
+            aria-label={`View all ${total} agents in Agents`}
             className="composer-subagents__all"
             onClick={() => props.onOpenSubagent?.()}
             size="xs"
@@ -232,16 +232,16 @@ export function SubagentsTray(props: SubagentsTrayProps) {
           ) : null}
           {confirming && working.length > 1 ? (
             <div
-              aria-label="Confirm stopping subagents"
+              aria-label="Confirm stopping agents"
               className="composer-subagents__confirm"
               role="group"
             >
               <p>
-                Stop all {working.length} managed subagents on this thread? Their work is cancelled
-                and cannot be resumed.
+                Stop all {working.length} managed agents on this thread? Their work is cancelled and
+                cannot be resumed.
               </p>
               <p className="composer-subagents__confirm-scope">
-                Only this thread&apos;s helpers are affected.
+                Only this thread&apos;s agents are affected.
               </p>
               <div className="composer-subagents__confirm-actions">
                 <OctantButton
@@ -254,7 +254,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                   type="button"
                   variant="destructive"
                 >
-                  Stop {working.length} subagents
+                  Stop {working.length} agents
                 </OctantButton>
                 <OctantButton
                   onClick={() => setConfirming(false)}
@@ -314,12 +314,12 @@ export function SubagentsTray(props: SubagentsTrayProps) {
           ) : null}
           {candidates.length > preview.length ? (
             <p className="composer-subagents__notice">
-              Showing {preview.length} of {candidates.length} active or unresolved subagents. Open
+              Showing {preview.length} of {candidates.length} active or unresolved agents. Open
               Agents for the full list.
             </p>
           ) : null}
           {candidates.length === 0 ? (
-            <p className="composer-subagents__notice">Finished subagents are listed in Agents.</p>
+            <p className="composer-subagents__notice">Finished agents are listed in Agents.</p>
           ) : null}
         </div>
       ) : null}
@@ -482,7 +482,7 @@ function SubagentTrayRow(props: {
         <OctantIconButton
           className="composer-subagents__action"
           disabled={props.busy}
-          label={`Stop subagent: ${entry.task}`}
+          label={`Stop agent: ${entry.task}`}
           onClick={() => props.onStop(entry.runId)}
           size="icon-xs"
           type="button"
@@ -503,7 +503,7 @@ function CompareGroupTrayRow(props: {
   readonly onOpenSubagent?: (runId?: string) => void;
 }) {
   const { item } = props;
-  const meta = [`${item.members.length} subagents`, ...stateCounts(item.members)].join(" · ");
+  const meta = [`${item.members.length} agents`, ...stateCounts(item.members)].join(" · ");
   return (
     <li className="composer-subagents__row">
       <OctantButton

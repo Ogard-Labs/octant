@@ -275,7 +275,7 @@ describe("AgentsCenter", () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
     const title = await screen.findByText("No agent runs yet");
     expect(title.closest("[role='status']")).toHaveClass("surface-empty");
-    expect(screen.getByText(/Helpers a thread starts for part of its work/)).toBeVisible();
+    expect(screen.getByText(/Agents a thread starts for part of its work/)).toBeVisible();
   });
 
   it("offers search and filters only once there are runs to filter", async () => {
@@ -394,12 +394,12 @@ describe("AgentsCenter", () => {
     render(<AgentsCenter client={createClient({ cancel })} />);
     await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
 
-    await user.click(await screen.findByRole("button", { name: "Stop child agents" }));
-    expect(screen.getByText(/Stop this run and any child agents/)).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Stop agents" }));
+    expect(screen.getByText(/Stop this run and any agents/)).toBeVisible();
     expect(cancel).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Keep running" }));
-    expect(screen.queryByText(/Stop this run and any child agents/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stop this run and any agents/)).not.toBeInTheDocument();
     expect(cancel).not.toHaveBeenCalled();
   });
 
@@ -422,13 +422,13 @@ describe("AgentsCenter", () => {
       />,
     );
     await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
-    await user.click(await screen.findByRole("button", { name: "Stop child agents" }));
-    expect(screen.getByText(/Stop this run and any child agents/)).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Stop agents" }));
+    expect(screen.getByText(/Stop this run and any agents/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Audit the copy" }));
 
-    expect(screen.queryByText(/Stop this run and any child agents/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Stop child agents" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stop this run and any agents/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop agents" })).not.toBeInTheDocument();
     expect(cancel).not.toHaveBeenCalled();
   });
 
@@ -446,7 +446,7 @@ describe("AgentsCenter", () => {
     );
     await user.click(await screen.findByRole("button", { name: "Summarize the design" }));
 
-    expect(screen.queryByRole("button", { name: "Stop child agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop agents" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume" })).not.toBeInTheDocument();
   });

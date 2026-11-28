@@ -192,7 +192,7 @@ export function GoogleCliAccountSettings({
     >
       <p>
         A token can access every Project allowed by this account&apos;s IAM roles and the OAuth
-        scopes you select. It is not confined to the task&apos;s Project.
+        scopes you select. It is not confined to the thread&apos;s Project.
       </p>
       <form aria-label="Google Cloud command line" noValidate onSubmit={ask}>
         <div className="setgroup">

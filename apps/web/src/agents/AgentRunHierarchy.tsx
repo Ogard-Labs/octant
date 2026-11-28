@@ -150,7 +150,7 @@ export function AgentRunHierarchy(props: {
       setErrorMessage(
         error instanceof AgentRunClientFailure
           ? error.message
-          : "Subagents are unavailable. Reconnect and retry.",
+          : "Agents are unavailable. Reconnect and retry.",
       );
       setStatus("error");
     }
@@ -237,9 +237,9 @@ export function AgentRunHierarchy(props: {
   // read" from "handed off nothing". The section says the answer is partial
   // rather than let those rows read as complete.
   const workersNotice = workerRunsRefused
-    ? "This window cannot read the workers' subagents."
+    ? "This window cannot read the workers' agents."
     : workerGraph?.workersTruncated === true
-      ? "Subagents are shown for the most recently changed workers only."
+      ? "Agents are shown for the most recently changed workers only."
       : undefined;
   const workers = useMemo(
     (): ReadonlyArray<SubagentWorker> | undefined =>
@@ -432,7 +432,7 @@ export function AgentRunHierarchy(props: {
             ? {
                 steerNotice:
                   steer.phase === "sending"
-                    ? "Sending your note. The helper reads it at its next step."
+                    ? "Sending your note. The agent reads it at its next step."
                     : "Steering note delivered.",
               }
             : {})}

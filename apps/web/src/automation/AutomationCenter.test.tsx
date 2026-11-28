@@ -601,7 +601,7 @@ describe("AutomationCenter creation and editing", () => {
 
     await screen.findByRole("heading", { name: "Suggested automations" });
     await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Review this routine" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review this automation" }));
 
     const form = await screen.findByRole("form", { name: "New automation" });
     expect(within(form).getByLabelText("Name")).toHaveValue(
@@ -790,7 +790,7 @@ describe("AutomationCenter calendar view", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
 
-    const calendar = screen.getByRole("region", { name: "Routine calendar" });
+    const calendar = screen.getByRole("region", { name: "Automation calendar" });
     expect(
       within(calendar).getAllByRole("button", { name: /Weekly summary/ }).length,
     ).toBeGreaterThan(0);
@@ -806,7 +806,7 @@ describe("AutomationCenter calendar view", () => {
     renderCenter();
     await screen.findByLabelText("Automations");
     await userEvent.click(screen.getByRole("button", { name: "Calendar" }));
-    const heading = screen.getByRole("region", { name: "Routine calendar" });
+    const heading = screen.getByRole("region", { name: "Automation calendar" });
     const before = within(heading).getByRole("heading").textContent;
 
     await userEvent.click(screen.getByRole("button", { name: "Next month" }));

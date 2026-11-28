@@ -62,6 +62,8 @@ export interface HubSettingsSectionProps {
    * item names. A saved id missing here stays listed so it can be unticked.
    */
   readonly projectNames?: ReadonlyMap<string, string>;
+  /** Called after a hub administration action refreshes status, so sibling views reload. */
+  readonly onHubStatusChanged?: () => void;
 }
 
 const NO_PROJECTS: ReadonlyMap<string, string> = new Map();
@@ -76,7 +78,7 @@ const GRANT_ITEM_COPY: Readonly<Record<HubGrantItem, { label: string; line: stri
     label: "Introduce",
     line: "Introduce other members to this computer; each becomes a full member here.",
   },
-  wake: { label: "Wake", line: "Hold this computer's routine wake times and wake it." },
+  wake: { label: "Wake", line: "Hold this computer's automation wake times and wake it." },
   owners: {
     label: "Owners",
     line: "Let your owner devices act here with a window's powers after a fresh unlock.",
@@ -216,7 +218,7 @@ function proposalSummary(offer: ProposalOffer): string {
     case "model-endpoint":
       return `Add the endpoint “${offer.displayName}” at ${offer.baseUrl}. It arrives switched off and without a key.`;
     case "routine":
-      return `A routine, “${offer.displayName}”. You choose its Project and it runs under this computer's own limits.`;
+      return `An automation, “${offer.displayName}”. You choose its Project and it runs under this computer's own limits.`;
   }
 }
 
@@ -468,6 +470,7 @@ export function HubSettingsSection({
   ownerUnlock,
   now,
   projectNames = NO_PROJECTS,
+  onHubStatusChanged,
 }: HubSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   /** The public half of the unlock key made for the join in progress; the private half never leaves the Secure Enclave. */
@@ -532,20 +535,26 @@ export function HubSettingsSection({
     [hub],
   );
 
-  const refresh = useCallback(async () => {
-    const failed = (message: string) => setState({ kind: "error", message });
-    try {
-      const reply = await request("status");
-      const status = reply.status === 200 ? readStatus(reply.body) : undefined;
-      if (status === undefined) failed("Octant could not read the hub status.");
-      else setState({ kind: "ready", status });
-    } catch (error) {
-      failed(failureMessage(error, "Octant could not read the hub status."));
-    }
-  }, [request]);
+  const refresh = useCallback(
+    async (notify = true) => {
+      const failed = (message: string) => setState({ kind: "error", message });
+      try {
+        const reply = await request("status");
+        const status = reply.status === 200 ? readStatus(reply.body) : undefined;
+        if (status === undefined) failed("Octant could not read the hub status.");
+        else {
+          setState({ kind: "ready", status });
+          if (notify) onHubStatusChanged?.();
+        }
+      } catch (error) {
+        failed(failureMessage(error, "Octant could not read the hub status."));
+      }
+    },
+    [onHubStatusChanged, request],
+  );
 
   useEffect(() => {
-    void refresh();
+    void refresh(false);
   }, [refresh]);
 
   const refreshCertificate = useCallback(async () => {
@@ -1728,8 +1737,8 @@ export function HubSettingsSection({
         <SettingsSection title="Wake service">
           <div className="setgroup">
             <SettingRow
-              description="Wakes a computer just before one of its routines is due, if its owner allowed Wake."
-              more="The hub learns only a time and an id for each routine, never what it does. Off by default."
+              description="Wakes a computer just before one of its automations is due, if its owner allowed Wake."
+              more="The hub learns only a time and an id for each automation, never what it does. Off by default."
               label="Wake service"
               scope="host"
               settingId="hub-wake-service"
@@ -1744,7 +1753,7 @@ export function HubSettingsSection({
           </div>
           {status.wake?.hub.enabled !== true ? null : status.wake.hub.spokes.length === 0 ? (
             <SettingsState kind="empty">
-              No spoke has told the hub a routine time yet.
+              No spoke has told the hub an automation time yet.
             </SettingsState>
           ) : (
             <ul aria-label="Spokes the hub wakes" className="setgroup">
@@ -1965,7 +1974,7 @@ export function HubSettingsSection({
           <div className="setgroup">
             <SettingRow
               description="Offer your spokes configuration that each computer's own person applies or dismisses."
-              more="An offer is an update channel, a plugin from the catalog, an agent profile, a model endpoint, or a routine. Each lands on a computer as a proposal its own person applies or dismisses, and only on a computer whose person ticked Provision. An offer never installs trusted, switches anything on, or carries a key. Off by default."
+              more="An offer is an update channel, a plugin from the catalog, an agent profile, a model endpoint, or an automation. Each lands on a computer as a proposal its own person applies or dismisses, and only on a computer whose person ticked Provision. An offer never installs trusted, switches anything on, or carries a key. Off by default."
               label="Offers"
               scope="host"
               settingId="hub-offers"
@@ -1995,7 +2004,7 @@ export function HubSettingsSection({
                 ))}
               </div>
               <p className="settings-section-line">
-                Plugins, profiles, endpoints, and routines are offered with `octant hub offer`.
+                Plugins, profiles, endpoints, and automations are offered with `octant hub offer`.
               </p>
               {status.provision.hub.offers.length === 0 ? (
                 <SettingsState kind="empty">The hub holds no offers.</SettingsState>
@@ -2331,7 +2340,7 @@ export function HubSettingsSection({
                     {AUTO_APPLY_KINDS.map((entry) => (
                       <SettingRow
                         description="Apply this kind of offer as soon as it arrives."
-                        more="Same as Apply, nothing more. Off by default. Routines and endpoints always ask."
+                        more="Same as Apply, nothing more. Off by default. Automations and endpoints always ask."
                         key={entry.kind}
                         label={entry.label}
                         scope="host"
@@ -2363,7 +2372,7 @@ export function HubSettingsSection({
                 <p className="settings-section-line">
                   Stays on this computer unless the hub grant above ticks Wake. Then it goes to the
                   hub so it can send a magic packet on your home network. The hub never learns what
-                  your routines do.
+                  your automations do.
                 </p>
                 <div className="host-settings__controls">
                   <OctantButton

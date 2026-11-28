@@ -21,7 +21,7 @@ export const YOUR_INSTRUCTIONS_PURPOSE =
   "Rules for working inside Octant, sent with every new turn on every provider.";
 
 export const YOUR_INSTRUCTIONS_MORE =
-  "Which provider or model takes which job, and when to use Work, Canvas, routines, or the board. A provider's own instruction files still apply and come first on how it works.";
+  "Which provider or model takes which job, and when to use Work, Canvas, automations, or the board. A provider's own instruction files still apply and come first on how it works.";
 
 export const ORCHESTRATION_PURPOSE =
   "Instructions for coordinator threads and a Project's planner only, sent after your instructions.";

@@ -105,7 +105,7 @@ const categoryLabels: Readonly<Record<ContextEntryCategory, string>> = {
   "octant-tools": "Octant tools",
   mcp: "MCP",
   "tool-results": "Tool results",
-  "subagent-results": "Subagent results",
+  "subagent-results": "Agent results",
   reserves: "Reserves",
 };
 

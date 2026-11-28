@@ -1900,7 +1900,7 @@ function createWorkspaceMutation(
       if (intent.tab.mode !== mode) {
         throw {
           category: "invalid",
-          message: "This subagent belongs to a different mode than the active workspace.",
+          message: "This agent belongs to a different mode than the active workspace.",
         };
       }
       const surface: WorkspaceTab = {

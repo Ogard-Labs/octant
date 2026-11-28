@@ -924,7 +924,7 @@ describe("WorkThreadWorkspace", () => {
     ).not.toBeInTheDocument();
     expect(
       screen
-        .getByRole("button", { name: "Add attachment or task action" })
+        .getByRole("button", { name: "Add attachment or thread action" })
         .closest(".composer-field"),
     ).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Task actions" })).not.toBeInTheDocument();
@@ -981,7 +981,7 @@ describe("WorkThreadWorkspace", () => {
     );
     expect(note).toHaveTextContent("Left out: 1 attachment.");
     expect(note).toHaveTextContent("did not transfer");
-    const transcript = screen.getByRole("region", { name: "Task workspace" });
+    const transcript = screen.getByRole("region", { name: "Thread workspace" });
     expect(transcript.textContent).toMatch(
       /Context handoff[\s\S]*Model Two[\s\S]*Model One[\s\S]*Summarize the brief/,
     );
@@ -1138,7 +1138,7 @@ describe("WorkThreadWorkspace", () => {
     await screen.findByText("Turn one canvas");
     await waitFor(() => expect(readCompaction).toHaveBeenCalled());
     expect(document.querySelector("[data-compaction-divider]")).toBeNull();
-    const transcript = screen.getByRole("region", { name: "Task workspace" });
+    const transcript = screen.getByRole("region", { name: "Thread workspace" });
     expect(transcript.textContent).toMatch(
       /Summarize the brief[\s\S]*Turn one canvas[\s\S]*Here is the confined summary\.[\s\S]*Context handoff[\s\S]*Model One[\s\S]*Model Two[\s\S]*Continue on the remote provider/,
     );
@@ -1568,7 +1568,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    await user.click(screen.getByRole("button", { name: "Add attachment or task action" }));
+    await user.click(screen.getByRole("button", { name: "Add attachment or thread action" }));
     await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -1578,9 +1578,9 @@ describe("WorkThreadWorkspace", () => {
       expectedVersion: 1,
       deliveryTarget: "Draft brief",
     });
-    expect(await screen.findByText("This task is marked Done.")).toBeInTheDocument();
+    expect(await screen.findByText("This thread is marked Done.")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Add attachment or task action" }),
+      screen.queryByRole("button", { name: "Add attachment or thread action" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
 
@@ -1592,10 +1592,10 @@ describe("WorkThreadWorkspace", () => {
       expectedVersion: 2,
     });
     await waitFor(() =>
-      expect(screen.queryByText("This task is marked Done.")).not.toBeInTheDocument(),
+      expect(screen.queryByText("This thread is marked Done.")).not.toBeInTheDocument(),
     );
     expect(
-      screen.getByRole("button", { name: "Add attachment or task action" }),
+      screen.getByRole("button", { name: "Add attachment or thread action" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeEnabled();
   });
@@ -1621,7 +1621,7 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByLabelText("Bound provider and model")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Work prompt" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
-    expect(screen.getByText("This task is marked Done.")).toBeInTheDocument();
+    expect(screen.getByText("This thread is marked Done.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reopen" })).toBeEnabled();
   });
 
@@ -2406,10 +2406,10 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    const entry = await screen.findByRole("article", { name: "Subagent results" });
+    const entry = await screen.findByRole("article", { name: "Agent results" });
     await userEvent.click(within(entry).getByRole("button", { name: "Show result" }));
     expect(
-      within(entry).getByRole("article", { name: "Research subagent finished" }),
+      within(entry).getByRole("article", { name: "Research agent finished" }),
     ).toHaveTextContent("MATRIX-A3");
     expect(screen.queryByRole("article", { name: "Your message" })).not.toBeInTheDocument();
   });
@@ -3106,7 +3106,7 @@ describe("WorkThreadWorkspace", () => {
       );
 
       await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByRole("alert")).toHaveTextContent("This task could not be loaded.");
+      expect(screen.getByRole("alert")).toHaveTextContent("This thread could not be loaded.");
       await act(async () => vi.advanceTimersByTimeAsync(350));
       expect(transcript).toHaveBeenCalledOnce();
     } finally {
@@ -3795,7 +3795,7 @@ describe("WorkThreadWorkspace", () => {
 
     expect(mutate).not.toHaveBeenCalled();
     expect(startFirstTurn).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Rebind this task before sending/)).toBeInTheDocument();
+    expect(await screen.findByText(/Rebind this thread before sending/)).toBeInTheDocument();
   });
 
   it("offers a file picker on an existing Work thread that can send images", async () => {
@@ -3832,7 +3832,7 @@ describe("WorkThreadWorkspace", () => {
     );
 
     await screen.findByLabelText("Bound provider and model");
-    expect(screen.getByRole("button", { name: "Add attachment or task action" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Add attachment or thread action" })).toBeEnabled();
   });
 
   it("attaches a picture marked up in this thread's Browser, and refuses it on a model that cannot read images", async () => {
@@ -4085,7 +4085,7 @@ describe("WorkThreadWorkspace", () => {
         title="Draft brief"
       />,
     );
-    expect(await screen.findByText("This task is no longer available.")).toBeInTheDocument();
+    expect(await screen.findByText("This thread is no longer available.")).toBeInTheDocument();
     expect(onDisplayReadyChange).toHaveBeenLastCalledWith(false);
     expect(store.read("work", String(threadId))).toBeUndefined();
   });

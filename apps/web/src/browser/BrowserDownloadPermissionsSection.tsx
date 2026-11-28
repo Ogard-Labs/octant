@@ -137,7 +137,9 @@ export function BrowserDownloadPermissionsSection(props: {
       if (result.kind === "download-permission-granted") {
         setReview(undefined);
         setEditing(false);
-        setNotice("Download manifest granted. It grants no account access and starts no routine.");
+        setNotice(
+          "Download manifest granted. It grants no account access and starts no automation.",
+        );
       }
       if (result.kind === "download-permission-revoked")
         setNotice(
@@ -182,7 +184,7 @@ export function BrowserDownloadPermissionsSection(props: {
         scope="host"
         settingId="browser-download-permissions"
         focused={props.focusedSetting === "browser-download-permissions"}
-        description="Save known native source chains into one approved directory for a routine and account profile."
+        description="Save known native source chains into one approved directory for an automation and account profile."
         more="Account access stays separate."
       >
         <div className="host-settings__controls">
@@ -216,7 +218,7 @@ export function BrowserDownloadPermissionsSection(props: {
       ) : null}
       {loaded && targets.length === 0 ? (
         <SettingsState kind="empty">
-          No eligible local Work or Code routine in this Project. Reviewing a manifest starts
+          No eligible local Work or Code automation in this Project. Reviewing a manifest starts
           nothing.
         </SettingsState>
       ) : null}
@@ -252,7 +254,7 @@ export function BrowserDownloadPermissionsSection(props: {
       <OctantDialogPresence>
         {!editing ? null : (
           <OctantConfirmDialog
-            children="Review one routine’s source sites, destination, file types and limits before granting download permission."
+            children="Review one automation’s source sites, destination, file types and limits before granting download permission."
             title={
               review === undefined ? "Review recurring downloads" : "Grant this download manifest?"
             }
@@ -286,11 +288,11 @@ export function BrowserDownloadPermissionsSection(props: {
                 {review === undefined ? (
                   <>
                     <label>
-                      Routine
+                      Automation
                       <OctantSelectField
-                        aria-label="Download routine"
+                        aria-label="Download automation"
                         value={targetId}
-                        placeholder="Choose a routine"
+                        placeholder="Choose an automation"
                         onValueChange={(value) => {
                           setTargetId(value);
                           setFolderId("");
@@ -426,7 +428,7 @@ export function BrowserDownloadPermissionsSection(props: {
                   </>
                 ) : (
                   <dl className="grid min-w-0 gap-2">
-                    <dt>Routine</dt>
+                    <dt>Automation</dt>
                     <dd>{review.permission.target.label}</dd>
                     <dt>Model</dt>
                     <dd>{review.permission.target.modelId}</dd>
@@ -473,7 +475,7 @@ export function BrowserDownloadPermissionsSection(props: {
                 )}
                 <p>
                   Each admitted file consumes quota, including a later cancellation. Permission ends
-                  on revocation, changed routine authority or host restart. Revoking closes an
+                  on revocation, changed automation authority or host restart. Revoking closes an
                   affected page, but a file already dispatched may have been saved. Check the
                   destination before retrying. This manifest grants no account access, uploads or
                   access to other folders.

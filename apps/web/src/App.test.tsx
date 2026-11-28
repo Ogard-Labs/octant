@@ -863,7 +863,9 @@ describe("App", () => {
         expect(
           composer.getByRole("button", { name: /^Where this thread works: New worktree/ }),
         ).toBeVisible();
-        const approve = composer.getByRole("button", { name: "Approve and start described task" });
+        const approve = composer.getByRole("button", {
+          name: "Approve and start described thread",
+        });
         await waitFor(() => expect(approve).toBeEnabled());
         await user.click(approve);
         await waitFor(() => expect(executePlannerProposal).toHaveBeenCalledOnce());
@@ -1249,7 +1251,7 @@ describe("App", () => {
     await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
     await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
     await user.click(within(returnedOnboarding).getByRole("button", { name: "Continue" }));
-    await user.click(await screen.findByRole("button", { name: "Start a task" }));
+    await user.click(await screen.findByRole("button", { name: "Start a thread" }));
     const prompt = await screen.findByRole("textbox", { name: "First message" });
     await user.type(prompt, "Use the updated default");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -1435,7 +1437,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
     const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
-    expect(within(rail).getByRole("button", { name: "New task" })).toBeVisible();
+    expect(within(rail).getByRole("button", { name: "New thread" })).toBeVisible();
     expect(within(rail).getByRole("button", { name: /^Inbox, \d+$/ })).toBeVisible();
     // Show sidebar sits in the title band, not the rail, and only once.
     expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
@@ -3245,9 +3247,9 @@ describe("App", () => {
       />,
     );
 
-    const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
+    const prompt = await screen.findByRole("textbox", { name: "Start a new thread" });
     await user.type(prompt, "Draft brief");
-    const start = screen.getByRole("button", { name: "Start task" });
+    const start = screen.getByRole("button", { name: "Start thread" });
     expect(start).toBeEnabled();
     await user.click(start);
 
@@ -3368,15 +3370,15 @@ describe("App", () => {
     );
 
     await user.type(
-      await screen.findByRole("textbox", { name: "Start a new task" }),
+      await screen.findByRole("textbox", { name: "Start a new thread" }),
       "Draft brief",
     );
-    await user.click(screen.getByRole("button", { name: "Start task" }));
+    await user.click(screen.getByRole("button", { name: "Start thread" }));
 
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
     ).toBeVisible();
-    expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Start a new thread" })).toBeNull();
     expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("Draft brief");
   });
 
@@ -3450,13 +3452,13 @@ describe("App", () => {
       />,
     );
 
-    const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
+    const prompt = await screen.findByRole("textbox", { name: "Start a new thread" });
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
     const levels = screen.getByRole("group", { name: "Effort level" });
     await user.click(within(levels).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(prompt, "Keep this overview draft");
-    await user.click(screen.getByRole("button", { name: "Start task" }));
+    await user.click(screen.getByRole("button", { name: "Start thread" }));
 
     expect(workThreadClient.execute).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4604,9 +4606,9 @@ describe("App", () => {
         if (olderChat === undefined) throw new Error("Expected Chat navigation");
         await user.click(olderChat);
       }
-      let tray = await screen.findByRole("group", { name: "Subagents" });
+      let tray = await screen.findByRole("group", { name: "Agents" });
       if (openedFrom === "composer tray") {
-        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Agents,.*Show them/ }));
         await user.click(within(tray).getByRole("button", { name: /Inspect parser.*Opens it/ }));
       } else {
         await showRightUtilityDock(user);
@@ -4618,28 +4620,24 @@ describe("App", () => {
       if (openedFrom === "composer tray") {
         // A row in the composer's card opens the subagent as a thread of its
         // own, beside its parent; View all still opens the Agents list.
-        expect(await screen.findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await screen.findByRole("region", { name: "Agent" })).toBeVisible();
         // Opening beside the thread splits its pane, which draws the thread's
         // composer again.
-        tray = await screen.findByRole("group", { name: "Subagents" });
+        tray = await screen.findByRole("group", { name: "Agents" });
       } else {
         const opened = screen.getByRole("complementary", { name: "Right Utility Dock" });
-        expect(await within(opened).findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await within(opened).findByRole("region", { name: "Agent" })).toBeVisible();
       }
       for (let request = 0; request < 2; request += 1) {
-        await user.click(
-          within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
-        );
+        await user.click(within(tray).getByRole("button", { name: "View all 2 agents in Agents" }));
         const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-        expect(await within(dock).findByRole("region", { name: "Subagents" })).toBeVisible();
-        expect(within(dock).queryByRole("region", { name: "Subagent" })).not.toBeInTheDocument();
-        expect(within(dock).getByRole("button", { name: /Earlier review/ })).toBeVisible();
+        expect(await within(dock).findByRole("button", { name: /Earlier review/ })).toBeVisible();
+        expect(within(dock).getByRole("region", { name: "Agents" })).toBeVisible();
+        expect(within(dock).queryByRole("region", { name: "Agent" })).not.toBeInTheDocument();
         await user.click(within(dock).getByRole("button", { name: /Inspect parser/ }));
-        expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(await within(dock).findByRole("region", { name: "Agent" })).toBeVisible();
       }
-      await user.click(
-        within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
-      );
+      await user.click(within(tray).getByRole("button", { name: "View all 2 agents in Agents" }));
       const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
       await user.click(await within(dock).findByRole("button", { name: /Earlier review/ }));
       expect(await within(dock).findByText("Retained completed reply")).toBeVisible();
@@ -4787,13 +4785,13 @@ describe("App", () => {
         name: "Workspace pane: Controller foundation",
       });
       await user.click(originalPane);
-      const tray = await within(originalPane).findByRole("group", { name: "Subagents" });
+      const tray = await within(originalPane).findByRole("group", { name: "Agents" });
       if (returnThrough === "its subagent tab") {
         // Opened from the subagent's own tab, the saved review's Back leaves
         // that tab in view, and on a wide window the dock stays as it was.
-        await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
+        await user.click(within(tray).getByRole("button", { name: /Agents,.*Show them/ }));
         await user.click(within(tray).getByRole("button", { name: /Review parser.*Opens it/ }));
-        const subagent = await screen.findByRole("region", { name: "Subagent" });
+        const subagent = await screen.findByRole("region", { name: "Agent" });
         const latestInTab = await within(subagent).findByRole("region", {
           name: "Generation 2 result",
         });
@@ -4802,13 +4800,13 @@ describe("App", () => {
         expect(
           await within(reviewDock).findByRole("table", { name: "Diff for src/parser.ts" }),
         ).toHaveTextContent("captured generation 2");
-        await user.click(within(reviewDock).getByRole("button", { name: "Back to subagent" }));
+        await user.click(within(reviewDock).getByRole("button", { name: "Back to agent" }));
         expect(
           screen.queryByRole("region", { name: "Saved child review" }),
         ).not.toBeInTheDocument();
-        expect(screen.getByRole("region", { name: "Subagent" })).toBeVisible();
+        expect(screen.getByRole("region", { name: "Agent" })).toBeVisible();
         expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-        expect(within(reviewDock).queryByRole("region", { name: "Subagent" })).toBeNull();
+        expect(within(reviewDock).queryByRole("region", { name: "Agent" })).toBeNull();
         // Ordinary Review afterwards is the working tree, not the saved diff.
         await user.click(bandTool("Review"));
         await user.click(bandTool("Review"));
@@ -4834,7 +4832,7 @@ describe("App", () => {
         await within(dock).findByRole("table", { name: "Diff for src/parser.ts" }),
       ).toHaveTextContent("captured generation 1");
       expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
-      await user.click(within(dock).getByRole("button", { name: "Back to subagent" }));
+      await user.click(within(dock).getByRole("button", { name: "Back to agent" }));
       const latest = await within(dock).findByRole("region", { name: "Generation 2 result" });
       await user.click(within(latest).getByRole("button", { name: "Review changes" }));
       expect(
@@ -5360,11 +5358,11 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await findComposeButton("New task"));
+    await user.click(await findComposeButton("New thread"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
-    await user.click(composeButton("New task"));
+    await user.click(composeButton("New thread"));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
@@ -5409,7 +5407,7 @@ describe("App", () => {
     const shown = await screen.findByRole("region", { name: "Continue" }, { timeout: 4000 });
     expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
 
-    await user.click(composeButton("New task"));
+    await user.click(composeButton("New thread"));
 
     expect(
       await screen.findByRole("heading", { name: "What are we building today?" }),
@@ -5423,8 +5421,8 @@ describe("App", () => {
 
   it.each([
     ["Chat", chatShellBootstrap, "New chat"],
-    ["Work", workHomeShellBootstrap, "New task"],
-    ["Code", codeHomeShellBootstrap, "New task"],
+    ["Work", workHomeShellBootstrap, "New thread"],
+    ["Code", codeHomeShellBootstrap, "New thread"],
   ] as const)(
     "keeps the %s question and composer in the same column when New task opens from home",
     async (_mode, bootstrapFor, compose) => {
@@ -5476,7 +5474,7 @@ describe("App", () => {
     // rail's Home mark is what tells the two apart.
     const home = () => screen.getByRole("button", { name: "Home" });
     await screen.findByRole("button", { name: "Customize" });
-    await user.click(composeButton("New task"));
+    await user.click(composeButton("New thread"));
     await waitFor(() => expect(home()).not.toHaveAttribute("aria-current"));
 
     await user.click(modes().getByRole("button", { name: "Work" }));
@@ -5500,7 +5498,7 @@ describe("App", () => {
 
     await screen.findByRole("button", { name: "Customize" });
     expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
-    await user.click(composeButton("New task"));
+    await user.click(composeButton("New thread"));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current"),
     );
@@ -5534,7 +5532,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await findComposeButton("New task"));
+    await user.click(await findComposeButton("New thread"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
@@ -5562,7 +5560,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await findComposeButton("New task"));
+    await user.click(await findComposeButton("New thread"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
@@ -5590,7 +5588,7 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
-    await user.click(composeButton("New task"));
+    await user.click(composeButton("New thread"));
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
@@ -5711,7 +5709,7 @@ describe("App", () => {
         await user.keyboard("{Control>}k{/Control}");
         await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
         const dialog = await screen.findByRole("dialog", { name: "Search threads" });
-        await user.click(within(dialog).getByRole("button", { name: "New task" }));
+        await user.click(within(dialog).getByRole("button", { name: "New thread" }));
       } else {
         await act(async () => startNewAgent?.());
       }
@@ -6823,7 +6821,7 @@ describe("App", () => {
     }
     const projectsDestination = await screen.findByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
-    expect(composeButton("New task")).toBeVisible();
+    expect(composeButton("New thread")).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     // The Board's row became the Running tile; the tile goes to the same place.
@@ -6877,7 +6875,7 @@ describe("App", () => {
         name: "Pull requests",
       }),
     ).toBeVisible();
-    expect(await findComposeButton("New task")).toBeVisible();
+    expect(await findComposeButton("New thread")).toBeVisible();
     await openSidebarProject(user, "Octant");
     const overview = await screen.findByRole("region", { name: "Workspace pane: Octant" });
     expect(overview).toBeVisible();
@@ -7190,7 +7188,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("region", { name: "Workspace pane: New task" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Workspace pane: New thread" })).toBeVisible();
   });
 
   it("opens implemented settings and deep-links search results to focused controls", async () => {
@@ -7772,7 +7770,7 @@ describe("App", () => {
 
     // Leaving the Board shows the dock again, as it was, rather than finding it
     // closed: it was only stepped aside.
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+    await user.click(await screen.findByRole("button", { name: "Back to workspace" }));
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
   });
 
@@ -7821,7 +7819,7 @@ describe("App", () => {
 
     // Leaving the Board shows the panel again, with the tab it had, rather than
     // finding it closed: it was only stepped aside.
-    await user.click(screen.getByRole("button", { name: "Back to workspace" }));
+    await user.click(await screen.findByRole("button", { name: "Back to workspace" }));
     const restored = await screen.findByRole("region", { name: "Bottom panel" });
     expect(within(restored).getByRole("tab", { name: "Terminal" })).toBeVisible();
   });

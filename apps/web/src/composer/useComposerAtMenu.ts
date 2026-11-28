@@ -350,7 +350,7 @@ export function useComposerAtMenu(input: {
       rows.push({
         id: "subagent-model",
         title: "@model",
-        meta: "Choose a subagent's provider, model, and reasoning",
+        meta: "Choose an agent's provider, model, and reasoning",
         icon: "model",
         choose: () => setModelPicker({ start, end, caret: start + raw.length }),
       });

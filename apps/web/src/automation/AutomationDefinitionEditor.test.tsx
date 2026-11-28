@@ -410,7 +410,7 @@ describe("AutomationDefinitionEditor creation", () => {
     await chooseLabeledOption("Authority profile", "Work default");
     expect(
       screen.getByText(
-        "A file routine watches a folder on this computer, so a Project on a server offers no file trigger.",
+        "A file automation watches a folder on this computer, so a Project on a server offers no file trigger.",
       ),
     ).toBeVisible();
     await userEvent.click(screen.getByLabelText("Schedule"));

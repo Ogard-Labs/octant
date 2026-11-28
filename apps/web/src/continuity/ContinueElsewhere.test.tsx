@@ -103,7 +103,7 @@ describe("continuing the same task elsewhere", () => {
     await user.click(screen.getByRole("button", { name: "Text only: omit files and images" }));
     await user.click(await screen.findByRole("option", { name: /second model/ }));
     expect(change).toHaveBeenCalledWith({ providerInstanceId: instance.id, modelId: "second" });
-    expect(screen.getByRole("link", { name: "Open task link" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Open thread link" }).getAttribute("href")).toBe(
       `https://host.example/?continueMode=work&continueThread=${id}`,
     );
     expect(screen.getByText(/Unsent drafts and local view state stay on this screen/)).toBeTruthy();

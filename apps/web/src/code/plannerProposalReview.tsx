@@ -277,7 +277,7 @@ export function PlannerProposalReviewDialog(
             </>
           }
           fixedPrompt={review.proposal.intent}
-          createLabel="Approve and start described task"
+          createLabel="Approve and start described thread"
           providerGroups={providerGroups}
           {...(!current || !reviewCurrent
             ? {
@@ -287,13 +287,13 @@ export function PlannerProposalReviewDialog(
             : reviewAttempt.status !== "none"
               ? {
                   createDisabledReason:
-                    "The prior approval outcome is unresolved. Inspect its submitted task; no replacement approval can be sent.",
+                    "The prior approval outcome is unresolved. Inspect its submitted thread; no replacement approval can be sent.",
                 }
               : providerReady
                 ? {}
                 : {
                     createDisabledReason:
-                      "Choose an available provider and model before approving this task.",
+                      "Choose an available provider and model before approving this thread.",
                   })}
           {...(props.projectName === undefined ? {} : { projectName: props.projectName })}
           {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
@@ -347,7 +347,7 @@ export function PlannerProposalReviewDialog(
         />
       </NewTaskDraftScopeContext.Provider>
       <p className="oct-row-detail">
-        Approve and start creates this described task in {props.projectName ?? "this Project"} and
+        Approve and start creates this described thread in {props.projectName ?? "this Project"} and
         sends its exact proposal as the first message, using the provider, checkout and access you
         choose above.
       </p>

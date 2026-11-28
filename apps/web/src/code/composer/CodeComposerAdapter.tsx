@@ -1095,7 +1095,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
       // one is chosen. Send stays live and says so: a Send greyed out for this
       // alone left people guessing why nothing happened.
       if (props.projectId === undefined) {
-        setSendNotice("Choose a Project first. A Code task works in a folder.");
+        setSendNotice("Choose a Project first. A Code thread works in a folder.");
         return;
       }
       const extensionSelections = extensionDraft.receipts.flatMap((receipt) =>

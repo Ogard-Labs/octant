@@ -102,11 +102,14 @@ export function WindowChrome(props: WindowChromeProps) {
             <WindowHistoryButtons className="window-chrome__button" history={props.history} />
           )}
           {props.onNewThread === undefined ? null : (
-            <OctantTooltip label={props.newThreadLabel ?? "New task"} shortcut={newThreadShortcut}>
+            <OctantTooltip
+              label={props.newThreadLabel ?? "New thread"}
+              shortcut={newThreadShortcut}
+            >
               <IconButton
                 className="window-chrome__button window-chrome__new-thread"
                 icon={SquarePen}
-                label={props.newThreadLabel ?? "New task"}
+                label={props.newThreadLabel ?? "New thread"}
                 onClick={props.onNewThread}
                 // The tooltip names the button; a native title would say it twice.
                 title=""

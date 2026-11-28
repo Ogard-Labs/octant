@@ -298,6 +298,7 @@ const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas-action",
   "artifact-mirror",
   "canvas-outside-content",
+  "canvas-version-images",
   // A person's "Allow network" choice for the Canvas, keyed by the Canvas.
   "canvas-network-access",
   // A link's record goes with its Canvas; the owed revoke of that link is a
@@ -327,6 +328,7 @@ export function collectCanvasFamilyAggregates(
   add("canvas-choice-answers", canvasId);
   add("artifact-mirror", canvasId);
   add("canvas-outside-content", canvasId);
+  add("canvas-version-images", canvasId);
   add("canvas-network-access", canvasId);
   return [...keys.values()];
 }
@@ -494,6 +496,7 @@ function collectOwnedAggregates(
     add("canvas-choice-answers", canvasId);
     add("artifact-mirror", canvasId);
     add("canvas-outside-content", canvasId);
+    add("canvas-version-images", canvasId);
     add("canvas-network-access", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);

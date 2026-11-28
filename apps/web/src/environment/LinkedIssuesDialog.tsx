@@ -58,12 +58,12 @@ export function LinkedIssuesDialog(props: LinkedIssuesDialogProps) {
         <h1 id={titleId}>Linked issues</h1>
       </div>
       <p id={descriptionId}>
-        The agent may update only the issues linked here, and a pull request this task opens names
+        The agent may update only the issues linked here, and a pull request this thread opens names
         them as fixed. When the Project keeps linked issues up to date, Octant moves them to In
         Progress, In Review and Done.
       </p>
       {props.linkedIssues.length === 0 ? (
-        <p>No issue is linked to this task.</p>
+        <p>No issue is linked to this thread.</p>
       ) : (
         <ul className="environment-thread-prs__list">
           {props.linkedIssues.map((entry) => {
@@ -73,7 +73,7 @@ export function LinkedIssuesDialog(props: LinkedIssuesDialogProps) {
                 <span className="environment-thread-pr__text">
                   <span className="environment-thread-pr__title">{label}</span>
                   {entry.source === "created-from" ? (
-                    <span className="environment-thread-pr__meta">Task started from it</span>
+                    <span className="environment-thread-pr__meta">Thread started from it</span>
                   ) : null}
                 </span>
                 <OctantButton

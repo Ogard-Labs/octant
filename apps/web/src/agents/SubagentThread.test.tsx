@@ -76,7 +76,7 @@ describe("SubagentThread", () => {
   it("opens headed Subagent of its thread, which leads back there", async () => {
     const onOpenParent = view(client("running"));
     expect(await screen.findByRole("heading", { name: "Find the flaky test" })).toBeVisible();
-    expect(screen.getByText("Subagent of")).toBeVisible();
+    expect(screen.getByText("Agent of")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Fix the release build" }));
     expect(onOpenParent).toHaveBeenCalledOnce();
   });

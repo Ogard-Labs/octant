@@ -13,13 +13,13 @@ export function UsageNamesProvider(props: {
 const KIND_LABELS: Readonly<Record<string, string>> = {
   provider: "Provider",
   "chat-thread": "Chat",
-  "work-thread": "Work task",
-  "code-thread": "Code task",
+  "work-thread": "Work thread",
+  "code-thread": "Code thread",
   "image-job": "Image job",
   project: "Project",
   "code-project": "Project",
   host: "Host",
-  thread: "Task",
+  thread: "Thread",
 };
 
 /**

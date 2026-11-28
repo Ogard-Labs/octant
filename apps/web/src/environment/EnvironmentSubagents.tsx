@@ -97,13 +97,13 @@ export function EnvironmentSubagents(props: {
       onOpenChange={setChosen}
       open={open}
       summary={summary}
-      title="Subagents"
+      title="Agents"
     >
       {/* Before the first read answers the list is empty but unknown; saying
           None there hid runs that existed and contradicted the header. */}
       {controller.status !== "ready" ? (
         <p className="environment-subagents__empty" role="status">
-          Reading subagents…
+          Reading agents…
         </p>
       ) : (
         <div className="environment-subagents__list">

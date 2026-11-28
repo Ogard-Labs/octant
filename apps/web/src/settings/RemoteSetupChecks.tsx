@@ -15,7 +15,7 @@ import type { RemoteSetupIntent } from "./RemoteSetupGuide";
 
 const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   ready:
-    "The read-only SSH check completed. This proves this connection only; no task was started.",
+    "The read-only SSH check completed. This proves this connection only; no thread was started.",
   "needs-person":
     "Run server checks at this computer or from a device its person paired. Restricted sessions cannot probe servers.",
   "needs-local-window":
@@ -26,7 +26,7 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   "missing-agent":
     "No SSH agent is available to Octant. Start or unlock your agent on the Octant host and load the intended key, then check again.",
   "authentication-refused":
-    "SSH could not authenticate. Check the agent's loaded key and the registered login user on the Octant host. Never paste a private key into a task.",
+    "SSH could not authenticate. Check the agent's loaded key and the registered login user on the Octant host. Never paste a private key into a thread.",
   "key-confirmation-required": "This server's key needs a confirmation at this computer.",
   "kept-key-unsupported":
     "This check uses the host's SSH agent. It cannot verify a key Octant keeps. Use the existing server key controls; no key was created or changed.",
@@ -41,7 +41,7 @@ const REMEDIES: Readonly<Record<RemoteSetupCheckReason, string>> = {
   "unsupported-runtime":
     "Server Projects use Octant Harness. Native provider runtimes run on the Octant host and cannot execute this server Project. Choose Octant Harness; this does not test a provider installation.",
   "probe-unavailable":
-    "The server did not return the expected POSIX shell and directory response. Check that its login can run sh and pwd. No task was started.",
+    "The server did not return the expected POSIX shell and directory response. Check that its login can run sh and pwd. No thread was started.",
   cancelled:
     "The check stopped. Its last result does not establish connectivity. Check again when ready.",
   busy: "Other setup checks are still finishing. Wait briefly, then check again.",
@@ -164,7 +164,7 @@ export function RemoteSetupChecks(props: {
       if (sequence.current !== attempt) return;
       setPhase("disconnected");
       setHostMessage(
-        "The Octant host could not answer. Check that it is running, awake and reachable, then recheck. No task or command is restarted.",
+        "The Octant host could not answer. Check that it is running, awake and reachable, then recheck. No thread or command is restarted.",
       );
     } finally {
       clearTimeout(timer);
@@ -173,7 +173,7 @@ export function RemoteSetupChecks(props: {
   };
   return (
     <div className="remote-setup__details" aria-label="Read-only setup checks">
-      <p>Check readiness without starting a task or changing registration, keys or SSH trust.</p>
+      <p>Check readiness without starting a thread or changing registration, keys or SSH trust.</p>
       {host ? null : (
         <ol className="remote-setup__steps">
           <li>Check registration, runtime support and the host’s SSH agent.</li>

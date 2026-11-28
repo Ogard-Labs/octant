@@ -389,7 +389,7 @@ it.each([false, true])(
     await waitFor(() => {
       const notices = screen.queryAllByRole("status").map((node) => node.textContent ?? "");
       expect(
-        notices.some((text) => text.includes("Added to this task’s saved draft")),
+        notices.some((text) => text.includes("Added to this thread’s saved draft")),
         notices.join("; "),
       ).toBe(true);
     });

@@ -13,6 +13,7 @@ export type ComputerUseSessionId = typeof ComputerUseSessionId.Type;
 export const ComputerUseActionKind = Schema.Literal(
   "click",
   "type-text",
+  "type-secret",
   "key-press",
   "scroll",
   "screenshot",

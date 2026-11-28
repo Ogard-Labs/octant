@@ -2631,6 +2631,7 @@ export function useProviderController(options: ProviderControllerOptions) {
   // controller whole can bail out of a render that changed none of it.
   return useRetainedRecord({
     status,
+    ...(client === undefined ? {} : { client }),
     snapshot,
     instances: snapshot?.instances ?? NO_PROVIDER_INSTANCES,
     readInstances,

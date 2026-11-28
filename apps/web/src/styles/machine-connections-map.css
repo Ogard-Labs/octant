@@ -1,0 +1,218 @@
+/* Connections map in Settings › Remote access.
+   Uses only Octant theme tokens and 4px spacing steps so light and dark themes
+   and stylesheet boundary checks stay consistent. */
+
+.connections-map {
+  display: grid;
+  gap: var(--oct-space-4);
+}
+
+.connections-map__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.connections-map__hint {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.connections-map__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.connections-map__canvas {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.connections-map__diagram {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.connections-map__edge-line {
+  stroke: var(--oct-border);
+  stroke-width: 2;
+}
+
+.connections-map__edge-line--connected {
+  stroke: var(--oct-success-fg);
+}
+
+.connections-map__edge-line--unmeasured {
+  stroke: var(--oct-muted);
+  stroke-dasharray: 6 4;
+  stroke-width: 1.5;
+}
+
+.connections-map__edge-text {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.connections-map__node-svg {
+  fill: var(--oct-surface-warm);
+  stroke: var(--oct-border);
+  stroke-width: 1.5;
+}
+
+.connections-map__node-svg--local {
+  stroke: var(--oct-accent);
+  stroke-width: 2;
+}
+
+.connections-map__node-title-svg {
+  fill: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
+}
+
+.connections-map__nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--oct-space-3);
+}
+
+.connections-map__node {
+  display: grid;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface-warm);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  cursor: grab;
+}
+
+.connections-map__node[data-selected="true"] {
+  border-color: var(--oct-accent);
+}
+
+.connections-map__node[data-drop-target="true"] {
+  border-color: var(--oct-success-fg);
+  background: var(--oct-success-soft);
+}
+
+.connections-map__node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+
+.connections-map__node-select {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
+}
+
+.connections-map__node-meta {
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.connections-map__node-origin {
+  margin: 0;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.connections-map__list-section {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.connections-map__subheading {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+}
+
+.connections-map__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.connections-map__list-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.connections-map__list-copy {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.connections-map__plan-panel {
+  display: grid;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.connections-map__plan-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.connections-map__plan-pair {
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  color: var(--oct-fg);
+}
+
+.watching-thread-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  background: var(--oct-surface);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.watching-thread-bar__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+}

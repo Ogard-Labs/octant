@@ -23,7 +23,7 @@ describe("usage identity labels", () => {
   });
   it("keeps unresolved subjects distinguishable without displaying a full UUID", () => {
     render(<UsageName kind="code-thread" id="12345678-1234-4123-8123-123456789012" />);
-    expect(screen.getByText("Code task · 12345678…")).toHaveAttribute(
+    expect(screen.getByText("Code thread · 12345678…")).toHaveAttribute(
       "title",
       "12345678-1234-4123-8123-123456789012",
     );

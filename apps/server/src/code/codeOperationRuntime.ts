@@ -430,6 +430,7 @@ export interface CodeOperationRuntimeOptions {
   readonly computerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    readonly operationId?: string;
     readonly destination?: ComputerUseDestinationSelection;
     /**
      * Asks in the thread. `offer` adds "Remember for this Project" to the
@@ -6555,6 +6556,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.computerUseTools?.({
           windowId: active.windowId,
           thread: active.thread,
+          operationId: String(active.operationId),
           ...(active.computerUseDestination === undefined
             ? {}
             : { destination: active.computerUseDestination }),

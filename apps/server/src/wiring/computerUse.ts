@@ -63,7 +63,10 @@ import {
   createDesktopDaemonPort,
   desktopDaemonSocketReady,
 } from "../computerUse/desktopDaemonPort";
-import { bundledDesktopProviders } from "../computerUse/bundledDesktopProviders";
+import {
+  bundledDesktopProviders,
+  cuaDesktopSupportedOnPlatform,
+} from "../computerUse/bundledDesktopProviders";
 import { leasableProvidersOf } from "../computerUse/computerUseDestination";
 import { readProjectDesktopRecipe } from "../computerUse/projectDesktopRecipe";
 import {
@@ -89,6 +92,7 @@ import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import {
   COMPUTER_USE_TOOL_HELP,
+  COMPUTER_USE_TOOL_HELP_NO_SECRET,
   DISPOSABLE_DESKTOP_TOOL_HELP,
 } from "../plugins/computerUse/computerUsePlugin";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -97,6 +101,7 @@ import type { ToolActionAuthority } from "@octant/contracts";
 import { ChildComputerOwners, childComputerTools } from "../agentRun/agentRunChildAskTools";
 import type { AgentRunChildToolHost } from "../agentRun/agentRunChildTools";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
+import type { ThreadSecretService } from "../threadSecrets/threadSecretService";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { UsageWiring } from "./usage";
 import type { FoundationsWiring } from "./foundations";
@@ -258,10 +263,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   // lease exists. The lease service asks the daemon nothing, not even a
   // restart listing, until this host has journaled a Cua lease, and whether
   // the daemon is there is read from its socket without connecting.
-  const cuaDesktop =
-    process.platform === "linux"
-      ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
-      : undefined;
+  const cuaDesktop = cuaDesktopSupportedOnPlatform(process.platform)
+    ? createCuaDesktopProvider(createDesktopDaemonPort({ daemon: () => CUA_DESKTOP_DAEMON }))
+    : undefined;
   let cuaDaemonReady = false;
   const refreshCuaDaemonReady = () => {
     if (cuaDesktop === undefined) return;
@@ -432,10 +436,13 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     clearInterval(desktopLeaseTimer);
   };
   // The tool service exists wherever a send can bind a destination: this
-  // Mac's screen, or a desktop a Linux host can lease.
+  // Mac's screen, or a desktop this host can lease.
   const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
   let shellServiceRef:
     | Pick<ShellService, "rememberComputerUseApp" | "rememberDesktopFileTransfer">
+    | undefined;
+  let threadSecretsRef:
+    | Pick<ThreadSecretService, "inspectHandle" | "redeem" | "registerConsumer">
     | undefined;
   /**
    * Journals one "Remember for this Project" answer with whoever gave it,
@@ -522,6 +529,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
                 ),
               }),
           destination: () => desktopLeases.destination(),
+          threadSecrets: () => threadSecretsRef,
           now: processAuthorityTime,
           settings: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
@@ -661,6 +669,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     owner: ComputerUseOwner,
     ask?: ComputerUseThreadAsk,
     level?: AppToolThreadLevel,
+    turnId?: string,
   ) => {
     const observed = providerRuntimeRegistry.observedState(owner.providerInstanceId);
     if (browserToolTransport(observed, String(owner.modelId), level) !== true) return undefined;
@@ -671,7 +680,19 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       owner,
       model?.inputModalities.includes("image") === true,
       ask,
+      childOwner(owner) === undefined ? turnId : undefined,
     );
+    const advertisesTypeSecret =
+      tools !== undefined &&
+      tools.definitions.some(
+        (tool) =>
+          typeof tool.inputSchema === "object" &&
+          tool.inputSchema !== null &&
+          "properties" in tool.inputSchema &&
+          typeof tool.inputSchema.properties === "object" &&
+          tool.inputSchema.properties !== null &&
+          "handle" in tool.inputSchema.properties,
+      );
     // Help is the plugin's own static guidance, not application content, so
     // it is answered outside the taint wrapper and never marks the thread.
     return tools === undefined
@@ -683,7 +704,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
-          owner.leaseId === undefined ? COMPUTER_USE_TOOL_HELP : DISPOSABLE_DESKTOP_TOOL_HELP,
+          owner.leaseId !== undefined
+            ? DISPOSABLE_DESKTOP_TOOL_HELP
+            : advertisesTypeSecret
+              ? COMPUTER_USE_TOOL_HELP
+              : COMPUTER_USE_TOOL_HELP_NO_SECRET,
         );
   };
   contributeChildTools((input) => {
@@ -721,6 +746,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
         })
         .catch(() => undefined);
     }
+    computerUseTools?.syncSecretConsumer();
     void computerUseTools?.sweep().catch(() => undefined);
   };
   const stopComputerSettingsWatch = persistence.journal.subscribeCommitted(() =>
@@ -826,6 +852,12 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       shellService: Pick<ShellService, "rememberComputerUseApp" | "rememberDesktopFileTransfer">,
     ) => {
       shellServiceRef = shellService;
+    },
+    installThreadSecrets: (
+      service: Pick<ThreadSecretService, "inspectHandle" | "redeem" | "registerConsumer">,
+    ) => {
+      threadSecretsRef = service;
+      computerUseTools?.syncSecretConsumer();
     },
     /** Where a Project's desktop recipe keeps the key a cloud provider reads. */
     desktopRecipeKeys,

@@ -62,8 +62,8 @@ const TITLES: Record<FirstRunStepId, string> = {
 function summaries(hostPlatform: HostPlatform | undefined): Record<FirstRunStepId, string> {
   return {
     providers: `What ${thisComputerName(hostPlatform)} can actually reach.`,
-    project: "The folder your first task works in.",
-    model: "The model your first task starts with.",
+    project: "The folder your first thread works in.",
+    model: "The model your first thread starts with.",
     mode: "How much agents may do before they ask.",
   };
 }

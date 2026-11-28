@@ -557,7 +557,7 @@ export function EnvironmentSuggestedTasks() {
   return (
     <FollowUpSuggestionChips
       {...chips}
-      frame={(cards) => <EnvironmentCard caption="Suggested tasks">{cards}</EnvironmentCard>}
+      frame={(cards) => <EnvironmentCard caption="Suggested threads">{cards}</EnvironmentCard>}
     />
   );
 }
@@ -565,6 +565,6 @@ export function EnvironmentSuggestedTasks() {
 /** Where a suggestion would run, as the card's small heading. */
 function targetLabel(suggestion: NativeHarnessFollowUpSuggestion): string {
   if (suggestion.target === "same-thread") return "Next step here";
-  if (suggestion.target === "new-worktree") return "New task · own worktree";
-  return "New task";
+  if (suggestion.target === "new-worktree") return "New thread · own worktree";
+  return "New thread";
 }

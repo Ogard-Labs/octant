@@ -61,7 +61,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
         : {})}
       {...(presentedSidebarCollapsed && !sidebarRail
         ? {
-            newThreadLabel: activeMode === "chat" ? "New chat" : "New task",
+            newThreadLabel: activeMode === "chat" ? "New chat" : "New thread",
             onNewThread: () => actions.startNewThreadDraft(activeMode),
           }
         : {})}

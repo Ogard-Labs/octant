@@ -1,6 +1,6 @@
 import { decodeCanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +45,17 @@ import {
   canvasOutsideContentWriters,
   registerCanvasOutsideContentEvents,
 } from "./canvas/canvasOutsideContentMark";
+import {
+  CanvasVersionImageStore,
+  registerCanvasVersionImagesEvents,
+} from "./canvas/canvasVersionImages";
+import {
+  readCanvasDesignAssetFile,
+  resolveCanvasDesignAssets,
+  type CanvasDesignAssetPorts,
+  type CanvasDesignAssetVersionContext,
+} from "./canvas/canvasDesignAssets";
+import { liveWorkFilesystem } from "./work/workFilesystemPort";
 import { CanvasProjection } from "./canvas/canvasProjection";
 import { CanvasService } from "./canvas/canvasService";
 import { CanvasDesignRunTickets } from "./canvas/canvasDesignPage";
@@ -1046,6 +1057,7 @@ describe("canvas routes", () => {
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "phone" }),
       expect.objectContaining({ mode: "chat", projectId, threadId }),
+      { canvasId, versionId, marks: "labelled" },
     );
 
     // A request the contract does not admit is refused as a value.
@@ -1200,6 +1212,7 @@ describe("canvas routes", () => {
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "phone" }),
       expect.objectContaining({ mode: "chat", projectId, threadId }),
+      { canvasId, versionId, legacyClient: true },
     );
 
     // An image block that draws a generated image is read as that one image,
@@ -1219,6 +1232,7 @@ describe("canvas routes", () => {
         ],
       },
       expect.objectContaining({ mode: "chat", projectId, threadId }),
+      { canvasId, versionId, legacyClient: true },
     );
 
     // A block that is not a design, and a request that names more than it should.
@@ -1226,12 +1240,381 @@ describe("canvas routes", () => {
       (await ask(`canvasId=${String(canvasId)}&versionId=${versionId}&blockId=nope`)).body,
     ).toMatchObject({ kind: "unavailable" });
     expect((await ask(`${query}&path=/etc/hosts`)).status).toBe(400);
+    expect((await ask(`${query}&marks=invalid`)).status).toBe(400);
+    expect((await ask(`${query}&marks=labelled&marks=recorded`)).status).toBe(400);
 
     // A window looking at another Project is told nothing and resolves nothing.
     resolveDesignAssets.mockClear();
     active = otherProjectId;
     expect((await ask(query)).body).toEqual({ kind: "unauthorized", canvasId: String(canvasId) });
     expect(resolveDesignAssets).not.toHaveBeenCalled();
+  });
+
+  it("withholds a replaced Project image on older versions across design-assets, html-file, and design-page while keeping unchanged files and newest-version live reads", async () => {
+    const pngA = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const pngB = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 8, 7, 6]);
+    const pngC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 5, 5, 5, 5]);
+    const b64A = Buffer.from(pngA).toString("base64");
+    const b64B = Buffer.from(pngB).toString("base64");
+    const b64C = Buffer.from(pngC).toString("base64");
+
+    const tempDir = mkdtempSync(join(tmpdir(), "octant-canvas-route-digests-"));
+    const dbDir = mkdtempSync(join(tmpdir(), "octant-canvas-route-db-"));
+    const connection = openSqlite(join(dbDir, "journal.sqlite"));
+    try {
+      const future = new Date(Date.now() + 60_000).toISOString();
+      applyMigrations(connection, MIGRATIONS, () => future);
+      const events = new EventRegistry();
+      registerCanvasVersionImagesEvents(events);
+      const projections = new ProjectionRegistry();
+      projections.register(new AggregateHeadsProjection());
+      const journal = new Journal({
+        connection,
+        registry: events,
+        projections,
+        clock: () => future,
+      });
+
+      writeFileSync(join(tempDir, "kept.png"), pngA);
+      writeFileSync(join(tempDir, "hero.png"), pngA);
+
+      const ports: CanvasDesignAssetPorts = {
+        generatedImage: async () => ({ status: "unavailable", reason: "missing" }),
+        browserCapture: async () => ({ status: "unavailable", reason: "missing" }),
+        projectFile: async ({ path, maximumBytes }) =>
+          readCanvasDesignAssetFile({
+            filesystem: liveWorkFilesystem,
+            root: tempDir,
+            path,
+            maximumBytes,
+          }),
+      };
+      const imageStore = new CanvasVersionImageStore({
+        journal,
+        ports,
+        uuid: () => crypto.randomUUID(),
+        actor: Schema.decodeUnknownSync(EventActor)({
+          kind: "system",
+          actorId: "00000000-0000-4000-8000-000000000001",
+        }),
+      });
+
+      const workProjectId = decodeProjectId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+      const otherWorkProjectId = decodeProjectId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+      const workThreadId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+      const workCanvasId = decodeCanvasId("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+      const v1Id = "11111111-1111-4111-8111-111111111111";
+      const v2Id = "22222222-2222-4222-8222-222222222222";
+      const vUnrecordedId = "33333333-3333-4333-8333-333333333333";
+
+      const makeBlocks = () => [
+        {
+          blockId: "screen" as never,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "design" as const,
+          title: "Screen",
+          size: "phone" as const,
+          assets: [
+            {
+              assetId: "kept" as never,
+              source: { kind: "project-file" as const, path: "kept.png" },
+            },
+            {
+              assetId: "hero" as never,
+              source: { kind: "project-file" as const, path: "hero.png" },
+            },
+          ],
+          frames: [
+            {
+              frameId: "home" as never,
+              title: "Home",
+              html: '<img src="octant-asset:kept" alt="Kept"><img src="octant-asset:hero" alt="Hero">',
+            },
+          ],
+        },
+        {
+          blockId: "proto" as never,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "design" as const,
+          title: "Prototype",
+          size: "phone" as const,
+          runsScript: true as const,
+          assets: [
+            {
+              assetId: "hero" as never,
+              source: { kind: "project-file" as const, path: "hero.png" },
+            },
+          ],
+          frames: [
+            {
+              frameId: "start" as never,
+              title: "Start",
+              html: '<img src="octant-asset:hero" alt="Hero"><script>void 0;</script>',
+            },
+          ],
+        },
+      ];
+      const makeVersion = (versionId: string, sequence: number) => ({
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        canvasId: workCanvasId,
+        versionId: versionId as never,
+        sequence,
+        definition: {
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          title: "Work screens",
+          blocks: makeBlocks(),
+          sourceManifest: [],
+          provenance: {
+            hostId: "local" as never,
+            mode: "work" as const,
+            projectId: workProjectId,
+            threadId: workThreadId as never,
+            actor: {
+              kind: "local-user" as const,
+              actorId: "00000000-0000-4000-8000-000000000002" as never,
+            },
+            providerInstanceId: "00000000-0000-4000-8000-000000000003" as never,
+            modelId: "octant-local" as never,
+            createdAt: future as never,
+          },
+        },
+        createdBy: {
+          kind: "local-user" as const,
+          actorId: "00000000-0000-4000-8000-000000000002" as never,
+        },
+        createdAt: future as never,
+      });
+
+      const v1 = makeVersion(v1Id, 1);
+      const vUnrecorded = makeVersion(vUnrecordedId, 2);
+      const v2 = makeVersion(v2Id, 3);
+
+      const projection = new CanvasProjection();
+      projection.applyCreated({ canvasId: workCanvasId, version: v1 });
+      await imageStore.record(v1);
+
+      // Replace hero.png before appending vUnrecorded (left unrecorded) and v2 (recorded with pngB).
+      writeFileSync(join(tempDir, "hero.png"), pngB);
+      projection.applyVersionAppended({ canvasId: workCanvasId, version: vUnrecorded });
+      projection.applyVersionAppended({ canvasId: workCanvasId, version: v2 });
+      await imageStore.record(v2);
+
+      // Replace hero.png again with pngC while v2 is still the newest version.
+      writeFileSync(join(tempDir, "hero.png"), pngC);
+
+      const store = new WindowAuthorityStore();
+      store.register({ windowId, capability: windowCapability, now: 0 });
+      const canvasService = new CanvasService(
+        {
+          projection,
+          eventStore: {
+            appendCreate: () => {
+              throw new Error("unused");
+            },
+            appendVersion: () => {
+              throw new Error("unused");
+            },
+          } as never,
+          uuid: () => crypto.randomUUID(),
+          clock: () => future as never,
+        },
+        {
+          authorize: (entry, ctx) =>
+            ctx.mode === "work" &&
+            ctx.projectId !== null &&
+            String(entry.currentVersion.definition.provenance.projectId) === ctx.projectId,
+        },
+      );
+
+      let activeProject = workProjectId;
+      const resolveDesignAssets = async (
+        block: { readonly blockId: unknown; readonly assets?: ReadonlyArray<unknown> | undefined },
+        provenance: Parameters<typeof resolveCanvasDesignAssets>[1],
+        version?: CanvasDesignAssetVersionContext,
+      ) => {
+        if (version === undefined) {
+          return resolveCanvasDesignAssets(block as never, provenance, ports);
+        }
+        const entry = projection.getById(version.canvasId);
+        const isCurrent =
+          entry !== undefined &&
+          String(entry.currentVersion.versionId) === String(version.versionId);
+        if (isCurrent && version.marks !== "recorded") {
+          return resolveCanvasDesignAssets(block as never, provenance, ports);
+        }
+        const recorded = await imageStore.forBlock(
+          String(version.canvasId),
+          String(version.versionId),
+          String(block.blockId),
+        );
+        return resolveCanvasDesignAssets(block as never, provenance, ports, {
+          mode: "compare",
+          ...(recorded === undefined ? {} : { recorded }),
+          clientSupportsMarks: version.legacyClient !== true,
+        });
+      };
+
+      const route = createCanvasRouteHandler({
+        canvasProjection: projection,
+        canvasService,
+        windowAuthorityStore: store,
+        resolveDesignAssets: resolveDesignAssets as never,
+        designRunTickets: new CanvasDesignRunTickets(),
+        projects: {
+          bootstrap: async () => ({
+            active: [
+              {
+                id: workProjectId,
+                name: "Work Project",
+                type: "work",
+                lifecycle: "active",
+                pinned: false,
+                rank: "0/1" as never,
+                version: 1 as never,
+                createdAt: now as never,
+                updatedAt: now as never,
+              } as never,
+            ],
+            archived: [],
+            availability: [],
+            memory: [],
+          }),
+        },
+        activeContextResolver: async () => ({ mode: "work", projectId: activeProject }),
+        now: () => 1,
+      });
+
+      const askAssets = async (versionId: string, blockId: string, marks?: string) => {
+        const suffix = marks === undefined ? "" : `&marks=${marks}`;
+        const response = await route(
+          new Request(
+            `http://127.0.0.1/api/canvas/design-assets?canvasId=${String(workCanvasId)}&versionId=${versionId}&blockId=${blockId}${suffix}`,
+            { method: "GET", headers: { "x-octant-window-capability": windowCapability } },
+          ),
+        );
+        return { status: response?.status, body: JSON.parse((await response?.text()) ?? "{}") };
+      };
+
+      // 1. Superseded v1 with marks=labelled: unchanged kept.png draws, changed hero.png returns changed with no bytes.
+      const v1Labelled = await askAssets(v1Id, "screen", "labelled");
+      expect(v1Labelled.status).toBe(200);
+      expect(v1Labelled.body.assets).toEqual([
+        { assetId: "kept", status: "resolved", mediaType: "image/png", data: b64A },
+        { assetId: "hero", status: "unavailable", reason: "changed" },
+      ]);
+      expect(JSON.stringify(v1Labelled.body)).not.toContain(b64B);
+      expect(JSON.stringify(v1Labelled.body)).not.toContain(b64C);
+
+      // 2. Older client (no marks param) on v1 gets `missing` instead of `changed`.
+      const v1Legacy = await askAssets(v1Id, "screen");
+      expect(v1Legacy.body.assets).toEqual([
+        { assetId: "kept", status: "resolved", mediaType: "image/png", data: b64A },
+        { assetId: "hero", status: "unavailable", reason: "missing" },
+      ]);
+
+      // 3. Unrecorded superseded version draws live with `mark: "unrecorded"` for marked clients, and no mark for legacy.
+      const vUnrecLabelled = await askAssets(vUnrecordedId, "screen", "labelled");
+      expect(vUnrecLabelled.body.assets).toEqual([
+        {
+          assetId: "kept",
+          status: "resolved",
+          mediaType: "image/png",
+          data: b64A,
+          mark: "unrecorded",
+        },
+        {
+          assetId: "hero",
+          status: "resolved",
+          mediaType: "image/png",
+          data: b64C,
+          mark: "unrecorded",
+        },
+      ]);
+      const vUnrecLegacy = await askAssets(vUnrecordedId, "screen");
+      expect(vUnrecLegacy.body.assets[1]).not.toHaveProperty("mark");
+
+      // 4. Newest version (v2) with marks=labelled draws live pngC; with marks=recorded (miniature) withholds pngC as changed.
+      const v2Live = await askAssets(v2Id, "screen", "labelled");
+      expect(v2Live.body.assets[1]).toEqual({
+        assetId: "hero",
+        status: "resolved",
+        mediaType: "image/png",
+        data: b64C,
+      });
+      const v2Miniature = await askAssets(v2Id, "screen", "recorded");
+      expect(v2Miniature.body.assets[1]).toEqual({
+        assetId: "hero",
+        status: "unavailable",
+        reason: "changed",
+      });
+      expect(JSON.stringify(v2Miniature.body)).not.toContain(b64C);
+
+      // 5. HTML file of older version v1 draws unchanged kept.png, withholds replaced hero.png as placeholder.
+      const htmlRes = await route(
+        new Request("http://127.0.0.1/api/canvas/html-file", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            kind: "canvas-html-file",
+            canvasId: String(workCanvasId),
+            versionId: v1Id,
+          }),
+        }),
+      );
+      const htmlBody = JSON.parse((await htmlRes?.text()) ?? "{}") as {
+        readonly kind: string;
+        readonly html?: string;
+      };
+      expect(htmlBody.kind).toBe("ready");
+      expect(htmlBody.html).toContain(b64A);
+      expect(htmlBody.html).not.toContain(b64B);
+      expect(htmlBody.html).not.toContain(b64C);
+
+      // 6. Running prototype page of older version v1 withholds replaced hero.png.
+      const runRes = await route(
+        new Request("http://127.0.0.1/api/canvas/design-run", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": windowCapability,
+          },
+          body: JSON.stringify({
+            canvasId: String(workCanvasId),
+            versionId: v1Id,
+            blockId: "proto",
+          }),
+        }),
+      );
+      const runBody = JSON.parse((await runRes?.text()) ?? "{}") as {
+        readonly kind: string;
+        readonly page?: string;
+      };
+      expect(runBody.kind).toBe("ready");
+      const pageRes = await route(
+        new Request(`http://127.0.0.1${runBody.page ?? ""}`, {
+          method: "GET",
+          headers: { "sec-fetch-dest": "iframe" },
+        }),
+      );
+      const pageHtml = (await pageRes?.text()) ?? "";
+      expect(pageRes?.status).toBe(200);
+      expect(pageHtml).toContain("data:image/svg+xml;base64,");
+      expect(pageHtml).not.toContain(b64B);
+      expect(pageHtml).not.toContain(b64C);
+
+      // 7. Another Project's window is still unauthorized.
+      activeProject = otherWorkProjectId;
+      const unauthorized = await askAssets(v1Id, "screen", "labelled");
+      expect(unauthorized.body).toEqual({ kind: "unauthorized", canvasId: String(workCanvasId) });
+    } finally {
+      connection.close();
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(dbDir, { recursive: true, force: true });
+    }
   });
 
   it("serves a running design once, for one fresh ticket an authorized window asked for", async () => {
@@ -1389,6 +1772,7 @@ describe("canvas routes", () => {
     expect(resolveDesignAssets).toHaveBeenCalledWith(
       expect.objectContaining({ blockId: "checkout" }),
       expect.objectContaining({ mode: "chat", projectId, threadId }),
+      { canvasId, versionId, marks: "labelled" },
     );
 
     // A replayed ticket opens nothing, and the refusal carries the same policy.

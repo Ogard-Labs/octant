@@ -42,6 +42,7 @@ import { copyClaudePageToCanvas } from "../canvas/claudePageCanvasCopy";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "../canvasRoutes";
 import { CanvasEventStore } from "../canvas/canvasEventStore";
 import { markCanvasReader } from "../canvas/canvasOutsideContentMark";
+import { CanvasVersionImageStore } from "../canvas/canvasVersionImages";
 import type { CanvasProjectionEntry } from "../canvas/canvasProjection";
 import { CanvasService, type CanvasServiceDependencies } from "../canvas/canvasService";
 import { CanvasChoiceAnswerService } from "../canvas/canvasChoiceAnswerService";
@@ -73,6 +74,7 @@ import {
 } from "../designSystems/designSystemContext";
 import {
   type CanvasDesignAssetPorts,
+  type CanvasDesignAssetVersionContext,
   readCanvasDesignAssetFile,
   resolveCanvasDesignAssets,
   resolveCanvasShareImages,
@@ -462,11 +464,43 @@ export function wireCanvas(deps: CanvasDependencies) {
       });
     },
   };
-  const resolveDesignAssets = (
+  const canvasVersionImages = new CanvasVersionImageStore({
+    journal: persistence.journal,
+    ports: canvasDesignAssetPorts,
+    canvasExists: (canvasId) =>
+      persistence.canvasProjection.getById(decodeCanvasId(canvasId)) !== undefined,
+    uuid: randomUUID,
+    actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
+  const resolveDesignAssets = async (
     block: Pick<CanvasDesignBlock, "blockId" | "assets">,
     provenance: CanvasProvenance,
-  ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> =>
-    resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    version?: CanvasDesignAssetVersionContext,
+  ): Promise<ReadonlyArray<CanvasDesignAssetResolution>> => {
+    const hasProjectFile = (block.assets ?? []).some(
+      (asset) => asset.source.kind === "project-file",
+    );
+    if (version === undefined || !hasProjectFile) {
+      return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    }
+    const entry = persistence.canvasProjection.getById(version.canvasId);
+    const isCurrent =
+      entry !== undefined && String(entry.currentVersion.versionId) === String(version.versionId);
+    const shouldCompare = !isCurrent || version.marks === "recorded";
+    if (!shouldCompare) {
+      return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts);
+    }
+    const recorded = await canvasVersionImages.forBlock(
+      String(version.canvasId),
+      String(version.versionId),
+      String(block.blockId),
+    );
+    return resolveCanvasDesignAssets(block, provenance, canvasDesignAssetPorts, {
+      mode: "compare",
+      ...(recorded === undefined ? {} : { recorded }),
+      clientSupportsMarks: version.legacyClient !== true,
+    });
+  };
   const resolveShareImages = (definition: Pick<CanvasDefinition, "blocks" | "provenance">) =>
     resolveCanvasShareImages(definition, canvasDesignAssetPorts);
 
@@ -571,6 +605,9 @@ export function wireCanvas(deps: CanvasDependencies) {
         // The replica publish listens on the same seam as the mirror, so
         // every surface's revisions publish the same way.
         void replicaArtifactSync.service?.versionCommitted(version);
+      },
+      onLocalVersionCommitted: (version) => {
+        void canvasVersionImages.record(version);
       },
     },
     {
@@ -1356,6 +1393,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     canvasPublicShareService,
     canvasRoutes,
     canvasService,
+    canvasVersionImages,
     forgetCanvasShareImages,
     replicaArtifactSync,
     resolveCanvasWorkspace,

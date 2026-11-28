@@ -1382,7 +1382,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         resolveSelectedExtensions,
         pinnedExtensionIds,
         threadDesktopDestination,
-        computerUseTools: ({ windowId, thread, destination, ask }) =>
+        computerUseTools: ({ windowId, thread, operationId, destination, ask }) =>
           computerToolsFor(
             decodeComputerUseOwner({
               windowId,
@@ -1395,6 +1395,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
             ask,
             appToolThreadLevel(thread, resolveThreadStrict(String(thread.id))),
+            operationId,
           ),
         spendCeiling,
         terminalProcessPort,

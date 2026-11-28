@@ -70,7 +70,7 @@ it.each(["child", "routine"] as const)(
     await user.click(screen.getByRole("combobox", { name: "Caller" }));
     await user.click(
       await screen.findByRole("option", {
-        name: `${kind === "child" ? "Child" : "Routine"} · Read the daily report`,
+        name: `${kind === "child" ? "Child" : "Automation"} · Read the daily report`,
       }),
     );
     await user.click(screen.getByRole("combobox", { name: "Profile" }));

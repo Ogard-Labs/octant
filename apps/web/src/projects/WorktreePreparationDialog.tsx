@@ -140,7 +140,7 @@ export function WorktreePreparationDialog(props: {
                 setView(undefined);
               }}
               options={[
-                { id: "", label: "This task's checkout" },
+                { id: "", label: "This thread's checkout" },
                 ...children.map((child) => ({
                   id: child.requestId,
                   label: `Child: ${child.task.slice(0, 80)}`,
@@ -165,8 +165,8 @@ export function WorktreePreparationDialog(props: {
               </p>
               <p>{preparation.reason}</p>
               <p>
-                The first agent task waits for setup, or until you Skip. Setup uses task access, has
-                a ten minute limit, and never replays after restart.
+                The first agent turn waits for setup, or until you Skip. Setup uses thread access,
+                has a ten minute limit, and never replays after restart.
               </p>
             </>
           )}

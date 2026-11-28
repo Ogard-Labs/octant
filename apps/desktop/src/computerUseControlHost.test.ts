@@ -416,4 +416,178 @@ describe("Thread-owned computer control", () => {
       await host.close();
     }
   });
+
+  it("marks an empty AXSecureTextField protected even with a plain label, allows typeSecret only on it, and refuses non-secure fields", async () => {
+    let snapshot = 0;
+    let fieldSubrole: string | undefined = "AXSecureTextField";
+    const call = vi.fn(async (name: string) => {
+      const data =
+        name === "list_apps"
+          ? { apps: [{ bundle_id: "com.example.Auth", name: "Auth", pid: 456, running: true }] }
+          : name === "list_windows"
+            ? { windows: [{ window_id: 12, title: "Unlock Keychain" }] }
+            : name === "get_window_state"
+              ? {
+                  snapshot_id: `s${String(++snapshot).padStart(8, "0")}`,
+                  window_title: "Unlock Keychain",
+                  screenshot_width: 100,
+                  screenshot_height: 100,
+                  elements: [
+                    { element_index: 0, role: "AXWindow", label: "Unlock Keychain" },
+                    {
+                      element_index: 4,
+                      role: "AXTextField",
+                      ...(fieldSubrole === undefined ? {} : { subrole: fieldSubrole }),
+                      label: "Code",
+                      parent_index: 0,
+                      frame: { x: 1, y: 1, w: 80, h: 24 },
+                    },
+                    {
+                      element_index: 5,
+                      role: "AXTextField",
+                      label: "Password",
+                      parent_index: 0,
+                      frame: { x: 1, y: 30, w: 80, h: 24 },
+                    },
+                    {
+                      element_index: 6,
+                      role: "AXButton",
+                      subrole: "AXSecureTextField",
+                      label: "Unlock",
+                      parent_index: 0,
+                      frame: { x: 1, y: 60, w: 80, h: 24 },
+                    },
+                  ],
+                }
+              : { ok: true };
+      return {
+        text: "",
+        images: [{ mimeType: "image/png", dataBase64: "AAAA" }],
+        structuredJson: JSON.stringify(data),
+        rawJson: "{}",
+        isError: false,
+        degraded: false,
+      };
+    });
+    const host = createComputerUseControlHost({
+      runtime: async () => ({
+        generation: "generation-1",
+        version: "0.62.1",
+        call,
+        close: async () => {},
+      }),
+    });
+    try {
+      const observed = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Auth",
+          windowId: 12,
+        }),
+      );
+      if (observed.kind !== "observation") throw new Error("Expected observation.");
+      expect(observed.windowTitle).toBe("Unlock Keychain");
+      expect(observed.elements.find((item) => item.index === 4)).toMatchObject({
+        protected: true,
+      });
+
+      // Ordinary type still refuses the empty AXSecureTextField.
+      expect(
+        await host.execute(owner, {
+          operation: "type",
+          observationId: observed.observationId,
+          elementIndex: 4,
+          text: "plain-text",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "protected-field" });
+
+      // A fresh observation is needed because execute() refreshed the window observation.
+      const observedForSecret = await host.execute(
+        owner,
+        decodeComputerControlCommand({
+          operation: "observe",
+          appId: "com.example.Auth",
+          windowId: 12,
+        }),
+      );
+      if (observedForSecret.kind !== "observation") throw new Error("Expected observation.");
+
+      // Non-secure text field labeled "Password" and wrong-role button are both refused.
+      expect(
+        await host.inspectSecretTarget(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 5,
+        }),
+      ).toMatchObject({ kind: "refused", reason: "not-a-password-field" });
+      expect(
+        await host.typeSecret(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 5,
+          text: "never-typed",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "not-a-password-field" });
+      expect(
+        await host.typeSecret(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 6,
+          text: "never-typed",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "not-a-password-field" });
+      expect(call.mock.calls.some(([name]) => name === "type_text")).toBe(false);
+
+      // Inspecting the verified secure field returns its window title without invalidating the observation.
+      expect(
+        await host.inspectSecretTarget(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 4,
+        }),
+      ).toEqual({
+        kind: "secure-target",
+        appId: "com.example.Auth",
+        windowId: 12,
+        windowTitle: "Unlock Keychain",
+      });
+
+      // If the field loses AXSecureTextField before typing (e.g. show-password toggle), typing is refused.
+      fieldSubrole = undefined;
+      expect(
+        await host.typeSecret(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 4,
+          text: "never-typed",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "stale-observation" });
+      expect(call.mock.calls.some(([name]) => name === "type_text")).toBe(false);
+
+      // Restoring AXSecureTextField and typing returns only { kind: "typed" } without a screenshot.
+      fieldSubrole = "AXSecureTextField";
+      const typed = await host.typeSecret(owner, {
+        observationId: observedForSecret.observationId,
+        elementIndex: 4,
+        text: "top-secret-password",
+      });
+      expect(typed).toEqual({ kind: "typed" });
+      expect(call).toHaveBeenCalledWith(
+        "type_text",
+        expect.objectContaining({
+          pid: 456,
+          window_id: 12,
+          delivery_mode: "background",
+          text: "top-secret-password",
+        }),
+        expect.any(AbortSignal),
+      );
+      // The observation is invalidated after typing.
+      expect(
+        await host.typeSecret(owner, {
+          observationId: observedForSecret.observationId,
+          elementIndex: 4,
+          text: "top-secret-password",
+        }),
+      ).toMatchObject({ kind: "refused", reason: "stale-observation" });
+    } finally {
+      await host.close();
+    }
+  });
 });
