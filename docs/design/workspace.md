@@ -2958,9 +2958,13 @@ kinds, labelling the leftover; it adds no authority of its own.
 
 ## Inline questionnaires
 
-An agent can ask for related decisions through the app-owned `ask-user` tool
-in Chat, Work, and Code. A questionnaire belongs in its originating thread,
-with one compact card containing up to four questions.
+An agent can ask for related decisions through the app-owned `ask-user` tool or
+a provider's native question form (Claude Code `AskUserQuestion`, Codex
+`item/tool/requestUserInput`, OpenCode forms, or ACP elicitation) in Chat,
+Work, and Code. Every multi-question ask arrives as one shared questionnaire
+card in its originating thread (up to four questions per card, and up to 32
+options per question without silent clipping at eight) on desktop, web, and
+phone.
 
 A pending question or approval, the `ask-user` card or a provider's own, is
 docked directly above the composer in Chat, Work and Code, outside the
@@ -2968,18 +2972,33 @@ transcript, so a long reply never carries it out of view and the answer sits
 where the person types (maintainer decision, 2026-11-24). The reply that asked
 keeps its waiting status in the transcript, and an answered question's summary
 stays there. The composer is not the answer field: the card keeps its own
-written-answer field and Submit, and the composer keeps queueing messages.
-Each option shows its number, and pressing 1–9 while focus is in the card
-picks that option as a click would; in a questionnaire the keys act within
+written-answer field and sticky Submit footer, and the composer keeps queueing
+messages. Each option shows its number, and pressing 1–9 while focus is in the
+card picks that option as a click would; in a questionnaire the keys act within
 the question that has focus. A key never sends, and digits typed into a text
 field stay text. It creates no Canvas.
 More than four decisions belong in a Canvas [choice block](canvas.md#choice-block),
 which has no question limit; the tool's description tells agents so.
-Each question offers one choice or several choices, optional descriptions,
-and an optional written alternative. Recommendations are labelled and never
-preselected. A person can add a comment alongside their choices by default.
-A provider-native form can explicitly omit this field when its protocol cannot
-return a comment; the host refuses a supplied comment for that exact ask.
+The card opens with an **Input needed** heading (and a question count when
+several questions are asked). Each question shows an optional short `header`,
+its prompt, single or multi-select options with optional descriptions, an
+accent-based selected state, and an always-visible written-answer field when
+custom answers are permitted (including zero-option free-text questions).
+Recommendations — including provider labels carrying a trailing
+`(Recommended)` suffix — are extracted into a quiet **Recommended** pill and
+never preselected. A person can add a comment alongside their choices by
+default. A provider-native form can explicitly omit this field when its
+protocol cannot return a comment; the host refuses a supplied comment for that
+exact ask.
+
+Needs you, Inbox, and Home rows carry the questionnaire summary: actionable
+rows show `"n questions"` and either expand the questionnaire card to answer in
+place or open the thread, while find-only lead and subagent questionnaires show
+`"n questions"` with **Open**. Sidebar and phone thread rows waiting on a
+question show a typed **Input** status rather than a generic attention mark. On
+the phone, one shared questionnaire card serves Work, native harness, Chat, and
+Code, keeps unsent drafts in memory across leaving the thread screen, and lists
+pending questions where the phone lists what needs you.
 
 Choosing an option only edits the draft. **Send answers** submits the complete
 set once; the host validates question and option identities, required answers,
@@ -3032,16 +3051,17 @@ cancelled, and recovered requests cannot resume a dead provider session.
 Answers convey preferences within existing thread authority and never grant
 permissions. Credentials continue through the credential request mechanism.
 
-The tool carries a bounded typed `questionnaire` alongside its existing prompt.
-For example, `{ "prompt": "Choose the exports", "questionnaire": { "questions":
-[{ "id": "formats", "prompt": "Which formats?", "selection": "multiple",
-"options": [{ "id": "pdf", "label": "PDF" }, { "id": "md", "label": "Markdown" }] }] } }`.
+The tool and provider adapters carry a bounded typed `questionnaire` alongside
+the prompt, including optional per-question `header`, option descriptions,
+extracted `recommended` flags, and `allowCustom` settings. For example,
+`{ "prompt": "Choose the exports", "questionnaire": { "questions":
+[{ "id": "formats", "header": "Formats", "prompt": "Which formats?", "selection": "multiple",
+"options": [{ "id": "pdf", "label": "PDF", "recommended": true }, { "id": "md", "label": "Markdown" }] }] } }`.
 The existing answer channel carries a versioned JSON response with question
-IDs, selected option IDs, optional written alternatives, and a comment. The
-tool returns the decoded response to the model. This keeps the existing
-authenticated, thread-scoped answer routes and one-use request identity.
-Provider-native question formats keep their existing adapter contracts; the
-questionnaire capability uses the provider-neutral app tool boundary.
+IDs, selected option IDs, optional written alternatives, and a comment. Each
+provider adapter translates the validated response back into its native reply
+shape once. This keeps the existing authenticated, thread-scoped answer routes
+and one-use request identity.
 
 A Code task's **Worktrees** control (an entry of Environment's Branch row, and
 an entry of the header's More menu when the Project has saved actions) opens its Setup tab beside

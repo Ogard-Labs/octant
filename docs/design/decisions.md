@@ -401,13 +401,16 @@ Status: Partly built. Since: 2026-11-14. Detail: [Provider runtimes: Plan mode a
 
 ### Codex and OpenCode question forms
 
-Codex's and OpenCode's question forms reach the person through Octant's questionnaire (maintainer decision, 2026-11-14).
+Claude Code (`AskUserQuestion`), Codex (`item/tool/requestUserInput`), OpenCode (`form.created` / `question.v2.asked`), ACP elicitation, and native-harness question sets each reach the person as one shared questionnaire card answered once across Chat, Work, and Code on desktop, web, and phone (maintainer decision, 2026-11-14).
 
+- Each provider maps multi-question asks — preserving per-question headers, option descriptions, `(Recommended)` parsing, multi-select, and custom-answer rules without silently truncating at eight options — into one questionnaire and translates the validated `QuestionnaireResponse` back into one native reply.
+- Needs you, Inbox, and Home rows summarize questionnaires as `"n questions"` and answer in place or open the thread; sidebar and phone rows show a typed **Input** status.
 - Under Strict, a question asking for a secret is refused with a message to the model and never shown.
-- Outside Strict, a Codex secret question is shown, answered in a masked field, and the answer goes to the Codex process in memory only; the journal records only that one was given (maintainer decisions, 2026-11-21).
+- Outside Strict, a Codex secret question stays on the masked field path (never entering the journaled questionnaire), and the answer goes to the Codex process in memory only; the journal records only that one was given (maintainer decisions, 2026-11-21).
 - Only the person answers, never an agent acting for them. A subagent takes its parent's Strict value.
+- Live signed-in provider smokes (Claude Code, Codex, OpenCode, ACP) and iOS Simulator verification stay maintainer checks.
 
-Status: Built. Since: 2026-11-14. Detail: [Provider runtimes: Codex](provider-runtimes.md#codex) and [Provider runtimes: OpenCode](provider-runtimes.md#opencode).
+Status: Built. Since: 2026-11-14. Detail: [Workspace: Inline questionnaires](workspace.md#inline-questionnaires), [Provider runtimes: Claude Code](provider-runtimes.md#claude-code), [Codex](provider-runtimes.md#codex), and [OpenCode](provider-runtimes.md#opencode).
 
 ### Codex runs as itself
 
