@@ -152,10 +152,10 @@ export class PendingRequestService {
     ]
       .filter(inThread)
       .sort(
-      (left, right) =>
-        left.requestedAt.localeCompare(right.requestedAt) ||
-        requestKey(left).localeCompare(requestKey(right)),
-    );
+        (left, right) =>
+          left.requestedAt.localeCompare(right.requestedAt) ||
+          requestKey(left).localeCompare(requestKey(right)),
+      );
     return decodePendingRequestList({
       requests: oldestFirst.slice(0, MAX_PENDING_REQUESTS).map((request) => {
         const review =

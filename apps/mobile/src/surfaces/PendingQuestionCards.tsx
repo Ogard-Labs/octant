@@ -55,7 +55,10 @@ export async function listThreadPendingQuestions(
       headers: { accept: PENDING_REQUEST_SERVICE_OFFERS_MEDIA_TYPE },
     });
   let response = await read(`/api/pending-requests?threadId=${encodeURIComponent(threadId)}`);
-  if (response.status === 400) response = await read("/api/pending-requests");
+  // An older host refuses the query: its route with 400, and its remote
+  // listener, which forwards no query on this read, with 404.
+  if (response.status === 400 || response.status === 404)
+    response = await read("/api/pending-requests");
   if (!response.ok) throw new Error("The host's waiting questions could not be read.");
   const body: unknown = await response.json();
   const items =

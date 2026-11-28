@@ -47,7 +47,10 @@ export interface PendingRequestRouteDependencies {
 function threadFilterOf(query: URLSearchParams): string | undefined {
   const keys = [...query.keys()];
   const value = query.get("threadId");
-  return keys.length === 1 && keys[0] === "threadId" && value !== null && /^[A-Za-z0-9-]{1,64}$/.test(value)
+  return keys.length === 1 &&
+    keys[0] === "threadId" &&
+    value !== null &&
+    /^[A-Za-z0-9-]{1,64}$/.test(value)
     ? value
     : undefined;
 }

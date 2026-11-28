@@ -154,7 +154,9 @@ export function pendingQuestionOf(view: ChatThreadView): AgentPendingQuestion | 
   // A provider's single question arrives as a one-question questionnaire with
   // no plain options, so its choices are read from there to be shown.
   const only =
-    question.questionnaire?.questions.length === 1 ? question.questionnaire.questions[0] : undefined;
+    question.questionnaire?.questions.length === 1
+      ? question.questionnaire.questions[0]
+      : undefined;
   const options =
     question.options.length === 0 && only !== undefined
       ? only.options.map((option) => ({ label: option.label, description: option.description }))

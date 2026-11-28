@@ -1307,7 +1307,10 @@ class AgentScreen {
                 ? ""
                 : `\n${String(this.#secret.value.length)} characters typed.`)
             : request.questionnaire !== undefined
-              ? workQuestionnaireText(request.questionnaire, this.#answersTo(workRequestId(request)))
+              ? workQuestionnaireText(
+                  request.questionnaire,
+                  this.#answersTo(workRequestId(request)),
+                )
               : request.options
                   .map((option, index) => String(index + 1) + ". " + option.label)
                   .join("\n") + "\nType an answer, then Enter.");

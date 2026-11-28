@@ -253,7 +253,9 @@ function readQuestionAnswer(
       : undefined;
   if (named !== undefined) {
     const answer = { questionId: question.id, selectedOptionIds: [named.id] };
-    return questionAnswerIsAllowed(question, answer) ? answer : refusal;
+    // One label cannot meet a question that asks for several choices; there
+    // the line stays a written answer, as it was before labels chose.
+    if (questionAnswerIsAllowed(question, answer)) return answer;
   }
   if (!writes) return refusal;
   const answer = {

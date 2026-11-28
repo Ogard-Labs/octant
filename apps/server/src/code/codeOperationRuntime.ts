@@ -8859,8 +8859,9 @@ const MAX_PROVIDER_INPUT_OPTION_BYTES = 1_024;
  * none stays a free-text question.
  */
 function boundProviderInputOptions(options: ReadonlyArray<string>): ReadonlyArray<string> {
-  return options
-    .flatMap((label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? []);
+  return options.flatMap(
+    (label) => boundProviderText(label, MAX_PROVIDER_INPUT_OPTION_BYTES, "") ?? [],
+  );
 }
 
 /**

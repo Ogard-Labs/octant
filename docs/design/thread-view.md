@@ -1485,7 +1485,8 @@ single question) and, in Work, **Dismiss**, which ends the question unanswered
 as the desktop's does. Its unsent draft is kept in memory per request, so it
 survives leaving the thread. In Chat and Code the card reads the thread's own
 waiting requests, narrowed by the host before its cap, so many requests on
-other threads never hide them; a draft is dropped only when a whole list shows
+other threads never hide them (a host from before that read is asked for its
+whole list); a draft is dropped only when a whole list shows
 its request no longer waits. A refusal from a turn still running keeps the
 draft as well. Each sends the answer and the
 version it read through the same request route a window uses, and the host

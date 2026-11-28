@@ -420,7 +420,10 @@ describe("subagent pending requests", () => {
     expect(work).toMatchObject({
       kind: "child-question",
       questionnaire: {
-        questions: [{ id: "fixture", prompt: "Which fixture under [redacted path]" }, { id: "seed" }],
+        questions: [
+          { id: "fixture", prompt: "Which fixture under [redacted path]" },
+          { id: "seed" },
+        ],
       },
     });
     const [code] = await list({ run: agentRun({ mode: "code" }) });

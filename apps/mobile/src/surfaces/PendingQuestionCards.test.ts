@@ -113,14 +113,14 @@ function hostListing(
         reads.push(path);
         const [, query = ""] = path.split("?");
         const threadId = new URLSearchParams(query).get("threadId");
-        // A host from before thread reads refuses every query.
+        // A host from before thread reads refuses every query: its remote
+        // listener, which the phone always goes through, with 404.
         if (threadId !== null && options.refusesThreadReads === true)
-          return Response.json({ code: "invalid" }, { status: 400 });
+          return new Response(null, { status: 404 });
         return Response.json({
           requests: requests.filter(
             (request) =>
-              threadId === null ||
-              (request as { readonly threadId: string }).threadId === threadId,
+              threadId === null || (request as { readonly threadId: string }).threadId === threadId,
           ),
           truncated: options.truncated ?? false,
         });
