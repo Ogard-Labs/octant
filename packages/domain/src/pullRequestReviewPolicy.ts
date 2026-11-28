@@ -1,5 +1,6 @@
 import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -130,9 +131,65 @@ export function authorizePullRequestReviewSettingChange(
     : { allowed: false, reason: "host-person-required" };
 }
 
-/** Stable key for one pull request target on a Project. */
-export function pullRequestReviewTargetKey(target: PullRequestReviewTarget): string {
+/** Legacy `owner/name#number` key used before pull requests carried a GitHub node ID. */
+export function pullRequestReviewLegacyTargetKey(target: PullRequestReviewTarget): string {
   return `${String(target.projectId)}:${String(target.repositoryOwner).toLowerCase()}/${String(target.repositoryName).toLowerCase()}#${target.number}`;
+}
+
+/** Stable node-ID key for one pull request on a Project; survives repository renames and name reuse. */
+export function pullRequestReviewNodeTargetKey(
+  projectId: ProjectId | string,
+  pullRequestNodeId: string,
+): string {
+  return `${String(projectId)}:node:${pullRequestNodeId}`;
+}
+
+export interface ParsedPullRequestReviewLegacyTargetKey {
+  readonly projectId: string;
+  readonly repositoryOwner: string;
+  readonly repositoryName: string;
+  readonly number: number;
+}
+
+/**
+ * Parses a legacy `projectId:owner/name#number` key. Returns `undefined` for
+ * node-ID keys (`projectId:node:…`) or malformed values.
+ */
+export function parsePullRequestReviewLegacyTargetKey(
+  key: string,
+): ParsedPullRequestReviewLegacyTargetKey | undefined {
+  const colon = key.indexOf(":");
+  if (colon <= 0) return undefined;
+  const projectId = key.slice(0, colon);
+  const rest = key.slice(colon + 1);
+  if (rest.startsWith("node:")) return undefined;
+  const slash = rest.indexOf("/");
+  const hash = rest.lastIndexOf("#");
+  if (slash <= 0 || hash <= slash + 1 || hash === rest.length - 1) return undefined;
+  const repositoryOwner = rest.slice(0, slash);
+  const repositoryName = rest.slice(slash + 1, hash);
+  const numberText = rest.slice(hash + 1);
+  if (!/^[1-9]\d*$/.test(numberText)) return undefined;
+  const number = Number(numberText);
+  if (!Number.isSafeInteger(number) || number <= 0) return undefined;
+  return { projectId, repositoryOwner, repositoryName, number };
+}
+
+/**
+ * Stable key for one pull request target on a Project. Uses the linked pull
+ * request's GitHub node ID when known so repository renames keep reviews and
+ * guides and reused repository names never collide; falls back to the legacy
+ * `owner/name#number` coordinate key when no node ID is known.
+ */
+export function pullRequestReviewTargetKey(
+  target: PullRequestReviewTarget,
+  pullRequestNodeId?: string,
+): string {
+  const nodeId = pullRequestNodeId ?? target.pullRequestNodeId;
+  if (nodeId !== undefined) {
+    return pullRequestReviewNodeTargetKey(target.projectId, nodeId);
+  }
+  return pullRequestReviewLegacyTargetKey(target);
 }
 
 export interface ResolveEffectivePullRequestReviewConfigInput {

@@ -33,6 +33,7 @@ import { settleSpendCeilingReservation } from "@octant/domain";
 import { Effect, Schema, Stream } from "effect";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it } from "vitest";
+import { PullRequestLinkService } from "../code/pullRequestLinkService";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -322,16 +323,37 @@ function createHarness(options?: {
     },
   };
 
-  const makeService = () =>
+  const pullRequestLinks = new PullRequestLinkService({
+    journal: rawJournal,
+    uuid,
+    clock: () => NOW,
+  });
+
+  const makeService = (serviceOptions?: { readonly withLinks?: boolean }) =>
     new PullRequestReviewService({
       registry,
       journal,
+      ...(serviceOptions?.withLinks === true ? { pullRequestLinks } : {}),
       authority: {
         canAccessProject: () => true,
-        authorizePullRequest: async () => ({
-          status: "authorized",
-          linkedThreadIds: [String(THREAD_ID)],
-        }),
+        authorizePullRequest: async (_windowId, requestedTarget) => {
+          const link =
+            serviceOptions?.withLinks === true
+              ? pullRequestLinks.resolveLink({
+                  projectId: requestedTarget.projectId,
+                  repositoryOwner: requestedTarget.repositoryOwner,
+                  repositoryName: requestedTarget.repositoryName,
+                  number: requestedTarget.number,
+                })
+              : undefined;
+          return {
+            status: "authorized",
+            linkedThreadIds: [String(THREAD_ID)],
+            ...(link?.pullRequestNodeId === undefined
+              ? {}
+              : { pullRequestNodeId: link.pullRequestNodeId }),
+          };
+        },
       },
       threads: {
         readThread: (id) => (String(id) === String(THREAD_ID) ? thread : undefined),
@@ -361,6 +383,7 @@ function createHarness(options?: {
   return {
     service,
     makeService,
+    pullRequestLinks,
     turnMetrics,
     recordedFindings,
     postedComments,
@@ -1150,6 +1173,252 @@ describe("second-model pull request reviewer service", () => {
       expect(threadView.view.latestReview?.reviewId).toBe(reviewB?.reviewId);
       expect(threadView.view.latestReview?.headSha).toBe(HEAD_2);
       expect(threadView.view.latestReview?.status).toBe("completed");
+    }
+  });
+
+  it("keeps reviews and per-PR settings across a repository rename and never shares them when a different pull request reuses the old repository name", async () => {
+    let currentHead = HEAD_1;
+    const h = createHarness({ currentHeadSha: () => currentHead });
+    const beforeRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const afterRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9",
+      baseRepositoryNodeId: "R_kgDO_app",
+      threadIds: [THREAD_ID],
+    });
+
+    const service = h.makeService({ withLinks: true });
+    await service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await service.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: beforeRename, sendBlockingFindingsToWorker: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const review = await service.reviewPullRequestHead({
+      target: beforeRename,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(review?.status).toBe("completed");
+
+    // Rename acme/app -> acme/application on the same linked PR node ID.
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9",
+      baseRepositoryNodeId: "R_kgDO_app",
+      threadIds: [THREAD_ID],
+    });
+
+    // A different pull request reuses acme/app#9 with a different GitHub node ID.
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_reused9",
+      baseRepositoryNodeId: "R_kgDO_reused",
+      threadIds: [THREAD_ID],
+    });
+
+    const renamedView = await service.queryPullRequestSettings(WINDOW_ID, afterRename, THREAD_ID);
+    expect(renamedView.status).toBe("ok");
+    if (renamedView.status === "ok") {
+      expect(renamedView.view.settings.sendBlockingFindingsToWorker).toBe(true);
+      expect(renamedView.view.latestReview?.reviewId).toBe(review?.reviewId);
+    }
+
+    // Reviewing the same head under the renamed coordinates must deduplicate.
+    expect(
+      await service.reviewPullRequestHead({
+        target: afterRename,
+        threadId: THREAD_ID,
+        headSha: HEAD_1,
+        baseRef: "origin/main",
+        state: "open",
+      }),
+    ).toBeUndefined();
+
+    const reusedView = await service.queryPullRequestSettings(WINDOW_ID, beforeRename, THREAD_ID);
+    expect(reusedView.status).toBe("ok");
+    if (reusedView.status === "ok") {
+      expect(reusedView.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(reusedView.view.latestReview).toBeUndefined();
+    }
+
+    // Replaying from the journal preserves both the renamed PR's history and isolation.
+    const restarted = h.makeService({ withLinks: true });
+    const replayedRenamed = await restarted.queryPullRequestSettings(
+      WINDOW_ID,
+      afterRename,
+      THREAD_ID,
+    );
+    expect(replayedRenamed.status).toBe("ok");
+    if (replayedRenamed.status === "ok") {
+      expect(replayedRenamed.view.settings.sendBlockingFindingsToWorker).toBe(true);
+      expect(replayedRenamed.view.latestReview?.reviewId).toBe(review?.reviewId);
+    }
+    const replayedReused = await restarted.queryPullRequestSettings(
+      WINDOW_ID,
+      beforeRename,
+      THREAD_ID,
+    );
+    expect(replayedReused.status).toBe("ok");
+    if (replayedReused.status === "ok") {
+      expect(replayedReused.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(replayedReused.view.latestReview).toBeUndefined();
+    }
+
+    // A new head on the renamed PR continues cleanly.
+    currentHead = HEAD_2;
+    const nextReview = await restarted.reviewPullRequestHead({
+      target: afterRename,
+      threadId: THREAD_ID,
+      headSha: HEAD_2,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(nextReview?.status).toBe("completed");
+  });
+
+  it("replays legacy coordinate-keyed reviews and per-PR settings across a rename without version conflicts and isolates reused names", async () => {
+    let currentHead = HEAD_1;
+    const h = createHarness({ currentHeadSha: () => currentHead });
+    const beforeRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const afterRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+
+    // Record legacy PR settings and a legacy review BEFORE any PR link or node ID exists.
+    await h.service.updateProjectSettings(
+      WINDOW_ID,
+      { projectId: PROJECT_ID, enabled: true, route: REVIEWER_ROUTE, postSummaryComment: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    await h.service.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: beforeRename, sendBlockingFindingsToWorker: true },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    const legacyReview = await h.service.reviewPullRequestHead({
+      target: beforeRename,
+      threadId: THREAD_ID,
+      headSha: HEAD_1,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(legacyReview?.status).toBe("completed");
+
+    // Link is created, backfilled with a GitHub node ID, and renamed to acme/application#9.
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_legacy9",
+      baseRepositoryNodeId: "R_kgDO_legacy",
+      threadIds: [THREAD_ID],
+    });
+    // Another PR later reuses acme/app#9 with a distinct node ID.
+    await h.pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_new9",
+      baseRepositoryNodeId: "R_kgDO_new",
+      threadIds: [THREAD_ID],
+    });
+
+    const replayed = h.makeService({ withLinks: true });
+    const renamedView = await replayed.queryPullRequestSettings(WINDOW_ID, afterRename, THREAD_ID);
+    expect(renamedView.status).toBe("ok");
+    if (renamedView.status === "ok") {
+      expect(renamedView.view.settings.sendBlockingFindingsToWorker).toBe(true);
+      expect(renamedView.view.latestReview?.reviewId).toBe(legacyReview?.reviewId);
+    }
+
+    const reusedView = await replayed.queryPullRequestSettings(WINDOW_ID, beforeRename, THREAD_ID);
+    expect(reusedView.status).toBe("ok");
+    if (reusedView.status === "ok") {
+      expect(reusedView.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(reusedView.view.latestReview).toBeUndefined();
+    }
+
+    // Updating settings and reviewing a new head on the renamed PR after legacy replay must not hit version conflicts.
+    const updated = await replayed.updatePullRequestSettings(
+      WINDOW_ID,
+      { target: afterRename, sendBlockingFindingsToWorker: false },
+      "local-window",
+      LOCAL_ACTOR,
+    );
+    expect(updated.status).toBe("ok");
+    currentHead = HEAD_2;
+    const secondReview = await replayed.reviewPullRequestHead({
+      target: afterRename,
+      threadId: THREAD_ID,
+      headSha: HEAD_2,
+      baseRef: "origin/main",
+      state: "open",
+    });
+    expect(secondReview?.status).toBe("completed");
+
+    const afterRestart = h.makeService({ withLinks: true });
+    const finalView = await afterRestart.queryPullRequestSettings(
+      WINDOW_ID,
+      afterRename,
+      THREAD_ID,
+    );
+    expect(finalView.status).toBe("ok");
+    if (finalView.status === "ok") {
+      expect(finalView.view.settings.sendBlockingFindingsToWorker).toBe(false);
+      expect(finalView.view.latestReview?.reviewId).toBe(secondReview?.reviewId);
     }
   });
 });

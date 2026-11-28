@@ -21,6 +21,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PullRequestLinkService } from "../code/pullRequestLinkService";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -214,14 +215,34 @@ function harness(options: {
     activation: () => ({ installed: true, trusted: true, enabled: writerEnabled }),
     writer: createBundledPullRequestGuideWriter(),
   });
-  const make = () =>
+  const pullRequestLinks = new PullRequestLinkService({
+    journal,
+    uuid,
+    clock: () => NOW,
+  });
+  const make = (serviceOptions?: { readonly withLinks?: boolean }) =>
     new PullRequestGuideService({
       journal,
+      ...(serviceOptions?.withLinks === true ? { pullRequestLinks } : {}),
       authority: {
-        authorizePullRequest: async () => ({
-          status: "authorized",
-          linkedThreadIds: [String(THREAD_ID)],
-        }),
+        authorizePullRequest: async (_windowId, requestedTarget) => {
+          const link =
+            serviceOptions?.withLinks === true
+              ? pullRequestLinks.resolveLink({
+                  projectId: requestedTarget.projectId,
+                  repositoryOwner: requestedTarget.repositoryOwner,
+                  repositoryName: requestedTarget.repositoryName,
+                  number: requestedTarget.number,
+                })
+              : undefined;
+          return {
+            status: "authorized",
+            linkedThreadIds: [String(THREAD_ID)],
+            ...(link?.pullRequestNodeId === undefined
+              ? {}
+              : { pullRequestNodeId: link.pullRequestNodeId }),
+          };
+        },
         threadPullRequest: async () => ({ status: "resolved", target: TARGET }),
       },
       readThread: () => makeThread(),
@@ -233,6 +254,8 @@ function harness(options: {
     });
   return {
     make,
+    journal,
+    pullRequestLinks,
     turns,
     spend,
     recordedUsage,
@@ -595,6 +618,175 @@ describe("review guides", () => {
     expect(read.status).toBe("read");
     if (read.status === "read") {
       expect(read.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
+  });
+
+  it("keeps a guide across a repository rename and never shares it when a different pull request reuses the old repository name", async () => {
+    const { make, pullRequestLinks } = harness({ route: ROUTE });
+    const beforeRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const afterRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9",
+      baseRepositoryNodeId: "R_kgDO_app",
+      threadIds: [THREAD_ID],
+    });
+
+    const service = make({ withLinks: true });
+    const started = await service.writeForPerson(WINDOW_ID, beforeRename);
+    if (started.status !== "started") throw new Error("expected guide run");
+    expect((await started.done).status).toBe("recorded");
+
+    // Rename acme/app -> acme/application on the same linked PR node ID.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_app9",
+      baseRepositoryNodeId: "R_kgDO_app",
+      threadIds: [THREAD_ID],
+    });
+
+    // A different pull request later reuses the old name acme/app#9 with a distinct node ID.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_reused9",
+      baseRepositoryNodeId: "R_kgDO_reused",
+      threadIds: [THREAD_ID],
+    });
+
+    const readAfterRename = await service.read(WINDOW_ID, afterRename, HEAD_1);
+    expect(readAfterRename.status).toBe("read");
+    if (readAfterRename.status === "read") {
+      expect(readAfterRename.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
+
+    const readReused = await service.read(WINDOW_ID, beforeRename, HEAD_1);
+    expect(readReused.status).toBe("read");
+    if (readReused.status === "read") {
+      expect(readReused.view.guide).toBeUndefined();
+    }
+
+    // Replaying from the journal preserves both the renamed PR's guide and isolation.
+    const restarted = make({ withLinks: true });
+    const replayedRenamed = await restarted.read(WINDOW_ID, afterRename, HEAD_1);
+    expect(replayedRenamed.status).toBe("read");
+    if (replayedRenamed.status === "read") {
+      expect(replayedRenamed.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
+    const replayedReused = await restarted.read(WINDOW_ID, beforeRename, HEAD_1);
+    expect(replayedReused.status).toBe("read");
+    if (replayedReused.status === "read") {
+      expect(replayedReused.view.guide).toBeUndefined();
+    }
+  });
+
+  it("replays a legacy coordinate-keyed guide across a repository rename, allows rewrites without a version conflict, and isolates reused names", async () => {
+    const replies = { current: GUIDE_REPLY };
+    const { make, pullRequestLinks, head } = harness({ route: ROUTE, replies });
+    const beforeRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("app"),
+      number: 9,
+    };
+    const afterRename: PullRequestReviewTarget = {
+      projectId: PROJECT_ID,
+      repositoryOwner: Schema.decodeUnknownSync(GithubRepositoryOwner)("acme"),
+      repositoryName: Schema.decodeUnknownSync(GithubRepositoryName)("application"),
+      number: 9,
+    };
+
+    // Write a legacy guide BEFORE any PR link or node ID exists (stored under `${projectId}:acme/app#9`).
+    const legacyService = make({ withLinks: false });
+    const legacyRun = await legacyService.writeForPerson(WINDOW_ID, beforeRename);
+    if (legacyRun.status !== "started") throw new Error("expected legacy guide run");
+    expect((await legacyRun.done).status).toBe("recorded");
+
+    // Link is created, backfilled with a GitHub node ID, and later renamed to acme/application#9.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      threadIds: [THREAD_ID],
+    });
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "application",
+      lookupRepositoryOwner: "acme",
+      lookupRepositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_legacy9",
+      baseRepositoryNodeId: "R_kgDO_legacy",
+      threadIds: [THREAD_ID],
+    });
+    // Another PR later reuses acme/app#9 with a different node ID.
+    await pullRequestLinks.recordObservation({
+      projectId: PROJECT_ID,
+      repositoryOwner: "acme",
+      repositoryName: "app",
+      number: 9,
+      pullRequestNodeId: "PR_kwDO_new9",
+      baseRepositoryNodeId: "R_kgDO_new",
+      threadIds: [THREAD_ID],
+    });
+
+    const replayed = make({ withLinks: true });
+    const renamedRead = await replayed.read(WINDOW_ID, afterRename, HEAD_1);
+    expect(renamedRead.status).toBe("read");
+    if (renamedRead.status === "read") {
+      expect(renamedRead.view.guide?.stops[0]?.title).toBe("Guests are let in");
+    }
+
+    const reusedRead = await replayed.read(WINDOW_ID, beforeRename, HEAD_1);
+    expect(reusedRead.status).toBe("read");
+    if (reusedRead.status === "read") {
+      expect(reusedRead.view.guide).toBeUndefined();
+    }
+
+    // Rewriting the guide after upgrading to the node-ID aggregate must succeed without version conflicts.
+    head.current = HEAD_2;
+    replies.current = JSON.stringify({
+      stops: [
+        {
+          title: "Post-rename guide stop",
+          why: "Written on the stable node-ID aggregate after replaying legacy history.",
+          needsDecision: false,
+          anchors: [],
+        },
+      ],
+    });
+    const rewrite = await replayed.writeForPerson(WINDOW_ID, afterRename);
+    if (rewrite.status !== "started") throw new Error("expected post-rename rewrite");
+    expect((await rewrite.done).status).toBe("recorded");
+
+    const afterRestart = make({ withLinks: true });
+    const latestRead = await afterRestart.read(WINDOW_ID, afterRename, HEAD_2);
+    expect(latestRead.status).toBe("read");
+    if (latestRead.status === "read") {
+      expect(latestRead.view.guide?.stops[0]?.title).toBe("Post-rename guide stop");
     }
   });
 });
