@@ -8,8 +8,6 @@ import { ExtensionPackageManifest, ExtensionProvenance } from "@octant/contracts
  * only in the one component each holds.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * Manifest facts only the host states: the identity it stores the package
  * under, where it came from, what its content hashes to, whether anyone
@@ -27,7 +25,7 @@ const {
   source: _source,
   provenance: _provenance,
   ...authoredManifestFields
-} = ExtensionPackageManifest.from.fields;
+} = ExtensionPackageManifest.fields;
 const {
   reviewed: _reviewed,
   reviewedAt: _reviewedAt,
@@ -39,8 +37,8 @@ const {
 /** The manifest an author writes: a package manifest without the host's facts. */
 export const AuthoredPackageManifest = Schema.Struct({
   ...authoredManifestFields,
-  provenance: Schema.optional(Schema.Struct(authoredProvenanceFields).annotations(strict)),
-}).annotations(strict);
+  provenance: Schema.optional(Schema.Struct(authoredProvenanceFields)),
+});
 
 /** Whether a package document's manifest states a fact only the host may state. */
 export function writesHostAssignedField(document: unknown): boolean {

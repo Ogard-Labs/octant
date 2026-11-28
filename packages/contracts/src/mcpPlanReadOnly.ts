@@ -1,13 +1,12 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The providers whose own MCP servers Octant starts or withholds per session,
  * and so whose servers a person may let into Plan.
  */
-export const McpPlanServerProvider = Schema.Literal("claude", "codex", "opencode");
+export const McpPlanServerProvider = Schema.Literals(["claude", "codex", "opencode"]);
 export type McpPlanServerProvider = typeof McpPlanServerProvider.Type;
 
 /**
@@ -15,12 +14,12 @@ export type McpPlanServerProvider = typeof McpPlanServerProvider.Type;
  * matched exactly when a Plan session starts; Claude Code and OpenCode build
  * tool names from it, so it holds no `__` separator and no whitespace.
  */
-export const McpPlanServerName = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(128),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-  Schema.filter((value) => !value.includes("__"), {
-    message: () => "An MCP server name has no double underscore.",
+export const McpPlanServerName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  Schema.makeFilter((value) => !value.includes("__"), {
+    message: "An MCP server name has no double underscore.",
   }),
 );
 export type McpPlanServerName = typeof McpPlanServerName.Type;
@@ -29,15 +28,15 @@ export type McpPlanServerName = typeof McpPlanServerName.Type;
 export const McpPlanReadOnlyServer = Schema.Struct({
   provider: McpPlanServerProvider,
   serverName: McpPlanServerName,
-}).annotations(strict);
+});
 export type McpPlanReadOnlyServer = typeof McpPlanReadOnlyServer.Type;
 
 export const McpPlanReadOnlySettings = Schema.Struct({
   kind: Schema.Literal("mcp-plan-read-only-settings"),
-  servers: Schema.Array(McpPlanReadOnlyServer).pipe(Schema.maxItems(256)),
+  servers: Schema.Array(McpPlanReadOnlyServer).check(Schema.isMaxLength(256)),
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type McpPlanReadOnlySettings = typeof McpPlanReadOnlySettings.Type;
 
 /**
@@ -51,20 +50,20 @@ export const McpPlanReadOnlyCommand = Schema.Struct({
   serverName: McpPlanServerName,
   readOnly: Schema.Boolean,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type McpPlanReadOnlyCommand = typeof McpPlanReadOnlyCommand.Type;
 
-export const McpPlanReadOnlyResult = Schema.Union(
+export const McpPlanReadOnlyResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("mcp-plan-read-only-settings"),
     settings: McpPlanReadOnlySettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("mcp-plan-read-only-refused"),
-    reason: Schema.Literal("malformed", "stale-version", "unauthorized", "no-change"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["malformed", "stale-version", "unauthorized", "no-change"]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type McpPlanReadOnlyResult = typeof McpPlanReadOnlyResult.Type;
 
 export const MCP_PLAN_READ_ONLY_AGGREGATE_TYPE = "mcp-plan-read-only";
@@ -75,9 +74,18 @@ export const McpServerPlanReadOnlySet = Schema.Struct({
   provider: McpPlanServerProvider,
   serverName: McpPlanServerName,
   readOnly: Schema.Boolean,
-}).annotations(strict);
+});
 export type McpServerPlanReadOnlySet = typeof McpServerPlanReadOnlySet.Type;
 
-export const decodeMcpPlanReadOnlySettings = Schema.decodeUnknownSync(McpPlanReadOnlySettings);
-export const decodeMcpPlanReadOnlyCommand = Schema.decodeUnknownSync(McpPlanReadOnlyCommand);
-export const decodeMcpPlanReadOnlyResult = Schema.decodeUnknownSync(McpPlanReadOnlyResult);
+export const decodeMcpPlanReadOnlySettings = Schema.decodeUnknownSync(
+  McpPlanReadOnlySettings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeMcpPlanReadOnlyCommand = Schema.decodeUnknownSync(
+  McpPlanReadOnlyCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeMcpPlanReadOnlyResult = Schema.decodeUnknownSync(
+  McpPlanReadOnlyResult,
+  STRICT_DECODE_OPTIONS,
+);

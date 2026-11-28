@@ -1,10 +1,9 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ChatThreadId } from "./chat";
 import { UtcTimestamp } from "./events";
 import { ImageInputCapability, ProviderInstanceId, ProviderModelId } from "./providers";
 import { SettingsDeepLink } from "./settings";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * One provider/model pair a Navigator role is pinned to. Selecting a pair
@@ -15,7 +14,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const NavigatorAssistantModelRef = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type NavigatorAssistantModelRef = typeof NavigatorAssistantModelRef.Type;
 
 /**
@@ -32,7 +31,7 @@ export type NavigatorAssistantModelRef = typeof NavigatorAssistantModelRef.Type;
 export const NavigatorAssistantSettings = Schema.Struct({
   defaultProvider: Schema.optional(NavigatorAssistantModelRef),
   visionReviewer: Schema.optional(NavigatorAssistantModelRef),
-}).annotations(strict);
+});
 export type NavigatorAssistantSettings = typeof NavigatorAssistantSettings.Type;
 
 /**
@@ -40,10 +39,10 @@ export type NavigatorAssistantSettings = typeof NavigatorAssistantSettings.Type;
  * the way every other Navigator fact is: a renderer never reconstructs a turn.
  */
 export const NavigatorAssistantTranscriptMessage = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+  role: Schema.Literals(["user", "assistant"]),
   text: Schema.String,
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type NavigatorAssistantTranscriptMessage = typeof NavigatorAssistantTranscriptMessage.Type;
 
 /**
@@ -60,17 +59,20 @@ export type NavigatorAssistantTranscriptMessage = typeof NavigatorAssistantTrans
  * host currently knows it — `unknown` is not `supported`.
  */
 export const NavigatorAssistantSnapshot = Schema.Struct({
-  status: Schema.Literal("ready", "unconfigured"),
+  status: Schema.Literals(["ready", "unconfigured"]),
   settingsTarget: SettingsDeepLink,
   threadId: Schema.NullOr(ChatThreadId),
   transcript: Schema.Array(NavigatorAssistantTranscriptMessage),
   defaultProvider: Schema.NullOr(NavigatorAssistantModelRef),
   imageInput: ImageInputCapability,
   visionReviewer: Schema.NullOr(NavigatorAssistantModelRef),
-}).annotations(strict);
+});
 export type NavigatorAssistantSnapshot = typeof NavigatorAssistantSnapshot.Type;
 
-const NavigatorAssistantPrompt = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000));
+const NavigatorAssistantPrompt = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(100_000),
+);
 
 /**
  * Renderer commands for the Navigator surface. `send-message` appends a user
@@ -82,13 +84,13 @@ const NavigatorAssistantPrompt = Schema.NonEmptyTrimmedString.pipe(Schema.maxLen
 export const NavigatorAssistantCommand = Schema.Struct({
   kind: Schema.Literal("send-message"),
   prompt: NavigatorAssistantPrompt,
-}).annotations(strict);
+});
 export type NavigatorAssistantCommand = typeof NavigatorAssistantCommand.Type;
 
 export const NavigatorAssistantCommandResult = Schema.Struct({
   kind: Schema.Literal("message-sent"),
   snapshot: NavigatorAssistantSnapshot,
-}).annotations(strict);
+});
 export type NavigatorAssistantCommandResult = typeof NavigatorAssistantCommandResult.Type;
 
 /**
@@ -96,10 +98,10 @@ export type NavigatorAssistantCommandResult = typeof NavigatorAssistantCommandRe
  * deep link so the renderer can offer the exact fix instead of a dead end.
  */
 export const NavigatorAssistantFailure = Schema.Struct({
-  category: Schema.Literal("unconfigured", "invalid", "conflict", "unavailable"),
-  message: Schema.NonEmptyTrimmedString,
+  category: Schema.Literals(["unconfigured", "invalid", "conflict", "unavailable"]),
+  message: NonEmptyTrimmedString,
   settingsTarget: Schema.optional(SettingsDeepLink),
-}).annotations(strict);
+});
 export type NavigatorAssistantFailure = typeof NavigatorAssistantFailure.Type;
 
 /**
@@ -115,7 +117,7 @@ export type NavigatorAssistantFailure = typeof NavigatorAssistantFailure.Type;
 export const NavigatorAssistantThreadBound = Schema.Struct({
   threadId: ChatThreadId,
   boundAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type NavigatorAssistantThreadBound = typeof NavigatorAssistantThreadBound.Type;
 
 /** Journaled Navigator event names. Append-only wire facts; never renamed. */
@@ -125,18 +127,29 @@ export const NAVIGATOR_ASSISTANT_EVENT_NAMES = {
 
 export const decodeNavigatorAssistantThreadBound = Schema.decodeUnknownSync(
   NavigatorAssistantThreadBound,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNavigatorAssistantModelRef = Schema.decodeUnknownSync(
   NavigatorAssistantModelRef,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNavigatorAssistantSettings = Schema.decodeUnknownSync(
   NavigatorAssistantSettings,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeNavigatorAssistantSnapshot = Schema.decodeUnknownSync(
   NavigatorAssistantSnapshot,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNavigatorAssistantCommand = Schema.decodeUnknownSync(NavigatorAssistantCommand);
+export const decodeNavigatorAssistantCommand = Schema.decodeUnknownSync(
+  NavigatorAssistantCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeNavigatorAssistantCommandResult = Schema.decodeUnknownSync(
   NavigatorAssistantCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeNavigatorAssistantFailure = Schema.decodeUnknownSync(NavigatorAssistantFailure);
+export const decodeNavigatorAssistantFailure = Schema.decodeUnknownSync(
+  NavigatorAssistantFailure,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import { HubMemberId, HubMemberRole } from "./hubAndSpokes";
@@ -6,12 +7,12 @@ import { ProjectId } from "./projects";
 import { PermissionPersistence, ProviderExecutionPolicy } from "./providers";
 import { WorkAccess, WorkThreadId } from "./workThreads";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+const digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
 const base64Url = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(maxLength),
-    Schema.pattern(/^[A-Za-z0-9_-]+$/),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(maxLength),
+    Schema.isPattern(/^[A-Za-z0-9_-]+$/),
   );
 
 /** Request headers an owner device adds to a signed member request. */
@@ -24,41 +25,47 @@ export const OWNER_IDENTITY_KEY_HEADER = "x-octant-owner-identity-key";
  * challenge is the SHA-256 of that text (base64url). Either way the host
  * issued the challenge for exactly this method, path, and body.
  */
-export const OwnerUnlockProof = Schema.Union(
+export const OwnerUnlockProof = Schema.Union([
   Schema.Struct({
     shape: Schema.Literal("raw"),
-    challengeId: Schema.UUID,
+    challengeId: GuidString,
     signature: base64Url(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     shape: Schema.Literal("webauthn"),
-    challengeId: Schema.UUID,
+    challengeId: GuidString,
     authenticatorData: base64Url(1_024),
     clientDataJson: base64Url(2_048),
     signature: base64Url(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type OwnerUnlockProof = typeof OwnerUnlockProof.Type;
-export const decodeOwnerUnlockProof = Schema.decodeUnknownSync(OwnerUnlockProof);
+export const decodeOwnerUnlockProof = Schema.decodeUnknownSync(
+  OwnerUnlockProof,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const OwnerActionMethod = Schema.Literal("POST", "PUT");
+export const OwnerActionMethod = Schema.Literals(["POST", "PUT"]);
 
 /** An owner device asks the host for a challenge bound to the one action it is about to take. */
 export const OwnerChallengeRequest = Schema.Struct({
   method: OwnerActionMethod,
-  path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  path: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   bodyHash: digest,
-}).annotations(strict);
+});
 export type OwnerChallengeRequest = typeof OwnerChallengeRequest.Type;
-export const decodeOwnerChallengeRequest = Schema.decodeUnknownSync(OwnerChallengeRequest);
+export const decodeOwnerChallengeRequest = Schema.decodeUnknownSync(
+  OwnerChallengeRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const OwnerChallenge = Schema.Struct({
-  challengeId: Schema.UUID,
+  challengeId: GuidString,
   nonce: base64Url(64),
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  expiresAt: PositiveInt,
+});
 export type OwnerChallenge = typeof OwnerChallenge.Type;
-export const decodeOwnerChallenge = Schema.decodeUnknownSync(OwnerChallenge);
+export const decodeOwnerChallenge = Schema.decodeUnknownSync(OwnerChallenge, STRICT_DECODE_OPTIONS);
 
 /**
  * One device to add to a host's owner list. The person confirmed its name and
@@ -70,40 +77,48 @@ export const OwnerCandidate = Schema.Struct({
   memberId: HubMemberId,
   identityKeyFingerprint: digest,
   unlockKeyFingerprint: digest,
-}).annotations(strict);
+});
 export type OwnerCandidate = typeof OwnerCandidate.Type;
 
 export const OwnerAdditionRequest = Schema.Struct({
-  owners: Schema.Array(OwnerCandidate).pipe(Schema.minItems(1), Schema.maxItems(16)),
-}).annotations(strict);
+  owners: Schema.Array(OwnerCandidate).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+});
 export type OwnerAdditionRequest = typeof OwnerAdditionRequest.Type;
-export const decodeOwnerAdditionRequest = Schema.decodeUnknownSync(OwnerAdditionRequest);
+export const decodeOwnerAdditionRequest = Schema.decodeUnknownSync(
+  OwnerAdditionRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const OwnerRemovalRequest = Schema.Struct({ memberId: HubMemberId }).annotations(strict);
+export const OwnerRemovalRequest = Schema.Struct({ memberId: HubMemberId });
 export type OwnerRemovalRequest = typeof OwnerRemovalRequest.Type;
-export const decodeOwnerRemovalRequest = Schema.decodeUnknownSync(OwnerRemovalRequest);
+export const decodeOwnerRemovalRequest = Schema.decodeUnknownSync(
+  OwnerRemovalRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** An owner as a window or another owner device sees it: names and fingerprints, never keys. */
 export const OwnerListEntry = Schema.Struct({
   memberId: HubMemberId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   identityKeyFingerprint: digest,
   unlockKeyFingerprint: digest,
-}).annotations(strict);
+});
 export type OwnerListEntry = typeof OwnerListEntry.Type;
 
-export const ConfirmNewMembersRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
-  strict,
-);
+export const ConfirmNewMembersRequest = Schema.Struct({ enabled: Schema.Boolean });
 export type ConfirmNewMembersRequest = typeof ConfirmNewMembersRequest.Type;
-export const decodeConfirmNewMembersRequest = Schema.decodeUnknownSync(ConfirmNewMembersRequest);
+export const decodeConfirmNewMembersRequest = Schema.decodeUnknownSync(
+  ConfirmNewMembersRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window turns on or off the owner unlock a paired phone or web client's merge needs on this host. */
-export const PairedMergeUnlockRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
-  strict,
-);
+export const PairedMergeUnlockRequest = Schema.Struct({ enabled: Schema.Boolean });
 export type PairedMergeUnlockRequest = typeof PairedMergeUnlockRequest.Type;
-export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(PairedMergeUnlockRequest);
+export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(
+  PairedMergeUnlockRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A window chooses whether each runtime approval answer from an owner device
@@ -112,30 +127,40 @@ export const decodePairedMergeUnlockRequest = Schema.decodeUnknownSync(PairedMer
  */
 export const OwnerApprovalAnswerUnlockRequest = Schema.Struct({
   enabled: Schema.Boolean,
-}).annotations(strict);
+});
 export type OwnerApprovalAnswerUnlockRequest = typeof OwnerApprovalAnswerUnlockRequest.Type;
 export const decodeOwnerApprovalAnswerUnlockRequest = Schema.decodeUnknownSync(
   OwnerApprovalAnswerUnlockRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const HubRoleRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
+export const HubRoleRequest = Schema.Struct({ enabled: Schema.Boolean });
 export type HubRoleRequest = typeof HubRoleRequest.Type;
-export const decodeHubRoleRequest = Schema.decodeUnknownSync(HubRoleRequest);
+export const decodeHubRoleRequest = Schema.decodeUnknownSync(HubRoleRequest, STRICT_DECODE_OPTIONS);
 
-export const OwnerJoinCodeRequest = Schema.Struct({ owner: Schema.Boolean }).annotations(strict);
-export const decodeOwnerJoinCodeRequest = Schema.decodeUnknownSync(OwnerJoinCodeRequest);
+export const OwnerJoinCodeRequest = Schema.Struct({ owner: Schema.Boolean });
+export const decodeOwnerJoinCodeRequest = Schema.decodeUnknownSync(
+  OwnerJoinCodeRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const OwnerMemberRequest = Schema.Struct({ memberId: HubMemberId }).annotations(strict);
-export const decodeOwnerMemberRequest = Schema.decodeUnknownSync(OwnerMemberRequest);
+export const OwnerMemberRequest = Schema.Struct({ memberId: HubMemberId });
+export const decodeOwnerMemberRequest = Schema.decodeUnknownSync(
+  OwnerMemberRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const NewMemberAlertId = Schema.UUID.pipe(Schema.brand("NewMemberAlertId"));
+export const NewMemberAlertId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("NewMemberAlertId"),
+);
 export type NewMemberAlertId = typeof NewMemberAlertId.Type;
 
 /** A spoke's record that a newer roster added a member; the hub cannot hide or write one. */
 export const NewMemberAlert = Schema.Struct({
   alertId: NewMemberAlertId,
   memberId: HubMemberId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   role: HubMemberRole,
   identityKeyFingerprint: digest,
   raisedAt: UtcTimestamp,
@@ -145,41 +170,47 @@ export const NewMemberAlert = Schema.Struct({
    * decision, 2026-11-19). Absent when none is known yet, and on alerts raised
    * before addresses were kept.
    */
-  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
-}).annotations(strict);
+  privateAddress: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ),
+});
 export type NewMemberAlert = typeof NewMemberAlert.Type;
-export const decodeNewMemberAlert = Schema.decodeUnknownSync(NewMemberAlert);
+export const decodeNewMemberAlert = Schema.decodeUnknownSync(NewMemberAlert, STRICT_DECODE_OPTIONS);
 
 /** A host's record that a device paired directly with it, kept until a window clears it. */
 export const PairedDeviceAlert = Schema.Struct({
   alertId: NewMemberAlertId,
-  deviceId: Schema.UUID,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  deviceId: GuidString,
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   deviceKeyFingerprint: digest,
   raisedAt: UtcTimestamp,
   /** Its address on the private network when it paired; kept here, never in the journal. */
-  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
-}).annotations(strict);
+  privateAddress: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ),
+});
 export type PairedDeviceAlert = typeof PairedDeviceAlert.Type;
 
 /** A device that paired directly with this host, as every device connected to it reads it. */
 export const PairedDeviceAlertView = Schema.Struct({
   kind: Schema.Literal("paired-device"),
   ...PairedDeviceAlert.fields,
-}).annotations(strict);
+});
 
 /** A spoke's new-member alert as every device connected to that host reads it. */
 export const HubMemberAlertView = Schema.Struct({
   kind: Schema.Literal("hub-member"),
   alertId: NewMemberAlertId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   role: HubMemberRole,
   identityKeyFingerprint: digest,
   raisedAt: UtcTimestamp,
-  privateAddress: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
-}).annotations(strict);
+  privateAddress: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ),
+});
 
-export const NewDeviceAlertView = Schema.Union(HubMemberAlertView, PairedDeviceAlertView);
+export const NewDeviceAlertView = Schema.Union([HubMemberAlertView, PairedDeviceAlertView]);
 export type NewDeviceAlertView = typeof NewDeviceAlertView.Type;
 
 /** Every device connected to a host reads its new-device alerts here. */
@@ -194,21 +225,27 @@ export const NEW_DEVICE_ALERTS_PATH = "/api/new-device-alerts";
 export const NewDeviceAlertList = Schema.Struct({
   alerts: Schema.Array(NewDeviceAlertView),
   removesHere: Schema.Boolean,
-}).annotations(strict);
+});
 export type NewDeviceAlertList = typeof NewDeviceAlertList.Type;
-export const decodeNewDeviceAlertList = Schema.decodeUnknownSync(NewDeviceAlertList);
+export const decodeNewDeviceAlertList = Schema.decodeUnknownSync(
+  NewDeviceAlertList,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A member a host holds status-only under Confirm new members until an owner or its window confirms it. */
 export const HeldMember = Schema.Struct({
   memberId: HubMemberId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   role: HubMemberRole,
   identityKeyFingerprint: digest,
-}).annotations(strict);
+});
 export type HeldMember = typeof HeldMember.Type;
 
-export const OwnerAlertRequest = Schema.Struct({ alertId: NewMemberAlertId }).annotations(strict);
-export const decodeOwnerAlertRequest = Schema.decodeUnknownSync(OwnerAlertRequest);
+export const OwnerAlertRequest = Schema.Struct({ alertId: NewMemberAlertId });
+export const decodeOwnerAlertRequest = Schema.decodeUnknownSync(
+  OwnerAlertRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Carries the id of an open administration session beside the signed request (decision H17). */
 export const OWNER_SESSION_HEADER = "x-octant-owner-session";
@@ -221,76 +258,84 @@ export const OWNER_SESSION_HEADER = "x-octant-owner-session";
  */
 export const OwnerAdministrationSession = Schema.Struct({
   sessionId: base64Url(64),
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  expiresAt: PositiveInt,
+});
 export type OwnerAdministrationSession = typeof OwnerAdministrationSession.Type;
 export const decodeOwnerAdministrationSession = Schema.decodeUnknownSync(
   OwnerAdministrationSession,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
  * What a posture belongs to: a Code Project's remembered default, or one Code
  * thread's own posture, or a Work thread's access level.
  */
-const CodeOwnerPostureSubject = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("code-thread"), threadId: CodeThreadId }).annotations(
-    strict,
-  ),
-);
+const CodeOwnerPostureSubject = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("project"), projectId: ProjectId }),
+  Schema.Struct({ kind: Schema.Literal("code-thread"), threadId: CodeThreadId }),
+]);
 const WorkOwnerPostureSubject = Schema.Struct({
   kind: Schema.Literal("work-thread"),
   threadId: WorkThreadId,
-}).annotations(strict);
-export const OwnerPostureSubject = Schema.Union(CodeOwnerPostureSubject, WorkOwnerPostureSubject);
+});
+export const OwnerPostureSubject = Schema.Union([CodeOwnerPostureSubject, WorkOwnerPostureSubject]);
 export type OwnerPostureSubject = typeof OwnerPostureSubject.Type;
 
 export const OwnerPostureReadRequest = Schema.Struct({
   subject: Schema.optional(OwnerPostureSubject),
-}).annotations(strict);
+});
 export type OwnerPostureReadRequest = typeof OwnerPostureReadRequest.Type;
-export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(OwnerPostureReadRequest);
+export const decodeOwnerPostureReadRequest = Schema.decodeUnknownSync(
+  OwnerPostureReadRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A posture as a host reports it. `persistence` is absent where the host has none to report. */
-export const OwnerPosture = Schema.Union(
+export const OwnerPosture = Schema.Union([
   Schema.Struct({
     subject: CodeOwnerPostureSubject,
     posture: ProviderExecutionPolicy,
     version: digest,
     autoApprove: Schema.optional(Schema.Boolean),
     persistence: Schema.optional(PermissionPersistence),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     subject: WorkOwnerPostureSubject,
     posture: WorkAccess,
     version: digest,
-  }).annotations(strict),
-);
+  }),
+]);
 export type OwnerPosture = typeof OwnerPosture.Type;
 
-export const decodeOwnerPosture = Schema.decodeUnknownSync(OwnerPosture);
+export const decodeOwnerPosture = Schema.decodeUnknownSync(OwnerPosture, STRICT_DECODE_OPTIONS);
 export const OwnerPostureTarget = Schema.Struct({
   title: Schema.NonEmptyString,
   posture: OwnerPosture,
-}).annotations(strict);
+});
 export type OwnerPostureTarget = typeof OwnerPostureTarget.Type;
-export const decodeOwnerPostureTargets = Schema.decodeUnknownSync(Schema.Array(OwnerPostureTarget));
+export const decodeOwnerPostureTargets = Schema.decodeUnknownSync(
+  Schema.Array(OwnerPostureTarget),
+  STRICT_DECODE_OPTIONS,
+);
 
-export const OwnerPostureChangeRequest = Schema.Union(
+export const OwnerPostureChangeRequest = Schema.Union([
   Schema.Struct({
     expectedVersion: digest,
     subject: CodeOwnerPostureSubject,
     posture: ProviderExecutionPolicy,
     persistence: PermissionPersistence,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     expectedVersion: digest,
     subject: WorkOwnerPostureSubject,
     posture: WorkAccess,
-  }).annotations(strict),
-);
+  }),
+]);
 export type OwnerPostureChangeRequest = typeof OwnerPostureChangeRequest.Type;
-export const decodeOwnerPostureChangeRequest = Schema.decodeUnknownSync(OwnerPostureChangeRequest);
+export const decodeOwnerPostureChangeRequest = Schema.decodeUnknownSync(
+  OwnerPostureChangeRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A Code thread's wake switches as a host reports them to an owner device.
@@ -303,16 +348,20 @@ export const OwnerThreadWake = Schema.Struct({
   messageWake: Schema.Boolean,
   coordinatorWake: Schema.optional(Schema.Boolean),
   version: digest,
-}).annotations(strict);
+});
 export type OwnerThreadWake = typeof OwnerThreadWake.Type;
-export const decodeOwnerThreadWake = Schema.decodeUnknownSync(OwnerThreadWake);
+export const decodeOwnerThreadWake = Schema.decodeUnknownSync(
+  OwnerThreadWake,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const OwnerThreadWakeReadRequest = Schema.Struct({
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type OwnerThreadWakeReadRequest = typeof OwnerThreadWakeReadRequest.Type;
 export const decodeOwnerThreadWakeReadRequest = Schema.decodeUnknownSync(
   OwnerThreadWakeReadRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -320,7 +369,7 @@ export const decodeOwnerThreadWakeReadRequest = Schema.decodeUnknownSync(
  * worker's Wake for coordinator. Making or stopping a coordinator is not one
  * of them; that stays a person's choice at a window on the host.
  */
-export const OwnerThreadWakeSwitch = Schema.Literal("message-wake", "coordinator-wake");
+export const OwnerThreadWakeSwitch = Schema.Literals(["message-wake", "coordinator-wake"]);
 export type OwnerThreadWakeSwitch = typeof OwnerThreadWakeSwitch.Type;
 
 export const OwnerThreadWakeChangeRequest = Schema.Struct({
@@ -328,15 +377,17 @@ export const OwnerThreadWakeChangeRequest = Schema.Struct({
   expectedVersion: digest,
   switch: OwnerThreadWakeSwitch,
   wake: Schema.Boolean,
-}).annotations(strict);
+});
 export type OwnerThreadWakeChangeRequest = typeof OwnerThreadWakeChangeRequest.Type;
 export const decodeOwnerThreadWakeChangeRequest = Schema.decodeUnknownSync(
   OwnerThreadWakeChangeRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
-const credentialName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.pattern(/^[A-Za-z0-9._:-]+$/),
+const credentialName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9._:-]+$/),
 );
 
 /**
@@ -348,27 +399,32 @@ const credentialName = Schema.NonEmptyTrimmedString.pipe(
 export const OwnerCredentialReceiveRequest = Schema.Struct({
   sourceMemberId: HubMemberId,
   targetCredentialName: credentialName,
-}).annotations(strict);
+});
 export type OwnerCredentialReceiveRequest = typeof OwnerCredentialReceiveRequest.Type;
 export const decodeOwnerCredentialReceiveRequest = Schema.decodeUnknownSync(
   OwnerCredentialReceiveRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** The sending host's half: the owner unlocks on the host that holds the key and names its own provider row and the ticket the receiver issued. */
 export const OwnerCredentialCopyRequest = Schema.Struct({
   targetMemberId: HubMemberId,
   sourceCredentialName: credentialName,
-  ticketId: Schema.UUID,
-}).annotations(strict);
+  ticketId: GuidString,
+});
 export type OwnerCredentialCopyRequest = typeof OwnerCredentialCopyRequest.Type;
 export const decodeOwnerCredentialCopyRequest = Schema.decodeUnknownSync(
   OwnerCredentialCopyRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** What travels from the sending host to the receiving one, over the pinned member link. The ticket, not the sender, names the row that stores it. The value is a secret and is never journaled. */
 export const CredentialTransfer = Schema.Struct({
-  ticketId: Schema.UUID,
-  value: Schema.NonEmptyString.pipe(Schema.maxLength(8_192)),
-}).annotations(strict);
+  ticketId: GuidString,
+  value: Schema.NonEmptyString.check(Schema.isMaxLength(8_192)),
+});
 export type CredentialTransfer = typeof CredentialTransfer.Type;
-export const decodeCredentialTransfer = Schema.decodeUnknownSync(CredentialTransfer);
+export const decodeCredentialTransfer = Schema.decodeUnknownSync(
+  CredentialTransfer,
+  STRICT_DECODE_OPTIONS,
+);

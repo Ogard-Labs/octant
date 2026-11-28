@@ -525,7 +525,7 @@ async function takeEvents(
   count: number,
 ): Promise<ReadonlyArray<ProviderRuntimeEvent>> {
   return Effect.runPromise(
-    Stream.runCollect(Stream.unwrapScoped(connection.subscribe).pipe(Stream.take(count))),
+    Stream.runCollect(Stream.unwrap(connection.subscribe).pipe(Stream.take(count))),
   ).then((chunk) => [...chunk]);
 }
 
@@ -910,7 +910,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
       const f = fixture(input);
       const scope = await Effect.runPromise(Scope.make());
       const started = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           makeCodexDriver(f.options({ environment }))
             .acquire({ instanceId, projectRoot })
             .pipe(
@@ -927,9 +927,9 @@ describe("Codex driver probe and runtime lifecycle", () => {
         ),
       );
       await Effect.runPromise(Scope.close(scope, Exit.void));
-      if (started._tag === "Right") return { outcome: "started" };
+      if (started._tag === "Success") return { outcome: "started" };
       expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
-      return { outcome: "refused", failure: started.left };
+      return { outcome: "refused", failure: started.failure };
     };
     const refusal = (result: Awaited<ReturnType<typeof start>>): ProviderFailure | undefined =>
       result.outcome === "refused" ? result.failure : undefined;
@@ -1149,11 +1149,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
     const first = await Effect.runPromise(Scope.make());
     const second = await Effect.runPromise(Scope.make());
     const third = await Effect.runPromise(Scope.make());
-    const open = (
-      scope: Scope.CloseableScope,
-      policy: ProviderExecutionPolicy,
-      id: typeof sessionId,
-    ) =>
+    const open = (scope: Scope.Closeable, policy: ProviderExecutionPolicy, id: typeof sessionId) =>
       Effect.runPromise(
         driver.acquire({ instanceId, projectRoot }).pipe(
           Effect.flatMap((connection) =>
@@ -1209,7 +1205,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
     const registry = new ProviderRuntimeRegistry();
     const f = fixture();
     const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
-    const scopes: Scope.CloseableScope[] = [];
+    const scopes: Scope.Closeable[] = [];
     const open = async (id: typeof sessionId, strict: boolean | undefined) => {
       const scope = await Effect.runPromise(Scope.make());
       scopes.push(scope);
@@ -1302,7 +1298,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
     try {
       await startSession(acquired.connection, sessionId, "plan");
       const widened = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           acquired.connection.start({
             sessionId: secondSessionId,
             modelId: "gpt-5.4" as never,
@@ -1310,8 +1306,8 @@ describe("Codex driver probe and runtime lifecycle", () => {
           }),
         ),
       );
-      expect(widened._tag).toBe("Left");
-      if (widened._tag === "Left") expect(widened.left.category).toBe("unauthorized");
+      expect(widened._tag).toBe("Failure");
+      if (widened._tag === "Failure") expect(widened.failure.category).toBe("unauthorized");
       expect(f.startCount()).toBe(1);
     } finally {
       await acquired.close();
@@ -3100,7 +3096,7 @@ describe("Codex thread and turn lifecycle", () => {
       const first = await acquireConnection(driver);
       await startSession(first.connection);
       const terminal = Effect.runPromise(
-        Stream.runCollect(Stream.unwrapScoped(first.connection.subscribe)),
+        Stream.runCollect(Stream.unwrap(first.connection.subscribe)),
       ).then((events) => [...events]);
       await Effect.runPromise(
         first.connection.send({ sessionId, prompt: "break transport", attachments: [], tools: [] }),
@@ -4118,9 +4114,12 @@ describe("Codex execution authority and approvals", () => {
         "code",
       );
       const result = await Effect.runPromise(
-        Effect.either(acquired.connection.start(windowsStrictStart)),
+        Effect.result(acquired.connection.start(windowsStrictStart)),
       );
-      expect(result).toMatchObject({ _tag: "Left", left: { category: "incompatible", message } });
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { category: "incompatible", message },
+      });
       expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
       await acquired.close();
     }
@@ -4160,11 +4159,11 @@ describe("Codex execution authority and approvals", () => {
       "code",
     );
     const result = await Effect.runPromise(
-      Effect.either(acquired.connection.start(windowsStrictStart)),
+      Effect.result(acquired.connection.start(windowsStrictStart)),
     );
     expect(result).toMatchObject({
-      _tag: "Left",
-      left: {
+      _tag: "Failure",
+      failure: {
         category: "incompatible",
         message: expect.stringMatching(/Update Codex to 0\.169\.0/u),
       },
@@ -4266,7 +4265,7 @@ describe("Codex execution authority and approvals", () => {
     expect(f.startCount()).toBe(2);
     // A connection leased for one cannot then serve the other.
     const refused = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         first.connection.start({
           sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000063"),
           modelId: "gpt-5.4" as never,
@@ -4275,7 +4274,7 @@ describe("Codex execution authority and approvals", () => {
         }),
       ),
     );
-    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unauthorized");
+    expect(refused._tag === "Failure" ? refused.failure.category : undefined).toBe("unauthorized");
     await first.close();
     await second.close();
   });
@@ -4678,11 +4677,11 @@ describe("Codex execution authority and approvals", () => {
       }),
     );
     const refused = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
       ),
     );
-    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+    expect(refused._tag === "Failure" ? refused.failure.category : undefined).toBe("unsupported");
     expect(f.calls.some(({ method }) => method === "review/start")).toBe(false);
     await acquired.close();
   });
@@ -5138,7 +5137,7 @@ describe("Codex execution authority and approvals", () => {
     ]);
 
     const terminal = Promise.race([
-      Effect.runPromise(Stream.runCollect(Stream.unwrapScoped(acquired.connection.subscribe))).then(
+      Effect.runPromise(Stream.runCollect(Stream.unwrap(acquired.connection.subscribe))).then(
         (chunk) => [...chunk],
       ),
       new Promise<ReadonlyArray<ProviderRuntimeEvent>>((resolveTimeout) =>
@@ -6668,7 +6667,7 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
 
     const adopt = (nativeSessionId: string, id = sessionId) =>
       Effect.runPromise(
-        Effect.either(
+        Effect.result(
           sessions.adopt({
             instanceId,
             projectRoot,
@@ -6681,8 +6680,8 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       );
     const adopted = await adopt("person-1");
     expect(adopted).toMatchObject({
-      _tag: "Right",
-      right: {
+      _tag: "Success",
+      success: {
         driverKind: "codex",
         value: "person-1",
         adopted: true,
@@ -6701,8 +6700,8 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
 
     expect(await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).toEqual([]);
     expect(await adopt("person-1", secondSessionId)).toMatchObject({
-      _tag: "Left",
-      left: { message: "That Codex session already belongs to an Octant thread." },
+      _tag: "Failure",
+      failure: { message: "That Codex session already belongs to an Octant thread." },
     });
 
     // A release for another Octant session leaves the claim; this one's gives it back.
@@ -6729,7 +6728,7 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
     if (sessions === undefined) throw new Error("Codex offers no sessions.");
     const adopt = (nativeSessionId: string) =>
       Effect.runPromise(
-        Effect.either(
+        Effect.result(
           sessions.adopt({
             instanceId,
             projectRoot,
@@ -6742,14 +6741,14 @@ describe("Codex sessions begun outside Octant, native copies, and skill and plug
       );
     for (const nativeSessionId of ["person-elsewhere", "octant-1", "../escape"])
       expect(await adopt(nativeSessionId)).toMatchObject({
-        _tag: "Left",
-        left: { category: "stale-resume" },
+        _tag: "Failure",
+        failure: { category: "stale-resume" },
       });
 
     // The journal records an Octant thread holding it, so it is neither offered nor taken up.
     expect(await adopt("person-held")).toMatchObject({
-      _tag: "Left",
-      left: { message: "That Codex session already belongs to an Octant thread." },
+      _tag: "Failure",
+      failure: { message: "That Codex session already belongs to an Octant thread." },
     });
     expect(
       (await Effect.runPromise(sessions.list({ instanceId, projectRoot }))).map(

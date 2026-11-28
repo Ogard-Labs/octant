@@ -8,14 +8,14 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasDefinition, CanvasId, CanvasVersionId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const ARTIFACT_BUNDLE_FORMAT = "octant.artifact-bundle/1" as const;
 
@@ -28,21 +28,21 @@ export const ArtifactBundleHeader = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   sequence: PositiveInt,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   mode: OctantMode,
   projectId: ProjectId,
   hostId: HostId,
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ArtifactBundleHeader = typeof ArtifactBundleHeader.Type;
 
 export const ArtifactBundle = Schema.Struct({
   octant: ArtifactBundleHeader,
   definition: CanvasDefinition,
-}).annotations(strict);
+});
 export type ArtifactBundle = typeof ArtifactBundle.Type;
 
-export const decodeArtifactBundle = Schema.decodeUnknownSync(ArtifactBundle);
+export const decodeArtifactBundle = Schema.decodeUnknownSync(ArtifactBundle, STRICT_DECODE_OPTIONS);
 
 /**
  * The bundle as the mirror writes it.

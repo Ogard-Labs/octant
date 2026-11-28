@@ -1,4 +1,10 @@
 import { Schema } from "effect";
+import {
+  GuidString,
+  NonEmptyTrimmedString,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { CodeCheckoutId, CodeFileId, CodeProjectFilePath, CodeThreadId, CodeDigest } from "./code";
 import { ProjectId } from "./projects";
 import type { ProviderToolDefinition } from "./providers";
@@ -17,8 +23,6 @@ import type { ProviderToolDefinition } from "./providers";
  * reads, never journaled.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 export const MAX_CODE_LANGUAGE_DIAGNOSTICS = 1_000;
 export const MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH = 2_048;
 export const MAX_CODE_LANGUAGE_DEFINITION_TARGETS = 64;
@@ -30,145 +34,152 @@ const scope = { threadId: CodeThreadId, checkoutId: CodeCheckoutId, fileId: Code
 
 /** Zero-based line and UTF-16 character offset, as the editor counts them. */
 export const CodeLanguagePosition = Schema.Struct({
-  line: Schema.Int.pipe(Schema.between(0, MAX_POSITION)),
-  character: Schema.Int.pipe(Schema.between(0, MAX_POSITION)),
-}).annotations(strict);
+  line: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_POSITION })),
+  character: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_POSITION })),
+});
 export type CodeLanguagePosition = typeof CodeLanguagePosition.Type;
 
 export const CodeLanguageRange = Schema.Struct({
   start: CodeLanguagePosition,
   end: CodeLanguagePosition,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      ({ start, end }) =>
-        end.line > start.line || (end.line === start.line && end.character >= start.character),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    ({ start, end }) =>
+      end.line > start.line || (end.line === start.line && end.character >= start.character),
+  ),
+);
 export type CodeLanguageRange = typeof CodeLanguageRange.Type;
 
 export const CodeLanguageEditFile = Schema.Struct({
   path: CodeProjectFilePath,
   fileId: CodeFileId,
   identity: Schema.Struct({
-    device: Schema.NonEmptyTrimmedString,
-    inode: Schema.NonEmptyTrimmedString,
+    device: NonEmptyTrimmedString,
+    inode: NonEmptyTrimmedString,
   }),
   digest: CodeDigest,
-  before: Schema.String.pipe(Schema.maxLength(256 * 1024)),
-  after: Schema.String.pipe(Schema.maxLength(256 * 1024)),
-}).annotations(strict);
+  before: Schema.String.check(Schema.isMaxLength(256 * 1024)),
+  after: Schema.String.check(Schema.isMaxLength(256 * 1024)),
+});
 export type CodeLanguageEditFile = typeof CodeLanguageEditFile.Type;
 
 export const CodeLanguageEditPreview = Schema.Struct({
-  title: Schema.String.pipe(Schema.maxLength(256)),
-  files: Schema.Array(CodeLanguageEditFile).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  title: Schema.String.check(Schema.isMaxLength(256)),
+  files: Schema.Array(CodeLanguageEditFile).check(Schema.isMaxLength(16)),
+});
 export type CodeLanguageEditPreview = typeof CodeLanguageEditPreview.Type;
 
-export const CodeIntelligenceFeature = Schema.Literal(
+export const CodeIntelligenceFeature = Schema.Literals([
   "completion",
   "hover",
   "signature",
   "symbols",
   "formatting",
-);
+]);
 export type CodeIntelligenceFeature = typeof CodeIntelligenceFeature.Type;
 export const CodeIntelligenceItem = Schema.Struct({
-  label: Schema.String.pipe(Schema.maxLength(512)),
-  text: Schema.optional(Schema.String.pipe(Schema.maxLength(16_384))),
-  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(8_192))),
-  kind: Schema.optional(Schema.Int.pipe(Schema.between(1, 26))),
+  label: Schema.String.check(Schema.isMaxLength(512)),
+  text: Schema.optional(Schema.String.check(Schema.isMaxLength(16_384))),
+  detail: Schema.optional(Schema.String.check(Schema.isMaxLength(8_192))),
+  kind: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 26 }))),
   range: Schema.optional(CodeLanguageRange),
   parameters: Schema.optional(
-    Schema.Array(Schema.String.pipe(Schema.maxLength(512))).pipe(Schema.maxItems(64)),
+    Schema.Array(Schema.String.check(Schema.isMaxLength(512))).check(Schema.isMaxLength(64)),
   ),
-}).annotations(strict);
+});
 export type CodeIntelligenceItem = typeof CodeIntelligenceItem.Type;
 export const CodeIntelligenceAnswer = Schema.Struct({
   status: Schema.Literal("intelligence"),
   feature: CodeIntelligenceFeature,
   ...scope,
-  documentVersion: Schema.Int.pipe(Schema.positive()),
-  documentRevision: Schema.UUID,
-  items: Schema.Array(CodeIntelligenceItem).pipe(Schema.maxItems(256)),
-  activeSignature: Schema.optional(Schema.Int.pipe(Schema.between(0, 255))),
-  activeParameter: Schema.optional(Schema.Int.pipe(Schema.between(0, 63))),
+  documentVersion: PositiveInt,
+  documentRevision: GuidString,
+  items: Schema.Array(CodeIntelligenceItem).check(Schema.isMaxLength(256)),
+  activeSignature: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 255 })),
+  ),
+  activeParameter: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 63 }))),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeIntelligenceAnswer = typeof CodeIntelligenceAnswer.Type;
 
-export const CodeLanguageReadRequest = Schema.Union(
+export const CodeLanguageReadRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("intelligence"),
     feature: CodeIntelligenceFeature,
     formatting: Schema.optional(
       Schema.Struct({
-        tabSize: Schema.Int.pipe(Schema.between(1, 8)),
+        tabSize: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 })),
         insertSpaces: Schema.Boolean,
-      }).annotations(strict),
+      }),
     ),
     ...scope,
     position: CodeLanguagePosition,
-    expectedVersion: Schema.Int.pipe(Schema.positive()),
-    expectedRevision: Schema.UUID,
-  }).annotations(strict),
+    expectedVersion: PositiveInt,
+    expectedRevision: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("rename"),
     ...scope,
     position: CodeLanguagePosition,
-    newName: Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(256),
-      Schema.filter((name) => !name.includes("\r") && !name.includes("\n") && !name.includes("\0")),
+    newName: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(256),
+      Schema.makeFilter(
+        (name) => !name.includes("\r") && !name.includes("\n") && !name.includes("\0"),
+      ),
     ),
-    expectedVersion: Schema.Int.pipe(Schema.positive()),
-    expectedRevision: Schema.UUID,
-  }).annotations(strict),
+    expectedVersion: PositiveInt,
+    expectedRevision: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("quick-fixes"),
     ...scope,
     position: CodeLanguagePosition,
-    expectedVersion: Schema.Int.pipe(Schema.positive()),
-    expectedRevision: Schema.UUID,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("diagnostics"), ...scope }).annotations(strict),
+    expectedVersion: PositiveInt,
+    expectedRevision: GuidString,
+  }),
+  Schema.Struct({ kind: Schema.Literal("diagnostics"), ...scope }),
   Schema.Struct({
     kind: Schema.Literal("definition"),
     ...scope,
     position: CodeLanguagePosition,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("capabilities"), ...scope }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("capabilities"), ...scope }),
   Schema.Struct({
     kind: Schema.Literal("references"),
     ...scope,
     position: CodeLanguagePosition,
     includeDeclaration: Schema.Boolean,
-    expectedVersion: Schema.Int.pipe(Schema.positive()),
-    expectedRevision: Schema.UUID,
-  }).annotations(strict),
-);
+    expectedVersion: PositiveInt,
+    expectedRevision: GuidString,
+  }),
+]);
 export type CodeLanguageReadRequest = typeof CodeLanguageReadRequest.Type;
 
-export const CodeLanguageDiagnosticSeverity = Schema.Literal(
+export const CodeLanguageDiagnosticSeverity = Schema.Literals([
   "error",
   "warning",
   "information",
   "hint",
-);
+]);
 export type CodeLanguageDiagnosticSeverity = typeof CodeLanguageDiagnosticSeverity.Type;
 
 export const CodeLanguageDiagnostic = Schema.Struct({
   path: CodeProjectFilePath,
   range: CodeLanguageRange,
   severity: CodeLanguageDiagnosticSeverity,
-  message: Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH)),
+  message: Schema.String.check(Schema.isMaxLength(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH)),
   /**
    * The label the server gives its diagnostics, such as `typescript`. A label
    * is a name, never a location, so a path separator is refused.
    */
-  source: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64), Schema.pattern(/^[^/\\]+$/)),
-}).annotations(strict);
+  source: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.isPattern(/^[^/\\]+$/),
+  ),
+});
 export type CodeLanguageDiagnostic = typeof CodeLanguageDiagnostic.Type;
 
 /**
@@ -177,17 +188,17 @@ export type CodeLanguageDiagnostic = typeof CodeLanguageDiagnostic.Type;
  * person learns a definition exists, never where on the host it is or what it
  * says.
  */
-export const CodeLanguageDefinitionTarget = Schema.Union(
+export const CodeLanguageDefinitionTarget = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("checkout-location"),
     path: CodeProjectFilePath,
     range: CodeLanguageRange,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("outside-checkout"),
-    label: Schema.Literal("bundled-library", "elsewhere"),
-  }).annotations(strict),
-);
+    label: Schema.Literals(["bundled-library", "elsewhere"]),
+  }),
+]);
 export type CodeLanguageDefinitionTarget = typeof CodeLanguageDefinitionTarget.Type;
 
 /**
@@ -196,7 +207,7 @@ export type CodeLanguageDefinitionTarget = typeof CodeLanguageDefinitionTarget.T
  * unchanged. A component that is installed but not effective reads as
  * `no-language-server`, since a disabled component contributes nothing.
  */
-export const CodeLanguageRefusalReason = Schema.Literal(
+export const CodeLanguageRefusalReason = Schema.Literals([
   "thread-inactive",
   "checkout-unavailable",
   "checkout-mismatch",
@@ -211,17 +222,21 @@ export const CodeLanguageRefusalReason = Schema.Literal(
   "plan-read-only",
   "local-host-required",
   "approval-required",
-);
+]);
 export type CodeLanguageRefusalReason = typeof CodeLanguageRefusalReason.Type;
 
 /** A state the person can wait out or retry, not a refusal. */
-export const CodeLanguageUnavailableReason = Schema.Literal("starting", "crashed", "timed-out");
+export const CodeLanguageUnavailableReason = Schema.Literals(["starting", "crashed", "timed-out"]);
 export type CodeLanguageUnavailableReason = typeof CodeLanguageUnavailableReason.Type;
 
-export const CodeLanguageReferenceSupport = Schema.Literal("supported", "unsupported", "unknown");
+export const CodeLanguageReferenceSupport = Schema.Literals([
+  "supported",
+  "unsupported",
+  "unknown",
+]);
 export type CodeLanguageReferenceSupport = typeof CodeLanguageReferenceSupport.Type;
 
-export const CodeLanguageReadResult = Schema.Union(
+export const CodeLanguageReadResult = Schema.Union([
   CodeIntelligenceAnswer,
   Schema.Struct({
     status: Schema.Literal("capabilities"),
@@ -229,27 +244,29 @@ export const CodeLanguageReadResult = Schema.Union(
     references: CodeLanguageReferenceSupport,
     rename: Schema.optional(CodeLanguageReferenceSupport),
     quickFixes: Schema.optional(CodeLanguageReferenceSupport),
-    intelligence: Schema.optional(Schema.Array(CodeIntelligenceFeature).pipe(Schema.maxItems(5))),
-  }).annotations(strict),
+    intelligence: Schema.optional(
+      Schema.Array(CodeIntelligenceFeature).check(Schema.isMaxLength(5)),
+    ),
+  }),
   Schema.Struct({
     status: Schema.Literal("edit-previews"),
     ...scope,
-    documentVersion: Schema.Int.pipe(Schema.positive()),
-    documentRevision: Schema.UUID,
-    previews: Schema.Array(CodeLanguageEditPreview).pipe(Schema.maxItems(16)),
-  }).annotations(strict),
+    documentVersion: PositiveInt,
+    documentRevision: GuidString,
+    previews: Schema.Array(CodeLanguageEditPreview).check(Schema.isMaxLength(16)),
+  }),
   Schema.Struct({
     status: Schema.Literal("edit-unavailable"),
-    reason: Schema.Literal("unsafe-edit", "unsaved-edits", "invalid-edit", "too-large"),
-  }).annotations(strict),
+    reason: Schema.Literals(["unsafe-edit", "unsaved-edits", "invalid-edit", "too-large"]),
+  }),
   Schema.Struct({
     status: Schema.Literal("references"),
     ...scope,
-    documentVersion: Schema.Int.pipe(Schema.positive()),
-    documentRevision: Schema.UUID,
-    targets: Schema.Array(CodeLanguageDefinitionTarget).pipe(
-      Schema.maxItems(MAX_CODE_LANGUAGE_REFERENCES),
-      Schema.filter(
+    documentVersion: PositiveInt,
+    documentRevision: GuidString,
+    targets: Schema.Array(CodeLanguageDefinitionTarget).check(
+      Schema.isMaxLength(MAX_CODE_LANGUAGE_REFERENCES),
+      Schema.makeFilter(
         (targets) =>
           new Set(
             targets
@@ -259,37 +276,37 @@ export const CodeLanguageReadResult = Schema.Union(
       ),
     ),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unsupported"),
-    capability: Schema.Literal("references", "rename", "quick-fixes", "intelligence"),
-    support: Schema.Literal("unsupported", "unknown"),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),
+    capability: Schema.Literals(["references", "rename", "quick-fixes", "intelligence"]),
+    support: Schema.Literals(["unsupported", "unknown"]),
+  }),
+  Schema.Struct({ status: Schema.Literal("stale") }),
   Schema.Struct({
     status: Schema.Literal("diagnostics"),
     ...scope,
-    diagnostics: Schema.Array(CodeLanguageDiagnostic).pipe(
-      Schema.maxItems(MAX_CODE_LANGUAGE_DIAGNOSTICS),
+    diagnostics: Schema.Array(CodeLanguageDiagnostic).check(
+      Schema.isMaxLength(MAX_CODE_LANGUAGE_DIAGNOSTICS),
     ),
     truncated: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("definition"),
     ...scope,
-    targets: Schema.Array(CodeLanguageDefinitionTarget).pipe(
-      Schema.maxItems(MAX_CODE_LANGUAGE_DEFINITION_TARGETS),
+    targets: Schema.Array(CodeLanguageDefinitionTarget).check(
+      Schema.isMaxLength(MAX_CODE_LANGUAGE_DEFINITION_TARGETS),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: CodeLanguageUnavailableReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeLanguageRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeLanguageReadResult = typeof CodeLanguageReadResult.Type;
 
 /**
@@ -300,7 +317,9 @@ export type CodeLanguageReadResult = typeof CodeLanguageReadResult.Type;
  */
 export const MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH = 5 * 1024 * 1024;
 
-const documentText = Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH));
+const documentText = Schema.String.check(
+  Schema.isMaxLength(MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH),
+);
 
 /**
  * What the editor has open, so the server analyses the person's text rather
@@ -311,44 +330,43 @@ const documentText = Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DOCUM
  * Text lives in memory for as long as the document is open and is never
  * written to disk.
  */
-export const CodeLanguageDocumentRequest = Schema.Union(
+export const CodeLanguageDocumentRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("open"),
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
     path: CodeProjectFilePath,
     text: documentText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change"),
     ...scope,
     text: documentText,
-    expectedRevision: Schema.optional(Schema.UUID),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("close"), ...scope }).annotations(strict),
-);
+    expectedRevision: Schema.optional(GuidString),
+  }),
+  Schema.Struct({ kind: Schema.Literal("close"), ...scope }),
+]);
 export type CodeLanguageDocumentRequest = typeof CodeLanguageDocumentRequest.Type;
 
-export const CodeLanguageDocumentResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("stale") }).annotations(strict),
+export const CodeLanguageDocumentResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("stale") }),
   Schema.Struct({
     status: Schema.Literal("synced"),
     ...scope,
     // Older hosts may omit it; new cross-file reads require a known version.
-    documentVersion: Schema.optional(Schema.Int.pipe(Schema.positive())),
-    documentRevision: Schema.optional(Schema.UUID),
-  }).annotations(strict),
-  /** The text is past the server's frame cap, so it is not sent. */
-  Schema.Struct({ status: Schema.Literal("too-large"), ...scope }).annotations(strict),
+    documentVersion: Schema.optional(PositiveInt),
+    documentRevision: Schema.optional(GuidString),
+  }),
+  Schema.Struct({ status: Schema.Literal("too-large"), ...scope }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: CodeLanguageUnavailableReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeLanguageRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeLanguageDocumentResult = typeof CodeLanguageDocumentResult.Type;
 
 /**
@@ -369,30 +387,33 @@ export const CODE_LANGUAGE_TOOL_NAME = "octant_code";
  */
 export const MAX_CODE_LANGUAGE_AGENT_REFERENCES = 200;
 
-const OneBased = Schema.Int.pipe(Schema.between(1, MAX_POSITION));
+const OneBased = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_POSITION }));
 
-export const CodeLanguageToolArguments = Schema.Union(
+export const CodeLanguageToolArguments = Schema.Union([
   Schema.Struct({
     operation: Schema.Literal("diagnostics"),
     path: CodeProjectFilePath,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("definition"),
     path: CodeProjectFilePath,
     line: OneBased,
     column: OneBased,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     operation: Schema.Literal("references"),
     path: CodeProjectFilePath,
     line: OneBased,
     column: OneBased,
     includeDeclaration: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeLanguageToolArguments = typeof CodeLanguageToolArguments.Type;
 
-export const decodeCodeLanguageToolArguments = Schema.decodeUnknownSync(CodeLanguageToolArguments);
+export const decodeCodeLanguageToolArguments = Schema.decodeUnknownSync(
+  CodeLanguageToolArguments,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Every operation answers for the file as saved on disk, so its lines match
@@ -429,7 +450,7 @@ export const CODE_LANGUAGE_TOOL_DEFINITION: ProviderToolDefinition = {
  * How far a person's approval of a `repo-tooling` server reaches: the one
  * checkout the editor's file is in, or every checkout of the Code Project.
  */
-export const CodeLanguageApprovalScope = Schema.Literal("checkout", "project");
+export const CodeLanguageApprovalScope = Schema.Literals(["checkout", "project"]);
 export type CodeLanguageApprovalScope = typeof CodeLanguageApprovalScope.Type;
 
 /**
@@ -443,25 +464,23 @@ export const CodeLanguageApprovalRequest = Schema.Struct({
   checkoutId: CodeCheckoutId,
   path: CodeProjectFilePath,
   scope: CodeLanguageApprovalScope,
-}).annotations(strict);
+});
 export type CodeLanguageApprovalRequest = typeof CodeLanguageApprovalRequest.Type;
 
-export const CodeLanguageApprovalResult = Schema.Union(
+export const CodeLanguageApprovalResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("approved"),
     threadId: CodeThreadId,
     checkoutId: CodeCheckoutId,
     scope: CodeLanguageApprovalScope,
-  }).annotations(strict),
-  /** The server that reads this file is `static`: it falls in no approval category. */
-  Schema.Struct({ status: Schema.Literal("not-required") }).annotations(strict),
+  }),
+  Schema.Struct({ status: Schema.Literal("not-required") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeLanguageRefusalReason,
-  }).annotations(strict),
-  /** The journal did not take the approval, so it is not in force. */
-  Schema.Struct({ status: Schema.Literal("not-recorded") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("not-recorded") }),
+]);
 export type CodeLanguageApprovalResult = typeof CodeLanguageApprovalResult.Type;
 
 /**
@@ -489,33 +508,42 @@ export const CODE_LANGUAGE_SERVER_EVENT_NAMES = {
  * approval is the checkout's or the Project's, and a thread purge leaves it.
  */
 export const CodeLanguageServerApprovalGranted = Schema.Struct({
-  approvalId: Schema.UUID,
+  approvalId: GuidString,
   projectId: ProjectId,
   approvalClass: Schema.Literal("shell-commands"),
-  component: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  scope: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("checkout"), checkoutId: CodeCheckoutId }).annotations(
-      strict,
-    ),
-    Schema.Struct({ kind: Schema.Literal("project") }).annotations(strict),
-  ),
-}).annotations(strict);
+  component: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  scope: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("checkout"), checkoutId: CodeCheckoutId }),
+    Schema.Struct({ kind: Schema.Literal("project") }),
+  ]),
+});
 export type CodeLanguageServerApprovalGranted = typeof CodeLanguageServerApprovalGranted.Type;
 
 export const decodeCodeLanguageApprovalRequest = Schema.decodeUnknownSync(
   CodeLanguageApprovalRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeLanguageApprovalResult = Schema.decodeUnknownSync(
   CodeLanguageApprovalResult,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeLanguageServerApprovalGranted = Schema.decodeUnknownSync(
   CodeLanguageServerApprovalGranted,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeLanguageReadRequest = Schema.decodeUnknownSync(CodeLanguageReadRequest);
-export const decodeCodeLanguageReadResult = Schema.decodeUnknownSync(CodeLanguageReadResult);
+export const decodeCodeLanguageReadRequest = Schema.decodeUnknownSync(
+  CodeLanguageReadRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeLanguageReadResult = Schema.decodeUnknownSync(
+  CodeLanguageReadResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodeLanguageDocumentRequest = Schema.decodeUnknownSync(
   CodeLanguageDocumentRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeLanguageDocumentResult = Schema.decodeUnknownSync(
   CodeLanguageDocumentResult,
+  STRICT_DECODE_OPTIONS,
 );

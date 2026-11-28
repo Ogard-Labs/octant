@@ -12,8 +12,6 @@ import { ActorId } from "./events";
  * existing importers are unaffected.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
 // policy have been reviewed together. Version 2 adds the board surface
@@ -50,7 +48,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // one, so a future bump cannot silently drop an intermediate version from the
 // set that decodes.
 export const CANVAS_SCHEMA_VERSION = 30 as const;
-export const CanvasSchemaVersion = Schema.Literal(
+export const CanvasSchemaVersion = Schema.Literals([
   1,
   2,
   3,
@@ -81,17 +79,21 @@ export const CanvasSchemaVersion = Schema.Literal(
   28,
   29,
   CANVAS_SCHEMA_VERSION,
-);
+]);
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;
 export const CanvasBlockSchemaVersion = CanvasSchemaVersion;
 export type CanvasBlockSchemaVersion = CanvasSchemaVersion;
 
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 
 export const CanvasId = brandedUuid("CanvasId");
@@ -115,9 +117,9 @@ export type CanvasTableRowId = typeof CanvasTableRowId.Type;
 // the user's behalf. The agent kind is admitted for board actions such as
 // layout revisions and comment threading that may originate from a provider
 // turn or an explicit user gesture.
-export const CanvasActor = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("system"), actorId: ActorId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("local-user"), actorId: ActorId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("agent"), actorId: ActorId }).annotations(strict),
-);
+export const CanvasActor = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("system"), actorId: ActorId }),
+  Schema.Struct({ kind: Schema.Literal("local-user"), actorId: ActorId }),
+  Schema.Struct({ kind: Schema.Literal("agent"), actorId: ActorId }),
+]);
 export type CanvasActor = typeof CanvasActor.Type;

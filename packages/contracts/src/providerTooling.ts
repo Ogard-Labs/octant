@@ -9,85 +9,82 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProviderInstanceId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 export const PROVIDER_TOOLING_PROVIDERS = ["claude", "codex"] as const;
-export const ProviderToolingProvider = Schema.Literal(...PROVIDER_TOOLING_PROVIDERS);
+export const ProviderToolingProvider = Schema.Literals(PROVIDER_TOOLING_PROVIDERS);
 export type ProviderToolingProvider = typeof ProviderToolingProvider.Type;
 
-const Short = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(2048));
+const Short = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048));
 
 export const ProviderToolingEnvironmentValue = Schema.Struct({
-  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
-  value: Schema.String.pipe(Schema.maxLength(1024)),
-}).annotations(strict);
+  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  value: Schema.String.check(Schema.isMaxLength(1024)),
+});
 
 /** What the person asked to change. The host validates every value again. */
-export const ProviderToolingRequest = Schema.Union(
+export const ProviderToolingRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("mcp-add-url"),
     name: Short,
     url: Short,
     /** Claude only. Defaults to `http`. */
-    transport: Schema.optional(Schema.Literal("http", "sse")),
+    transport: Schema.optional(Schema.Literals(["http", "sse"])),
     /** Claude only: the OAuth client a pre-registered server expects. */
     oauthClientId: Schema.optional(Short),
     /** Claude only. Held in the credential broker, given to the command through its environment. */
     oauthClientSecret: Schema.optional(
-      Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4096)),
+      Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
     ),
     /** Codex only: the name of the variable Codex reads a bearer token from. Never the token. */
     bearerTokenEnvVar: Schema.optional(Short),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("mcp-add-stdio"),
     name: Short,
     command: Short,
-    args: Schema.Array(Schema.String.pipe(Schema.maxLength(2048))).pipe(Schema.maxItems(64)),
+    args: Schema.Array(Schema.String.check(Schema.isMaxLength(2048))).check(Schema.isMaxLength(64)),
     /** Plain settings only: the command line shows them. A key is refused. */
-    env: Schema.Array(ProviderToolingEnvironmentValue).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("mcp-remove"), name: Short }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("marketplace-add"), source: Short }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("marketplace-remove"), name: Short }).annotations(strict),
+    env: Schema.Array(ProviderToolingEnvironmentValue).check(Schema.isMaxLength(32)),
+  }),
+  Schema.Struct({ kind: Schema.Literal("mcp-remove"), name: Short }),
+  Schema.Struct({ kind: Schema.Literal("marketplace-add"), source: Short }),
+  Schema.Struct({ kind: Schema.Literal("marketplace-remove"), name: Short }),
   Schema.Struct({
     kind: Schema.Literal("plugin-install"),
     plugin: Short,
     marketplace: Schema.optional(Short),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("plugin-uninstall"),
     plugin: Short,
     marketplace: Schema.optional(Short),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ProviderToolingRequest = typeof ProviderToolingRequest.Type;
 
 export type ProviderToolingCommandKind = ProviderToolingRequest["kind"];
 
-export const ProviderToolingSectionKind = Schema.Literal("mcp-servers", "plugins", "marketplaces");
+export const ProviderToolingSectionKind = Schema.Literals([
+  "mcp-servers",
+  "plugins",
+  "marketplaces",
+]);
 export type ProviderToolingSectionKind = typeof ProviderToolingSectionKind.Type;
 
-export const ProviderToolingRefusalReason = Schema.Literal(
-  /** A value broke a rule; `field` says which. */
+export const ProviderToolingRefusalReason = Schema.Literals([
   "invalid-value",
-  /** The CLI has no safe way to take that secret, so Octant does not pass it. */
   "secret-unsupported",
-  /** The installed CLI has no command for this. */
   "unsupported",
-  /** The account is not a Claude Code or Codex account on this host. */
   "unknown-account",
-  /** The host cannot do this now (no broker for a secret, no CLI found). */
   "unavailable",
-  /** Only a person in a window on this host may change an account's tools. */
   "not-a-local-window",
   "unknown-plan",
   "expired-plan",
   "changed-plan",
   "used-plan",
-);
+]);
 export type ProviderToolingRefusalReason = typeof ProviderToolingRefusalReason.Type;
 
 export const ProviderToolingRefusal = Schema.Struct({
@@ -95,12 +92,12 @@ export const ProviderToolingRefusal = Schema.Struct({
   reason: ProviderToolingRefusalReason,
   message: Schema.String,
   field: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type ProviderToolingRefusal = typeof ProviderToolingRefusal.Type;
 
 export const ProviderToolingListRequest = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
-}).annotations(strict);
+});
 export type ProviderToolingListRequest = typeof ProviderToolingListRequest.Type;
 
 export const ProviderToolingEntry = Schema.Struct({
@@ -111,7 +108,7 @@ export const ProviderToolingEntry = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
   /** For a plugin: the marketplace it came from, when the provider says. */
   marketplace: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type ProviderToolingEntry = typeof ProviderToolingEntry.Type;
 
 export const ProviderToolingSection = Schema.Struct({
@@ -122,11 +119,11 @@ export const ProviderToolingSection = Schema.Struct({
    * holds the first lines as text. `no-command`: this version of the CLI has
    * no such command, so Octant offers nothing for it.
    */
-  status: Schema.Literal("listed", "failed", "unreadable", "no-command"),
+  status: Schema.Literals(["listed", "failed", "unreadable", "no-command"]),
   entries: Schema.Array(ProviderToolingEntry),
   lines: Schema.Array(Schema.String),
   message: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type ProviderToolingSection = typeof ProviderToolingSection.Type;
 
 export const ProviderToolingListing = Schema.Struct({
@@ -139,26 +136,26 @@ export const ProviderToolingListing = Schema.Struct({
   sections: Schema.Array(ProviderToolingSection),
   /** What this provider's CLI cannot take safely or at all, said plainly. */
   notes: Schema.Array(Schema.String),
-}).annotations(strict);
+});
 export type ProviderToolingListing = typeof ProviderToolingListing.Type;
 
-export const ProviderToolingListResult = Schema.Union(
+export const ProviderToolingListResult = Schema.Union([
   ProviderToolingListing,
   ProviderToolingRefusal,
-);
+]);
 export type ProviderToolingListResult = typeof ProviderToolingListResult.Type;
 
 export const ProviderToolingPlanRequest = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   request: ProviderToolingRequest,
-}).annotations(strict);
+});
 export type ProviderToolingPlanRequest = typeof ProviderToolingPlanRequest.Type;
 
 export const ProviderToolingPlan = Schema.Struct({
   status: Schema.Literal("planned"),
-  planId: Schema.UUID,
+  planId: GuidString,
   /** Binds the confirmation to exactly the command shown. */
-  digest: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
   expiresAt: Schema.String,
   provider: ProviderToolingProvider,
   commandKind: Schema.String,
@@ -169,34 +166,37 @@ export const ProviderToolingPlan = Schema.Struct({
   effects: Schema.Array(Schema.String),
   usesSecret: Schema.Boolean,
   runsAsItself: Schema.Boolean,
-}).annotations(strict);
+});
 export type ProviderToolingPlan = typeof ProviderToolingPlan.Type;
 
-export const ProviderToolingPlanResult = Schema.Union(ProviderToolingPlan, ProviderToolingRefusal);
+export const ProviderToolingPlanResult = Schema.Union([
+  ProviderToolingPlan,
+  ProviderToolingRefusal,
+]);
 export type ProviderToolingPlanResult = typeof ProviderToolingPlanResult.Type;
 
 export const ProviderToolingApplyRequest = Schema.Struct({
-  planId: Schema.UUID,
-  digest: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-}).annotations(strict);
+  planId: GuidString,
+  digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+});
 export type ProviderToolingApplyRequest = typeof ProviderToolingApplyRequest.Type;
 
 export const ProviderToolingCancelRequest = Schema.Struct({
-  planId: Schema.UUID,
-}).annotations(strict);
+  planId: GuidString,
+});
 export type ProviderToolingCancelRequest = typeof ProviderToolingCancelRequest.Type;
 
-export const ProviderToolingCancelResult = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("cancelled") }).annotations(strict),
+export const ProviderToolingCancelResult = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("cancelled") }),
   ProviderToolingRefusal,
-);
+]);
 export type ProviderToolingCancelResult = typeof ProviderToolingCancelResult.Type;
 
 export const ProviderToolingSucceeded = Schema.Struct({
   status: Schema.Literal("applied"),
   /** The provider's own output, capped and scrubbed of any secret. */
   output: Schema.String,
-}).annotations(strict);
+});
 
 export const ProviderToolingFailed = Schema.Struct({
   status: Schema.Literal("failed"),
@@ -204,13 +204,13 @@ export const ProviderToolingFailed = Schema.Struct({
   timedOut: Schema.Boolean,
   output: Schema.String,
   message: Schema.String,
-}).annotations(strict);
+});
 
-export const ProviderToolingApplyResult = Schema.Union(
+export const ProviderToolingApplyResult = Schema.Union([
   ProviderToolingSucceeded,
   ProviderToolingFailed,
   ProviderToolingRefusal,
-);
+]);
 export type ProviderToolingApplyResult = typeof ProviderToolingApplyResult.Type;
 
 /**
@@ -223,7 +223,7 @@ export const PROVIDER_TOOLING_APPLIED = "provider.tooling-applied@1";
 export const ProviderToolingAppliedRecordSchema = Schema.Struct({
   provider: ProviderToolingProvider,
   providerInstanceId: ProviderInstanceId,
-  commandKind: Schema.Literal(
+  commandKind: Schema.Literals([
     "mcp-add-url",
     "mcp-add-stdio",
     "mcp-remove",
@@ -231,27 +231,35 @@ export const ProviderToolingAppliedRecordSchema = Schema.Struct({
     "marketplace-remove",
     "plugin-install",
     "plugin-uninstall",
-  ),
+  ]),
   /** The server, marketplace, or plugin name. Absent for a marketplace given as a path or URL. */
   name: Schema.optional(Schema.String),
-  outcome: Schema.Literal("succeeded", "failed"),
+  outcome: Schema.Literals(["succeeded", "failed"]),
   usedSecret: Schema.Boolean,
-}).annotations(strict);
+});
 export type ProviderToolingAppliedRecord = typeof ProviderToolingAppliedRecordSchema.Type;
 
 export const decodeProviderToolingListRequest = Schema.decodeUnknownSync(
   ProviderToolingListRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderToolingPlanRequest = Schema.decodeUnknownSync(
   ProviderToolingPlanRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderToolingApplyRequest = Schema.decodeUnknownSync(
   ProviderToolingApplyRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProviderToolingCancelRequest = Schema.decodeUnknownSync(
   ProviderToolingCancelRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeProviderToolingRequest = Schema.decodeUnknownSync(ProviderToolingRequest);
+export const decodeProviderToolingRequest = Schema.decodeUnknownSync(
+  ProviderToolingRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeProviderToolingAppliedRecord = Schema.decodeUnknownSync(
   ProviderToolingAppliedRecordSchema,
+  STRICT_DECODE_OPTIONS,
 );

@@ -79,23 +79,21 @@ interface HubAdministrationRoute {
   readonly bodyOptional?: true;
 }
 
-const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean }).annotations({
-  onExcessProperty: "error",
-});
-const JoinBody = Schema.Struct({ code: Schema.String.pipe(Schema.maxLength(4_096)) }).annotations({
-  onExcessProperty: "error",
+const JoinCodeBody = Schema.Struct({ owner: Schema.Boolean });
+const JoinBody = Schema.Struct({
+  code: Schema.String.pipe(Schema.check(Schema.isMaxLength(4_096))),
 });
 
-const EmptyBody = Schema.Struct({}).annotations({ parseOptions: { onExcessProperty: "error" } });
+const EmptyBody = Schema.Struct({});
 
 const JoinFinishBody = Schema.Struct({
-  unlockPublicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{1,512}$/)),
-}).annotations({ parseOptions: { onExcessProperty: "error" } });
+  unlockPublicKey: Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{1,512}$/))),
+});
 
 const CertificateBody = Schema.Struct({
-  action: Schema.Literal("enable", "disable", "renew"),
+  action: Schema.Literals(["enable", "disable", "renew"]),
   acknowledgedCertificateTransparency: Schema.optional(Schema.Boolean),
-}).annotations({ onExcessProperty: "error" });
+});
 
 export const HUB_ADMINISTRATION_OPERATIONS = {
   status: { method: "GET", path: "/api/desktop/hub/status" },
@@ -104,7 +102,7 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   "join-code": {
     method: "POST",
     path: "/api/desktop/hub/join-codes",
-    decodeBody: Schema.decodeUnknownSync(JoinCodeBody),
+    decodeBody: Schema.decodeUnknownSync(JoinCodeBody, { onExcessProperty: "error" }),
   },
   remove: {
     method: "POST",
@@ -114,14 +112,14 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   join: {
     method: "POST",
     path: "/api/desktop/hub/join",
-    decodeBody: Schema.decodeUnknownSync(JoinBody),
+    decodeBody: Schema.decodeUnknownSync(JoinBody, { onExcessProperty: "error" }),
   },
   // An owner device presents the unlock key it made for this hub; the hub keeps
   // it only if the join code was an owner code.
   "join-finish": {
     method: "POST",
     path: "/api/desktop/hub/join/finish",
-    decodeBody: Schema.decodeUnknownSync(JoinFinishBody),
+    decodeBody: Schema.decodeUnknownSync(JoinFinishBody, { onExcessProperty: "error" }),
     bodyOptional: true,
   },
   grant: { method: "POST", path: "/api/desktop/hub/grant", decodeBody: decodeHubGrant },
@@ -183,7 +181,9 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
     method: "POST",
     path: "/api/desktop/hub/certificate",
     decodeBody: (value) =>
-      Schema.decodeUnknownSync(CertificateBody)(value, { onExcessProperty: "error" }),
+      Schema.decodeUnknownSync(CertificateBody, { onExcessProperty: "error" })(value, {
+        onExcessProperty: "error",
+      }),
   },
   "standby-order": {
     method: "POST",
@@ -429,7 +429,7 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   "shutdown-listing": {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/shutdown/listing",
-    decodeBody: Schema.decodeUnknownSync(EmptyBody),
+    decodeBody: Schema.decodeUnknownSync(EmptyBody, { onExcessProperty: "error" }),
     bodyOptional: true,
   },
   "shutdown-challenge": {
@@ -477,7 +477,7 @@ export const HUB_ADMINISTRATION_OPERATIONS = {
   "handovers-list": {
     method: "POST",
     path: "/api/desktop/hub/thread-moves/handovers/list",
-    decodeBody: Schema.decodeUnknownSync(EmptyBody),
+    decodeBody: Schema.decodeUnknownSync(EmptyBody, { onExcessProperty: "error" }),
     bodyOptional: true,
   },
   "handovers-continue": {

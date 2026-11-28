@@ -33,7 +33,7 @@ import {
   type PullRequestReviewTarget,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodeOperationService } from "../code/codeOperationService";
 import type { GhCommandPort } from "../code/ghPullRequestPort";
@@ -555,16 +555,18 @@ function makeProductionHarness(options: {
           }),
         stop: () => Effect.void,
         subscribe: Effect.succeed(
-          Stream.async<ProviderRuntimeEvent>((emit) => {
-            const flush = () => {
-              for (const event of queuedEvents.splice(0)) {
-                void emit.single(event);
-              }
-              if (closed) void emit.end();
-            };
-            flushEvents = flush;
-            flush();
-          }),
+          Stream.callback<ProviderRuntimeEvent>((queue) =>
+            Effect.sync(() => {
+              const flush = () => {
+                for (const event of queuedEvents.splice(0)) {
+                  Queue.offerUnsafe(queue, event);
+                }
+                if (closed) Queue.endUnsafe(queue);
+              };
+              flushEvents = flush;
+              flush();
+            }),
+          ),
         ),
       } as never),
   };

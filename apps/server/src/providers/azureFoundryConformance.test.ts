@@ -289,7 +289,7 @@ describe("Azure AI Foundry provider conformance", () => {
       Effect.scoped(driver.verifyToolCapability!({ instanceId, modelId })),
     );
     if (Exit.isFailure(exit)) {
-      const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+      const failure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
       expect(failure).toMatchObject({ category: "unauthenticated" });
     } else {
       throw new Error("Expected verifyToolCapability to fail for a 401 response");
@@ -367,7 +367,7 @@ describe("Azure AI Foundry provider conformance", () => {
             modelId,
             executionPolicy: "approval-gated",
           });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),

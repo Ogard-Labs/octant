@@ -16,6 +16,7 @@
  */
 
 import { personDecides } from "./hostAnswer";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { ArtifactBundle, decodeArtifactBundle, encodeArtifactBundle } from "./artifactBundle";
 import { CanvasId, CanvasVersionId } from "./canvas";
@@ -31,12 +32,12 @@ import { CanvasActor, CanvasBlockId } from "./canvasIdentity";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const REPLICA_ENTRY_FORMAT = "octant.replica-entry/2" as const;
 
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * An instance id is derived from the device key it signs with: the first 16
@@ -61,9 +62,10 @@ function isReplicaDisplayName(value: string): boolean {
  * The name of the computer that wrote the entry, as that computer names
  * itself. It is not a path and it is not an instance id.
  */
-export const ReplicaDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter(isReplicaDisplayName),
+export const ReplicaDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.makeFilter(isReplicaDisplayName),
 );
 export type ReplicaDisplayName = typeof ReplicaDisplayName.Type;
 
@@ -72,7 +74,7 @@ export type ReplicaDisplayName = typeof ReplicaDisplayName.Type;
  * Ed25519 SPKI is 44 DER bytes, which base64 encodes to 60 characters with
  * one padding character; a different-length string is not an Ed25519 SPKI.
  */
-export const ReplicaDevicePublicKey = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{59}=$/));
+export const ReplicaDevicePublicKey = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9+/]{59}=$/));
 export type ReplicaDevicePublicKey = typeof ReplicaDevicePublicKey.Type;
 
 /**
@@ -85,7 +87,7 @@ export const ReplicaOrigin = Schema.Struct({
   displayName: ReplicaDisplayName,
   sequence: PositiveInt,
   publicKey: ReplicaDevicePublicKey,
-}).annotations(strict);
+});
 export type ReplicaOrigin = typeof ReplicaOrigin.Type;
 
 /**
@@ -99,25 +101,25 @@ export type ReplicaOrigin = typeof ReplicaOrigin.Type;
 export const ReplicaArtifactOrigin = Schema.Struct({
   canvasId: CanvasId,
   hostId: HostId,
-  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-}).annotations(strict);
+  projectName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+});
 export type ReplicaArtifactOrigin = typeof ReplicaArtifactOrigin.Type;
 
 export const ReplicaParentVersion = Schema.Struct({
   versionId: CanvasVersionId,
-}).annotations(strict);
+});
 export type ReplicaParentVersion = typeof ReplicaParentVersion.Type;
 
-export const ReplicaParents = Schema.Array(ReplicaParentVersion).pipe(
-  Schema.maxItems(16),
-  Schema.filter(
+export const ReplicaParents = Schema.Array(ReplicaParentVersion).check(
+  Schema.isMaxLength(16),
+  Schema.makeFilter(
     (parents) => new Set(parents.map((parent) => String(parent.versionId))).size === parents.length,
   ),
 );
 export type ReplicaParents = typeof ReplicaParents.Type;
 
 /** Lowercase hex SHA-256 of {@link replicaEntryContentPreimage}. */
-export const ReplicaContentHash = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+export const ReplicaContentHash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 export type ReplicaContentHash = typeof ReplicaContentHash.Type;
 
 /**
@@ -126,7 +128,7 @@ export type ReplicaContentHash = typeof ReplicaContentHash.Type;
  * carries was covered. Missing is not verified: an entry whose signature was
  * not checked is not an entry that passed.
  */
-export const ReplicaSignatureVerdict = Schema.Literal("verified", "bad-signature", "missing");
+export const ReplicaSignatureVerdict = Schema.Literals(["verified", "bad-signature", "missing"]);
 export type ReplicaSignatureVerdict = typeof ReplicaSignatureVerdict.Type;
 
 const ReplicaEntryFields = {
@@ -141,27 +143,27 @@ const ReplicaEntryFields = {
 export const ReplicaVersionEntry = Schema.Struct({
   kind: Schema.Literal("artifact-version"),
   ...ReplicaEntryFields,
-}).annotations(strict);
+});
 export type ReplicaVersionEntry = typeof ReplicaVersionEntry.Type;
 
 export const ReplicaTombstoneEntry = Schema.Struct({
   kind: Schema.Literal("artifact-tombstone"),
   ...ReplicaEntryFields,
-}).annotations(strict);
+});
 export type ReplicaTombstoneEntry = typeof ReplicaTombstoneEntry.Type;
 
-export const ReplicaArtifactEntry = Schema.Union(ReplicaVersionEntry, ReplicaTombstoneEntry);
+export const ReplicaArtifactEntry = Schema.Union([ReplicaVersionEntry, ReplicaTombstoneEntry]);
 export type ReplicaArtifactEntry = typeof ReplicaArtifactEntry.Type;
 
 /** One write-once slot of one instance: `<instanceId>/<sequence>.json`. */
 export const ReplicaSlotRef = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: PositiveInt,
-}).annotations(strict);
+});
 export type ReplicaSlotRef = typeof ReplicaSlotRef.Type;
 
 const commentBody = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
 
 /**
  * One change to a Canvas's comment threads, as it travels between computers.
@@ -170,7 +172,7 @@ const commentBody = (maxLength: number) =>
  * deletion: it removes the comment and its replies wherever it is read, and
  * the entry stays in the log.
  */
-export const ReplicaCommentChange = Schema.Union(
+export const ReplicaCommentChange = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("comment"),
     commentId: CanvasCommentId,
@@ -178,7 +180,7 @@ export const ReplicaCommentChange = Schema.Union(
     author: CanvasActor,
     body: commentBody(CANVAS_COMMENT_BODY_MAX_CHARS),
     createdAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reply"),
     commentId: CanvasCommentId,
@@ -186,20 +188,20 @@ export const ReplicaCommentChange = Schema.Union(
     author: CanvasActor,
     body: commentBody(CANVAS_COMMENT_REPLY_BODY_MAX_CHARS),
     createdAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resolve"),
     commentId: CanvasCommentId,
     resolvedBy: CanvasActor,
     resolvedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("tombstone"),
     commentId: CanvasCommentId,
     deletedBy: CanvasActor,
     deletedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaCommentChange = typeof ReplicaCommentChange.Type;
 
 /**
@@ -216,18 +218,18 @@ export const ReplicaCommentEntry = Schema.Struct({
   kind: Schema.Literal("canvas-comment"),
   origin: ReplicaOrigin,
   artifact: ReplicaArtifactOrigin,
-  after: Schema.Array(ReplicaSlotRef).pipe(
-    Schema.maxItems(64),
-    Schema.filter(
+  after: Schema.Array(ReplicaSlotRef).check(
+    Schema.isMaxLength(64),
+    Schema.makeFilter(
       (after) => new Set(after.map((slot) => String(slot.instanceId))).size === after.length,
     ),
   ),
   contentHash: ReplicaContentHash,
   change: ReplicaCommentChange,
-}).annotations(strict);
+});
 export type ReplicaCommentEntry = typeof ReplicaCommentEntry.Type;
 
-const ChoiceQuestionId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+const ChoiceQuestionId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64));
 
 /**
  * One change to a Canvas decision form's saved answers, as it travels between
@@ -235,19 +237,19 @@ const ChoiceQuestionId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))
  * fingerprint, chosen option labels, optional written answer or note, author,
  * and time; a `clear` removes the saved answer for that question.
  */
-export const ReplicaChoiceAnswerChange = Schema.Union(
+export const ReplicaChoiceAnswerChange = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("set"),
     answer: CanvasChoiceAnswer,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("clear"),
     blockId: CanvasBlockId,
     questionId: ChoiceQuestionId,
     clearedBy: CanvasActor,
     clearedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaChoiceAnswerChange = typeof ReplicaChoiceAnswerChange.Type;
 
 /**
@@ -265,15 +267,15 @@ export const ReplicaChoiceAnswerEntry = Schema.Struct({
   kind: Schema.Literal("canvas-choice-answer"),
   origin: ReplicaOrigin,
   artifact: ReplicaArtifactOrigin,
-  after: Schema.Array(ReplicaSlotRef).pipe(
-    Schema.maxItems(64),
-    Schema.filter(
+  after: Schema.Array(ReplicaSlotRef).check(
+    Schema.isMaxLength(64),
+    Schema.makeFilter(
       (after) => new Set(after.map((slot) => String(slot.instanceId))).size === after.length,
     ),
   ),
   contentHash: ReplicaContentHash,
   change: ReplicaChoiceAnswerChange,
-}).annotations(strict);
+});
 export type ReplicaChoiceAnswerEntry = typeof ReplicaChoiceAnswerEntry.Type;
 
 /** An entry about a Canvas: a version, a deletion, a comment change, or a decision-form answer change. */
@@ -303,33 +305,31 @@ export type ReplicaCanvasEntry =
  * - `replica-left` is signed by a member leaving the replica, naming the
  *   founder it pinned. What it signed before it still counts; nothing after.
  */
-export const ReplicaMembershipEntryKind = Schema.Literal(
+export const ReplicaMembershipEntryKind = Schema.Literals([
   "replica-founded",
   "join-request",
   "join-approved",
   "join-accepted",
   "revocation",
   "replica-left",
-);
+]);
 export type ReplicaMembershipEntryKind = typeof ReplicaMembershipEntryKind.Type;
 
 const membershipFormat = Schema.Literal(REPLICA_ENTRY_FORMAT);
 
 /** Lowercase hex SHA-256 of the exact bytes of an approval file. */
-export const ReplicaRecordHash = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+export const ReplicaRecordHash = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 export type ReplicaRecordHash = typeof ReplicaRecordHash.Type;
 
 export const ReplicaFoundedEntry = Schema.Struct({
   format: membershipFormat,
   kind: Schema.Literal("replica-founded"),
   origin: ReplicaOrigin,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((entry) => entry.origin.sequence === 1, {
-      message: () => "A founding record is its writer's sequence 1.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((entry) => entry.origin.sequence === 1, {
+    message: "A founding record is its writer's sequence 1.",
+  }),
+);
 export type ReplicaFoundedEntry = typeof ReplicaFoundedEntry.Type;
 
 export const ReplicaJoinRequestEntry = Schema.Struct({
@@ -341,14 +341,12 @@ export const ReplicaJoinRequestEntry = Schema.Struct({
    * signature covers it, so the approver can hold the request to a freshness
    * window measured against its own clock.
    */
-  requestedAt: Schema.Int.pipe(Schema.nonNegative()),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((entry) => entry.origin.sequence === 1, {
-      message: () => "A join request is its writer's sequence 1.",
-    }),
-  );
+  requestedAt: NonNegativeInt,
+}).check(
+  Schema.makeFilter((entry) => entry.origin.sequence === 1, {
+    message: "A join request is its writer's sequence 1.",
+  }),
+);
 export type ReplicaJoinRequestEntry = typeof ReplicaJoinRequestEntry.Type;
 
 export const ReplicaJoinApprovedEntry = Schema.Struct({
@@ -359,7 +357,7 @@ export const ReplicaJoinApprovedEntry = Schema.Struct({
   /** The approved computer's device key; the record is valid only when `subject` is its id. */
   subjectKey: ReplicaDevicePublicKey,
   subjectName: ReplicaDisplayName,
-}).annotations(strict);
+});
 export type ReplicaJoinApprovedEntry = typeof ReplicaJoinApprovedEntry.Type;
 
 export const ReplicaJoinAcceptedEntry = Schema.Struct({
@@ -371,26 +369,22 @@ export const ReplicaJoinAcceptedEntry = Schema.Struct({
   approvalHash: ReplicaRecordHash,
   /** The founder the joiner pinned when it confirmed. */
   founder: ReplicaInstanceId,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((entry) => entry.origin.sequence >= 2, {
-      message: () => "A join acceptance follows its writer's join request.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((entry) => entry.origin.sequence >= 2, {
+    message: "A join acceptance follows its writer's join request.",
+  }),
+);
 export type ReplicaJoinAcceptedEntry = typeof ReplicaJoinAcceptedEntry.Type;
 
 /** Consecutive sequences of one instance, both ends included. */
 export const ReplicaSequenceRun = Schema.Struct({
   from: PositiveInt,
   to: PositiveInt,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((run) => run.from <= run.to, {
-      message: () => "A run starts at or before where it ends.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((run) => run.from <= run.to, {
+    message: "A run starts at or before where it ends.",
+  }),
+);
 export type ReplicaSequenceRun = typeof ReplicaSequenceRun.Type;
 
 /**
@@ -412,18 +406,18 @@ export const REPLICA_KEPT_SLOTS_MAX_RUNS = 1_024;
  */
 export const ReplicaKeptSlots = Schema.Struct({
   version: Schema.Literal(1),
-  runs: Schema.Array(ReplicaSequenceRun).pipe(
-    Schema.maxItems(REPLICA_KEPT_SLOTS_MAX_RUNS),
-    Schema.filter(
+  runs: Schema.Array(ReplicaSequenceRun).check(
+    Schema.isMaxLength(REPLICA_KEPT_SLOTS_MAX_RUNS),
+    Schema.makeFilter(
       (runs) =>
         runs.every((run, index) => {
           const previous = runs[index - 1];
           return previous === undefined || previous.to + 1 < run.from;
         }),
-      { message: () => "Kept runs are ascending, apart, and do not overlap." },
+      { message: "Kept runs are ascending, apart, and do not overlap." },
     ),
   ),
-}).annotations(strict);
+});
 export type ReplicaKeptSlots = typeof ReplicaKeptSlots.Type;
 
 export const ReplicaRevocationEntry = Schema.Struct({
@@ -435,21 +429,19 @@ export const ReplicaRevocationEntry = Schema.Struct({
    * The last sequence of the revoked instance that still counts; 0 when none
    * does. Every entry it signed after this stops counting on every computer.
    */
-  cut: Schema.Int.pipe(Schema.nonNegative()),
+  cut: NonNegativeInt,
   /**
    * Which of the subject's slots at or before the cut still count. A
    * revocation without it, as written before this field existed, keeps every
    * slot at or before the cut.
    */
   kept: Schema.optional(ReplicaKeptSlots),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (entry) => entry.kept === undefined || entry.kept.runs.every((run) => run.to <= entry.cut),
-      { message: () => "A revocation keeps no slot after its cut." },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (entry) => entry.kept === undefined || entry.kept.runs.every((run) => run.to <= entry.cut),
+    { message: "A revocation keeps no slot after its cut." },
+  ),
+);
 export type ReplicaRevocationEntry = typeof ReplicaRevocationEntry.Type;
 
 /**
@@ -464,31 +456,29 @@ export const ReplicaLeftEntry = Schema.Struct({
   kind: Schema.Literal("replica-left"),
   origin: ReplicaOrigin,
   founder: ReplicaInstanceId,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((entry) => entry.origin.sequence >= 2, {
-      message: () => "Leaving follows the writer's first record.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((entry) => entry.origin.sequence >= 2, {
+    message: "Leaving follows the writer's first record.",
+  }),
+);
 export type ReplicaLeftEntry = typeof ReplicaLeftEntry.Type;
 
-export const ReplicaMembershipEntry = Schema.Union(
+export const ReplicaMembershipEntry = Schema.Union([
   ReplicaFoundedEntry,
   ReplicaJoinRequestEntry,
   ReplicaJoinApprovedEntry,
   ReplicaJoinAcceptedEntry,
   ReplicaRevocationEntry,
   ReplicaLeftEntry,
-);
+]);
 export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
 
-export const ReplicaEntry = Schema.Union(
+export const ReplicaEntry = Schema.Union([
   ReplicaArtifactEntry,
   ReplicaCommentEntry,
   ReplicaChoiceAnswerEntry,
   ReplicaMembershipEntry,
-);
+]);
 export type ReplicaEntry = typeof ReplicaEntry.Type;
 
 /** Whether an entry is a membership record rather than an entry about a Canvas. */
@@ -501,14 +491,35 @@ export function isReplicaMembershipEntry(entry: ReplicaEntry): entry is ReplicaM
   );
 }
 
-export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry);
-export const decodeReplicaArtifactEntry = Schema.decodeUnknownSync(ReplicaArtifactEntry);
-export const decodeReplicaCommentEntry = Schema.decodeUnknownSync(ReplicaCommentEntry);
-export const decodeReplicaCommentChange = Schema.decodeUnknownSync(ReplicaCommentChange);
-export const decodeReplicaChoiceAnswerEntry = Schema.decodeUnknownSync(ReplicaChoiceAnswerEntry);
-export const decodeReplicaChoiceAnswerChange = Schema.decodeUnknownSync(ReplicaChoiceAnswerChange);
-export const decodeReplicaMembershipEntry = Schema.decodeUnknownSync(ReplicaMembershipEntry);
-export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(ReplicaSignatureVerdict);
+export const decodeReplicaEntry = Schema.decodeUnknownSync(ReplicaEntry, STRICT_DECODE_OPTIONS);
+export const decodeReplicaArtifactEntry = Schema.decodeUnknownSync(
+  ReplicaArtifactEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaCommentEntry = Schema.decodeUnknownSync(
+  ReplicaCommentEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaCommentChange = Schema.decodeUnknownSync(
+  ReplicaCommentChange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaChoiceAnswerEntry = Schema.decodeUnknownSync(
+  ReplicaChoiceAnswerEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaChoiceAnswerChange = Schema.decodeUnknownSync(
+  ReplicaChoiceAnswerChange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaMembershipEntry = Schema.decodeUnknownSync(
+  ReplicaMembershipEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaSignatureVerdict = Schema.decodeUnknownSync(
+  ReplicaSignatureVerdict,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Read one entry from the JSON text a store would hold.
@@ -709,35 +720,30 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
  * Host commands for managing who may write to a replica store. These travel
  * only over the loopback host route; a paired phone is refused there.
  */
-export const ReplicaMembershipCommand = Schema.Union(
+export const ReplicaMembershipCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("create-replica"),
     displayName: ReplicaDisplayName,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("write-join-request"),
     displayName: ReplicaDisplayName,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("approve-join"),
     joinRequest: ReplicaJoinRequestEntry,
-    confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
-  }).annotations(strict),
+    confirmationCode: Schema.String.check(Schema.isPattern(/^\d{6}$/)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-join"),
     /** The member whose approval of this computer's request the person confirmed. */
     approver: ReplicaInstanceId,
-    confirmationCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
-  }).annotations(strict),
-  /**
-   * What revoking a computer would keep: the cut the host would take after
-   * reading the store, and the computers the revoked one brought in, so the
-   * person can revoke them in the same step or move the cut earlier.
-   */
+    confirmationCode: Schema.String.check(Schema.isPattern(/^\d{6}$/)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoke-preview"),
     subject: ReplicaInstanceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoke"),
     subject: ReplicaInstanceId,
@@ -746,25 +752,18 @@ export const ReplicaMembershipCommand = Schema.Union(
      * host cuts at the highest sequence of the subject it holds after reading
      * the store; a value may only move the cut earlier than that.
      */
-    cut: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    cut: Schema.optional(NonNegativeInt),
     /** Computers the subject brought in, revoked in the same step. */
-    alsoRevoke: Schema.optional(Schema.Array(ReplicaInstanceId).pipe(Schema.maxItems(64))),
-  }).annotations(strict),
+    alsoRevoke: Schema.optional(Schema.Array(ReplicaInstanceId).check(Schema.isMaxLength(64))),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull"),
-  }).annotations(strict),
-  /**
-   * Leave the replica: a member in good standing first publishes a signed
-   * `replica-left` record, then this computer forgets its identity, removes
-   * its device key, and turns sync off. `withoutStore` leaves without that
-   * record, for a store that cannot be reached any more; the other computers
-   * then keep listing this one until someone revokes it.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("leave"),
     withoutStore: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
 
 /**
@@ -777,7 +776,7 @@ export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
  * leave a host - a credential, a secret-shaped value, or an absolute path. The
  * rest are the artifact reconcile policy's reasons.
  */
-export const ReplicaReadRefusalReason = Schema.Literal(
+export const ReplicaReadRefusalReason = Schema.Literals([
   "unknown-instance",
   "revoked-instance",
   "sequence-gap",
@@ -787,33 +786,33 @@ export const ReplicaReadRefusalReason = Schema.Literal(
   "path-mismatch",
   "unreadable",
   "unsafe-content",
-);
+]);
 export type ReplicaReadRefusalReason = typeof ReplicaReadRefusalReason.Type;
 
 export const ReplicaReadRefusal = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: PositiveInt,
   reason: ReplicaReadRefusalReason,
-}).annotations(strict);
+});
 export type ReplicaReadRefusal = typeof ReplicaReadRefusal.Type;
 
 /**
  * What one artifact entry did on this computer: a new version, a version it
  * already had, a second head beside one from the same parent, or a tombstone.
  */
-export const ReplicaArtifactKeptOutcome = Schema.Literal(
+export const ReplicaArtifactKeptOutcome = Schema.Literals([
   "imported",
   "already-present",
   "concurrent-head",
   "tombstone",
-);
+]);
 export type ReplicaArtifactKeptOutcome = typeof ReplicaArtifactKeptOutcome.Type;
 
 export const ReplicaArtifactReconciled = Schema.Struct({
   instanceId: ReplicaInstanceId,
   sequence: PositiveInt,
   outcome: ReplicaArtifactKeptOutcome,
-}).annotations(strict);
+});
 export type ReplicaArtifactReconciled = typeof ReplicaArtifactReconciled.Type;
 
 /** A computer the revoked one brought in, directly or through others. */
@@ -824,33 +823,33 @@ export const ReplicaBroughtIn = Schema.Struct({
   parent: ReplicaInstanceId,
   /** The parent's sequence that approval sits at: a cut below it removes this computer. */
   approvalSequence: PositiveInt,
-}).annotations(strict);
+});
 export type ReplicaBroughtIn = typeof ReplicaBroughtIn.Type;
 
 /** A revocation the subject of a revoke preview wrote, at its own sequence. */
 export const ReplicaSubjectRevocation = Schema.Struct({
   sequence: PositiveInt,
   subject: ReplicaInstanceId,
-  cut: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  cut: NonNegativeInt,
+});
 export type ReplicaSubjectRevocation = typeof ReplicaSubjectRevocation.Type;
 
-export const ReplicaMembershipResult = Schema.Union(
+export const ReplicaMembershipResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("replica-created"),
     instanceId: ReplicaInstanceId,
     entry: ReplicaFoundedEntry,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("join-requested"),
     instanceId: ReplicaInstanceId,
     entry: ReplicaJoinRequestEntry,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("join-approved"),
     subject: ReplicaInstanceId,
     entry: ReplicaJoinApprovedEntry,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoke-preview"),
     subject: ReplicaInstanceId,
@@ -859,7 +858,7 @@ export const ReplicaMembershipResult = Schema.Union(
      * the subject's valid signed entries this host read, artifact entries
      * included.
      */
-    cut: Schema.Int.pipe(Schema.nonNegative()),
+    cut: NonNegativeInt,
     broughtIn: Schema.Array(ReplicaBroughtIn),
     /**
      * Revocations the subject itself already wrote, each at its sequence, so
@@ -868,7 +867,7 @@ export const ReplicaMembershipResult = Schema.Union(
     subjectRevocations: Schema.Array(ReplicaSubjectRevocation),
     /** False when the store could not be read first, so the cut is what this computer already holds. */
     readStore: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoked"),
     subject: ReplicaInstanceId,
@@ -876,52 +875,42 @@ export const ReplicaMembershipResult = Schema.Union(
     alsoRevoked: Schema.Array(ReplicaRevocationEntry),
     /** False when the store could not be read first, so the cut is what this computer already holds. */
     readStore: Schema.Boolean,
-  }).annotations(strict),
-  /**
-   * The subject's revocation was published but a later one in the same step
-   * stopped: `alsoRevoked` landed, `notRevoked` did not and needs another
-   * revoke.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("revoked-in-part"),
     subject: ReplicaInstanceId,
     entry: ReplicaRevocationEntry,
     alsoRevoked: Schema.Array(ReplicaRevocationEntry),
-    notRevoked: Schema.Array(ReplicaInstanceId).pipe(Schema.minItems(1)),
+    notRevoked: Schema.Array(ReplicaInstanceId).check(Schema.isMinLength(1)),
     /** Why the publish stopped. */
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
     readStore: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("join-confirmed"),
     approver: ReplicaInstanceId,
     founder: ReplicaInstanceId,
-  }).annotations(strict),
-  /**
-   * This computer left its replica. `toldStore` says whether a signed
-   * `replica-left` record is in the store; `keyRemoved` whether the device key
-   * is gone from the credential store.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("left"),
     instanceId: ReplicaInstanceId,
     toldStore: Schema.Boolean,
     keyRemoved: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pulled"),
     /** Membership records this pull read and now holds. */
-    applied: Schema.Int.pipe(Schema.nonNegative()),
+    applied: NonNegativeInt,
     /** Files this pull read that are not valid records, and artifact entries it did not import. */
     refused: Schema.Array(ReplicaReadRefusal),
     /** Artifact entries this pull reconciled into the library, with what each one did. */
     artifacts: Schema.Array(ReplicaArtifactReconciled),
     /** Fresh join requests from computers that are not members yet. */
     joinRequests: Schema.Array(ReplicaJoinRequestEntry),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "not-configured",
       "already-member",
       "revoked-instance",
@@ -933,22 +922,26 @@ export const ReplicaMembershipResult = Schema.Union(
       "invalid-cut",
       "store-unavailable",
       "key-unavailable",
-      /** This computer's restore is stopped, and nothing reads the store until it resumes. */
       "restore-stopped",
-      /** The person stopped the read a join confirmation makes; confirming again carries on. */
       "join-stopped",
-    ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
+    ]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("store-failed"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ReplicaMembershipResult = typeof ReplicaMembershipResult.Type;
 
-export const decodeReplicaMembershipCommand = Schema.decodeUnknownSync(ReplicaMembershipCommand);
-export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMembershipResult);
+export const decodeReplicaMembershipCommand = Schema.decodeUnknownSync(
+  ReplicaMembershipCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(
+  ReplicaMembershipResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A computer that counts in this host's replica, as Settings › Sync lists it.
@@ -958,14 +951,14 @@ export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMem
 export const ReplicaMemberView = Schema.Struct({
   instanceId: ReplicaInstanceId,
   displayName: ReplicaDisplayName,
-  role: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("founder") }).annotations(strict),
+  role: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("founder") }),
     Schema.Struct({
       kind: Schema.Literal("approved"),
       approver: ReplicaInstanceId,
       approverName: ReplicaDisplayName,
-    }).annotations(strict),
-  ),
+    }),
+  ]),
   revoked: Schema.Boolean,
   /** It signed a `replica-left` record while it was a member. */
   left: Schema.Boolean,
@@ -975,7 +968,7 @@ export const ReplicaMemberView = Schema.Struct({
    * brought it in, directly or through others. Always false off the host.
    */
   revocable: Schema.Boolean,
-}).annotations(strict);
+});
 export type ReplicaMemberView = typeof ReplicaMemberView.Type;
 
 /**
@@ -986,22 +979,22 @@ export type ReplicaMemberView = typeof ReplicaMemberView.Type;
 export const ReplicaApproverView = Schema.Struct({
   instanceId: ReplicaInstanceId,
   displayName: ReplicaDisplayName,
-  matchingCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  matchingCode: Schema.String.check(Schema.isPattern(/^\d{6}$/)),
   /** That member's approval of this computer is in what this computer read. */
   approvedThisComputer: Schema.Boolean,
-}).annotations(strict);
+});
 export type ReplicaApproverView = typeof ReplicaApproverView.Type;
 
 /** A fresh join request a member in good standing can approve, with its code. */
 export const ReplicaJoinRequestView = Schema.Struct({
   request: ReplicaJoinRequestEntry,
-  matchingCode: Schema.String.pipe(Schema.pattern(/^\d{6}$/)),
+  matchingCode: Schema.String.check(Schema.isPattern(/^\d{6}$/)),
   /**
    * This computer already approved it; the request stays listed until the
    * joining computer confirms, and approving again would only add a record.
    */
   approvedByThisComputer: Schema.Boolean,
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 export type ReplicaJoinRequestView = typeof ReplicaJoinRequestView.Type;
 
 /**
@@ -1009,13 +1002,13 @@ export type ReplicaJoinRequestView = typeof ReplicaJoinRequestView.Type;
  * out above it: it asks to join again as a new computer. A computer that
  * left its replica on its own has no identity, so it is `none`.
  */
-export const ReplicaThisComputer = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const ReplicaThisComputer = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
-    kind: Schema.Literal("founder", "member", "left"),
+    kind: Schema.Literals(["founder", "member", "left"]),
     instanceId: ReplicaInstanceId,
     displayName: ReplicaDisplayName,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("joining"),
     instanceId: ReplicaInstanceId,
@@ -1023,8 +1016,8 @@ export const ReplicaThisComputer = Schema.Union(
     /** False once the request is older than a member will approve. */
     fresh: Schema.Boolean,
     approvers: Schema.Array(ReplicaApproverView),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaThisComputer = typeof ReplicaThisComputer.Type;
 
 /**
@@ -1034,7 +1027,7 @@ export type ReplicaThisComputer = typeof ReplicaThisComputer.Type;
  */
 const ReplicaStatusNotAvailable = Schema.Struct({
   kind: Schema.Literal("not-available"),
-}).annotations(strict);
+});
 
 /**
  * Bringing a replica's whole library onto this computer: the first read of a
@@ -1044,41 +1037,45 @@ const ReplicaStatusNotAvailable = Schema.Struct({
  * it, and while it is stopped this computer reads nothing from the store.
  */
 export const ReplicaRestoreProgress = Schema.Struct({
-  state: Schema.Literal("running", "stopped", "finished"),
-  done: Schema.Int.pipe(Schema.nonNegative()),
-  total: Schema.Int.pipe(Schema.nonNegative()),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((progress) => progress.done <= progress.total, {
-      message: () => "A restore cannot have read more slots than it counted.",
-    }),
-  );
+  state: Schema.Literals(["running", "stopped", "finished"]),
+  done: NonNegativeInt,
+  total: NonNegativeInt,
+}).check(
+  Schema.makeFilter((progress) => progress.done <= progress.total, {
+    message: "A restore cannot have read more slots than it counted.",
+  }),
+);
 export type ReplicaRestoreProgress = typeof ReplicaRestoreProgress.Type;
 
 /** Host commands for a restore. They travel only over the loopback host route. */
-export const ReplicaRestoreCommand = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("stop-restore") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("resume-restore") }).annotations(strict),
-);
+export const ReplicaRestoreCommand = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("stop-restore") }),
+  Schema.Struct({ kind: Schema.Literal("resume-restore") }),
+]);
 export type ReplicaRestoreCommand = typeof ReplicaRestoreCommand.Type;
 
-export const ReplicaRestoreResult = Schema.Union(
+export const ReplicaRestoreResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("restore"),
     restore: ReplicaRestoreProgress,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     /** No restore to stop or resume, or sync is off so none can run. */
-    reason: Schema.Literal("no-restore", "not-configured", "finished"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["no-restore", "not-configured", "finished"]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ReplicaRestoreResult = typeof ReplicaRestoreResult.Type;
 
-export const decodeReplicaRestoreCommand = Schema.decodeUnknownSync(ReplicaRestoreCommand);
-export const decodeReplicaRestoreResult = Schema.decodeUnknownSync(ReplicaRestoreResult);
+export const decodeReplicaRestoreCommand = Schema.decodeUnknownSync(
+  ReplicaRestoreCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaRestoreResult = Schema.decodeUnknownSync(
+  ReplicaRestoreResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Stop the read a join confirmation makes before it publishes the accept. It
@@ -1086,25 +1083,31 @@ export const decodeReplicaRestoreResult = Schema.decodeUnknownSync(ReplicaRestor
  */
 export const ReplicaJoinReadCommand = Schema.Struct({
   kind: Schema.Literal("stop-join-read"),
-}).annotations(strict);
+});
 export type ReplicaJoinReadCommand = typeof ReplicaJoinReadCommand.Type;
 
-export const ReplicaJoinReadResult = Schema.Union(
+export const ReplicaJoinReadResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("join-read"),
     joinRead: ReplicaRestoreProgress,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     /** No join confirmation is reading, or the last one already read everything. */
     reason: Schema.Literal("no-join-read"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ReplicaJoinReadResult = typeof ReplicaJoinReadResult.Type;
 
-export const decodeReplicaJoinReadCommand = Schema.decodeUnknownSync(ReplicaJoinReadCommand);
-export const decodeReplicaJoinReadResult = Schema.decodeUnknownSync(ReplicaJoinReadResult);
+export const decodeReplicaJoinReadCommand = Schema.decodeUnknownSync(
+  ReplicaJoinReadCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaJoinReadResult = Schema.decodeUnknownSync(
+  ReplicaJoinReadResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const ReplicaSyncStatus = Schema.Struct({
   lastPublish: ReplicaStatusNotAvailable,
@@ -1122,11 +1125,11 @@ export const ReplicaSyncStatus = Schema.Struct({
   lastError: Schema.optional(
     Schema.Struct({
       at: UtcTimestamp,
-      phase: Schema.Literal("entry", "signature", "read", "list"),
-      reason: Schema.Literal("not-connected", "refused", "slot-occupied", "truncated"),
-    }).annotations(strict),
+      phase: Schema.Literals(["entry", "signature", "read", "list"]),
+      reason: Schema.Literals(["not-connected", "refused", "slot-occupied", "truncated"]),
+    }),
   ),
-}).annotations(strict);
+});
 export type ReplicaSyncStatus = typeof ReplicaSyncStatus.Type;
 
 /** Settings › Sync on the host: membership, what a person can do next, and status. */
@@ -1138,7 +1141,7 @@ export const ReplicaMembershipView = Schema.Struct({
   members: Schema.Array(ReplicaMemberView),
   joinRequests: Schema.Array(ReplicaJoinRequestView),
   status: ReplicaSyncStatus,
-}).annotations(strict);
+});
 export type ReplicaMembershipView = typeof ReplicaMembershipView.Type;
 
 /**
@@ -1148,25 +1151,31 @@ export type ReplicaMembershipView = typeof ReplicaMembershipView.Type;
  */
 export const ReplicaSyncStatusView = Schema.Struct({
   kind: Schema.Literal("replica-sync-status"),
-  thisComputer: Schema.Literal("none", "founder", "member", "joining", "left"),
+  thisComputer: Schema.Literals(["none", "founder", "member", "joining", "left"]),
   members: Schema.Array(
     Schema.Struct({
       displayName: ReplicaDisplayName,
-      role: Schema.Union(
-        Schema.Struct({ kind: Schema.Literal("founder") }).annotations(strict),
+      role: Schema.Union([
+        Schema.Struct({ kind: Schema.Literal("founder") }),
         Schema.Struct({
           kind: Schema.Literal("approved"),
           approverName: ReplicaDisplayName,
-        }).annotations(strict),
-      ),
+        }),
+      ]),
       revoked: Schema.Boolean,
       left: Schema.Boolean,
       thisComputer: Schema.Boolean,
-    }).annotations(strict),
+    }),
   ),
   status: ReplicaSyncStatus,
-}).annotations(strict);
+});
 export type ReplicaSyncStatusView = typeof ReplicaSyncStatusView.Type;
 
-export const decodeReplicaMembershipView = Schema.decodeUnknownSync(ReplicaMembershipView);
-export const decodeReplicaSyncStatusView = Schema.decodeUnknownSync(ReplicaSyncStatusView);
+export const decodeReplicaMembershipView = Schema.decodeUnknownSync(
+  ReplicaMembershipView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaSyncStatusView = Schema.decodeUnknownSync(
+  ReplicaSyncStatusView,
+  STRICT_DECODE_OPTIONS,
+);

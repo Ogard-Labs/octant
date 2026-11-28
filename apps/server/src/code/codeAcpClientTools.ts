@@ -172,10 +172,10 @@ function errorResult(error: string) {
   return { result: { error }, isError: true as const };
 }
 
-function decodeInput<A>(schema: Schema.Schema<A>) {
+function decodeInput<A>(schema: Schema.Codec<A, unknown>) {
   return (value: string): A | undefined => {
     try {
-      return Schema.decodeUnknownSync(schema)(JSON.parse(value));
+      return Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(JSON.parse(value));
     } catch {
       return undefined;
     }

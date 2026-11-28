@@ -259,7 +259,7 @@ export function makeEventLoopShare(
   let sliceStartedAt = now();
   return Effect.suspend(() => {
     if (now() - sliceStartedAt < sliceMs) return Effect.void;
-    return Effect.async<void>((resume) => {
+    return Effect.callback<void>((resume) => {
       const pending = setImmediate(() => {
         sliceStartedAt = now();
         resume(Effect.void);

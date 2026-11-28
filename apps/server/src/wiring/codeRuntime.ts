@@ -3908,7 +3908,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   });
 }
 
-export type CodeRuntimeWiring = Effect.Effect.Success<ReturnType<typeof wireCodeRuntime>>;
+export type CodeRuntimeWiring = Effect.Success<ReturnType<typeof wireCodeRuntime>>;
 
 /**
  * Resolves the active working folder for a Code turn's host media tools from

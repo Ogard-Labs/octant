@@ -1,11 +1,10 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** A calendar date as it is written in `STATUS.md`. */
-export const WorkStatusDate = Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/));
+export const WorkStatusDate = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/));
 export type WorkStatusDate = typeof WorkStatusDate.Type;
 
 /**
@@ -13,15 +12,15 @@ export type WorkStatusDate = typeof WorkStatusDate.Type;
  * the day it was read. `overdue` is a date already passed; `due-soon` falls
  * inside the window the resume brief treats as urgent.
  */
-export const WorkStatusDueState = Schema.Literal("overdue", "due-soon", "upcoming");
+export const WorkStatusDueState = Schema.Literals(["overdue", "due-soon", "upcoming"]);
 export type WorkStatusDueState = typeof WorkStatusDueState.Type;
 
 /** One dated line from the Deadlines or Follow-ups section. */
 export const WorkStatusDatedItem = Schema.Struct({
   date: WorkStatusDate,
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  text: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   state: WorkStatusDueState,
-}).annotations(strict);
+});
 export type WorkStatusDatedItem = typeof WorkStatusDatedItem.Type;
 
 /** Names for the sections the template writes and the parser looks for. */
@@ -51,11 +50,14 @@ export const WorkProjectStatus = Schema.Struct({
   stale: Schema.Boolean,
   /** The `Current status` section, bounded, for the Project page. */
   currentStatus: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_WORK_STATUS_EXCERPT_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_WORK_STATUS_EXCERPT_LENGTH)),
   ),
-  followUps: Schema.Array(WorkStatusDatedItem).pipe(Schema.maxItems(MAX_WORK_STATUS_ITEMS)),
-  deadlines: Schema.Array(WorkStatusDatedItem).pipe(Schema.maxItems(MAX_WORK_STATUS_ITEMS)),
-}).annotations(strict);
+  followUps: Schema.Array(WorkStatusDatedItem).check(Schema.isMaxLength(MAX_WORK_STATUS_ITEMS)),
+  deadlines: Schema.Array(WorkStatusDatedItem).check(Schema.isMaxLength(MAX_WORK_STATUS_ITEMS)),
+});
 export type WorkProjectStatus = typeof WorkProjectStatus.Type;
 
-export const decodeWorkProjectStatus = Schema.decodeUnknownSync(WorkProjectStatus);
+export const decodeWorkProjectStatus = Schema.decodeUnknownSync(
+  WorkProjectStatus,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,4 +1,5 @@
 import { EXPORT_SENSITIVE_QUERY_KEYS, isCanvasShareSafeText } from "./canvasExportText";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 export { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasExportText";
 import { Schema } from "effect";
 import {
@@ -88,16 +89,19 @@ import { CanvasChoiceQuestions } from "./questionnaire";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedNonEmptyText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const boundedText = (maximum: number) => Schema.String.pipe(Schema.maxLength(maximum));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const boundedText = (maximum: number) => Schema.String.check(Schema.isMaxLength(maximum));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 
 // Share wire contracts version independently from Canvas wire contracts, and
@@ -189,7 +193,7 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 18 as const;
 // 18 carries, so it names blocks up to 30. A later Canvas bump that adds
 // something a share carries bumps the share version again.
 export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 30 as const;
-export const CanvasShareSchemaVersion = Schema.Literal(
+export const CanvasShareSchemaVersion = Schema.Literals([
   1,
   2,
   3,
@@ -208,7 +212,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   16,
   17,
   CANVAS_SHARE_SCHEMA_VERSION,
-);
+]);
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
 
 export const CanvasExportId = brandedUuid("CanvasExportId");
@@ -225,7 +229,7 @@ export type CanvasShareChannel = typeof CanvasShareChannel.Type;
 export const CanvasShareLocalUserActor = Schema.Struct({
   kind: Schema.Literal("local-user"),
   actorId: ActorId,
-}).annotations(strict);
+});
 export type CanvasShareLocalUserActor = typeof CanvasShareLocalUserActor.Type;
 
 export const CanvasShareConsent = Schema.Struct({
@@ -241,7 +245,7 @@ export const CanvasShareConsent = Schema.Struct({
   acknowledgedMarkupSharedAsWritten: Schema.optional(Schema.Literal(true)),
   acknowledgedAt: UtcTimestamp,
   acknowledgedBy: CanvasShareLocalUserActor,
-}).annotations(strict);
+});
 export type CanvasShareConsent = typeof CanvasShareConsent.Type;
 
 export const CanvasStaticExportRequest = Schema.Struct({
@@ -250,37 +254,37 @@ export const CanvasStaticExportRequest = Schema.Struct({
   exportId: CanvasExportId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  expectedSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: PositiveInt,
   hostId: HostId,
   projectId: ProjectId,
   channel: CanvasShareChannel,
   consent: CanvasShareConsent,
   /** Optional operator note stored with the export receipt; never used as authority. */
   note: Schema.optional(boundedNonEmptyText(512)),
-}).annotations(strict);
+});
 export type CanvasStaticExportRequest = typeof CanvasStaticExportRequest.Type;
 
 export const CanvasRedactedProvenance = Schema.Struct({
   hostId: HostId,
   projectId: ProjectId,
-  mode: Schema.Literal("chat", "work", "code"),
+  mode: Schema.Literals(["chat", "work", "code"]),
   /** Thread identity is retained as an opaque id; path/credential fields are never present. */
-  threadId: Schema.UUID,
+  threadId: GuidString,
   createdAt: UtcTimestamp,
   /** Provider/model identity is reduced to non-secret labels only. */
   providerLabel: boundedNonEmptyText(200),
   modelLabel: boundedNonEmptyText(200),
-  actorKind: Schema.Literal("system", "local-user", "agent"),
-}).annotations(strict);
+  actorKind: Schema.Literals(["system", "local-user", "agent"]),
+});
 export type CanvasRedactedProvenance = typeof CanvasRedactedProvenance.Type;
 
 export const CanvasStaticExportSourceEntry = Schema.Struct({
-  sourceId: Schema.UUID,
+  sourceId: GuidString,
   kind: boundedNonEmptyText(64),
   displayName: boundedNonEmptyText(256),
   /** Opaque reference only; never a filesystem path or live credential. */
   opaqueRef: boundedNonEmptyText(256),
-}).annotations(strict);
+});
 export type CanvasStaticExportSourceEntry = typeof CanvasStaticExportSourceEntry.Type;
 
 /**
@@ -288,7 +292,7 @@ export type CanvasStaticExportSourceEntry = typeof CanvasStaticExportSourceEntry
  * host: the share leaves without host, Project, thread, or image identity.
  */
 export const CanvasShareImageRef = Schema.String.pipe(
-  Schema.pattern(/^image-[1-9][0-9]?$/),
+  Schema.check(Schema.isPattern(/^image-[1-9][0-9]?$/)),
   Schema.brand("CanvasShareImageRef"),
 );
 export type CanvasShareImageRef = typeof CanvasShareImageRef.Type;
@@ -306,19 +310,21 @@ export const CANVAS_SHARE_IMAGES_MAX_BYTES = 4 * 1024 * 1024;
 const shareImageFields = {
   imageRef: CanvasShareImageRef,
   mediaType: CanvasDesignAssetMediaType,
-  byteLength: Schema.Int.pipe(Schema.between(1, CANVAS_DESIGN_ASSET_MAX_BYTES)),
-  sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: CANVAS_DESIGN_ASSET_MAX_BYTES }),
+  ),
+  sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
 } as const;
-const shareImageData = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
-  Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+const shareImageData = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
+  Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
 );
 
 export const CanvasShareImage = Schema.Struct({
   ...shareImageFields,
   data: shareImageData,
-}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+});
 export type CanvasShareImage = typeof CanvasShareImage.Type;
 
 /**
@@ -331,7 +337,7 @@ export type CanvasShareImage = typeof CanvasShareImage.Type;
 export const CanvasShareImageEntry = Schema.Struct({
   ...shareImageFields,
   data: Schema.optional(shareImageData),
-}).annotations({ parseOptions: { onExcessProperty: "error" as const } });
+});
 export type CanvasShareImageEntry = typeof CanvasShareImageEntry.Type;
 
 /** The bytes base64 `data` holds, from its length and padding. */
@@ -410,32 +416,34 @@ function exportTextHasNoSecrets(value: string): boolean {
   return isCanvasShareSafeText(value);
 }
 
-const ExportLabel = boundedNonEmptyText(512).pipe(
-  Schema.filter((value) => exportTextHasNoSecrets(value), {
-    message: () => "Canvas export labels must not contain secret-bearing text.",
+const ExportLabel = boundedNonEmptyText(512).check(
+  Schema.makeFilter((value) => exportTextHasNoSecrets(value), {
+    message: "Canvas export labels must not contain secret-bearing text.",
   }),
 );
 
-const ExportText = boundedText(32_768).pipe(
-  Schema.filter((value) => exportTextHasNoSecrets(value), {
-    message: () => "Canvas export text must not contain secret-bearing values.",
+const ExportText = boundedText(32_768).check(
+  Schema.makeFilter((value) => exportTextHasNoSecrets(value), {
+    message: "Canvas export text must not contain secret-bearing values.",
   }),
 );
-const ExportNonEmptyText = boundedNonEmptyText(32_768).pipe(
-  Schema.filter((value) => exportTextHasNoSecrets(value), {
-    message: () => "Canvas export text must not contain secret-bearing values.",
+const ExportNonEmptyText = boundedNonEmptyText(32_768).check(
+  Schema.makeFilter((value) => exportTextHasNoSecrets(value), {
+    message: "Canvas export text must not contain secret-bearing values.",
   }),
 );
-const ExportMatrixNote = ExportText.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH));
+const ExportMatrixNote = ExportText.check(Schema.isMaxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH));
 const exportMatrixCellFields = {
   criterionId: boundedToken("CanvasNodeId"),
   optionId: boundedToken("CanvasNodeId"),
   note: Schema.optional(ExportMatrixNote),
 } as const;
-const ExportMathSource = ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_MATH_SOURCE_LENGTH));
-const ExportUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+const ExportMathSource = ExportNonEmptyText.check(
+  Schema.isMaxLength(CANVAS_MAX_MATH_SOURCE_LENGTH),
+);
+const ExportUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -456,10 +464,10 @@ const ExportUrl = Schema.String.pipe(
         return false;
       }
     },
-    { message: () => "Canvas export links must be credential-free http(s) URLs." },
+    { message: "Canvas export links must be credential-free http(s) URLs." },
   ),
 );
-const ExportScalar = Schema.Union(ExportText, Schema.Number, Schema.Boolean, Schema.Null);
+const ExportScalar = Schema.Union([ExportText, Schema.Number, Schema.Boolean, Schema.Null]);
 
 const exportHeatmapFields = {
   ...exportBlockFields,
@@ -473,41 +481,41 @@ const exportHeatmapFields = {
  * Sanitized first-party export blocks. Live sourceId authority is never present.
  * Unsupported or secret-bearing shapes must fail closed at decode time.
  */
-export const CanvasStaticExportBlock = Schema.Union(
+export const CanvasStaticExportBlock = Schema.Union([
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("heading"),
-    level: Schema.Int.pipe(Schema.between(1, 6)),
+    level: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 6 })),
     text: ExportNonEmptyText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("rich-text"),
     text: ExportNonEmptyText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("callout"),
-    tone: Schema.Literal("info", "success", "warning", "danger"),
+    tone: Schema.Literals(["info", "success", "warning", "danger"]),
     title: Schema.optional(ExportLabel),
     text: ExportNonEmptyText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("link"),
     label: ExportLabel,
     href: ExportUrl,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("divider"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("citation"),
     label: ExportLabel,
     quote: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("metric"),
@@ -519,29 +527,29 @@ export const CanvasStaticExportBlock = Schema.Union(
     // written; without them a shared metric that names any of them was refused.
     format: Schema.optional(CanvasNumberFormat),
     sparkline: Schema.optional(
-      Schema.Array(Schema.Number).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+      Schema.Array(Schema.Number).check(Schema.isMaxLength(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
     ),
     goodDirection: Schema.optional(CanvasMetricDirection),
     caption: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("progress"),
     label: ExportLabel,
-    value: Schema.Number.pipe(
-      Schema.filter((value) => Number.isFinite(value) && value >= 0 && value <= 1, {
-        message: () => "Canvas export progress values must be finite numbers between 0 and 1.",
+    value: Schema.Number.check(
+      Schema.makeFilter((value) => Number.isFinite(value) && value >= 0 && value <= 1, {
+        message: "Canvas export progress values must be finite numbers between 0 and 1.",
       }),
     ),
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("status"),
     label: ExportLabel,
     value: ExportLabel,
-    tone: Schema.Literal("neutral", "info", "success", "warning", "danger"),
-  }).annotations(strict),
+    tone: Schema.Literals(["neutral", "info", "success", "warning", "danger"]),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("key-value"),
@@ -549,9 +557,9 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         key: ExportLabel,
         value: ExportScalar,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(128)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(128)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("table"),
@@ -559,19 +567,19 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         id: boundedToken("CanvasTableColumnId"),
         label: ExportLabel,
-        type: Schema.Literal("text", "number", "boolean", "date", "status"),
+        type: Schema.Literals(["text", "number", "boolean", "date", "status"]),
         format: Schema.optional(CanvasNumberFormat),
         display: Schema.optional(CanvasTableColumnDisplay),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(64)),
-    rows: Schema.Array(Schema.Array(ExportScalar).pipe(Schema.maxItems(64))).pipe(
-      Schema.maxItems(1_024),
+      }),
+    ).check(Schema.isMaxLength(64)),
+    rows: Schema.Array(Schema.Array(ExportScalar).check(Schema.isMaxLength(64))).check(
+      Schema.isMaxLength(1_024),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("chart"),
-    chartType: Schema.Literal(
+    chartType: Schema.Literals([
       "line",
       "bar",
       "area",
@@ -585,37 +593,35 @@ export const CanvasStaticExportBlock = Schema.Union(
       "funnel",
       "radar",
       "sankey",
-    ),
+    ]),
     series: Schema.Array(
       Schema.Struct({
         seriesId: boundedToken("CanvasSeriesId"),
         label: ExportLabel,
         points: Schema.NonEmptyArray(
           Schema.Struct({
-            x: Schema.Union(Schema.Number, ExportText),
+            x: Schema.Union([Schema.Number, ExportText]),
             y: Schema.Number,
-          }).annotations(strict),
-        ).pipe(Schema.maxItems(2_048)),
-        mark: Schema.optional(Schema.Literal("bar", "line")),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(64)),
+          }),
+        ).check(Schema.isMaxLength(2_048)),
+        mark: Schema.optional(Schema.Literals(["bar", "line"])),
+      }),
+    ).check(Schema.isMaxLength(64)),
     links: Schema.optional(
       Schema.Array(
         Schema.Struct({
-          source: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
-          target: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
+          source: ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
+          target: ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH)),
           value: Schema.Number,
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(CANVAS_MAX_SANKEY_LINKS)),
+        }),
+      ).check(Schema.isMaxLength(CANVAS_MAX_SANKEY_LINKS)),
     ),
     format: Schema.optional(CanvasNumberFormat),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter((block) => canvasChartSeriesIssue(block) === undefined, {
-        message: () => "Chart series do not match the chart type.",
-      }),
-    ),
+  }).check(
+    Schema.makeFilter((block) => canvasChartSeriesIssue(block) === undefined, {
+      message: "Chart series do not match the chart type.",
+    }),
+  ),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("timeline"),
@@ -625,46 +631,46 @@ export const CanvasStaticExportBlock = Schema.Union(
         title: ExportLabel,
         startAt: UtcTimestamp,
         endAt: Schema.optional(UtcTimestamp),
-        status: Schema.optional(Schema.Literal("neutral", "info", "success", "warning", "danger")),
+        status: Schema.optional(
+          Schema.Literals(["neutral", "info", "success", "warning", "danger"]),
+        ),
         detail: Schema.optional(ExportText),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
-  }).annotations(strict),
-  // A shared plan keeps its phases and tasks but drops each task's source ids,
-  // which only resolve against the host that wrote it.
+      }),
+    ).check(Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("plan"),
     title: ExportLabel,
-    view: Schema.optional(Schema.Literal("checklist", "kanban", "timeline", "gantt")),
+    view: Schema.optional(Schema.Literals(["checklist", "kanban", "timeline", "gantt"])),
     phases: Schema.NonEmptyArray(
       Schema.Struct({
         phaseId: boundedToken("CanvasPlanPhaseId"),
         title: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
+      }),
+    ).check(Schema.isMaxLength(32)),
     tasks: Schema.Array(
       Schema.Struct({
         taskId: boundedToken("CanvasPlanTaskId"),
         phaseId: boundedToken("CanvasPlanPhaseId"),
         title: ExportLabel,
-        status: Schema.Literal("todo", "doing", "blocked", "done"),
+        status: Schema.Literals(["todo", "doing", "blocked", "done"]),
         owner: Schema.optional(
           Schema.Struct({
-            kind: Schema.Literal("person", "agent"),
+            kind: Schema.Literals(["person", "agent"]),
             label: Schema.optional(ExportLabel),
-          }).annotations(strict),
+          }),
         ),
         estimate: Schema.optional(ExportLabel),
         notes: Schema.optional(ExportText),
         startAt: Schema.optional(UtcTimestamp),
         dueAt: Schema.optional(UtcTimestamp),
         dependsOn: Schema.optional(
-          Schema.Array(boundedToken("CanvasPlanTaskId")).pipe(Schema.maxItems(16)),
+          Schema.Array(boundedToken("CanvasPlanTaskId")).check(Schema.isMaxLength(16)),
         ),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(256)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(256)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("diagram"),
@@ -678,8 +684,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         x: Schema.optional(Schema.Number),
         y: Schema.optional(Schema.Number),
         positioned: Schema.optional(Schema.Literal(true)),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
+      }),
+    ).check(Schema.isMaxLength(512)),
     edges: Schema.Array(
       Schema.Struct({
         edgeId: boundedToken("CanvasEdgeId"),
@@ -688,22 +694,22 @@ export const CanvasStaticExportBlock = Schema.Union(
         label: Schema.optional(ExportLabel),
         style: Schema.optional(CanvasDiagramEdgeStyle),
         tone: Schema.optional(CanvasDiagramTone),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(1_024)),
+      }),
+    ).check(Schema.isMaxLength(1_024)),
     groups: Schema.optional(
       Schema.Array(
         Schema.Struct({
           groupId: boundedToken("CanvasGroupId"),
           label: ExportLabel,
-          nodeIds: Schema.Array(boundedToken("CanvasNodeId")).pipe(Schema.maxItems(512)),
+          nodeIds: Schema.Array(boundedToken("CanvasNodeId")).check(Schema.isMaxLength(512)),
           tone: Schema.optional(CanvasDiagramTone),
           parentGroupId: Schema.optional(boundedToken("CanvasGroupId")),
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(64)),
+        }),
+      ).check(Schema.isMaxLength(64)),
     ),
-    flow: Schema.optional(Schema.Literal("down", "right")),
+    flow: Schema.optional(Schema.Literals(["down", "right"])),
     layout: Schema.optional(CanvasDiagramLayoutKind),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("sequence"),
@@ -711,16 +717,16 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         participantId: boundedToken("CanvasNodeId"),
         label: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
+      }),
+    ).check(Schema.isMaxLength(512)),
     messages: Schema.Array(
       Schema.Struct({
         messageId: boundedToken("CanvasEdgeId"),
         from: boundedToken("CanvasNodeId"),
         to: boundedToken("CanvasNodeId"),
         label: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(1_024)),
+      }),
+    ).check(Schema.isMaxLength(1_024)),
     activations: Schema.optional(
       Schema.Array(
         Schema.Struct({
@@ -728,8 +734,8 @@ export const CanvasStaticExportBlock = Schema.Union(
           participantId: boundedToken("CanvasNodeId"),
           startMessageId: boundedToken("CanvasEdgeId"),
           endMessageId: boundedToken("CanvasEdgeId"),
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(512)),
+        }),
+      ).check(Schema.isMaxLength(512)),
     ),
     notes: Schema.optional(
       Schema.Array(
@@ -738,10 +744,10 @@ export const CanvasStaticExportBlock = Schema.Union(
           text: ExportLabel,
           participantId: Schema.optional(boundedToken("CanvasNodeId")),
           afterMessageId: Schema.optional(boundedToken("CanvasEdgeId")),
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(64)),
+        }),
+      ).check(Schema.isMaxLength(64)),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("state"),
@@ -749,19 +755,19 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         stateId: boundedToken("CanvasNodeId"),
         label: ExportLabel,
-        role: Schema.optional(Schema.Literal("initial", "final")),
+        role: Schema.optional(Schema.Literals(["initial", "final"])),
         parentId: Schema.optional(boundedToken("CanvasNodeId")),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
+      }),
+    ).check(Schema.isMaxLength(512)),
     transitions: Schema.Array(
       Schema.Struct({
         transitionId: boundedToken("CanvasEdgeId"),
         source: boundedToken("CanvasNodeId"),
         target: boundedToken("CanvasNodeId"),
         label: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(1_024)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("er"),
@@ -775,21 +781,21 @@ export const CanvasStaticExportBlock = Schema.Union(
             name: ExportLabel,
             type: ExportLabel,
             key: Schema.optional(Schema.Literal(true)),
-          }).annotations(strict),
-        ).pipe(Schema.maxItems(64)),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
+          }),
+        ).check(Schema.isMaxLength(64)),
+      }),
+    ).check(Schema.isMaxLength(512)),
     relationships: Schema.Array(
       Schema.Struct({
         relationshipId: boundedToken("CanvasEdgeId"),
         source: boundedToken("CanvasNodeId"),
         target: boundedToken("CanvasNodeId"),
-        sourceCardinality: Schema.Literal("one", "zero-or-one", "many", "one-or-many"),
-        targetCardinality: Schema.Literal("one", "zero-or-one", "many", "one-or-many"),
+        sourceCardinality: Schema.Literals(["one", "zero-or-one", "many", "one-or-many"]),
+        targetCardinality: Schema.Literals(["one", "zero-or-one", "many", "one-or-many"]),
         label: Schema.optional(ExportLabel),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(1_024)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("swimlane"),
@@ -797,26 +803,26 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         laneId: boundedToken("CanvasSwimlaneLaneId"),
         label: ExportLabel,
-        kind: Schema.optional(Schema.Literal("actor", "team")),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
+        kind: Schema.optional(Schema.Literals(["actor", "team"])),
+      }),
+    ).check(Schema.isMaxLength(32)),
     steps: Schema.Array(
       Schema.Struct({
         stepId: boundedToken("CanvasNodeId"),
         laneId: boundedToken("CanvasSwimlaneLaneId"),
         label: ExportLabel,
         decision: Schema.optional(Schema.Literal(true)),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
+      }),
+    ).check(Schema.isMaxLength(512)),
     connections: Schema.Array(
       Schema.Struct({
         connectionId: boundedToken("CanvasEdgeId"),
         source: boundedToken("CanvasNodeId"),
         target: boundedToken("CanvasNodeId"),
         label: Schema.optional(ExportLabel),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(1_024)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("mindmap"),
@@ -826,18 +832,13 @@ export const CanvasStaticExportBlock = Schema.Union(
         label: ExportLabel,
         parentId: Schema.optional(boundedToken("CanvasNodeId")),
         note: Schema.optional(ExportText),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(512)),
-  }).annotations(strict),
-  // A shared mockup is the live block as it stands: every field is drawn
-  // data from closed sets or bounded text, and nothing in it resolves against
-  // the host. The share policy still runs the secret filter over its text.
+      }),
+    ).check(Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     ...exportMockupFields,
-  }).annotations(strict),
-  // A shared treemap or bar list keeps its readings but drops each leaf's or
-  // row's source id, which only resolves against the host that wrote it.
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("treemap"),
@@ -847,22 +848,22 @@ export const CanvasStaticExportBlock = Schema.Union(
         parentId: Schema.optional(boundedToken("CanvasNodeId")),
         label: ExportLabel,
         values: Schema.optional(
-          Schema.Record({ key: boundedToken("CanvasTreemapMeasureId"), value: Schema.Number }),
+          Schema.Record(boundedToken("CanvasTreemapMeasureId"), Schema.Number),
         ),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_TREEMAP_LEAVES)),
     measures: Schema.NonEmptyArray(
       Schema.Struct({
         measureId: boundedToken("CanvasTreemapMeasureId"),
         label: ExportLabel,
         format: Schema.optional(CanvasNumberFormat),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_TREEMAP_MEASURES)),
     sizeBy: boundedToken("CanvasTreemapMeasureId"),
     colorBy: boundedToken("CanvasTreemapMeasureId"),
     colorScale: Schema.optional(CanvasTreemapScale),
     startNodeId: Schema.optional(boundedToken("CanvasNodeId")),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportHeatmapFields,
     layout: Schema.Literal("matrix"),
@@ -870,23 +871,23 @@ export const CanvasStaticExportBlock = Schema.Union(
       Schema.Struct({
         rowId: boundedToken("CanvasHeatmapRowId"),
         label: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_ROWS)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_ROWS)),
     columns: Schema.NonEmptyArray(
       Schema.Struct({
         columnId: boundedToken("CanvasHeatmapColumnId"),
         label: ExportLabel,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_COLUMNS)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_COLUMNS)),
     cells: Schema.Array(
       Schema.Struct({
         rowId: boundedToken("CanvasHeatmapRowId"),
         columnId: boundedToken("CanvasHeatmapColumnId"),
         value: Schema.Number,
         note: Schema.optional(ExportText),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_CELLS)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_CELLS)),
+  }),
   Schema.Struct({
     ...exportHeatmapFields,
     layout: Schema.Literal("calendar"),
@@ -895,9 +896,9 @@ export const CanvasStaticExportBlock = Schema.Union(
         date: CanvasHeatmapDate,
         value: Schema.Number,
         note: Schema.optional(ExportText),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_DAYS)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_DAYS)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("bar-list"),
@@ -906,14 +907,14 @@ export const CanvasStaticExportBlock = Schema.Union(
         label: ExportLabel,
         value: Schema.Number,
         secondaryValue: Schema.optional(Schema.Number),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_BAR_LIST_ROWS)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_BAR_LIST_ROWS)),
     valueLabel: Schema.optional(ExportLabel),
     secondaryLabel: Schema.optional(ExportLabel),
     format: Schema.optional(CanvasNumberFormat),
     secondaryFormat: Schema.optional(CanvasNumberFormat),
     scale: Schema.optional(CanvasBarListScale),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("comparison-matrix"),
@@ -922,71 +923,71 @@ export const CanvasStaticExportBlock = Schema.Union(
         optionId: boundedToken("CanvasNodeId"),
         label: ExportLabel,
         detail: Schema.optional(ExportMatrixNote),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_OPTIONS)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_MATRIX_OPTIONS)),
     criteria: Schema.NonEmptyArray(
       Schema.Struct({
         criterionId: boundedToken("CanvasNodeId"),
         label: ExportLabel,
-        weight: Schema.optional(Schema.Number.pipe(Schema.between(0, CANVAS_MAX_MATRIX_WEIGHT))),
+        weight: Schema.optional(
+          Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: CANVAS_MAX_MATRIX_WEIGHT })),
+        ),
         prefer: Schema.optional(CanvasMatrixPreference),
         detail: Schema.optional(ExportMatrixNote),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CRITERIA)),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_MATRIX_CRITERIA)),
     cells: Schema.Array(
-      Schema.Union(
-        Schema.Struct({ ...exportMatrixCellFields, score: Schema.Number }).annotations(strict),
+      Schema.Union([
+        Schema.Struct({ ...exportMatrixCellFields, score: Schema.Number }),
         Schema.Struct({
           ...exportMatrixCellFields,
-          text: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH)),
-        }).annotations(strict),
-        Schema.Struct({ ...exportMatrixCellFields, glyph: CanvasMatrixGlyph }).annotations(strict),
-      ),
-    ).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CELLS)),
-    scoreRange: Schema.optional(
-      Schema.Struct({ min: Schema.Number, max: Schema.Number }).annotations(strict),
-    ),
+          text: ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH)),
+        }),
+        Schema.Struct({ ...exportMatrixCellFields, glyph: CanvasMatrixGlyph }),
+      ]),
+    ).check(Schema.isMaxLength(CANVAS_MAX_MATRIX_CELLS)),
+    scoreRange: Schema.optional(Schema.Struct({ min: Schema.Number, max: Schema.Number })),
     recommendedOptionId: Schema.optional(boundedToken("CanvasNodeId")),
     recommendation: Schema.optional(
-      ExportText.pipe(Schema.maxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH * 2)),
+      ExportText.check(Schema.isMaxLength(CANVAS_MAX_MATRIX_NOTE_LENGTH * 2)),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("math"),
     layout: Schema.Literal("display"),
     source: ExportMathSource,
-    caption: Schema.optional(ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_MATH_CAPTION_LENGTH))),
-  }).annotations(strict),
+    caption: Schema.optional(ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_MATH_CAPTION_LENGTH))),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("math"),
     layout: Schema.Literal("inline"),
     runs: Schema.NonEmptyArray(
-      Schema.Union(
+      Schema.Union([
         Schema.Struct({
-          text: ExportText.pipe(
-            Schema.maxLength(CANVAS_MAX_MATH_PARAGRAPH_LENGTH),
-            Schema.filter((value) => value.trim().length > 0),
+          text: ExportText.check(
+            Schema.isMaxLength(CANVAS_MAX_MATH_PARAGRAPH_LENGTH),
+            Schema.makeFilter((value) => value.trim().length > 0),
           ),
-        }).annotations(strict),
-        Schema.Struct({ math: ExportMathSource }).annotations(strict),
-      ),
-    ).pipe(Schema.maxItems(CANVAS_MAX_MATH_RUNS)),
-  }).annotations(strict),
+        }),
+        Schema.Struct({ math: ExportMathSource }),
+      ]),
+    ).check(Schema.isMaxLength(CANVAS_MAX_MATH_RUNS)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("code-excerpt"),
     language: boundedToken("CanvasLanguage"),
     code: ExportNonEmptyText,
-    startLine: Schema.optional(Schema.Int.pipe(Schema.positive())),
-    endLine: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
+    startLine: Schema.optional(PositiveInt),
+    endLine: Schema.optional(PositiveInt),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("pseudocode"),
     code: ExportNonEmptyText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("diff"),
@@ -995,23 +996,23 @@ export const CanvasStaticExportBlock = Schema.Union(
         header: ExportLabel,
         lines: Schema.Array(
           Schema.Struct({
-            kind: Schema.Literal("add", "remove", "context"),
+            kind: Schema.Literals(["add", "remove", "context"]),
             text: ExportText,
-          }).annotations(strict),
-        ).pipe(Schema.maxItems(4_096)),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(128)),
-  }).annotations(strict),
+          }),
+        ).check(Schema.isMaxLength(4_096)),
+      }),
+    ).check(Schema.isMaxLength(128)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("source-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("summary"),
-    summaryKind: Schema.Literal(
+    summaryKind: Schema.Literals([
       "task",
       "thread",
       "subagent",
@@ -1020,58 +1021,64 @@ export const CanvasStaticExportBlock = Schema.Union(
       "usage",
       "test",
       "pull-request",
-    ),
+    ]),
     title: ExportLabel,
     items: Schema.Array(
       Schema.Struct({
         label: ExportLabel,
         value: Schema.optional(ExportScalar),
-        status: Schema.optional(Schema.Literal("neutral", "info", "success", "warning", "danger")),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(128)),
-  }).annotations(strict),
+        status: Schema.optional(
+          Schema.Literals(["neutral", "info", "success", "warning", "danger"]),
+        ),
+      }),
+    ).check(Schema.isMaxLength(128)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("artifact-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("file-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("preview-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("browser-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("evidence-reference"),
     label: ExportLabel,
     detail: Schema.optional(ExportText),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("dashboard"),
     title: ExportLabel,
-    columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+    columns: Schema.optional(
+      Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: CANVAS_MAX_DASHBOARD_COLUMNS })),
+    ),
     cells: Schema.NonEmptyArray(
       Schema.Struct({
         blockId: boundedToken("CanvasBlockId"),
-        span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS)),
-  }).annotations(strict),
+        span: Schema.optional(
+          Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: CANVAS_MAX_DASHBOARD_COLUMNS })),
+        ),
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_DASHBOARD_CELLS)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("image"),
@@ -1079,33 +1086,33 @@ export const CanvasStaticExportBlock = Schema.Union(
     caption: Schema.optional(ExportText),
     /** The picture, from share version 18: one of the document's `images`. */
     imageRef: Schema.optional(CanvasShareImageRef),
-  }).annotations(strict),
-  // Layout groups carry only block ids and short pane labels, so they leave
-  // as the author wrote them; the blocks they name are shared beside them.
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("tabs"),
     panes: Schema.Array(
       Schema.Struct({
-        label: ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_TABS_LABEL_LENGTH)),
-        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
-      }).annotations(strict),
-    ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_TABS_PANES)),
-  }).annotations(strict),
+        label: ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_TABS_LABEL_LENGTH)),
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).check(
+          Schema.isMaxLength(128),
+        ),
+      }),
+    ).check(Schema.isMinLength(2), Schema.isMaxLength(CANVAS_MAX_TABS_PANES)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("columns"),
     tracks: Schema.Array(
       Schema.Struct({
-        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).pipe(Schema.maxItems(128)),
-      }).annotations(strict),
-    ).pipe(Schema.minItems(CANVAS_MIN_COLUMN_TRACKS), Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS)),
-  }).annotations(strict),
-  // A design leaves as its frames: markup, written as the author wrote it,
-  // which the viewer draws under the frame policy and nothing else. Its
-  // declared images do not leave: an asset names a Project file or an image
-  // job, which resolve only under this host's authority, so a shared frame
-  // draws a placeholder where one was named.
+        blockIds: Schema.NonEmptyArray(boundedToken("CanvasBlockId")).check(
+          Schema.isMaxLength(128),
+        ),
+      }),
+    ).check(
+      Schema.isMinLength(CANVAS_MIN_COLUMN_TRACKS),
+      Schema.isMaxLength(CANVAS_MAX_COLUMN_TRACKS),
+    ),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("design"),
@@ -1115,9 +1122,9 @@ export const CanvasStaticExportBlock = Schema.Union(
     brand: Schema.optional(CanvasDesignBrand),
     runsScript: Schema.optional(Schema.Literal(true)),
     styles: Schema.optional(CanvasDesignMarkup),
-    frames: Schema.Array(CanvasDesignFrame).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+    frames: Schema.Array(CanvasDesignFrame).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(CANVAS_MAX_DESIGN_FRAMES),
     ),
     /**
      * From share version 18, the declared images the frames name as
@@ -1130,12 +1137,10 @@ export const CanvasStaticExportBlock = Schema.Union(
         Schema.Struct({
           assetId: CanvasDesignAssetId,
           imageRef: CanvasShareImageRef,
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
+        }),
+      ).check(Schema.isMaxLength(CANVAS_MAX_DESIGN_ASSETS)),
     ),
-  }).annotations(strict),
-  // A deck carries references and the presenter's notes never leave, so a
-  // shared deck walks its slides without the notes panel.
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("deck"),
@@ -1146,17 +1151,15 @@ export const CanvasStaticExportBlock = Schema.Union(
         blockId: boundedToken("CanvasBlockId"),
         frameId: Schema.optional(CanvasDesignFrameId),
         variantId: Schema.optional(boundedToken("CanvasMockupVariantId")),
-      }).annotations(strict),
-    ).pipe(Schema.minItems(2), Schema.maxItems(CANVAS_MAX_DECK_SLIDES)),
-  }).annotations(strict),
-  // A choice leaves as its questions. It carries no answer, and the reader
-  // offers no send: a share has no thread to send to.
+      }),
+    ).check(Schema.isMinLength(2), Schema.isMaxLength(CANVAS_MAX_DECK_SLIDES)),
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("choice"),
-    prompt: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_PROMPT_LENGTH)),
-    questions: CanvasChoiceQuestions.pipe(
-      Schema.filter(
+    prompt: ExportNonEmptyText.check(Schema.isMaxLength(CANVAS_MAX_CHOICE_PROMPT_LENGTH)),
+    questions: CanvasChoiceQuestions.check(
+      Schema.makeFilter(
         (questions) =>
           questions.every(
             (question) =>
@@ -1167,7 +1170,7 @@ export const CanvasStaticExportBlock = Schema.Union(
                   (option.description === undefined || exportTextHasNoSecrets(option.description)),
               ),
           ),
-        { message: () => "Canvas export questions must not contain secret-bearing text." },
+        { message: "Canvas export questions must not contain secret-bearing text." },
       ),
     ),
     // Sections group and title the questions; like the questions, they leave
@@ -1175,31 +1178,31 @@ export const CanvasStaticExportBlock = Schema.Union(
     sections: Schema.optional(
       Schema.Array(
         Schema.Struct({
-          id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-          title: ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH)),
+          id: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+          title: ExportNonEmptyText.check(
+            Schema.isMaxLength(CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH),
+          ),
           intro: Schema.optional(
-            ExportNonEmptyText.pipe(Schema.maxLength(CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH)),
+            ExportNonEmptyText.check(Schema.isMaxLength(CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH)),
           ),
-          questionIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))).pipe(
-            Schema.minItems(1),
-          ),
-        }).annotations(strict),
-      ).pipe(
-        Schema.minItems(1),
-        Schema.filter(
+          questionIds: Schema.Array(
+            Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+          ).check(Schema.isMinLength(1)),
+        }),
+      ).check(
+        Schema.isMinLength(1),
+        Schema.makeFilter(
           (sections) =>
             sections.every(
               (section) =>
                 exportTextHasNoSecrets(section.title) &&
                 (section.intro === undefined || exportTextHasNoSecrets(section.intro)),
             ),
-          { message: () => "Canvas export sections must not contain secret-bearing text." },
+          { message: "Canvas export sections must not contain secret-bearing text." },
         ),
       ),
     ),
-  }).annotations(strict),
-  // A flow carries references, not content: the screens it names are shared
-  // beside it, and a journaled placement is a number pair, so it leaves whole.
+  }),
   Schema.Struct({
     ...exportBlockFields,
     kind: Schema.Literal("flow"),
@@ -1210,8 +1213,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         Schema.Struct({
           nodeId: boundedToken("CanvasNodeId"),
           note: boundedNonEmptyText(CANVAS_MAX_FLOW_ANNOTATION_LENGTH),
-        }).annotations(strict),
-      ).pipe(Schema.maxItems(CANVAS_MAX_FLOW_ANNOTATIONS)),
+        }),
+      ).check(Schema.isMaxLength(CANVAS_MAX_FLOW_ANNOTATIONS)),
     ),
     screens: Schema.Array(
       Schema.Struct({
@@ -1222,20 +1225,20 @@ export const CanvasStaticExportBlock = Schema.Union(
         x: Schema.optional(Schema.Number),
         y: Schema.optional(Schema.Number),
         positioned: Schema.optional(Schema.Literal(true)),
-      }).annotations(strict),
-    ).pipe(Schema.minItems(1), Schema.maxItems(CANVAS_MAX_FLOW_SCREENS)),
+      }),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(CANVAS_MAX_FLOW_SCREENS)),
     edges: Schema.Array(
       Schema.Struct({
         edgeId: boundedToken("CanvasEdgeId"),
         fromScreenId: boundedToken("CanvasNodeId"),
         toScreenId: boundedToken("CanvasNodeId"),
         fromNodeId: Schema.optional(boundedToken("CanvasNodeId")),
-        label: Schema.optional(ExportLabel.pipe(Schema.maxLength(CANVAS_MAX_FLOW_LABEL_LENGTH))),
+        label: Schema.optional(ExportLabel.check(Schema.isMaxLength(CANVAS_MAX_FLOW_LABEL_LENGTH))),
         tone: Schema.optional(CanvasDiagramTone),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(CANVAS_MAX_FLOW_EDGES)),
-  }).annotations(strict),
-);
+      }),
+    ).check(Schema.isMaxLength(CANVAS_MAX_FLOW_EDGES)),
+  }),
+]);
 export type CanvasStaticExportBlock = typeof CanvasStaticExportBlock.Type;
 
 export const CanvasStaticExportDocument = Schema.Struct({
@@ -1244,92 +1247,106 @@ export const CanvasStaticExportDocument = Schema.Struct({
   exportId: CanvasExportId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   exportedAt: UtcTimestamp,
-  title: boundedNonEmptyText(256).pipe(
-    Schema.filter((value) => isCanvasShareSafeText(value), {
-      message: () => "Canvas export document titles must not contain secrets or host paths.",
+  title: boundedNonEmptyText(256).check(
+    Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+      message: "Canvas export document titles must not contain secrets or host paths.",
     }),
   ),
-  channel: Schema.Literal("static-export", "authenticated-snapshot"),
+  channel: Schema.Literals(["static-export", "authenticated-snapshot"]),
   sharingEnabled: Schema.Literal(true),
   provenance: CanvasRedactedProvenance,
-  sourceManifest: Schema.Array(CanvasStaticExportSourceEntry).pipe(Schema.maxItems(128)),
+  sourceManifest: Schema.Array(CanvasStaticExportSourceEntry).check(Schema.isMaxLength(128)),
   /**
    * Blocks are restricted to the sanitized first-party export union. Unknown
    * kinds, future schema versions, and source-bound authority fields fail closed.
    */
-  blocks: Schema.Array(CanvasStaticExportBlock).pipe(Schema.maxItems(128)),
+  blocks: Schema.Array(CanvasStaticExportBlock).check(Schema.isMaxLength(128)),
   /** The images the blocks display, from share version 18. */
   images: Schema.optional(
-    Schema.Array(CanvasShareImageEntry).pipe(Schema.maxItems(CANVAS_SHARE_MAX_IMAGES)),
+    Schema.Array(CanvasShareImageEntry).check(Schema.isMaxLength(CANVAS_SHARE_MAX_IMAGES)),
   ),
-  threatModelId: Schema.Literal(
+  threatModelId: Schema.Literals([
     "canvas-share-static-export-v1",
     "canvas-share-authenticated-snapshot-v1",
-  ),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+  ]),
+}).pipe(
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_IMAGES_SCHEMA_VERSION ||
         !carriesShareImages(document),
-      { message: () => "Shared images require Canvas share version 18." },
+      { message: "Shared images require Canvas share version 18." },
     ),
-    Schema.filter((document) => canvasShareImagesAreConsistent(document), {
-      message: () =>
+    Schema.makeFilter((document) => canvasShareImagesAreConsistent(document), {
+      message:
         "A share's images must each be named by a block, match their length, and fit the image budget.",
     }),
-    // Same version gate as the live definition: mockup blocks are declared by
-    // share version 2, which accompanies Canvas schema version 3. A v1
-    // document carrying one is refused at decode, not partially rendered.
-    Schema.filter(
+  ), // Same version gate as the live definition: mockup blocks are declared by
+  // share version 2, which accompanies Canvas schema version 3. A v1
+  // document carrying one is refused at decode, not partially rendered.
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_MOCKUP_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "mockup"),
-      { message: () => "Mockup blocks require Canvas share version 2." },
+      { message: "Mockup blocks require Canvas share version 2." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_VISUALS_SCHEMA_VERSION ||
         !document.blocks.some(exportBlockUsesVisuals),
       {
-        message: () =>
+        message:
           "Treemap, heatmap, and bar-list blocks, number formats on charts and table columns, table column displays, and a board's own layout require Canvas share version 3.",
       },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_COMPARISON_MATRIX_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "comparison-matrix"),
-      { message: () => "Comparison matrix blocks require Canvas share version 4." },
+      { message: "Comparison matrix blocks require Canvas share version 4." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_MATH_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "math"),
-      { message: () => "Math blocks require Canvas share version 5." },
+      { message: "Math blocks require Canvas share version 5." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_MOCKUP_CATALOG_SCHEMA_VERSION ||
         !document.blocks.some(canvasMockupUsesCatalog),
-      { message: () => "A mockup that uses the catalog requires Canvas share version 6." },
+      { message: "A mockup that uses the catalog requires Canvas share version 6." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_FLOW_CHARTS_SCHEMA_VERSION ||
         !document.blocks.some(canvasChartUsesFlowTypes),
-      { message: () => "Funnel, radar, and sankey charts require Canvas share version 7." },
+      { message: "Funnel, radar, and sankey charts require Canvas share version 7." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_DASHBOARD_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "dashboard"),
-      { message: () => "Dashboard blocks require Canvas share version 8." },
+      { message: "Dashboard blocks require Canvas share version 8." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION ||
         !document.blocks.some(
@@ -1339,28 +1356,34 @@ export const CanvasStaticExportDocument = Schema.Struct({
             canvasPlanUsesGantt(block),
         ),
       {
-        message: () =>
+        message:
           "Tabs, columns, diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas share version 9.",
       },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_FRAMES_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "design"),
-      { message: () => "Design frames require Canvas share version 10." },
+      { message: "Design frames require Canvas share version 10." },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         document.schemaVersion >= CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION ||
         !document.blocks.some(
           (block) => canvasDesignUsesDesignFields(block) || canvasDiagramUsesRichFields(block),
         ),
       {
-        message: () =>
+        message:
           "Brand tokens and diagram icons, details, and nested groups require Canvas share version 11.",
       },
     ),
-    Schema.filter(
+  ),
+  Schema.check(
+    Schema.makeFilter(
       (document) =>
         (document.schemaVersion >= CANVAS_SHARE_FLOW_SCHEMA_VERSION ||
           !document.blocks.some((block) => block.kind === "flow")) &&
@@ -1375,11 +1398,12 @@ export const CanvasStaticExportDocument = Schema.Struct({
         (document.schemaVersion >= CANVAS_SHARE_DECISION_FORM_SCHEMA_VERSION ||
           !document.blocks.some((block) => canvasChoiceUsesDecisionForm(block))),
       {
-        message: () =>
+        message:
           "Flow blocks require Canvas share version 12, the mockup library requires Canvas share version 13, a deck block requires Canvas share version 14, flow callouts require Canvas share version 15, a choice block requires Canvas share version 16, and a decision form's sections and notes require Canvas share version 17.",
       },
     ),
-  );
+  ),
+);
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;
 
 /** Whether a shared block uses a kind or field introduced at share version 3. */
@@ -1410,7 +1434,7 @@ export const CanvasStaticExportReceipt = Schema.Struct({
   exportId: CanvasExportId,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   exportedAt: UtcTimestamp,
   channel: CanvasShareChannel,
   document: CanvasStaticExportDocument,
@@ -1418,35 +1442,46 @@ export const CanvasStaticExportReceipt = Schema.Struct({
   consent: CanvasShareConsent,
   /** Optional operator note preserved from the explicit export request. */
   note: Schema.optional(
-    boundedNonEmptyText(512).pipe(
-      Schema.filter((value) => exportTextHasNoSecrets(value), {
-        message: () => "Canvas export notes must not contain secret-bearing or host-path text.",
+    boundedNonEmptyText(512).check(
+      Schema.makeFilter((value) => exportTextHasNoSecrets(value), {
+        message: "Canvas export notes must not contain secret-bearing or host-path text.",
       }),
     ),
   ),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (receipt) =>
-        receipt.channel === "static-export" &&
-        receipt.document.channel === "static-export" &&
-        receipt.document.threatModelId === "canvas-share-static-export-v1",
-      {
-        message: () =>
-          "Canvas static export receipts must embed only static-export documents and threat models.",
-      },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (receipt) =>
+      receipt.channel === "static-export" &&
+      receipt.document.channel === "static-export" &&
+      receipt.document.threatModelId === "canvas-share-static-export-v1",
+    {
+      message:
+        "Canvas static export receipts must embed only static-export documents and threat models.",
+    },
+  ),
+);
 export type CanvasStaticExportReceipt = typeof CanvasStaticExportReceipt.Type;
 
-export const decodeCanvasStaticExportRequest = Schema.decodeUnknownSync(CanvasStaticExportRequest);
+export const decodeCanvasStaticExportRequest = Schema.decodeUnknownSync(
+  CanvasStaticExportRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasStaticExportDocument = Schema.decodeUnknownSync(
   CanvasStaticExportDocument,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasStaticExportReceipt = Schema.decodeUnknownSync(CanvasStaticExportReceipt);
-export const decodeCanvasShareConsent = Schema.decodeUnknownSync(CanvasShareConsent);
-export const decodeCanvasStaticExportBlock = Schema.decodeUnknownSync(CanvasStaticExportBlock);
+export const decodeCanvasStaticExportReceipt = Schema.decodeUnknownSync(
+  CanvasStaticExportReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasShareConsent = Schema.decodeUnknownSync(
+  CanvasShareConsent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasStaticExportBlock = Schema.decodeUnknownSync(
+  CanvasStaticExportBlock,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** Helper retained for policy tests that need to re-decode a local definition. */
 export function decodeCanvasDefinitionForShare(value: unknown): CanvasDefinition {

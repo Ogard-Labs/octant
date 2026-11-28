@@ -13,7 +13,7 @@ import {
 import { ManagedAttachmentStore } from "./managedAttachmentStore";
 import { prepareConversationInputs } from "./conversationInputs";
 
-const uuid = Schema.decodeUnknownSync(Schema.UUID);
+const uuid = Schema.decodeUnknownSync(Schema.String.check(Schema.isGUID()));
 const SNAPSHOT_PREFIX = "continuation-";
 const directories = { chat: "threads", work: "work-threads", code: "code-threads" } as const;
 export interface ConversationInputOwner {

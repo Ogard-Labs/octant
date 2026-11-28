@@ -648,4 +648,4 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
   });
 }
 
-export type IntegrationsWiring = Effect.Effect.Success<ReturnType<typeof wireIntegrations>>;
+export type IntegrationsWiring = Effect.Success<ReturnType<typeof wireIntegrations>>;

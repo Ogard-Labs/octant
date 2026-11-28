@@ -50,19 +50,25 @@ const validSettings = {
 
 describe("theme contracts", () => {
   it.each(["system", "light", "dark"] as const)("decodes the %s theme mode", (mode) => {
-    expect(Schema.decodeUnknownSync(ThemeMode)(mode)).toBe(mode);
+    expect(Schema.decodeUnknownSync(ThemeMode, { onExcessProperty: "error" })(mode)).toBe(mode);
   });
 
   it.each(["comfortable", "compact"] as const)("decodes the %s density", (density) => {
-    expect(Schema.decodeUnknownSync(ThemeDensity)(density)).toBe(density);
+    expect(Schema.decodeUnknownSync(ThemeDensity, { onExcessProperty: "error" })(density)).toBe(
+      density,
+    );
   });
 
   it.each(["translucent", "opaque"] as const)("decodes the %s translucency", (value) => {
-    expect(Schema.decodeUnknownSync(ThemeTranslucency)(value)).toBe(value);
+    expect(Schema.decodeUnknownSync(ThemeTranslucency, { onExcessProperty: "error" })(value)).toBe(
+      value,
+    );
   });
 
   it.each(["12h", "24h"] as const)("decodes the %s timestamp format", (value) => {
-    expect(Schema.decodeUnknownSync(ThemeTimestampFormat)(value)).toBe(value);
+    expect(
+      Schema.decodeUnknownSync(ThemeTimestampFormat, { onExcessProperty: "error" })(value),
+    ).toBe(value);
   });
 
   it("decodes a full theme settings payload and rejects excess fields", () => {
@@ -117,29 +123,39 @@ describe("theme contracts", () => {
         typography: { ...validSettings.typography, ui: { ...validSettings.typography.ui, family } },
       }),
     ).toThrow();
-    expect(() => Schema.decodeUnknownSync(ThemeFontFamily)(family)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ThemeFontFamily, { onExcessProperty: "error" })(family),
+    ).toThrow();
   });
 
   it("accepts a comma-separated quoted font stack", () => {
     expect(
-      Schema.decodeUnknownSync(ThemeFontFamily)('"SF Pro Display", "Helvetica Neue", sans-serif'),
+      Schema.decodeUnknownSync(ThemeFontFamily, { onExcessProperty: "error" })(
+        '"SF Pro Display", "Helvetica Neue", sans-serif',
+      ),
     ).toBe('"SF Pro Display", "Helvetica Neue", sans-serif');
   });
 
   it.each([7, 33, 0, 12.5, -1])("rejects font size %s", (size) => {
-    expect(() => Schema.decodeUnknownSync(ThemeFontSize)(size)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ThemeFontSize, { onExcessProperty: "error" })(size),
+    ).toThrow();
   });
 
   it.each([8, 13, 32])("accepts font size %s", (size) => {
-    expect(Schema.decodeUnknownSync(ThemeFontSize)(size)).toBe(size);
+    expect(Schema.decodeUnknownSync(ThemeFontSize, { onExcessProperty: "error" })(size)).toBe(size);
   });
 
   it.each([300, 400, 700])("accepts font weight %s", (weight) => {
-    expect(Schema.decodeUnknownSync(ThemeFontWeight)(weight)).toBe(weight);
+    expect(Schema.decodeUnknownSync(ThemeFontWeight, { onExcessProperty: "error" })(weight)).toBe(
+      weight,
+    );
   });
 
   it.each([299, 701, 400.5, Number.NaN])("rejects unsafe font weight %s", (weight) => {
-    expect(() => Schema.decodeUnknownSync(ThemeFontWeight)(weight)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ThemeFontWeight, { onExcessProperty: "error" })(weight),
+    ).toThrow();
   });
 
   it("defaults weight when decoding a legacy typography payload", () => {
@@ -152,48 +168,66 @@ describe("theme contracts", () => {
   });
 
   it.each([0.9, 2.6, 0, 3])("rejects line height %s", (value) => {
-    expect(() => Schema.decodeUnknownSync(ThemeLineHeight)(value)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ThemeLineHeight, { onExcessProperty: "error" })(value),
+    ).toThrow();
   });
 
   it.each([1, 1.4, 2.5])("accepts line height %s", (value) => {
-    expect(Schema.decodeUnknownSync(ThemeLineHeight)(value)).toBe(value);
+    expect(Schema.decodeUnknownSync(ThemeLineHeight, { onExcessProperty: "error" })(value)).toBe(
+      value,
+    );
   });
 
   it.each(["#fff", "#GGGGGG", "white", "rgb(0,0,0)", "#0000003", "", "#0000000"])(
     "rejects invalid hex color %s",
     (color) => {
-      expect(() => Schema.decodeUnknownSync(ThemeHexColor)(color)).toThrow();
+      expect(() =>
+        Schema.decodeUnknownSync(ThemeHexColor, { onExcessProperty: "error" })(color),
+      ).toThrow();
     },
   );
 
   it.each(["#000000", "#FFFFFF", "#1a1a1c", "#D8D8D4"])("accepts hex color %s", (color) => {
-    expect(Schema.decodeUnknownSync(ThemeHexColor)(color)).toBe(color);
+    expect(Schema.decodeUnknownSync(ThemeHexColor, { onExcessProperty: "error" })(color)).toBe(
+      color,
+    );
   });
 
   it("rejects semantic overrides with duplicate roles or invalid colors", () => {
     expect(() =>
-      Schema.decodeUnknownSync(ThemeSemanticOverrides)([
+      Schema.decodeUnknownSync(ThemeSemanticOverrides, { onExcessProperty: "error" })([
         { role: "accent", color: "#000000" },
         { role: "accent", color: "#ffffff" },
       ]),
     ).toThrow();
     expect(() =>
-      Schema.decodeUnknownSync(ThemeSemanticOverrideEntry)({ role: "accent", color: "white" }),
+      Schema.decodeUnknownSync(ThemeSemanticOverrideEntry, { onExcessProperty: "error" })({
+        role: "accent",
+        color: "white",
+      }),
     ).toThrow();
     expect(() =>
-      Schema.decodeUnknownSync(ThemeSemanticOverrideEntry)({ role: "", color: "#000000" }),
+      Schema.decodeUnknownSync(ThemeSemanticOverrideEntry, { onExcessProperty: "error" })({
+        role: "",
+        color: "#000000",
+      }),
     ).toThrow();
   });
 
   it("rejects editor typography missing required fields", () => {
     expect(() =>
-      Schema.decodeUnknownSync(TypographyEditor)({ family: "Inter", size: 13, lineHeight: 1.5 }),
+      Schema.decodeUnknownSync(TypographyEditor, { onExcessProperty: "error" })({
+        family: "Inter",
+        size: 13,
+        lineHeight: 1.5,
+      }),
     ).toThrow();
   });
 
   it("rejects terminal typography with excess fields", () => {
     expect(() =>
-      Schema.decodeUnknownSync(TypographyTerminal)({
+      Schema.decodeUnknownSync(TypographyTerminal, { onExcessProperty: "error" })({
         family: "Inter",
         size: 13,
         lineHeight: 1.5,
@@ -205,7 +239,11 @@ describe("theme contracts", () => {
 
   it("rejects ui typography with excess fields", () => {
     expect(() =>
-      Schema.decodeUnknownSync(TypographyUi)({ family: "Inter", size: 13, lineHeight: 1.5 }),
+      Schema.decodeUnknownSync(TypographyUi, { onExcessProperty: "error" })({
+        family: "Inter",
+        size: 13,
+        lineHeight: 1.5,
+      }),
     ).toThrow();
   });
 
@@ -424,7 +462,9 @@ describe("sidebar background contracts", () => {
     });
     expect(meta.mediaType).toBe("image/png");
 
-    const upload = Schema.decodeUnknownSync(SidebarBackgroundUploadResult)({
+    const upload = Schema.decodeUnknownSync(SidebarBackgroundUploadResult, {
+      onExcessProperty: "error",
+    })({
       backgroundId: "00000000-0000-4000-8000-000000000b01",
     });
     expect(upload.backgroundId).toBe("00000000-0000-4000-8000-000000000b01");

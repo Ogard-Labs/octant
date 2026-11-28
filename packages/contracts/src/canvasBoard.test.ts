@@ -131,7 +131,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 5,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(add).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-add" } });
+    expect(add).toMatchObject({ _tag: "Success", success: { kind: "canvas-comment-add" } });
 
     const reply = decodeCanvasCommentCommand({
       kind: "canvas-comment-reply",
@@ -143,7 +143,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 6,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(reply).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-reply" } });
+    expect(reply).toMatchObject({ _tag: "Success", success: { kind: "canvas-comment-reply" } });
 
     const resolve = decodeCanvasCommentCommand({
       kind: "canvas-comment-resolve",
@@ -153,7 +153,7 @@ describe("Canvas board comment contracts", () => {
       expectedSequence: 7,
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
-    expect(resolve).toMatchObject({ _tag: "Right", right: { kind: "canvas-comment-resolve" } });
+    expect(resolve).toMatchObject({ _tag: "Success", success: { kind: "canvas-comment-resolve" } });
 
     const deleteCommand = decodeCanvasCommentCommand({
       kind: "canvas-comment-delete",
@@ -164,8 +164,8 @@ describe("Canvas board comment contracts", () => {
       issuedAt: "2026-08-01T21:00:00.000Z",
     });
     expect(deleteCommand).toMatchObject({
-      _tag: "Right",
-      right: { kind: "canvas-comment-delete" },
+      _tag: "Success",
+      success: { kind: "canvas-comment-delete" },
     });
   });
 
@@ -245,7 +245,7 @@ describe("Canvas board comment contracts", () => {
         expectedSequence: 1,
         issuedAt: "2026-08-01T21:00:00.000Z",
       })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
   });
 });
 

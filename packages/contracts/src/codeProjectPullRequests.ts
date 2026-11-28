@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import {
   CodePullRequestReviewChangedFile,
@@ -20,37 +21,37 @@ import {
   PullRequestMerging,
 } from "./threadBoardPullRequests";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter(
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\0"),
     ),
   );
-const githubUpdatedAt = Schema.String.pipe(
-  Schema.filter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
+const githubUpdatedAt = Schema.String.check(
+  Schema.makeFilter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
 );
-const branchName = boundedNonEmptyText(255).pipe(
-  Schema.filter((value) => !/\s/.test(value) && !value.includes("..")),
+const branchName = boundedNonEmptyText(255).check(
+  Schema.makeFilter((value) => !/\s/.test(value) && !value.includes("..")),
 );
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\0"),
     ),
   );
-const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =>
-  Schema.Array(schema).pipe(
-    Schema.filter(
+const uniqueArray = <S extends Schema.Top>(schema: S, maximum: number) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter(
       (values) =>
         values.length <= maximum &&
         new Set(values.map((value) => String(value))).size === values.length,
     ),
   );
-const PullRequestUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter((value) => {
+const PullRequestUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return url.protocol === "https:" && url.username === "" && url.password === "";
@@ -59,9 +60,9 @@ const PullRequestUrl = Schema.String.pipe(
     }
   }),
 );
-const boundedReviewArray = <A, I, R>(schema: Schema.Schema<A, I, R>) =>
-  Schema.Array(schema).pipe(
-    Schema.filter((values) => values.length <= MAX_CODE_PULL_REQUEST_REVIEW_ITEMS),
+const boundedReviewArray = <S extends Schema.Top>(schema: S) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter((values) => values.length <= MAX_CODE_PULL_REQUEST_REVIEW_ITEMS),
   );
 
 export const MAX_CODE_PROJECT_PULL_REQUEST_ROWS = 100;
@@ -82,51 +83,51 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS = 8;
 export const CodeProjectPullRequestQuery = Schema.Struct({
   version: Schema.Literal(1),
   threadId: Schema.optional(CodeThreadId),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestQuery = typeof CodeProjectPullRequestQuery.Type;
 
-export const CodeProjectPullRequestRefreshCommand = Schema.Union(
+export const CodeProjectPullRequestRefreshCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("refresh-all"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refresh-project"),
     projectId: ProjectId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestRefreshCommand = typeof CodeProjectPullRequestRefreshCommand.Type;
 
-export const CodeProjectPullRequestStaleReason = Schema.Literal(
+export const CodeProjectPullRequestStaleReason = Schema.Literals([
   "rate-limited",
   "timeout",
   "malformed",
   "disconnected",
   "refresh-failed",
-);
+]);
 export type CodeProjectPullRequestStaleReason = typeof CodeProjectPullRequestStaleReason.Type;
 
 export const CodeProjectPullRequestFreshness = Schema.Struct({
-  status: Schema.Literal("fresh", "stale", "empty"),
+  status: Schema.Literals(["fresh", "stale", "empty"]),
   staleReason: Schema.optional(CodeProjectPullRequestStaleReason),
   lastSuccessfulRefreshAt: Schema.optional(UtcTimestamp),
   retryAfter: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestFreshness = typeof CodeProjectPullRequestFreshness.Type;
 
-export const CodeProjectPullRequestConnection = Schema.Union(
+export const CodeProjectPullRequestConnection = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("connected"),
     projectId: ProjectId,
     projectName: boundedNonEmptyText(512),
     repositoryOwner: GithubRepositoryOwner,
     repositoryName: GithubRepositoryName,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unconnected"),
     projectId: ProjectId,
     projectName: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestConnection = typeof CodeProjectPullRequestConnection.Type;
 
 /**
@@ -137,7 +138,7 @@ export type CodeProjectPullRequestConnection = typeof CodeProjectPullRequestConn
 export const CodeProjectPullRequestProjectFreshness = Schema.Struct({
   projectId: ProjectId,
   freshness: CodeProjectPullRequestFreshness,
-}).annotations(strict);
+});
 export type CodeProjectPullRequestProjectFreshness =
   typeof CodeProjectPullRequestProjectFreshness.Type;
 
@@ -149,47 +150,47 @@ export type CodeProjectPullRequestProjectFreshness =
  */
 export const CodeProjectPullRequestBackgroundRefreshState = Schema.Struct({
   projectId: ProjectId,
-  state: Schema.Literal("disabled", "scheduled", "backing-off", "unavailable"),
+  state: Schema.Literals(["disabled", "scheduled", "backing-off", "unavailable"]),
   nextObservationAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestBackgroundRefreshState =
   typeof CodeProjectPullRequestBackgroundRefreshState.Type;
 
-export const CodeProjectPullRequestChecksSummary = Schema.Literal(
+export const CodeProjectPullRequestChecksSummary = Schema.Literals([
   "unknown",
   "pending",
   "passing",
   "failing",
-);
+]);
 export type CodeProjectPullRequestChecksSummary = typeof CodeProjectPullRequestChecksSummary.Type;
 
-export const CodeProjectPullRequestReviewSummary = Schema.Literal(
+export const CodeProjectPullRequestReviewSummary = Schema.Literals([
   "unknown",
   "none",
   "pending",
   "approved",
   "changes-requested",
-);
+]);
 export type CodeProjectPullRequestReviewSummary = typeof CodeProjectPullRequestReviewSummary.Type;
 
-export const CodeProjectPullRequestState = Schema.Literal("unknown", "open", "merged", "closed");
+export const CodeProjectPullRequestState = Schema.Literals(["unknown", "open", "merged", "closed"]);
 export type CodeProjectPullRequestState = typeof CodeProjectPullRequestState.Type;
 
-export const CodeProjectPullRequestMergeability = Schema.Literal(
+export const CodeProjectPullRequestMergeability = Schema.Literals([
   "mergeable",
   "conflicting",
   "unknown",
-);
+]);
 export type CodeProjectPullRequestMergeability = typeof CodeProjectPullRequestMergeability.Type;
 
-export const CodeProjectPullRequestMergeMethod = Schema.Literal("merge", "squash", "rebase");
+export const CodeProjectPullRequestMergeMethod = Schema.Literals(["merge", "squash", "rebase"]);
 export type CodeProjectPullRequestMergeMethod = typeof CodeProjectPullRequestMergeMethod.Type;
 
 export const CodeProjectPullRequestMergeCommand = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   method: CodeProjectPullRequestMergeMethod,
   /**
    * The head commit the person reviewed. The server refuses with `stale`
@@ -210,10 +211,10 @@ export const CodeProjectPullRequestMergeCommand = Schema.Struct({
    * the caller confirmed a head alone.
    */
   baseBranch: Schema.optional(branchName),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestMergeCommand = typeof CodeProjectPullRequestMergeCommand.Type;
 
-const CodeProjectPullRequestMergeRefusal = Schema.Literal(
+const CodeProjectPullRequestMergeRefusal = Schema.Literals([
   "not-authorized",
   "not-open",
   "not-mergeable",
@@ -223,14 +224,14 @@ const CodeProjectPullRequestMergeRefusal = Schema.Literal(
   "not-confirmed",
   "checks-not-passing",
   "checks-unknown",
-);
+]);
 export type CodeProjectPullRequestMergeRefusal = typeof CodeProjectPullRequestMergeRefusal.Type;
 
-const CodeProjectPullRequestMergeUnavailable = Schema.Literal(
+const CodeProjectPullRequestMergeUnavailable = Schema.Literals([
   "disconnected",
   "unauthenticated",
   "unavailable",
-);
+]);
 export type CodeProjectPullRequestMergeUnavailable =
   typeof CodeProjectPullRequestMergeUnavailable.Type;
 
@@ -247,7 +248,7 @@ export const CODE_OWNER_UNLOCKED_MERGE_PATHS = [
  * host is in no hub, or its hub grant leaves owners out, so it has no owner who
  * could give one. The rest repeat the host's check of the owner and the unlock.
  */
-export const CodeOwnerMergeUnlockReason = Schema.Literal(
+export const CodeOwnerMergeUnlockReason = Schema.Literals([
   "missing",
   "invalid",
   "no-owner-list",
@@ -261,7 +262,7 @@ export const CodeOwnerMergeUnlockReason = Schema.Literal(
   "action-mismatch",
   "signature-invalid",
   "user-verification-missing",
-);
+]);
 export type CodeOwnerMergeUnlockReason = typeof CodeOwnerMergeUnlockReason.Type;
 
 /**
@@ -274,26 +275,26 @@ export const CodeOwnerMergeUnlockRefusal = Schema.Struct({
   status: Schema.Literal("owner-unlock-required"),
   reason: CodeOwnerMergeUnlockReason,
   hostMemberId: Schema.optional(HubMemberId),
-}).annotations(strict);
+});
 export type CodeOwnerMergeUnlockRefusal = typeof CodeOwnerMergeUnlockRefusal.Type;
 
-export const CodeProjectPullRequestMergeOutcome = Schema.Union(
+export const CodeProjectPullRequestMergeOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("merged"),
-    number: Schema.Int.pipe(Schema.positive()),
+    number: PositiveInt,
     method: CodeProjectPullRequestMergeMethod,
     mergedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeProjectPullRequestMergeRefusal,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: CodeProjectPullRequestMergeUnavailable,
-  }).annotations(strict),
+  }),
   CodeOwnerMergeUnlockRefusal,
-);
+]);
 export type CodeProjectPullRequestMergeOutcome = typeof CodeProjectPullRequestMergeOutcome.Type;
 
 export const CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED =
@@ -310,35 +311,31 @@ export const CodeProjectPullRequestMergeRecorded = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   method: CodeProjectPullRequestMergeMethod,
   headSha: boundedNonEmptyText(64),
   /** Set for a merge confirmed on a paired phone or web client; absent for the local window. */
-  caller: Schema.optional(Schema.Literal("local-window", "remote-device")),
-  result: Schema.Union(
-    Schema.Struct({ status: Schema.Literal("merged") }).annotations(strict),
+  caller: Schema.optional(Schema.Literals(["local-window", "remote-device"])),
+  result: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("merged") }),
     Schema.Struct({
       status: Schema.Literal("refused"),
       reason: CodeProjectPullRequestMergeRefusal,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       status: Schema.Literal("unavailable"),
       reason: CodeProjectPullRequestMergeUnavailable,
-    }).annotations(strict),
-    /**
-     * The merge call threw instead of answering, so whether GitHub merged is
-     * unknown. Only the category is kept: raw error text can carry a remote
-     * URL with credentials.
-     */
+    }),
     Schema.Struct({
       status: Schema.Literal("failed"),
-      reason: Schema.Literal("aborted", "error"),
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+      reason: Schema.Literals(["aborted", "error"]),
+    }),
+  ]),
+});
 export type CodeProjectPullRequestMergeRecorded = typeof CodeProjectPullRequestMergeRecorded.Type;
 export const decodeCodeProjectPullRequestMergeRecorded = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeRecorded,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const MAX_CODE_PROJECT_PULL_REQUEST_STACK_MERGE = 10;
@@ -359,23 +356,22 @@ export const CodeProjectPullRequestStackMergeCommand = Schema.Struct({
   baseBranch: Schema.optional(branchName),
   items: Schema.Array(
     Schema.Struct({
-      number: Schema.Int.pipe(Schema.positive()),
+      number: PositiveInt,
       headSha: boundedNonEmptyText(64),
-    }).annotations(strict),
-  ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_STACK_MERGE)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_STACK_MERGE)),
+});
 export type CodeProjectPullRequestStackMergeCommand =
   typeof CodeProjectPullRequestStackMergeCommand.Type;
 
-export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
+export const CodeProjectPullRequestStackMergeOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("merged"),
-    merged: Schema.Array(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
-  /** The stack was not one stack, so nothing merged. */
+    merged: Schema.Array(PositiveInt),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "not-authorized",
       "not-confirmed",
       "empty",
@@ -383,41 +379,34 @@ export const CodeProjectPullRequestStackMergeOutcome = Schema.Union(
       "duplicate",
       "not-a-chain",
       "unreadable",
-      /** The bottom no longer lands on the branch the person confirmed. */
       "base-changed",
-      /** A layer's head is not the one the person confirmed. */
       "stale",
-    ),
-  }).annotations(strict),
-  /** Some merged, then one did not: `merged` is what landed before it. */
+    ]),
+  }),
   Schema.Struct({
     status: Schema.Literal("stopped"),
-    merged: Schema.Array(Schema.Int.pipe(Schema.positive())),
-    stoppedAt: Schema.Int.pipe(Schema.positive()),
+    merged: Schema.Array(PositiveInt),
+    stoppedAt: PositiveInt,
     /**
      * The branch the layer it stopped at was pointed at for its merge, and
      * stays pointed at: the layer below has landed there, so its old base
      * would strand it.
      */
     retargetedTo: Schema.optional(branchName),
-    outcome: Schema.Union(
-      /**
-       * GitHub took the merge but has not landed it: a merge queue or
-       * auto-merge holds it. The layers above are left as they were.
-       */
-      Schema.Struct({ status: Schema.Literal("not-landed") }).annotations(strict),
+    outcome: Schema.Union([
+      Schema.Struct({ status: Schema.Literal("not-landed") }),
       Schema.Struct({
         status: Schema.Literal("refused"),
         reason: CodeProjectPullRequestMergeRefusal,
-      }).annotations(strict),
+      }),
       Schema.Struct({
         status: Schema.Literal("unavailable"),
         reason: CodeProjectPullRequestMergeUnavailable,
-      }).annotations(strict),
-    ),
-  }).annotations(strict),
+      }),
+    ]),
+  }),
   CodeOwnerMergeUnlockRefusal,
-);
+]);
 export type CodeProjectPullRequestStackMergeOutcome =
   typeof CodeProjectPullRequestStackMergeOutcome.Type;
 
@@ -425,11 +414,11 @@ const CodeProjectPullRequestActionTarget = {
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
 } as const;
 
-export const CodeProjectPullRequestLabel = Schema.String.pipe(
-  Schema.filter(
+export const CodeProjectPullRequestLabel = Schema.String.check(
+  Schema.makeFilter(
     (value) =>
       value.length >= 1 &&
       value.length <= 50 &&
@@ -444,53 +433,49 @@ export const CodeProjectPullRequestLabel = Schema.String.pipe(
  * review thread, close, and reopen. The person's click is the approval; the
  * text of a comment or reply is posted under their name and is never journaled.
  */
-export const CodeProjectPullRequestActionCommand = Schema.Union(
+export const CodeProjectPullRequestActionCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("labels"),
     ...CodeProjectPullRequestActionTarget,
-    add: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(20)),
-    remove: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(20)),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((command) => command.add.length + command.remove.length > 0)),
+    add: Schema.Array(CodeProjectPullRequestLabel).check(Schema.isMaxLength(20)),
+    remove: Schema.Array(CodeProjectPullRequestLabel).check(Schema.isMaxLength(20)),
+  }).check(Schema.makeFilter((command) => command.add.length + command.remove.length > 0)),
   Schema.Struct({
     kind: Schema.Literal("comment"),
     ...CodeProjectPullRequestActionTarget,
     body: boundedNonEmptyText(65_536),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reply"),
     ...CodeProjectPullRequestActionTarget,
-    reviewThreadId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/)),
+    reviewThreadId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_=-]{1,128}$/)),
     body: boundedNonEmptyText(65_536),
-  }).annotations(strict),
-  // A review lands on the head the person read: the host refuses it as stale
-  // when the head has moved, and the forge records it on that commit.
+  }),
   Schema.Struct({
     kind: Schema.Literal("approve"),
     ...CodeProjectPullRequestActionTarget,
     headSha: boundedNonEmptyText(64),
     body: Schema.optional(boundedNonEmptyText(65_536)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("request-changes"),
     ...CodeProjectPullRequestActionTarget,
     headSha: boundedNonEmptyText(64),
     body: boundedNonEmptyText(65_536),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("close"),
     ...CodeProjectPullRequestActionTarget,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reopen"),
     ...CodeProjectPullRequestActionTarget,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestActionCommand = typeof CodeProjectPullRequestActionCommand.Type;
 export type CodeProjectPullRequestActionKind = CodeProjectPullRequestActionCommand["kind"];
 
-const CodeProjectPullRequestActionRefusal = Schema.Literal(
+const CodeProjectPullRequestActionRefusal = Schema.Literals([
   "not-authorized",
   "invalid",
   "not-open",
@@ -500,19 +485,19 @@ const CodeProjectPullRequestActionRefusal = Schema.Literal(
   "stale",
   "own-pull-request",
   "failed",
-);
+]);
 
-export const CodeProjectPullRequestActionOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("done") }).annotations(strict),
+export const CodeProjectPullRequestActionOutcome = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("done") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: CodeProjectPullRequestActionRefusal,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: CodeProjectPullRequestMergeUnavailable,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestActionOutcome = typeof CodeProjectPullRequestActionOutcome.Type;
 
 export const MAX_CODE_PROJECT_PULL_REQUEST_REPOSITORY_LABELS = 100;
@@ -521,7 +506,7 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_THREADS = 50;
 /** The one pull request whose labels and review threads the person's controls read. */
 export const CodeProjectPullRequestActionContextQuery = Schema.Struct({
   ...CodeProjectPullRequestActionTarget,
-}).annotations(strict);
+});
 export type CodeProjectPullRequestActionContextQuery =
   typeof CodeProjectPullRequestActionContextQuery.Type;
 
@@ -532,33 +517,33 @@ export type CodeProjectPullRequestActionContextQuery =
  * excerpt is the first comment's start, shown so the person knows which thread
  * a reply answers.
  */
-export const CodeProjectPullRequestActionContext = Schema.Union(
+export const CodeProjectPullRequestActionContext = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("read"),
-    labels: Schema.Array(CodeProjectPullRequestLabel).pipe(Schema.maxItems(50)),
-    repositoryLabels: Schema.Array(CodeProjectPullRequestLabel).pipe(
-      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REPOSITORY_LABELS),
+    labels: Schema.Array(CodeProjectPullRequestLabel).check(Schema.isMaxLength(50)),
+    repositoryLabels: Schema.Array(CodeProjectPullRequestLabel).check(
+      Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_REPOSITORY_LABELS),
     ),
     reviewThreads: Schema.Array(
       Schema.Struct({
-        id: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_=-]{1,128}$/)),
+        id: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_=-]{1,128}$/)),
         resolved: Schema.Boolean,
         outdated: Schema.Boolean,
         path: boundedText(1_024),
         author: boundedText(255),
         excerpt: boundedText(400),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_THREADS)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_THREADS)),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: Schema.Literal("not-authorized"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: CodeProjectPullRequestMergeUnavailable,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestActionContext = typeof CodeProjectPullRequestActionContext.Type;
 
 export const CODE_PROJECT_PULL_REQUEST_ACTION_RECORDED =
@@ -573,8 +558,8 @@ export const CodeProjectPullRequestActionRecorded = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-  action: Schema.Literal(
+  number: PositiveInt,
+  action: Schema.Literals([
     "labels",
     "comment",
     "reply",
@@ -582,32 +567,32 @@ export const CodeProjectPullRequestActionRecorded = Schema.Struct({
     "request-changes",
     "close",
     "reopen",
-  ),
+  ]),
   labels: Schema.optional(
     Schema.Struct({
       add: Schema.Array(CodeProjectPullRequestLabel),
       remove: Schema.Array(CodeProjectPullRequestLabel),
-    }).annotations(strict),
+    }),
   ),
-  bodyBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  result: Schema.Union(
-    Schema.Struct({ status: Schema.Literal("done") }).annotations(strict),
+  bodyBytes: Schema.optional(NonNegativeInt),
+  result: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("done") }),
     Schema.Struct({
       status: Schema.Literal("refused"),
       reason: CodeProjectPullRequestActionRefusal,
-    }).annotations(strict),
+    }),
     Schema.Struct({
       status: Schema.Literal("unavailable"),
       reason: CodeProjectPullRequestMergeUnavailable,
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+    }),
+  ]),
+});
 export type CodeProjectPullRequestActionRecorded = typeof CodeProjectPullRequestActionRecorded.Type;
 
 export const CodeProjectPullRequestLinkedThread = Schema.Struct({
   threadId: CodeThreadId,
   title: boundedNonEmptyText(512),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestLinkedThread = typeof CodeProjectPullRequestLinkedThread.Type;
 
 /**
@@ -618,11 +603,11 @@ export type CodeProjectPullRequestLinkedThread = typeof CodeProjectPullRequestLi
 export const CodeProjectPullRequestFailingCheck = Schema.Struct({
   name: boundedNonEmptyText(512),
   completedAt: Schema.optional(githubUpdatedAt),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestFailingCheck = typeof CodeProjectPullRequestFailingCheck.Type;
 
 /** A local watch's latest observation, joined only onto a row this window may read. */
-export const PullRequestBabysitStatus = Schema.Literal(
+export const PullRequestBabysitStatus = Schema.Literals([
   "checking",
   "connection",
   "draft",
@@ -640,27 +625,27 @@ export const PullRequestBabysitStatus = Schema.Literal(
   "needs-help",
   "thread-unavailable",
   "authority-lost",
-);
+]);
 export type PullRequestBabysitStatus = typeof PullRequestBabysitStatus.Type;
 export const CodeProjectPullRequestRow = Schema.Struct({
   babysit: Schema.optional(
     Schema.Struct({
       threadId: CodeThreadId,
       status: PullRequestBabysitStatus,
-      checks: Schema.optional(Schema.Literal("all", "required")),
+      checks: Schema.optional(Schema.Literals(["all", "required"])),
       stoppedAt: Schema.optional(UtcTimestamp),
-      feedbackTurns: Schema.optional(Schema.NonNegativeInt),
-      feedbackLimit: Schema.optional(Schema.Int.pipe(Schema.positive())),
+      feedbackTurns: Schema.optional(NonNegativeInt),
+      feedbackLimit: Schema.optional(PositiveInt),
       blockerDetail: Schema.optional(boundedNonEmptyText(512)),
       requiredLabel: Schema.optional(CodeProjectPullRequestLabel),
       readyHeadSha: Schema.optional(boundedNonEmptyText(64)),
-    }).annotations(strict),
+    }),
   ),
   projectId: ProjectId,
   projectName: boundedNonEmptyText(512),
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: boundedNonEmptyText(256),
   draft: Schema.Boolean,
   state: CodeProjectPullRequestState,
@@ -683,9 +668,9 @@ export const CodeProjectPullRequestRow = Schema.Struct({
    * request.
    */
   reviewRequestedFrom: Schema.optional(
-    Schema.Array(boundedNonEmptyText(128)).pipe(
-      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS),
-      Schema.filter(
+    Schema.Array(boundedNonEmptyText(128)).check(
+      Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_REVIEW_REQUESTS),
+      Schema.makeFilter(
         (values) => new Set(values.map((value) => value.toLowerCase())).size === values.length,
       ),
     ),
@@ -695,8 +680,8 @@ export const CodeProjectPullRequestRow = Schema.Struct({
    * snapshot taken before that fact was recorded; that is not a failure.
    */
   failingChecks: Schema.optional(
-    Schema.Array(CodeProjectPullRequestFailingCheck).pipe(
-      Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS),
+    Schema.Array(CodeProjectPullRequestFailingCheck).check(
+      Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_FAILING_CHECKS),
     ),
   ),
   /**
@@ -731,10 +716,10 @@ export const CodeProjectPullRequestRow = Schema.Struct({
    * identity existed or for unlinked repository pull requests.
    */
   linkId: Schema.optional(PullRequestLinkId),
-  linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
-    Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
+  linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).check(
+    Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestRow = typeof CodeProjectPullRequestRow.Type;
 
 /**
@@ -744,22 +729,22 @@ export type CodeProjectPullRequestRow = typeof CodeProjectPullRequestRow.Type;
 export const CodeProjectPullRequestView = Schema.Struct({
   version: Schema.Literal(1),
   query: CodeProjectPullRequestQuery,
-  projects: Schema.Array(CodeProjectPullRequestConnection).pipe(
-    Schema.filter(
+  projects: Schema.Array(CodeProjectPullRequestConnection).check(
+    Schema.makeFilter(
       (projects) =>
         projects.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&
         new Set(projects.map((project) => String(project.projectId))).size === projects.length,
     ),
   ),
-  rows: Schema.Array(CodeProjectPullRequestRow).pipe(
-    Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_ROWS),
+  rows: Schema.Array(CodeProjectPullRequestRow).check(
+    Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_ROWS),
   ),
   repositoriesTruncated: Schema.Boolean,
   pullRequestsTruncated: Schema.Boolean,
   freshness: CodeProjectPullRequestFreshness,
   projectFreshness: Schema.optional(
-    Schema.Array(CodeProjectPullRequestProjectFreshness).pipe(
-      Schema.filter(
+    Schema.Array(CodeProjectPullRequestProjectFreshness).check(
+      Schema.makeFilter(
         (entries) =>
           entries.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&
           new Set(entries.map((entry) => String(entry.projectId))).size === entries.length,
@@ -767,8 +752,8 @@ export const CodeProjectPullRequestView = Schema.Struct({
     ),
   ),
   backgroundRefresh: Schema.optional(
-    Schema.Array(CodeProjectPullRequestBackgroundRefreshState).pipe(
-      Schema.filter(
+    Schema.Array(CodeProjectPullRequestBackgroundRefreshState).check(
+      Schema.makeFilter(
         (entries) =>
           entries.length <= MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS &&
           new Set(entries.map((entry) => String(entry.projectId))).size === entries.length,
@@ -776,25 +761,33 @@ export const CodeProjectPullRequestView = Schema.Struct({
     ),
   ),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeProjectPullRequestView = typeof CodeProjectPullRequestView.Type;
 
 export const decodeCodeProjectPullRequestQuery = Schema.decodeUnknownSync(
   CodeProjectPullRequestQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestRefreshCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestRefreshCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestMergeCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestMergeOutcome = Schema.decodeUnknownSync(
   CodeProjectPullRequestMergeOutcome,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestView = Schema.decodeUnknownSync(
   CodeProjectPullRequestView,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCodeProjectPullRequestRow = Schema.decodeUnknownSync(CodeProjectPullRequestRow);
+export const decodeCodeProjectPullRequestRow = Schema.decodeUnknownSync(
+  CodeProjectPullRequestRow,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Cached read of one in-memory Project-scoped pull-request detail snapshot.
@@ -805,16 +798,16 @@ export const CodeProjectPullRequestDetailQuery = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type CodeProjectPullRequestDetailQuery = typeof CodeProjectPullRequestDetailQuery.Type;
 
 export const CodeProjectPullRequestDetailRefreshCommand = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type CodeProjectPullRequestDetailRefreshCommand =
   typeof CodeProjectPullRequestDetailRefreshCommand.Type;
 
@@ -823,19 +816,19 @@ export type CodeProjectPullRequestDetailSection = typeof CodeProjectPullRequestD
 
 export const CodeProjectPullRequestDetailObserved = Schema.Struct({
   state: Schema.Literal("observed"),
-  freshness: Schema.Literal("fresh", "stale"),
+  freshness: Schema.Literals(["fresh", "stale"]),
   ambiguous: Schema.Boolean,
   staleSections: uniqueArray(CodeProjectPullRequestDetailSection, 7),
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   url: PullRequestUrl,
   title: boundedText(1_024),
-  pullRequestState: Schema.Literal("open", "merged", "closed", "draft"),
+  pullRequestState: Schema.Literals(["open", "merged", "closed", "draft"]),
   baseRepository: boundedNonEmptyText(512),
   baseBranch: branchName,
   headRepository: boundedText(512),
   headBranch: branchName,
   /** Empty when the read carried no head commit; a merge then refuses as stale. */
-  headSha: Schema.String.pipe(Schema.maxLength(64)),
+  headSha: Schema.String.check(Schema.isMaxLength(64)),
   author: boundedText(255),
   mergeability: Schema.optional(CodeProjectPullRequestMergeability),
   matchesDeliveryBranch: Schema.Literal(false),
@@ -847,18 +840,18 @@ export const CodeProjectPullRequestDetailObserved = Schema.Struct({
   checks: boundedReviewArray(CodePullRequestReviewCheck),
   reviews: boundedReviewArray(CodePullRequestReviewOpinion),
   comments: boundedReviewArray(CodePullRequestReviewComment),
-}).annotations(strict);
+});
 export type CodeProjectPullRequestDetailObserved = typeof CodeProjectPullRequestDetailObserved.Type;
 
-export const CodeProjectPullRequestDetail = Schema.Union(
+export const CodeProjectPullRequestDetail = Schema.Union([
   CodeProjectPullRequestDetailObserved,
   Schema.Struct({
     state: Schema.Literal("unavailable"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     state: Schema.Literal("empty"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeProjectPullRequestDetail = typeof CodeProjectPullRequestDetail.Type;
 
 /**
@@ -869,37 +862,46 @@ export const CodeProjectPullRequestDetailView = Schema.Struct({
   query: CodeProjectPullRequestDetailQuery,
   detail: CodeProjectPullRequestDetail,
   freshness: CodeProjectPullRequestFreshness,
-  linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).pipe(
-    Schema.maxItems(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
+  linkedThreads: Schema.Array(CodeProjectPullRequestLinkedThread).check(
+    Schema.isMaxLength(MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
   ),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeProjectPullRequestDetailView = typeof CodeProjectPullRequestDetailView.Type;
 
 export const decodeCodeProjectPullRequestDetailQuery = Schema.decodeUnknownSync(
   CodeProjectPullRequestDetailQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestDetailRefreshCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestDetailRefreshCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestDetailView = Schema.decodeUnknownSync(
   CodeProjectPullRequestDetailView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestStackMergeCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestStackMergeCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestStackMergeOutcome = Schema.decodeUnknownSync(
   CodeProjectPullRequestStackMergeOutcome,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestActionCommand = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestActionContextQuery = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionContextQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestActionContext = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionContext,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodeProjectPullRequestActionOutcome = Schema.decodeUnknownSync(
   CodeProjectPullRequestActionOutcome,
+  STRICT_DECODE_OPTIONS,
 );

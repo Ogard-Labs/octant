@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ImageUsageUnits } from "./imageGeneration";
 import { AggregateReference, UtcTimestamp } from "./events";
 import { ProviderDriverKind, ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const ContextManifestId = brandedUuid("ContextManifestId");
 export type ContextManifestId = typeof ContextManifestId.Type;
@@ -26,50 +27,50 @@ export type ContextCompactionId = typeof ContextCompactionId.Type;
 export const ContextSubjectRef = AggregateReference;
 export type ContextSubjectRef = typeof ContextSubjectRef.Type;
 
-export const ContextAccuracy = Schema.Literal(
+export const ContextAccuracy = Schema.Literals([
   "provider-reported",
   "exact-tokenizer",
   "model-family-estimate",
   "conservative-heuristic",
   "unknown",
-);
+]);
 export type ContextAccuracy = typeof ContextAccuracy.Type;
 
 export const KnownTokenMeasurement = Schema.Struct({
   kind: Schema.Literal("known"),
   tokens: NonNegativeInt,
-  accuracy: Schema.Literal(
+  accuracy: Schema.Literals([
     "provider-reported",
     "exact-tokenizer",
     "model-family-estimate",
     "conservative-heuristic",
-  ),
-}).annotations(strict);
+  ]),
+});
 export type KnownTokenMeasurement = typeof KnownTokenMeasurement.Type;
 
 export const UnknownTokenMeasurement = Schema.Struct({
   kind: Schema.Literal("unknown"),
   accuracy: Schema.Literal("unknown"),
-}).annotations(strict);
+});
 export type UnknownTokenMeasurement = typeof UnknownTokenMeasurement.Type;
 
-export const TokenMeasurement = Schema.Union(KnownTokenMeasurement, UnknownTokenMeasurement);
+export const TokenMeasurement = Schema.Union([KnownTokenMeasurement, UnknownTokenMeasurement]);
 export type TokenMeasurement = typeof TokenMeasurement.Type;
 
-export const ContextConfidence = Schema.Literal("high", "medium", "low", "unknown");
+export const ContextConfidence = Schema.Literals(["high", "medium", "low", "unknown"]);
 export type ContextConfidence = typeof ContextConfidence.Type;
 
-export const ContextMetadataSource = Schema.Literal(
+export const ContextMetadataSource = Schema.Literals([
   "conservative-fallback",
   "runtime-reported",
   "provider-discovery",
   "reviewed-catalog",
   "user-supplied",
   "observed-evidence",
-);
+]);
 export type ContextMetadataSource = typeof ContextMetadataSource.Type;
 
-export const ContextEntryCategory = Schema.Literal(
+export const ContextEntryCategory = Schema.Literals([
   "provider-framing",
   "octant-policy",
   "user-instructions",
@@ -87,19 +88,19 @@ export const ContextEntryCategory = Schema.Literal(
   "tool-results",
   "subagent-results",
   "reserves",
-);
+]);
 export type ContextEntryCategory = typeof ContextEntryCategory.Type;
 
-export const ContextEntryPosture = Schema.Literal(
+export const ContextEntryPosture = Schema.Literals([
   "required",
   "compressible",
   "replaceable",
   "removable",
   "reserved",
-);
+]);
 export type ContextEntryPosture = typeof ContextEntryPosture.Type;
 
-export const ContextEntryState = Schema.Literal(
+export const ContextEntryState = Schema.Literals([
   "included",
   "summarized",
   "referenced",
@@ -107,24 +108,24 @@ export const ContextEntryState = Schema.Literal(
   "truncated",
   "omitted",
   "reserved",
-);
+]);
 export type ContextEntryState = typeof ContextEntryState.Type;
 
-export const ContextRetention = Schema.Literal("active", "superseded", "stale");
+export const ContextRetention = Schema.Literals(["active", "superseded", "stale"]);
 export type ContextRetention = typeof ContextRetention.Type;
 
-export const ContextHealth = Schema.Literal(
+export const ContextHealth = Schema.Literals([
   "healthy",
   "watch",
   "optimizing",
   "action-needed",
   "blocked",
   "rate-limited",
-);
+]);
 export type ContextHealth = typeof ContextHealth.Type;
 
 export const ContextSourceRef = Schema.Struct({
-  kind: Schema.Literal(
+  kind: Schema.Literals([
     "provider",
     "instruction",
     "memory",
@@ -140,68 +141,66 @@ export const ContextSourceRef = Schema.Struct({
     "preview-selection",
     "canvas-selection",
     "summary",
-  ),
-  referenceId: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  ]),
+  referenceId: NonEmptyTrimmedString,
+});
 export type ContextSourceRef = typeof ContextSourceRef.Type;
 
 export const ContextPreview = Schema.Struct({
   redacted: Schema.Boolean,
-  label: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  label: Schema.optional(NonEmptyTrimmedString),
+});
 export type ContextPreview = typeof ContextPreview.Type;
 
-export const ContextRoutingEligibility = Schema.Union(
+export const ContextRoutingEligibility = Schema.Union([
   Schema.Struct({
     providerInstanceId: ProviderInstanceId,
     status: Schema.Literal("eligible"),
     reason: Schema.Literal("selected-provider"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     providerInstanceId: ProviderInstanceId,
     status: Schema.Literal("ineligible"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "provider-mismatch",
       "privacy-local-only",
       "cross-provider-opt-in-required",
       "authority-denied",
       "source-disabled",
       "unknown",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type ContextRoutingEligibility = typeof ContextRoutingEligibility.Type;
 
-export const ExtendedContextMode = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("unavailable") }).annotations(strict),
+export const ExtendedContextMode = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unavailable") }),
   Schema.Struct({
     kind: Schema.Literal("available"),
-    modes: Schema.NonEmptyArray(Schema.NonEmptyTrimmedString),
-    activeMode: Schema.optional(Schema.NonEmptyTrimmedString),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (value) => value.activeMode === undefined || value.modes.includes(value.activeMode),
-      ),
+    modes: Schema.NonEmptyArray(NonEmptyTrimmedString),
+    activeMode: Schema.optional(NonEmptyTrimmedString),
+  }).check(
+    Schema.makeFilter(
+      (value) => value.activeMode === undefined || value.modes.includes(value.activeMode),
     ),
-);
+  ),
+]);
 export type ExtendedContextMode = typeof ExtendedContextMode.Type;
 
-export const ContextTokenizer = Schema.Union(
+export const ContextTokenizer = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("exact", "family-estimate", "heuristic"),
-    id: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unavailable") }).annotations(strict),
-);
+    kind: Schema.Literals(["exact", "family-estimate", "heuristic"]),
+    id: NonEmptyTrimmedString,
+  }),
+  Schema.Struct({ kind: Schema.Literal("unavailable") }),
+]);
 export type ContextTokenizer = typeof ContextTokenizer.Type;
 
 export const ModelLimitConflict = Schema.Struct({
-  field: Schema.Literal("contextWindow", "maxOutput"),
+  field: Schema.Literals(["contextWindow", "maxOutput"]),
   values: Schema.NonEmptyArray(PositiveInt),
   sources: Schema.NonEmptyArray(ContextMetadataSource),
-}).annotations(strict);
+});
 export type ModelLimitConflict = typeof ModelLimitConflict.Type;
 
 export const ModelContextLimits = Schema.Struct({
@@ -210,39 +209,35 @@ export const ModelContextLimits = Schema.Struct({
   contextWindow: PositiveInt,
   maxOutput: Schema.optional(PositiveInt),
   extendedContext: ExtendedContextMode,
-  reasoning: Schema.Literal("included", "separate", "unknown"),
-  compaction: Schema.Literal("automatic", "manual", "none", "unknown"),
+  reasoning: Schema.Literals(["included", "separate", "unknown"]),
+  compaction: Schema.Literals(["automatic", "manual", "none", "unknown"]),
   tokenizer: ContextTokenizer,
   source: ContextMetadataSource,
   confidence: ContextConfidence,
   conflicts: Schema.Array(ModelLimitConflict),
   verifiedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (limits) => limits.maxOutput === undefined || limits.maxOutput <= limits.contextWindow,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (limits) => limits.maxOutput === undefined || limits.maxOutput <= limits.contextWindow,
+  ),
+);
 export type ModelContextLimits = typeof ModelContextLimits.Type;
 
-export const ServiceLimitBucket = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("unavailable") }).annotations(strict),
+export const ServiceLimitBucket = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("unavailable") }),
   Schema.Struct({
     status: Schema.Literal("available"),
     limit: PositiveInt,
     remaining: NonNegativeInt,
     resetsAt: Schema.optional(UtcTimestamp),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((bucket) => bucket.remaining <= bucket.limit)),
-);
+  }).check(Schema.makeFilter((bucket) => bucket.remaining <= bucket.limit)),
+]);
 export type ServiceLimitBucket = typeof ServiceLimitBucket.Type;
 
-export const ServiceRetryState = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("inactive") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("active"), until: UtcTimestamp }).annotations(strict),
-);
+export const ServiceRetryState = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("inactive") }),
+  Schema.Struct({ status: Schema.Literal("active"), until: UtcTimestamp }),
+]);
 export type ServiceRetryState = typeof ServiceRetryState.Type;
 
 /**
@@ -251,45 +246,47 @@ export type ServiceRetryState = typeof ServiceRetryState.Type;
  * never converted into a fabricated limit or remaining count.
  */
 export const ProviderRateLimitOverage = Schema.Struct({
-  status: Schema.Literal("allowed", "warning", "exhausted"),
+  status: Schema.Literals(["allowed", "warning", "exhausted"]),
   inUse: Schema.optional(Schema.Boolean),
   resetsAt: Schema.optional(UtcTimestamp),
-  disabledReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
-}).annotations(strict);
+  disabledReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ),
+});
 export type ProviderRateLimitOverage = typeof ProviderRateLimitOverage.Type;
 
 export const ProviderRateLimitWindow = Schema.Struct({
-  window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-  status: Schema.Literal("allowed", "warning", "exhausted"),
-  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  window: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  status: Schema.Literals(["allowed", "warning", "exhausted"]),
+  utilization: Schema.optional(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
   resetsAt: Schema.optional(UtcTimestamp),
   observedAt: UtcTimestamp,
   overage: Schema.optional(ProviderRateLimitOverage),
-}).annotations(strict);
+});
 export type ProviderRateLimitWindow = typeof ProviderRateLimitWindow.Type;
 
 export const ProviderServiceLimits = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
-  scope: Schema.Literal("provider-instance", "model", "account", "unknown"),
+  scope: Schema.Literals(["provider-instance", "model", "account", "unknown"]),
   requests: ServiceLimitBucket,
   tokens: ServiceLimitBucket,
   concurrency: ServiceLimitBucket,
   retry: ServiceRetryState,
-  quota: Schema.Literal("available", "exhausted", "unavailable", "unknown"),
+  quota: Schema.Literals(["available", "exhausted", "unavailable", "unknown"]),
   source: ContextMetadataSource,
   confidence: ContextConfidence,
   updatedAt: UtcTimestamp,
   rateLimitWindows: Schema.optional(
-    Schema.Array(ProviderRateLimitWindow).pipe(Schema.maxItems(32)),
+    Schema.Array(ProviderRateLimitWindow).check(Schema.isMaxLength(32)),
   ),
-}).annotations(strict);
+});
 export type ProviderServiceLimits = typeof ProviderServiceLimits.Type;
 
 export const ContextEntry = Schema.Struct({
   id: ContextEntryId,
   source: ContextSourceRef,
   category: ContextEntryCategory,
-  label: Schema.NonEmptyTrimmedString,
+  label: NonEmptyTrimmedString,
   eligibility: ContextRoutingEligibility,
   posture: ContextEntryPosture,
   retention: ContextRetention,
@@ -303,33 +300,29 @@ export const ContextEntry = Schema.Struct({
   reuseCount: NonNegativeInt,
   preview: ContextPreview,
   summaryId: Schema.optional(ContextSummaryId),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (entry) =>
-        entry.includedSize <= entry.originalSize &&
-        (entry.state !== "omitted" || entry.includedSize === 0) &&
-        (entry.eligibility.status === "eligible" || entry.state === "omitted"),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (entry) =>
+      entry.includedSize <= entry.originalSize &&
+      (entry.state !== "omitted" || entry.includedSize === 0) &&
+      (entry.eligibility.status === "eligible" || entry.state === "omitted"),
+  ),
+);
 export type ContextEntry = typeof ContextEntry.Type;
 
-const UniqueContextEntryIds = Schema.Array(ContextEntryId).pipe(
-  Schema.filter((ids) => new Set(ids).size === ids.length),
+const UniqueContextEntryIds = Schema.Array(ContextEntryId).check(
+  Schema.makeFilter((ids) => new Set(ids).size === ids.length),
 );
 
 export const ContextTurnOverrides = Schema.Struct({
   pinnedEntryIds: UniqueContextEntryIds,
   excludedEntryIds: UniqueContextEntryIds,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (overrides) =>
-        !overrides.pinnedEntryIds.some((entryId) => overrides.excludedEntryIds.includes(entryId)),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (overrides) =>
+      !overrides.pinnedEntryIds.some((entryId) => overrides.excludedEntryIds.includes(entryId)),
+  ),
+);
 export type ContextTurnOverrides = typeof ContextTurnOverrides.Type;
 
 export const ContextManifest = Schema.Struct({
@@ -340,20 +333,18 @@ export const ContextManifest = Schema.Struct({
   entries: Schema.Array(ContextEntry),
   overrides: ContextTurnOverrides,
   createdAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (manifest) =>
-        new Set(manifest.entries.map((entry) => entry.id)).size === manifest.entries.length &&
-        manifest.entries.every(
-          (entry) => entry.eligibility.providerInstanceId === manifest.providerInstanceId,
-        ) &&
-        [...manifest.overrides.pinnedEntryIds, ...manifest.overrides.excludedEntryIds].every(
-          (entryId) => manifest.entries.some((entry) => entry.id === entryId),
-        ),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (manifest) =>
+      new Set(manifest.entries.map((entry) => entry.id)).size === manifest.entries.length &&
+      manifest.entries.every(
+        (entry) => entry.eligibility.providerInstanceId === manifest.providerInstanceId,
+      ) &&
+      [...manifest.overrides.pinnedEntryIds, ...manifest.overrides.excludedEntryIds].every(
+        (entryId) => manifest.entries.some((entry) => entry.id === entryId),
+      ),
+  ),
+);
 export type ContextManifest = typeof ContextManifest.Type;
 
 export const ContextReserveBreakdown = Schema.Struct({
@@ -362,11 +353,11 @@ export const ContextReserveBreakdown = Schema.Struct({
   framing: NonNegativeInt,
   variance: NonNegativeInt,
   safety: NonNegativeInt,
-}).annotations(strict);
+});
 export type ContextReserveBreakdown = typeof ContextReserveBreakdown.Type;
 
 export const ContextRemedy = Schema.Struct({
-  kind: Schema.Literal(
+  kind: Schema.Literals([
     "unpin-context",
     "exclude-context",
     "compact-range",
@@ -375,12 +366,12 @@ export const ContextRemedy = Schema.Struct({
     "reduce-output-reserve",
     "switch-model",
     "fork-thread",
-  ),
+  ]),
   entryId: Schema.optional(ContextEntryId),
-}).annotations(strict);
+});
 export type ContextRemedy = typeof ContextRemedy.Type;
 
-export const ContextPlanEntryReason = Schema.Literal(
+export const ContextPlanEntryReason = Schema.Literals([
   "required",
   "pinned",
   "selected",
@@ -395,7 +386,7 @@ export const ContextPlanEntryReason = Schema.Literal(
   "reserved",
   "ineligible",
   "unknown-size",
-);
+]);
 export type ContextPlanEntryReason = typeof ContextPlanEntryReason.Type;
 
 export const PlannedContextEntry = Schema.Struct({
@@ -403,7 +394,7 @@ export const PlannedContextEntry = Schema.Struct({
   state: ContextEntryState,
   tokens: TokenMeasurement,
   reason: ContextPlanEntryReason,
-}).annotations(strict);
+});
 export type PlannedContextEntry = typeof PlannedContextEntry.Type;
 
 export const ContextCapabilityCounts = Schema.Struct({
@@ -411,24 +402,22 @@ export const ContextCapabilityCounts = Schema.Struct({
   availableTools: NonNegativeInt,
   loadedMcp: NonNegativeInt,
   availableMcp: NonNegativeInt,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (counts) =>
-        counts.loadedTools <= counts.availableTools && counts.loadedMcp <= counts.availableMcp,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (counts) =>
+      counts.loadedTools <= counts.availableTools && counts.loadedMcp <= counts.availableMcp,
+  ),
+);
 export type ContextCapabilityCounts = typeof ContextCapabilityCounts.Type;
 
 export const ContextPlanInspection = Schema.Struct({
-  displayLabel: Schema.NonEmptyTrimmedString,
+  displayLabel: NonEmptyTrimmedString,
   modelLimits: ModelContextLimits,
   serviceLimits: ProviderServiceLimits,
   capabilities: ContextCapabilityCounts,
-  requestShape: Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
+  requestShape: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
   watchHeadroomTokens: NonNegativeInt,
-}).annotations(strict);
+});
 export type ContextPlanInspection = typeof ContextPlanInspection.Type;
 
 export const ContextPlan = Schema.Struct({
@@ -443,16 +432,14 @@ export const ContextPlan = Schema.Struct({
   blocked: Schema.Boolean,
   remedies: Schema.Array(ContextRemedy),
   createdAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (plan) =>
-        (plan.blocked || plan.plannedInputTokens <= plan.safeInputBudget) &&
-        (plan.blocked ? plan.remedies.length > 0 : plan.remedies.length === 0) &&
-        plan.blocked === (plan.health === "blocked"),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (plan) =>
+      (plan.blocked || plan.plannedInputTokens <= plan.safeInputBudget) &&
+      (plan.blocked ? plan.remedies.length > 0 : plan.remedies.length === 0) &&
+      plan.blocked === (plan.health === "blocked"),
+  ),
+);
 export type ContextPlan = typeof ContextPlan.Type;
 
 export const ContextSummary = Schema.Struct({
@@ -466,12 +453,12 @@ export const ContextSummary = Schema.Struct({
   originalTokens: KnownTokenMeasurement,
   estimatedSavingsTokens: NonNegativeInt,
   replacedSummaryIds: Schema.Array(ContextSummaryId),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((summary) => summary.summaryTokens.tokens <= summary.originalTokens.tokens));
+}).check(
+  Schema.makeFilter((summary) => summary.summaryTokens.tokens <= summary.originalTokens.tokens),
+);
 export type ContextSummary = typeof ContextSummary.Type;
 
-const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
+const StableRequestShape = Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/));
 
 /**
  * What one reconciled request cost, in integer micro-dollars (1e-6 USD).
@@ -479,9 +466,9 @@ const StableRequestShape = Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]
  * a monetary spend ceiling treats the window as unpriceable, never as free.
  */
 export const UsageCost = Schema.Struct({
-  kind: Schema.Literal("provider-recorded", "api-estimate"),
-  usdMicros: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  kind: Schema.Literals(["provider-recorded", "api-estimate"]),
+  usdMicros: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
 export type UsageCost = typeof UsageCost.Type;
 
 /**
@@ -584,47 +571,45 @@ export const UsageReconciliation = Schema.Struct({
    */
   providerReported: Schema.optional(Schema.Boolean),
   cost: Schema.optional(UsageCost),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((reconciliation) => {
-      const variance = reconciliation.actualInputTokens - reconciliation.plannedInputTokens;
-      if (!Number.isSafeInteger(variance) || reconciliation.varianceTokens !== variance) {
-        return false;
-      }
-      const imageGeneration = reconciliation.requestShape === "image-generation";
-      // An image job has no context plan. One that completed counts its
-      // images; one that failed after its provider answered delivered none,
-      // and carries no units rather than a count of zero.
-      if (imageGeneration) return reconciliation.planId === undefined;
-      if (
-        reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
-        reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
-        reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
-        reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
-        reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
-        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
-        reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
-        reconciliation.requestShape === WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE ||
-        reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE ||
-        // A video job has no context plan and counts no images.
-        reconciliation.requestShape === VIDEO_GENERATION_REQUEST_SHAPE
-      ) {
-        return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
-      }
-      return reconciliation.planId !== undefined && reconciliation.imageUnits === undefined;
-    }),
-  );
+}).check(
+  Schema.makeFilter((reconciliation) => {
+    const variance = reconciliation.actualInputTokens - reconciliation.plannedInputTokens;
+    if (!Number.isSafeInteger(variance) || reconciliation.varianceTokens !== variance) {
+      return false;
+    }
+    const imageGeneration = reconciliation.requestShape === "image-generation";
+    // An image job has no context plan. One that completed counts its
+    // images; one that failed after its provider answered delivered none,
+    // and carries no units rather than a count of zero.
+    if (imageGeneration) return reconciliation.planId === undefined;
+    if (
+      reconciliation.requestShape === AGENT_RUN_TURN_REQUEST_SHAPE ||
+      reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
+      reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
+      reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
+      reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
+      reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE ||
+      reconciliation.requestShape === THREAD_TITLE_REQUEST_SHAPE ||
+      reconciliation.requestShape === WORKTREE_BRANCH_SUGGESTION_REQUEST_SHAPE ||
+      reconciliation.requestShape === PULL_REQUEST_REVIEW_REQUEST_SHAPE ||
+      // A video job has no context plan and counts no images.
+      reconciliation.requestShape === VIDEO_GENERATION_REQUEST_SHAPE
+    ) {
+      return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
+    }
+    return reconciliation.planId !== undefined && reconciliation.imageUnits === undefined;
+  }),
+);
 export type UsageReconciliation = typeof UsageReconciliation.Type;
 
-export const CapacityReservationState = Schema.Literal(
+export const CapacityReservationState = Schema.Literals([
   "requested",
   "reserved",
   "running",
   "reconciled",
   "released",
   "ambiguous",
-);
+]);
 export type CapacityReservationState = typeof CapacityReservationState.Type;
 
 export const CapacityReservation = Schema.Struct({
@@ -638,33 +623,29 @@ export const CapacityReservation = Schema.Struct({
   requests: PositiveInt,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (reservation) =>
-        reservation.updatedAt >= reservation.createdAt &&
-        (reservation.state === "reconciled"
-          ? reservation.actualTokens !== undefined
-          : reservation.state === "requested" ||
-              reservation.state === "reserved" ||
-              reservation.state === "running"
-            ? reservation.actualTokens === undefined
-            : true),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (reservation) =>
+      reservation.updatedAt >= reservation.createdAt &&
+      (reservation.state === "reconciled"
+        ? reservation.actualTokens !== undefined
+        : reservation.state === "requested" ||
+            reservation.state === "reserved" ||
+            reservation.state === "running"
+          ? reservation.actualTokens === undefined
+          : true),
+  ),
+);
 export type CapacityReservation = typeof CapacityReservation.Type;
 
-export const ContextManifestCreated = Schema.Struct({ manifest: ContextManifest }).annotations(
-  strict,
-);
+export const ContextManifestCreated = Schema.Struct({ manifest: ContextManifest });
 export type ContextManifestCreated = typeof ContextManifestCreated.Type;
 export const ContextOverridesUpdated = Schema.Struct({
   manifestId: ContextManifestId,
   overrides: ContextTurnOverrides,
-}).annotations(strict);
+});
 export type ContextOverridesUpdated = typeof ContextOverridesUpdated.Type;
-export const ContextPlanCreated = Schema.Struct({ plan: ContextPlan }).annotations(strict);
+export const ContextPlanCreated = Schema.Struct({ plan: ContextPlan });
 export type ContextPlanCreated = typeof ContextPlanCreated.Type;
 /**
  * A summary is generated from the subject's own conversation, so its text is
@@ -674,20 +655,23 @@ export type ContextPlanCreated = typeof ContextPlanCreated.Type;
  * stays bounded because context maintenance only ever summarizes bounded
  * material.
  */
-export const ContextSummaryContent = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(20_000));
+export const ContextSummaryContent = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(20_000),
+);
 export type ContextSummaryContent = typeof ContextSummaryContent.Type;
 
 export const ContextSummaryCreated = Schema.Struct({
   summary: ContextSummary,
-}).annotations(strict);
+});
 export type ContextSummaryCreated = typeof ContextSummaryCreated.Type;
 export const ContextUsageReconciled = Schema.Struct({
   reconciliation: UsageReconciliation,
-}).annotations(strict);
+});
 export type ContextUsageReconciled = typeof ContextUsageReconciled.Type;
 export const ContextCapacityReservationUpdated = Schema.Struct({
   reservation: CapacityReservation,
-}).annotations(strict);
+});
 export type ContextCapacityReservationUpdated = typeof ContextCapacityReservationUpdated.Type;
 
 /** The request shape a requested compaction's own model request is recorded under. */
@@ -697,7 +681,7 @@ export const CONTEXT_COMPACTION_REQUEST_SHAPE = "context-compaction";
  * Why a compaction was refused. Every refusal is decided before anything is
  * journaled, reserved, or sent, so a refused request leaves no trace.
  */
-export const ContextCompactionRefusalReason = Schema.Literal(
+export const ContextCompactionRefusalReason = Schema.Literals([
   "nothing-to-compact",
   "no-session",
   "runtime-version-unsupported",
@@ -708,18 +692,14 @@ export const ContextCompactionRefusalReason = Schema.Literal(
   "spend-ceiling-reached",
   "mode-disabled",
   "remote-client",
-  // A turn on the thread would be refused, so a summary nobody could send
-  // next is not paid for: the thread or its Project is archived or gone, the
-  // saved model options are no longer offered, or the harness session is
-  // paused.
   "project-unavailable",
   "model-options-unsupported",
   "thread-paused",
-);
+]);
 export type ContextCompactionRefusalReason = typeof ContextCompactionRefusalReason.Type;
 
 /** Why a journaled compaction ended without changing what the model sees. */
-export const ContextCompactionFailureReason = Schema.Literal(
+export const ContextCompactionFailureReason = Schema.Literals([
   "runtime-failed",
   "summary-failed",
   "summary-not-smaller",
@@ -727,63 +707,63 @@ export const ContextCompactionFailureReason = Schema.Literal(
   "timed-out",
   "subject-unavailable",
   "interrupted",
-);
+]);
 export type ContextCompactionFailureReason = typeof ContextCompactionFailureReason.Type;
 
-export const ContextCompactionExecutor = Schema.Union(
+export const ContextCompactionExecutor = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("host"),
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("runtime"),
     driverKind: ProviderDriverKind,
     providerInstanceId: ProviderInstanceId,
     modelId: Schema.optional(ProviderModelId),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ContextCompactionExecutor = typeof ContextCompactionExecutor.Type;
 
-export const ContextCompactionTokensAfter = Schema.Union(
+export const ContextCompactionTokensAfter = Schema.Union([
   KnownTokenMeasurement,
-  Schema.Struct({ kind: Schema.Literal("pending") }).annotations(strict),
-);
+  Schema.Struct({ kind: Schema.Literal("pending") }),
+]);
 export type ContextCompactionTokensAfter = typeof ContextCompactionTokensAfter.Type;
 
-export const ContextCompactionTokensFreed = Schema.Union(
+export const ContextCompactionTokensFreed = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("measured", "estimated"),
+    kind: Schema.Literals(["measured", "estimated"]),
     tokens: NonNegativeInt,
     accuracy: KnownTokenMeasurement.fields.accuracy,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unknown"),
-    reason: Schema.Literal("awaiting-next-report", "not-reported"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["awaiting-next-report", "not-reported"]),
+  }),
+]);
 export type ContextCompactionTokensFreed = typeof ContextCompactionTokensFreed.Type;
 
-export const ContextCompactionSummary = Schema.Union(
+export const ContextCompactionSummary = Schema.Union([
   Schema.Struct({
     visibility: Schema.Literal("stored"),
     summaryId: ContextSummaryId,
     summaryTokens: KnownTokenMeasurement,
-    throughTurnId: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({ visibility: Schema.Literal("runtime-only") }).annotations(strict),
-);
+    throughTurnId: NonEmptyTrimmedString,
+  }),
+  Schema.Struct({ visibility: Schema.Literal("runtime-only") }),
+]);
 export type ContextCompactionSummary = typeof ContextCompactionSummary.Type;
 
-export const ContextCompactionUsage = Schema.Union(
+export const ContextCompactionUsage = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("reported"),
     inputTokens: NonNegativeInt,
     outputTokens: NonNegativeInt,
     cost: Schema.optional(UsageCost),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unreported") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("unreported") }),
+]);
 export type ContextCompactionUsage = typeof ContextCompactionUsage.Type;
 
 /**
@@ -793,22 +773,31 @@ export type ContextCompactionUsage = typeof ContextCompactionUsage.Type;
  */
 export const MIN_AUTO_COMPACT_WINDOW_PERCENT = 50;
 export const MAX_AUTO_COMPACT_WINDOW_PERCENT = 95;
-export const AutoCompactWindowPercent = Schema.Int.pipe(
-  Schema.between(MIN_AUTO_COMPACT_WINDOW_PERCENT, MAX_AUTO_COMPACT_WINDOW_PERCENT),
+export const AutoCompactWindowPercent = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_AUTO_COMPACT_WINDOW_PERCENT,
+    maximum: MAX_AUTO_COMPACT_WINDOW_PERCENT,
+  }),
 );
 export type AutoCompactWindowPercent = typeof AutoCompactWindowPercent.Type;
 
 export const MIN_AUTO_COMPACT_IDLE_MINUTES = 5;
 export const MAX_AUTO_COMPACT_IDLE_MINUTES = 1_440;
-export const AutoCompactIdleMinutes = Schema.Int.pipe(
-  Schema.between(MIN_AUTO_COMPACT_IDLE_MINUTES, MAX_AUTO_COMPACT_IDLE_MINUTES),
+export const AutoCompactIdleMinutes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_AUTO_COMPACT_IDLE_MINUTES,
+    maximum: MAX_AUTO_COMPACT_IDLE_MINUTES,
+  }),
 );
 export type AutoCompactIdleMinutes = typeof AutoCompactIdleMinutes.Type;
 
 export const MIN_AUTO_COMPACT_LIMIT_PERCENT = 50;
 export const MAX_AUTO_COMPACT_LIMIT_PERCENT = 99;
-export const AutoCompactLimitPercent = Schema.Int.pipe(
-  Schema.between(MIN_AUTO_COMPACT_LIMIT_PERCENT, MAX_AUTO_COMPACT_LIMIT_PERCENT),
+export const AutoCompactLimitPercent = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_AUTO_COMPACT_LIMIT_PERCENT,
+    maximum: MAX_AUTO_COMPACT_LIMIT_PERCENT,
+  }),
 );
 export type AutoCompactLimitPercent = typeof AutoCompactLimitPercent.Type;
 
@@ -816,35 +805,35 @@ export type AutoCompactLimitPercent = typeof AutoCompactLimitPercent.Type;
  * Why Octant compacted a thread on its own, by a rule the person set. Absent
  * on a compaction the person asked for and on one a runtime made by itself.
  */
-export const ContextCompactionCause = Schema.Union(
+export const ContextCompactionCause = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("window-fill"),
     /** How full the window was at the report that crossed the rule, 0 to 100. */
-    filledPercent: Schema.Int.pipe(Schema.between(0, 100)),
+    filledPercent: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
     thresholdPercent: AutoCompactWindowPercent,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("idle"),
     /** Whole minutes since the thread's last turn ended, when the rule acted. */
-    idleMinutes: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+    idleMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
     thresholdMinutes: AutoCompactIdleMinutes,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("limit-near"),
     /** The provider's name for the account window, as its usage reading gives it. */
-    window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+    window: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
     /** How much of that window was used when the rule acted, 0 to 100. */
-    usedPercent: Schema.Int.pipe(Schema.between(0, 100)),
+    usedPercent: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
     thresholdPercent: AutoCompactLimitPercent,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ContextCompactionCause = typeof ContextCompactionCause.Type;
 
 export const ContextCompactionReceipt = Schema.Struct({
   compactionId: ContextCompactionId,
   subject: ContextSubjectRef,
   executor: ContextCompactionExecutor,
-  trigger: Schema.Literal("requested", "automatic"),
+  trigger: Schema.Literals(["requested", "automatic"]),
   cause: Schema.optional(ContextCompactionCause),
   tokensBefore: KnownTokenMeasurement,
   tokensAfter: ContextCompactionTokensAfter,
@@ -864,33 +853,31 @@ export const ContextCompactionReceipt = Schema.Struct({
        * brings removed turns back.
        */
       throughSource: ContextSourceRef,
-    }).annotations(strict),
+    }),
   ),
   usage: ContextCompactionUsage,
   completedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((receipt) => {
-      // The host keeps the text it wrote; a runtime keeps its own.
-      if ((receipt.executor.kind === "host") !== (receipt.summary.visibility === "stored")) {
-        return false;
-      }
-      if (receipt.tokensAfter.kind === "pending") {
-        return (
-          receipt.tokensFreed.kind === "unknown" &&
-          receipt.tokensFreed.reason === "awaiting-next-report"
-        );
-      }
-      // Freed is the difference of the two figures shown beside it, never a
-      // guess and never negative.
+}).check(
+  Schema.makeFilter((receipt) => {
+    // The host keeps the text it wrote; a runtime keeps its own.
+    if ((receipt.executor.kind === "host") !== (receipt.summary.visibility === "stored")) {
+      return false;
+    }
+    if (receipt.tokensAfter.kind === "pending") {
       return (
-        receipt.tokensFreed.kind === "unknown" ||
-        receipt.tokensFreed.tokens ===
-          Math.max(0, receipt.tokensBefore.tokens - receipt.tokensAfter.tokens)
+        receipt.tokensFreed.kind === "unknown" &&
+        receipt.tokensFreed.reason === "awaiting-next-report"
       );
-    }),
-  );
+    }
+    // Freed is the difference of the two figures shown beside it, never a
+    // guess and never negative.
+    return (
+      receipt.tokensFreed.kind === "unknown" ||
+      receipt.tokensFreed.tokens ===
+        Math.max(0, receipt.tokensBefore.tokens - receipt.tokensAfter.tokens)
+    );
+  }),
+);
 export type ContextCompactionReceipt = typeof ContextCompactionReceipt.Type;
 
 export const ContextCompactionRequested = Schema.Struct({
@@ -899,14 +886,14 @@ export const ContextCompactionRequested = Schema.Struct({
   executor: ContextCompactionExecutor,
   // Context commands are local-window only; a paired device is refused first.
   // `host-policy` is the host acting on a rule the person set in Settings.
-  requestedBy: Schema.Literal("local-window", "host-policy"),
+  requestedBy: Schema.Literals(["local-window", "host-policy"]),
   cause: Schema.optional(ContextCompactionCause),
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ContextCompactionRequested = typeof ContextCompactionRequested.Type;
 export const ContextCompactionCompleted = Schema.Struct({
   receipt: ContextCompactionReceipt,
-}).annotations(strict);
+});
 export type ContextCompactionCompleted = typeof ContextCompactionCompleted.Type;
 export const ContextCompactionFailed = Schema.Struct({
   compactionId: ContextCompactionId,
@@ -914,25 +901,25 @@ export const ContextCompactionFailed = Schema.Struct({
   reason: ContextCompactionFailureReason,
   sessionMayHaveChanged: Schema.Boolean,
   failedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ContextCompactionFailed = typeof ContextCompactionFailed.Type;
 
 /** Whether the server offers compaction for a thread right now, and why not. */
-export const ContextCompactionAvailability = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("available") }).annotations(strict),
+export const ContextCompactionAvailability = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("available") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: ContextCompactionRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ContextCompactionAvailability = typeof ContextCompactionAvailability.Type;
 
 /** A compaction that has ended: completed with its receipt, or failed. */
-export const ContextCompactionSettledRecord = Schema.Union(
+export const ContextCompactionSettledRecord = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("completed"),
     receipt: ContextCompactionReceipt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     compactionId: ContextCompactionId,
@@ -941,21 +928,21 @@ export const ContextCompactionSettledRecord = Schema.Union(
     reason: ContextCompactionFailureReason,
     sessionMayHaveChanged: Schema.Boolean,
     failedAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ContextCompactionSettledRecord = typeof ContextCompactionSettledRecord.Type;
 
 /** The thread's most recent compaction, folded from its journaled events. */
-export const ContextCompactionRecord = Schema.Union(
+export const ContextCompactionRecord = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("running"),
     compactionId: ContextCompactionId,
     executor: ContextCompactionExecutor,
     cause: Schema.optional(ContextCompactionCause),
     requestedAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   ...ContextCompactionSettledRecord.members,
-);
+]);
 export type ContextCompactionRecord = typeof ContextCompactionRecord.Type;
 
 export const CONTEXT_COMPACTION_EVENT_NAMES = {
@@ -964,40 +951,112 @@ export const CONTEXT_COMPACTION_EVENT_NAMES = {
   failed: "context.compaction-failed@1",
 } as const;
 
-export const decodeContextManifestId = Schema.decodeUnknownSync(ContextManifestId);
-export const decodeContextPlanId = Schema.decodeUnknownSync(ContextPlanId);
-export const decodeContextEntryId = Schema.decodeUnknownSync(ContextEntryId);
-export const decodeContextSummaryId = Schema.decodeUnknownSync(ContextSummaryId);
-export const decodeUsageReconciliationId = Schema.decodeUnknownSync(UsageReconciliationId);
-export const decodeCapacityReservationId = Schema.decodeUnknownSync(CapacityReservationId);
-export const decodeContextSubjectRef = Schema.decodeUnknownSync(ContextSubjectRef);
-export const decodeTokenMeasurement = Schema.decodeUnknownSync(TokenMeasurement);
-export const decodeModelContextLimits = Schema.decodeUnknownSync(ModelContextLimits);
-export const decodeProviderServiceLimits = Schema.decodeUnknownSync(ProviderServiceLimits);
-export const decodeContextEntry = Schema.decodeUnknownSync(ContextEntry);
-export const decodeContextTurnOverrides = Schema.decodeUnknownSync(ContextTurnOverrides);
-export const decodeContextManifest = Schema.decodeUnknownSync(ContextManifest);
-export const decodeContextReserveBreakdown = Schema.decodeUnknownSync(ContextReserveBreakdown);
-export const decodeContextPlan = Schema.decodeUnknownSync(ContextPlan);
-export const decodeContextSummary = Schema.decodeUnknownSync(ContextSummary);
-export const decodeContextSummaryContent = Schema.decodeUnknownSync(ContextSummaryContent);
-export const decodeUsageReconciliation = Schema.decodeUnknownSync(UsageReconciliation);
-export const decodeCapacityReservation = Schema.decodeUnknownSync(CapacityReservation);
-export const decodeContextManifestCreated = Schema.decodeUnknownSync(ContextManifestCreated);
-export const decodeContextOverridesUpdated = Schema.decodeUnknownSync(ContextOverridesUpdated);
-export const decodeContextPlanCreated = Schema.decodeUnknownSync(ContextPlanCreated);
-export const decodeContextSummaryCreated = Schema.decodeUnknownSync(ContextSummaryCreated);
-export const decodeContextUsageReconciled = Schema.decodeUnknownSync(ContextUsageReconciled);
+export const decodeContextManifestId = Schema.decodeUnknownSync(
+  ContextManifestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextPlanId = Schema.decodeUnknownSync(ContextPlanId, STRICT_DECODE_OPTIONS);
+export const decodeContextEntryId = Schema.decodeUnknownSync(ContextEntryId, STRICT_DECODE_OPTIONS);
+export const decodeContextSummaryId = Schema.decodeUnknownSync(
+  ContextSummaryId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUsageReconciliationId = Schema.decodeUnknownSync(
+  UsageReconciliationId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCapacityReservationId = Schema.decodeUnknownSync(
+  CapacityReservationId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextSubjectRef = Schema.decodeUnknownSync(
+  ContextSubjectRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTokenMeasurement = Schema.decodeUnknownSync(
+  TokenMeasurement,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeModelContextLimits = Schema.decodeUnknownSync(
+  ModelContextLimits,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProviderServiceLimits = Schema.decodeUnknownSync(
+  ProviderServiceLimits,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextEntry = Schema.decodeUnknownSync(ContextEntry, STRICT_DECODE_OPTIONS);
+export const decodeContextTurnOverrides = Schema.decodeUnknownSync(
+  ContextTurnOverrides,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextManifest = Schema.decodeUnknownSync(
+  ContextManifest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextReserveBreakdown = Schema.decodeUnknownSync(
+  ContextReserveBreakdown,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextPlan = Schema.decodeUnknownSync(ContextPlan, STRICT_DECODE_OPTIONS);
+export const decodeContextSummary = Schema.decodeUnknownSync(ContextSummary, STRICT_DECODE_OPTIONS);
+export const decodeContextSummaryContent = Schema.decodeUnknownSync(
+  ContextSummaryContent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUsageReconciliation = Schema.decodeUnknownSync(
+  UsageReconciliation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCapacityReservation = Schema.decodeUnknownSync(
+  CapacityReservation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextManifestCreated = Schema.decodeUnknownSync(
+  ContextManifestCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextOverridesUpdated = Schema.decodeUnknownSync(
+  ContextOverridesUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextPlanCreated = Schema.decodeUnknownSync(
+  ContextPlanCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextSummaryCreated = Schema.decodeUnknownSync(
+  ContextSummaryCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextUsageReconciled = Schema.decodeUnknownSync(
+  ContextUsageReconciled,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeContextCapacityReservationUpdated = Schema.decodeUnknownSync(
   ContextCapacityReservationUpdated,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeContextCompactionId = Schema.decodeUnknownSync(ContextCompactionId);
-export const decodeContextCompactionReceipt = Schema.decodeUnknownSync(ContextCompactionReceipt);
+export const decodeContextCompactionId = Schema.decodeUnknownSync(
+  ContextCompactionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextCompactionReceipt = Schema.decodeUnknownSync(
+  ContextCompactionReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeContextCompactionRequested = Schema.decodeUnknownSync(
   ContextCompactionRequested,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeContextCompactionCompleted = Schema.decodeUnknownSync(
   ContextCompactionCompleted,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeContextCompactionFailed = Schema.decodeUnknownSync(ContextCompactionFailed);
-export const decodeContextCompactionRecord = Schema.decodeUnknownSync(ContextCompactionRecord);
+export const decodeContextCompactionFailed = Schema.decodeUnknownSync(
+  ContextCompactionFailed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContextCompactionRecord = Schema.decodeUnknownSync(
+  ContextCompactionRecord,
+  STRICT_DECODE_OPTIONS,
+);

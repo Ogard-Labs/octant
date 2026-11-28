@@ -100,7 +100,7 @@ it.skipIf(process.env.OCTANT_VIBE_SMOKE !== "1")(
               executionPolicy: "full-access",
               tools,
             });
-            const events = yield* Effect.fork(
+            const events = yield* Effect.forkChild(
               collect((yield* connection.subscribe).pipe(Stream.tap(observe(connection)))),
             );
             yield* connection.send({
@@ -140,7 +140,7 @@ it.skipIf(process.env.OCTANT_VIBE_SMOKE !== "1")(
               tools,
             });
             expect(processStarts).toBe(beforeWarm);
-            const events = yield* Effect.fork(
+            const events = yield* Effect.forkChild(
               collect((yield* connection.subscribe).pipe(Stream.tap(observe(connection)))),
             );
             yield* connection.send({
@@ -182,7 +182,7 @@ it.skipIf(process.env.OCTANT_VIBE_SMOKE !== "1")(
               tools,
             });
             expect(resumed.resumeCursor?.value).toBe(cursor.value);
-            const events = yield* Effect.fork(
+            const events = yield* Effect.forkChild(
               collect((yield* connection.subscribe).pipe(Stream.tap(observe(connection)))),
             );
             yield* connection.send({

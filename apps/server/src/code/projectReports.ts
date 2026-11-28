@@ -10,7 +10,7 @@ import type { SqliteConnection } from "../persistence/sqlitePort";
 
 const decodeReportActivity = Schema.decodeUnknownSync(
   Schema.Struct({
-    projectReportCount: Schema.Int.pipe(Schema.nonNegative()),
+    projectReportCount: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
     projectReportSequence: Schema.NullOr(GlobalSequence),
   }),
 );

@@ -61,7 +61,7 @@ function recordingFetch(response: () => Response) {
 // A person's refresh is the reading that waits on the endpoint.
 function observe(facts: ReturnType<typeof makeOpenCodeGoUsageFacts>, onDemand = true) {
   return Effect.runPromise(
-    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand }))),
+    Effect.scoped(Effect.result(facts.observeServiceLimits({ instanceId, onDemand }))),
   );
 }
 
@@ -88,10 +88,10 @@ describe("OpenCode Go plan usage", () => {
       }),
     );
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("exhausted");
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("exhausted");
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "five_hour",
         status: "allowed",
@@ -140,7 +140,7 @@ describe("OpenCode Go plan usage", () => {
       }),
     );
 
-    expect(outcome._tag).toBe("Right");
+    expect(outcome._tag).toBe("Success");
     expect(new Headers(http.requests[0]?.init.headers).get("authorization")).toBe(
       "Bearer go-key-beta",
     );
@@ -190,7 +190,7 @@ describe("OpenCode Go plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -207,7 +207,7 @@ describe("OpenCode Go plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unavailable" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unavailable" } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -229,7 +229,7 @@ describe("OpenCode Go plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "protocol" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "protocol" } });
     expect(JSON.stringify(outcome)).not.toContain("go-key-3");
   });
 });

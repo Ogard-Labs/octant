@@ -17,7 +17,7 @@ import type {
   ProviderDriver,
   ProviderSessionStart,
 } from "@octant/provider-sdk/driver";
-import { Effect } from "effect";
+import { Cause, Effect, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   makePersistenceLive,
@@ -355,7 +355,7 @@ describe("an added agent's launch", () => {
         held.acquire({ instanceId } as never).pipe(
           Effect.flatMap((connection) =>
             connection.start(sessionStart).pipe(
-              Effect.zipRight(
+              Effect.andThen(
                 connection.answerApproval({
                   sessionId: "session-1",
                   requestId: "r1",
@@ -459,11 +459,15 @@ describe("an added agent's launch", () => {
       ),
     );
     expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure" && exit.cause._tag === "Fail") {
-      expect(exit.cause.error).toEqual({
-        category: "unavailable",
-        message: ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE,
-      });
+    if (exit._tag === "Failure") {
+      const failure = Cause.findErrorOption(exit.cause);
+      expect(Option.isSome(failure)).toBe(true);
+      if (Option.isSome(failure)) {
+        expect(failure.value).toEqual({
+          category: "unavailable",
+          message: ACP_PACKAGE_NEEDS_INSTALL_SCRIPT_MESSAGE,
+        });
+      }
     }
 
     // An unauthenticated reply proves the binary ran and asked for sign-in, so
@@ -483,11 +487,15 @@ describe("an added agent's launch", () => {
       ),
     );
     expect(unauthExit._tag).toBe("Failure");
-    if (unauthExit._tag === "Failure" && unauthExit.cause._tag === "Fail") {
-      expect(unauthExit.cause.error).toEqual({
-        category: "unauthenticated",
-        message: "Sign in first.",
-      });
+    if (unauthExit._tag === "Failure") {
+      const failure = Cause.findErrorOption(unauthExit.cause);
+      expect(Option.isSome(failure)).toBe(true);
+      if (Option.isSome(failure)) {
+        expect(failure.value).toEqual({
+          category: "unauthenticated",
+          message: "Sign in first.",
+        });
+      }
     }
   });
 });

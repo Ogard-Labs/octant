@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasBlockKind, CanvasDesignSize, CanvasSourceKind } from "./canvas";
 import { CanvasCardSchemaVersion } from "./canvasCards";
 import {
@@ -17,7 +18,6 @@ import {
 // contribution therefore cannot grant authority: installing, selecting, or
 // mentioning a skill only ever contributes presentation metadata that the
 // server reauthorizes. A recipe is a starting shape, not a document.
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CANVAS_SKILL_MAX_SUPPORTED_SOURCES = 8;
 export const CANVAS_SKILL_MAX_LAYOUTS = 16;
@@ -31,14 +31,17 @@ export const CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS = 280;
 export const CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS = 120;
 export const CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS = 140;
 
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(96),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
-    Schema.brand(brand),
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(96),
+      Schema.isPattern(/^[a-z][a-z0-9-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 const boundedText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
 
 export const CanvasSkillLayoutId = boundedToken("CanvasSkillLayoutId");
 export type CanvasSkillLayoutId = typeof CanvasSkillLayoutId.Type;
@@ -55,26 +58,26 @@ export const CanvasSkillLayoutSlot = Schema.Struct({
   blockKind: CanvasBlockKind,
   sourceKind: Schema.optional(CanvasSourceKind),
   label: Schema.optional(boundedText(CANVAS_SKILL_LABEL_MAX_CHARS)),
-}).annotations(strict);
+});
 export type CanvasSkillLayoutSlot = typeof CanvasSkillLayoutSlot.Type;
 
 export const CanvasSkillLayout = Schema.Struct({
   layoutId: CanvasSkillLayoutId,
   title: boundedText(CANVAS_SKILL_LABEL_MAX_CHARS),
-  slots: Schema.Array(CanvasSkillLayoutSlot).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_SKILL_MAX_SLOTS),
+  slots: Schema.Array(CanvasSkillLayoutSlot).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_SKILL_MAX_SLOTS),
   ),
-}).annotations(strict);
+});
 export type CanvasSkillLayout = typeof CanvasSkillLayout.Type;
 
-export const CanvasSkillPresentationRuleKind = Schema.Literal(
+export const CanvasSkillPresentationRuleKind = Schema.Literals([
   "emphasis",
   "ordering",
   "grouping",
   "formatting",
   "annotation",
-);
+]);
 export type CanvasSkillPresentationRuleKind = typeof CanvasSkillPresentationRuleKind.Type;
 
 /**
@@ -87,7 +90,7 @@ export const CanvasSkillPresentationRule = Schema.Struct({
   kind: CanvasSkillPresentationRuleKind,
   target: CanvasBlockKind,
   directive: boundedText(CANVAS_SKILL_DIRECTIVE_MAX_CHARS),
-}).annotations(strict);
+});
 export type CanvasSkillPresentationRule = typeof CanvasSkillPresentationRule.Type;
 
 /**
@@ -107,13 +110,11 @@ export const CanvasDocumentRecipeSkeletonBlock = Schema.Struct({
   kind: CanvasBlockKind,
   role: boundedText(CANVAS_DOCUMENT_RECIPE_ROLE_MAX_CHARS),
   size: Schema.optional(CanvasDesignSize),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((block) => block.size === undefined || block.kind === "design", {
-      message: () => "Only a design slot names a size.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((block) => block.size === undefined || block.kind === "design", {
+    message: "Only a design slot names a size.",
+  }),
+);
 export type CanvasDocumentRecipeSkeletonBlock = typeof CanvasDocumentRecipeSkeletonBlock.Type;
 
 export const CanvasDocumentRecipe = Schema.Struct({
@@ -127,10 +128,10 @@ export const CanvasDocumentRecipe = Schema.Struct({
    */
   summary: Schema.optional(boundedText(CANVAS_DOCUMENT_RECIPE_SUMMARY_MAX_CHARS)),
   whenToUse: boundedText(CANVAS_DOCUMENT_RECIPE_WHEN_MAX_CHARS),
-  skeleton: Schema.NonEmptyArray(CanvasDocumentRecipeSkeletonBlock).pipe(
-    Schema.maxItems(CANVAS_DOCUMENT_RECIPE_SKELETON_MAX),
+  skeleton: Schema.NonEmptyArray(CanvasDocumentRecipeSkeletonBlock).check(
+    Schema.isMaxLength(CANVAS_DOCUMENT_RECIPE_SKELETON_MAX),
   ),
-}).annotations(strict);
+});
 export type CanvasDocumentRecipe = typeof CanvasDocumentRecipe.Type;
 
 /**
@@ -139,7 +140,7 @@ export type CanvasDocumentRecipe = typeof CanvasDocumentRecipe.Type;
  */
 export const CanvasDocumentRecipeCatalog = Schema.Struct({
   recipes: Schema.Array(CanvasDocumentRecipe),
-}).annotations(strict);
+});
 export type CanvasDocumentRecipeCatalog = typeof CanvasDocumentRecipeCatalog.Type;
 
 export const CanvasSkillContribution = Schema.Struct({
@@ -153,37 +154,36 @@ export const CanvasSkillContribution = Schema.Struct({
   digest: ExtensionContentDigest,
   sourceKind: ExtensionSourceKind,
   supportedSources: Schema.Array(CanvasSourceKind)
-    .pipe(Schema.minItems(1), Schema.maxItems(CANVAS_SKILL_MAX_SUPPORTED_SOURCES))
-    .pipe(
-      Schema.filter((kinds) => new Set(kinds).size === kinds.length, {
-        message: () => "Canvas skill supported sources must be unique.",
+    .check(Schema.isMinLength(1), Schema.isMaxLength(CANVAS_SKILL_MAX_SUPPORTED_SOURCES))
+    .check(
+      Schema.makeFilter((kinds) => new Set(kinds).size === kinds.length, {
+        message: "Canvas skill supported sources must be unique.",
       }),
     ),
-  layouts: Schema.Array(CanvasSkillLayout).pipe(Schema.maxItems(CANVAS_SKILL_MAX_LAYOUTS)),
-  presentationRules: Schema.Array(CanvasSkillPresentationRule).pipe(
-    Schema.maxItems(CANVAS_SKILL_MAX_PRESENTATION_RULES),
+  layouts: Schema.Array(CanvasSkillLayout).check(Schema.isMaxLength(CANVAS_SKILL_MAX_LAYOUTS)),
+  presentationRules: Schema.Array(CanvasSkillPresentationRule).check(
+    Schema.isMaxLength(CANVAS_SKILL_MAX_PRESENTATION_RULES),
   ),
   recipes: Schema.optional(
-    Schema.Array(CanvasDocumentRecipe).pipe(
-      Schema.maxItems(CANVAS_DOCUMENT_RECIPE_MAX),
-      Schema.filter(
+    Schema.Array(CanvasDocumentRecipe).check(
+      Schema.isMaxLength(CANVAS_DOCUMENT_RECIPE_MAX),
+      Schema.makeFilter(
         (recipes) => new Set(recipes.map((recipe) => String(recipe.id))).size === recipes.length,
-        { message: () => "Canvas document recipe ids must be unique." },
+        { message: "Canvas document recipe ids must be unique." },
       ),
     ),
   ),
   scope: Schema.optional(StandaloneSkillScope),
-})
-  .annotations(strict)
-  .pipe(
-    // Provenance integrity: `digest` and `sourceKind` are audit-critical, so
-    // they must be consistent with the canonical `qualifiedId` rather than
-    // decoded independently. A qualified id is
-    // `<sourceKind>:<name>:<skill>:sha256:<digest>`; binding both fields to it
-    // prevents a contribution from decoding with an identity that ends in
-    // digest A while declaring digest B or a mismatched source kind (spoofed
-    // source/digest audit metadata).
-    Schema.filter(
+}).pipe(
+  // Provenance integrity: `digest` and `sourceKind` are audit-critical, so
+  // they must be consistent with the canonical `qualifiedId` rather than
+  // decoded independently. A qualified id is
+  // `<sourceKind>:<name>:<skill>:sha256:<digest>`; binding both fields to it
+  // prevents a contribution from decoding with an identity that ends in
+  // digest A while declaring digest B or a mismatched source kind (spoofed
+  // source/digest audit metadata).
+  Schema.check(
+    Schema.makeFilter(
       (contribution) => {
         const qualifiedId = String(contribution.qualifiedId);
         const separator = qualifiedId.indexOf(":");
@@ -193,15 +193,13 @@ export const CanvasSkillContribution = Schema.Struct({
           qualifiedId.endsWith(`:${String(contribution.digest)}`)
         );
       },
-      {
-        message: () =>
-          "Canvas skill sourceKind and digest must match the qualified skill identity.",
-      },
+      { message: "Canvas skill sourceKind and digest must match the qualified skill identity." },
     ),
-  );
+  ),
+);
 export type CanvasSkillContribution = typeof CanvasSkillContribution.Type;
 
-export const CanvasSkillContributionDenialCode = Schema.Literal(
+export const CanvasSkillContributionDenialCode = Schema.Literals([
   "malformed",
   "untrusted",
   "not-enabled",
@@ -210,31 +208,43 @@ export const CanvasSkillContributionDenialCode = Schema.Literal(
   "version-mismatch",
   "unsupported-source",
   "scope-mismatch",
-);
+]);
 export type CanvasSkillContributionDenialCode = typeof CanvasSkillContributionDenialCode.Type;
 
-export const CanvasSkillContributionResolution = Schema.Union(
+export const CanvasSkillContributionResolution = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("admitted"),
     contribution: CanvasSkillContribution,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("denied"),
     denialCode: CanvasSkillContributionDenialCode,
     message: boundedText(1_024),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasSkillContributionResolution = typeof CanvasSkillContributionResolution.Type;
 
-export const decodeCanvasSkillLayout = Schema.decodeUnknownSync(CanvasSkillLayout);
+export const decodeCanvasSkillLayout = Schema.decodeUnknownSync(
+  CanvasSkillLayout,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasSkillPresentationRule = Schema.decodeUnknownSync(
   CanvasSkillPresentationRule,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasDocumentRecipe = Schema.decodeUnknownSync(CanvasDocumentRecipe);
+export const decodeCanvasDocumentRecipe = Schema.decodeUnknownSync(
+  CanvasDocumentRecipe,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasDocumentRecipeCatalog = Schema.decodeUnknownSync(
   CanvasDocumentRecipeCatalog,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasSkillContribution = Schema.decodeUnknownSync(CanvasSkillContribution);
+export const decodeCanvasSkillContribution = Schema.decodeUnknownSync(
+  CanvasSkillContribution,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasSkillContributionResolution = Schema.decodeUnknownSync(
   CanvasSkillContributionResolution,
+  STRICT_DECODE_OPTIONS,
 );

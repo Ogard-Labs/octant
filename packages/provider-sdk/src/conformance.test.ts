@@ -516,7 +516,7 @@ describe("session compaction conformance", () => {
                       compacting = true;
                     }),
                     () =>
-                      Effect.zipRight(
+                      Effect.andThen(
                         Effect.promise(() => hold.promise),
                         effect,
                       ),
@@ -553,7 +553,7 @@ describe("session compaction conformance", () => {
               send: () =>
                 compacting && options.hold === "refuses-turns"
                   ? Effect.fail(failure("unavailable", "The session is compacting."))
-                  : Effect.zipRight(
+                  : Effect.andThen(
                       emit({ ...base(), kind: "text-delta", text: "hello" }),
                       emit({ ...base(), kind: "completed" }),
                     ),

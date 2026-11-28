@@ -2368,9 +2368,9 @@ describe("WorkTurnRuntime", () => {
           }),
         resume: () => Effect.die("unused"),
         send: () =>
-          Effect.sync(() => calls.send()).pipe(Effect.zipRight(Queue.offer(queue, completed(1)))),
+          Effect.sync(() => calls.send()).pipe(Effect.andThen(Queue.offer(queue, completed(1)))),
         attachRuntimeTurn: () =>
-          Effect.sync(() => calls.attach()).pipe(Effect.zipRight(Queue.offer(queue, completed(2)))),
+          Effect.sync(() => calls.attach()).pipe(Effect.andThen(Queue.offer(queue, completed(2)))),
         backgroundWork: () => ({ current: () => work, watch: () => () => undefined }),
         interrupt: () => Effect.void,
         stop: () => Effect.sync(() => calls.stop()),

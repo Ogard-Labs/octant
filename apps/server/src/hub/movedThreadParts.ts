@@ -33,8 +33,7 @@ import {
 import { Schema } from "effect";
 import type { PackedPart } from "./threadMoveService";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const PartId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+const PartId = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64)));
 
 /** What the conversation part says about the bulk parts beside it. */
 export const MovedThreadParts = Schema.Struct({
@@ -42,42 +41,44 @@ export const MovedThreadParts = Schema.Struct({
     Schema.Struct({
       profileInstanceId: ProviderInstanceId,
       modelId: ProviderModelId,
-      promptHash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      promptHash: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
       createdAt: UtcTimestamp,
       updatedAt: UtcTimestamp,
       images: Schema.Array(
         Schema.Struct({
           partId: PartId,
           /** The image's id on the source, which a carried design's assets may name. */
-          sourceImageId: Schema.UUID,
-        }).annotations(strict),
-      ).pipe(Schema.minItems(1)),
-    }).annotations(strict),
+          sourceImageId: Schema.String.check(Schema.isGUID()),
+        }),
+      ).pipe(Schema.check(Schema.isMinLength(1))),
+    }),
   ),
   browserCaptures: Schema.Array(
     Schema.Struct({
       partId: PartId,
       /** The capture's id on the source, which a carried design's assets may name. */
-      sourceCaptureId: Schema.UUID,
-      origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-      url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-      title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+      sourceCaptureId: Schema.String.check(Schema.isGUID()),
+      origin: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+        Schema.check(Schema.isMaxLength(2048)),
+      ),
+      url: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(4096))),
+      title: Schema.optional(
+        Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(1024))),
+      ),
       capturedAt: UtcTimestamp,
       recording: Schema.optional(BrowserRecordingFacts),
-    }).annotations(strict),
+    }),
   ),
-  canvases: Schema.Array(
-    Schema.Struct({ partId: PartId, carriesOutsideContent: Schema.Boolean }).annotations(strict),
-  ),
-}).annotations(strict);
+  canvases: Schema.Array(Schema.Struct({ partId: PartId, carriesOutsideContent: Schema.Boolean })),
+});
 export type MovedThreadParts = typeof MovedThreadParts.Type;
 
 /** A Canvas part: every version the Canvas holds, oldest first. */
 const MovedCanvas = Schema.Struct({
-  versions: Schema.Array(CanvasVersion).pipe(Schema.minItems(1)),
-}).annotations(strict);
+  versions: Schema.Array(CanvasVersion).pipe(Schema.check(Schema.isMinLength(1))),
+});
 const encodeMovedCanvas = Schema.encodeSync(MovedCanvas);
-const decodeMovedCanvas = Schema.decodeUnknownSync(MovedCanvas);
+const decodeMovedCanvas = Schema.decodeUnknownSync(MovedCanvas, { onExcessProperty: "error" });
 
 /** A Canvas the thread owns, as the source reads it. */
 export interface OwnedCanvas {

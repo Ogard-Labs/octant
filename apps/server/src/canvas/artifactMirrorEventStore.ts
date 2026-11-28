@@ -13,8 +13,6 @@ import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * The journal frames the mirror writes.
  *
@@ -24,18 +22,18 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  */
 export const ArtifactMirrorSettingChanged = Schema.Struct({
   settings: ArtifactMirrorSettings,
-}).annotations(strict);
+});
 
 export const ArtifactMirrorWritten = Schema.Struct({
   receipt: ArtifactMirrorReceipt,
-}).annotations(strict);
+});
 
 export const ArtifactMirrorReimported = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
   /** The file the new version came from, relative to its destination root. */
-  path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  path: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(512))),
+});
 
 export function registerArtifactMirrorEvents(registry: EventRegistry): EventRegistry {
   return registry

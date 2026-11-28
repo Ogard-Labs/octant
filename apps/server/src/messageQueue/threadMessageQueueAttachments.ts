@@ -37,26 +37,31 @@ const chatReference = Schema.Struct({
   chatThreadId: ChatThreadId,
   chatAttachmentId: ChatAttachmentId,
   displayName: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_CHAT_ATTACHMENT_DISPLAY_NAME_LENGTH),
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(MAX_CHAT_ATTACHMENT_DISPLAY_NAME_LENGTH)),
   ),
-  size: Schema.Int.pipe(Schema.greaterThan(0), Schema.lessThanOrEqualTo(MAX_CHAT_ATTACHMENT_BYTES)),
-  hash: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  size: Schema.Int.pipe(
+    Schema.check(Schema.isGreaterThan(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(MAX_CHAT_ATTACHMENT_BYTES)),
+  ),
+  hash: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   finalizedAt: UtcTimestamp,
 });
-const privateContext = Schema.Union(
+const privateContext = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("chat"),
     threadId: ChatThreadId,
     messageId: ThreadQueueMessageId,
-    attachments: Schema.Array(chatReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+    attachments: Schema.Array(chatReference).pipe(
+      Schema.check(Schema.isMaxLength(MAX_CHAT_TURN_ATTACHMENTS)),
+    ),
   }),
   Schema.Struct({
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
     messageId: ThreadQueueMessageId,
     attachments: Schema.Array(CodeAttachmentReference).pipe(
-      Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS),
+      Schema.check(Schema.isMaxLength(MAX_CODE_TURN_ATTACHMENTS)),
     ),
   }),
   Schema.Struct({
@@ -64,10 +69,10 @@ const privateContext = Schema.Union(
     threadId: WorkThreadId,
     messageId: ThreadQueueMessageId,
     attachments: Schema.Array(WorkAttachmentReference).pipe(
-      Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS),
+      Schema.check(Schema.isMaxLength(MAX_WORK_TURN_ATTACHMENTS)),
     ),
   }),
-);
+]);
 type PrivateContext = typeof privateContext.Type;
 const decodePrivateContext = Schema.decodeUnknownSync(privateContext, {
   onExcessProperty: "error",

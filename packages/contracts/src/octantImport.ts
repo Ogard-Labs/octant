@@ -1,9 +1,9 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { OctantMode } from "./modes";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const ThreadIdText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const ThreadIdText = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
 
 /**
  * The record Octant Nightly keeps of each import of Octant's data
@@ -18,7 +18,7 @@ export const OCTANT_IMPORT_RECORDED = "data.octant-import-recorded@1" as const;
 export const OctantImportConflict = Schema.Struct({
   mode: OctantMode,
   octantThreadId: ThreadIdText,
-}).annotations(strict);
+});
 export type OctantImportConflict = typeof OctantImportConflict.Type;
 
 /** The Nightly copy a conflicting Octant thread arrived as. */
@@ -26,14 +26,14 @@ export const OctantImportCopy = Schema.Struct({
   mode: OctantMode,
   octantThreadId: ThreadIdText,
   copyThreadId: ThreadIdText,
-}).annotations(strict);
+});
 export type OctantImportCopy = typeof OctantImportCopy.Type;
 
 /** A record the import held back: Nightly's stream stays, or it has none yet. */
 export const OctantImportHeldBack = Schema.Struct({
-  aggregateType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  aggregateId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-}).annotations(strict);
+  aggregateType: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  aggregateId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+});
 export type OctantImportHeldBack = typeof OctantImportHeldBack.Type;
 
 export const OctantImportCounts = Schema.Struct({
@@ -43,7 +43,7 @@ export const OctantImportCounts = Schema.Struct({
   contentRows: NonNegativeInt,
   /** In-flight work that arrived settled or paused. */
   settled: NonNegativeInt,
-}).annotations(strict);
+});
 export type OctantImportCounts = typeof OctantImportCounts.Type;
 
 /**
@@ -55,7 +55,7 @@ export const OctantImportOutcomeCounts = Schema.Struct({
   ...OctantImportCounts.fields,
   /** Side files copied into Nightly's folder: attachments, images, icons, receipts. */
   files: NonNegativeInt,
-}).annotations(strict);
+});
 export type OctantImportOutcomeCounts = typeof OctantImportOutcomeCounts.Type;
 
 /**
@@ -69,7 +69,7 @@ export type OctantImportOutcomeCounts = typeof OctantImportOutcomeCounts.Type;
  * it again instead of taking its absence for a deletion in Nightly.
  */
 export const OctantImportRecorded = Schema.Struct({
-  importId: Schema.UUID,
+  importId: GuidString,
   octantMark: NonNegativeInt,
   copies: Schema.Array(OctantImportCopy),
   conflicts: Schema.Array(OctantImportConflict),
@@ -83,6 +83,9 @@ export const OctantImportRecorded = Schema.Struct({
    * Absent in a record written before the field existed.
    */
   codeThreadIds: Schema.optional(Schema.Array(ThreadIdText)),
-}).annotations(strict);
+});
 export type OctantImportRecorded = typeof OctantImportRecorded.Type;
-export const decodeOctantImportRecorded = Schema.decodeUnknownSync(OctantImportRecorded);
+export const decodeOctantImportRecorded = Schema.decodeUnknownSync(
+  OctantImportRecorded,
+  STRICT_DECODE_OPTIONS,
+);

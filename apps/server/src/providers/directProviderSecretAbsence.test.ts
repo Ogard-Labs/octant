@@ -128,7 +128,7 @@ describe("Direct-provider secret-absence harness", () => {
 
     const exit = await Effect.runPromiseExit(Effect.scoped(driver.probe({ instanceId })));
     if (Exit.isFailure(exit)) {
-      const failureOption = Cause.failureOption(exit.cause);
+      const failureOption = Cause.findErrorOption(exit.cause);
       const failureError = Option.getOrUndefined(failureOption);
       expect(failureError).toBeDefined();
       assertSecretAbsent("OpenAI-compatible failure diagnostics", failureError);
@@ -264,7 +264,7 @@ async function runTurnAndCollectEvents(
           modelId,
           executionPolicy: "approval-gated",
         });
-        const collector = yield* Effect.fork(
+        const collector = yield* Effect.forkChild(
           (yield* connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === sessionId),
             Stream.takeUntil(
@@ -526,7 +526,7 @@ describe("Organization sign-in secret absence", () => {
             const turn = (prompt: string) =>
               Effect.gen(function* () {
                 const events: ProviderRuntimeEvent[] = [];
-                const collector = yield* Effect.fork(
+                const collector = yield* Effect.forkChild(
                   (yield* connection.subscribe).pipe(
                     Stream.filter((event) => event.sessionId === sessionId),
                     Stream.takeUntil(

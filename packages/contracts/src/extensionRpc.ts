@@ -1,4 +1,5 @@
 import { GithubMcpPermissionProfile, McpOAuthClientRegistration } from "./hostOAuth";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ApprovalOutsideContent } from "./contentProvenance";
 import { SkillFolderPath } from "./shell";
 import { personDecides } from "./hostAnswer";
@@ -37,12 +38,12 @@ import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { SecretStoreItemReference, SecretStoreKind } from "./secretStores";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximumLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximumLength));
-const opaqueCursor = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximumLength));
+const opaqueCursor = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
 );
 const packageTarget = {
   extensionId: ToolExtensionId,
@@ -53,7 +54,7 @@ const versionedTarget = {
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
 };
-const stateCommandVersion = EventVersion.pipe(Schema.filter((version) => version === 1));
+const stateCommandVersion = EventVersion.check(Schema.makeFilter((version) => version === 1));
 const desiredStateMutation = {
   commandVersion: stateCommandVersion,
   extensionId: ToolExtensionId,
@@ -63,13 +64,13 @@ const desiredStateMutation = {
 export const ExtensionEffectiveStateQuery = Schema.Struct({
   scope: ExtensionActivationScope,
   expectedCatalogEpoch: Schema.optional(ExtensionCatalogEpoch),
-}).annotations(strict);
+});
 export type ExtensionEffectiveStateQuery = typeof ExtensionEffectiveStateQuery.Type;
 
 export const ExtensionToolApproval = Schema.Struct({
-  approvalId: Schema.UUID,
-  threadId: Schema.UUID,
-  projectId: Schema.optional(Schema.UUID),
+  approvalId: GuidString,
+  threadId: GuidString,
+  projectId: Schema.optional(GuidString),
   extensionId: ToolExtensionId,
   packageId: ExtensionPackageId,
   componentId: ExtensionComponentId,
@@ -77,7 +78,7 @@ export const ExtensionToolApproval = Schema.Struct({
   serverName: boundedText(128),
   providerToolName: boundedText(256),
   mcpToolName: boundedText(256),
-  inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
+  inputJson: Schema.String.check(Schema.isMaxLength(64 * 1024)),
   requestedAt: UtcTimestamp,
   /**
    * Whether an approval is kept for the Project, or for the account on a
@@ -93,18 +94,18 @@ export const ExtensionToolApproval = Schema.Struct({
    * rest of this thread (`server-on-thread`), or this call alone (`call`).
    * Absent from a host that predates it, where an approval covers this call.
    */
-  answerCovers: Schema.optional(Schema.Literal("call", "server", "server-on-thread")),
+  answerCovers: Schema.optional(Schema.Literals(["call", "server", "server-on-thread"])),
   /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
   outsideContent: Schema.optional(ApprovalOutsideContent),
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 export type ExtensionToolApproval = typeof ExtensionToolApproval.Type;
 
 export const ExtensionToolApprovalList = Schema.Array(ExtensionToolApproval);
 export type ExtensionToolApprovalList = typeof ExtensionToolApprovalList.Type;
 
 export const ExtensionToolApprovalDecision = Schema.Struct({
-  approvalId: Schema.UUID,
-  decision: Schema.Literal("approved", "denied"),
+  approvalId: GuidString,
+  decision: Schema.Literals(["approved", "denied"]),
   /**
    * Names what the approval is kept for, where the prompt is `rememberable`.
    * Left out, an approval there is kept for every tool of the server. Only
@@ -115,16 +116,14 @@ export const ExtensionToolApprovalDecision = Schema.Struct({
    * What `remember` covers: this tool alone, or every tool of its server.
    * Absent means this tool, which is all an older client can ask for.
    */
-  rememberScope: Schema.optional(Schema.Literal("tool", "server")),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (answer) =>
-        (answer.remember !== true || answer.decision === "approved") &&
-        (answer.rememberScope === undefined || answer.remember === true),
-    ),
-  );
+  rememberScope: Schema.optional(Schema.Literals(["tool", "server"])),
+}).check(
+  Schema.makeFilter(
+    (answer) =>
+      (answer.remember !== true || answer.decision === "approved") &&
+      (answer.rememberScope === undefined || answer.remember === true),
+  ),
+);
 export type ExtensionToolApprovalDecision = typeof ExtensionToolApprovalDecision.Type;
 
 /**
@@ -134,22 +133,22 @@ export type ExtensionToolApprovalDecision = typeof ExtensionToolApprovalDecision
 export const ExtensionToolGrant = Schema.Struct({
   ...extensionToolGrantRecordedFields,
   grantedAt: UtcTimestamp,
-}).annotations({ ...strict, ...personDecides });
+}).annotate(personDecides);
 export type ExtensionToolGrant = typeof ExtensionToolGrant.Type;
 
-export const ExtensionToolGrantList = Schema.Array(ExtensionToolGrant).pipe(Schema.maxItems(4096));
+export const ExtensionToolGrantList = Schema.Array(ExtensionToolGrant).check(
+  Schema.isMaxLength(4096),
+);
 export type ExtensionToolGrantList = typeof ExtensionToolGrantList.Type;
 
 /**
  * What a local window may ask of remembered approvals: read them, or take one
  * away. Nothing here creates one; that happens only by answering a prompt.
  */
-export const ExtensionToolGrantRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("revoke"), grantId: ExtensionToolGrantId }).annotations(
-    strict,
-  ),
-);
+export const ExtensionToolGrantRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("list") }),
+  Schema.Struct({ kind: Schema.Literal("revoke"), grantId: ExtensionToolGrantId }),
+]);
 export type ExtensionToolGrantRequest = typeof ExtensionToolGrantRequest.Type;
 
 /**
@@ -158,8 +157,8 @@ export type ExtensionToolGrantRequest = typeof ExtensionToolGrantRequest.Type;
  * never written into the package; the package carries a reference instead.
  */
 const userAddedSecretValue = Schema.Struct({
-  name: boundedText(128).pipe(Schema.pattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
-  value: Schema.String.pipe(Schema.maxLength(8192)),
+  name: boundedText(128).check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
+  value: Schema.String.check(Schema.isMaxLength(8192)),
   secret: Schema.Boolean,
   /**
    * A secret that comes from a linked secret store: the host keeps this item
@@ -167,11 +166,9 @@ const userAddedSecretValue = Schema.Struct({
    * launched. `value` is empty and `secret` is true.
    */
   linked: Schema.optional(
-    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
-      strict,
-    ),
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }),
   ),
-}).annotations(strict);
+});
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
   /**
@@ -188,71 +185,77 @@ export const UserAddedMcpServerRequest = Schema.Struct({
   connectorId: Schema.optional(boundedText(64)),
   /** A bundled local setup; never a hosted OAuth connector. */
   localSetupId: Schema.optional(Schema.Literal("paper")),
-  server: Schema.Union(
+  server: Schema.Union([
     Schema.Struct({
       type: Schema.Literal("stdio"),
       command: boundedText(1024),
-      args: Schema.Array(Schema.String.pipe(Schema.maxLength(1024))).pipe(Schema.maxItems(64)),
-      env: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(64)),
-    }).annotations(strict),
+      args: Schema.Array(Schema.String.check(Schema.isMaxLength(1024))).check(
+        Schema.isMaxLength(64),
+      ),
+      env: Schema.Array(userAddedSecretValue).check(Schema.isMaxLength(64)),
+    }),
     Schema.Struct({
       type: Schema.Literal("streamable-http"),
       url: boundedText(2048),
-      headers: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(32)),
-    }).annotations(strict),
-  ),
-}).annotations(strict);
+      headers: Schema.Array(userAddedSecretValue).check(Schema.isMaxLength(32)),
+    }),
+  ]),
+});
 export type UserAddedMcpServerRequest = typeof UserAddedMcpServerRequest.Type;
-export const decodeUserAddedMcpServerRequest = Schema.decodeUnknownSync(UserAddedMcpServerRequest);
+export const decodeUserAddedMcpServerRequest = Schema.decodeUnknownSync(
+  UserAddedMcpServerRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * MCP servers and plugins another agent tool on this computer already knows,
  * listed for the person to add. The listing carries no path and no value:
  * an opaque id names each item, and the host keeps what it points at.
  */
-export const DiscoveredAgentToolingOrigin = Schema.Literal("claude-code", "codex");
+export const DiscoveredAgentToolingOrigin = Schema.Literals(["claude-code", "codex"]);
 export type DiscoveredAgentToolingOrigin = typeof DiscoveredAgentToolingOrigin.Type;
-const discoveredId = boundedText(128).pipe(Schema.pattern(/^[a-z]+-[a-f0-9]{32}$/));
+const discoveredId = boundedText(128).check(Schema.isPattern(/^[a-z]+-[a-f0-9]{32}$/));
 export const DiscoveredMcpServer = Schema.Struct({
   id: discoveredId,
   origin: DiscoveredAgentToolingOrigin,
   /** Where the other tool keeps it: for the person, or for one Project's folder. */
-  scope: Schema.Literal("user", "project"),
+  scope: Schema.Literals(["user", "project"]),
   name: boundedText(128),
-  transport: Schema.Literal("stdio", "streamable-http"),
+  transport: Schema.Literals(["stdio", "streamable-http"]),
   /** The command line or the address, for the row; never a secret. */
   summary: boundedText(512),
   /** Variables the other tool reads from its environment that this host could not find. */
-  needsValues: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  needsValues: Schema.Array(boundedText(128)).check(Schema.isMaxLength(32)),
   /**
    * Variables the other tool expands inside the command, its arguments or the
    * address. Octant never copies a host value into those fields, so a server
    * that has any cannot be added from here.
    */
-  unsupportedPlaceholders: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  unsupportedPlaceholders: Schema.Array(boundedText(128)).check(Schema.isMaxLength(32)),
   /** Values that will be kept in the credential store rather than the package. */
-  secretNames: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  secretNames: Schema.Array(boundedText(128)).check(Schema.isMaxLength(32)),
+});
 export type DiscoveredMcpServer = typeof DiscoveredMcpServer.Type;
 export const DiscoveredPlugin = Schema.Struct({
   id: discoveredId,
   origin: DiscoveredAgentToolingOrigin,
   name: boundedText(128),
   version: Schema.optional(boundedText(64)),
-  format: Schema.Literal("agent-plugins", "codex-plugin", "claude-plugin"),
+  format: Schema.Literals(["agent-plugins", "codex-plugin", "claude-plugin"]),
   /** Whether the other tool has it switched on. */
   enabledThere: Schema.Boolean,
-}).annotations(strict);
+});
 export type DiscoveredPlugin = typeof DiscoveredPlugin.Type;
 export const DiscoveredAgentToolingListing = Schema.Struct({
-  servers: Schema.Array(DiscoveredMcpServer).pipe(Schema.maxItems(256)),
-  plugins: Schema.Array(DiscoveredPlugin).pipe(Schema.maxItems(256)),
+  servers: Schema.Array(DiscoveredMcpServer).check(Schema.isMaxLength(256)),
+  plugins: Schema.Array(DiscoveredPlugin).check(Schema.isMaxLength(256)),
   /** What was found but cannot be offered, in plain words. */
-  notes: Schema.Array(boundedText(256)).pipe(Schema.maxItems(64)),
-}).annotations(strict);
+  notes: Schema.Array(boundedText(256)).check(Schema.isMaxLength(64)),
+});
 export type DiscoveredAgentToolingListing = typeof DiscoveredAgentToolingListing.Type;
 export const decodeDiscoveredAgentToolingListing = Schema.decodeUnknownSync(
   DiscoveredAgentToolingListing,
+  STRICT_DECODE_OPTIONS,
 );
 /**
  * Signing in to a hosted MCP server a person added. The view never carries a
@@ -271,56 +274,60 @@ export const McpClientSetupInput = Schema.Struct({
     tokenEndpoint: boundedText(2048),
     callback: boundedText(256),
     mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
-  }).annotations(strict),
-  kind: Schema.Literal("registered", "metadata-document"),
+  }),
+  kind: Schema.Literals(["registered", "metadata-document"]),
   clientId: boundedText(2048),
-  authentication: Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+  authentication: Schema.Literals(["none", "client_secret_post", "client_secret_basic"]),
   secret: Schema.optional(
-    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }).annotations(
-      strict,
-    ),
+    Schema.Struct({ store: SecretStoreKind, reference: SecretStoreItemReference }),
   ),
-}).annotations(strict);
+});
 export type McpClientSetupInput = typeof McpClientSetupInput.Type;
 
-export const McpServerSignInRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("prepare-client"), ...signInTarget }).annotations(strict),
+export const McpServerSignInRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("prepare-client"), ...signInTarget }),
   Schema.Struct({
     kind: Schema.Literal("save-client"),
     ...signInTarget,
     setup: McpClientSetupInput,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("configure-client"),
     ...signInTarget,
     registration: McpOAuthClientRegistration,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }),
+  Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }),
   Schema.Struct({
     kind: Schema.Literal("poll"),
     ...signInTarget,
-    attemptId: Schema.UUID,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("sign-out"), ...signInTarget }).annotations(strict),
-);
+    attemptId: GuidString,
+  }),
+  Schema.Struct({ kind: Schema.Literal("sign-out"), ...signInTarget }),
+]);
 export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
-export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
+export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(
+  McpServerSignInRequest,
+  STRICT_DECODE_OPTIONS,
+);
 /** Optional last-reported account facts; never token/JWT fields or inferred names. */
 export const McpReportedAccount = Schema.Struct({
-  workspaceId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
-  userId: Schema.optional(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9]{1,128}$/))),
+  workspaceId: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9]{1,128}$/))),
+  userId: Schema.optional(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9]{1,128}$/))),
   grantedScopes: Schema.optional(
     Schema.Array(
-      Schema.String.pipe(Schema.maxLength(128), Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/)),
-    ).pipe(Schema.maxItems(64)),
+      Schema.String.check(Schema.isMaxLength(128), Schema.isPattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/)),
+    ).check(Schema.isMaxLength(64)),
   ),
-}).annotations(strict);
+});
 export type McpReportedAccount = typeof McpReportedAccount.Type;
-export const decodeMcpReportedAccount = Schema.decodeUnknownSync(McpReportedAccount);
+export const decodeMcpReportedAccount = Schema.decodeUnknownSync(
+  McpReportedAccount,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const McpServerSignInView = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("client-configured") }).annotations(strict),
+export const McpServerSignInView = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("client-configured") }),
   Schema.Struct({
     kind: Schema.Literal("client-setup"),
     mcpPermissionProfile: Schema.optional(GithubMcpPermissionProfile),
@@ -330,55 +337,52 @@ export const McpServerSignInView = Schema.Union(
     callback: boundedText(256),
     metadataClientSupported: Schema.Boolean,
     authenticationMethods: Schema.Array(
-      Schema.Literal("none", "client_secret_post", "client_secret_basic"),
+      Schema.Literals(["none", "client_secret_post", "client_secret_basic"]),
     ),
     secretStoreAvailable: Schema.Boolean,
     registration: Schema.optional(McpOAuthClientRegistration),
-  }).annotations(strict),
-  /** A server reached by a command, or one that answered without asking for a sign-in. */
-  Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("not-applicable") }),
+  Schema.Struct({ kind: Schema.Literal("signed-out") }),
   Schema.Struct({
     kind: Schema.Literal("client-setup-required"),
     message: boundedText(512),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("cancel-pending"), message: boundedText(512) }).annotations(
-    strict,
-  ),
+  }),
+  Schema.Struct({ kind: Schema.Literal("cancel-pending"), message: boundedText(512) }),
   Schema.Struct({
     kind: Schema.Literal("sign-out-pending"),
     message: boundedText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("status-unavailable"),
     message: boundedText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("awaiting-consent"),
-    attemptId: Schema.UUID,
-    flow: Schema.optional(Schema.Literal("authorization-code-pkce", "relay")),
+    attemptId: GuidString,
+    flow: Schema.optional(Schema.Literals(["authorization-code-pkce", "relay"])),
     relayable: Schema.optional(Schema.Boolean),
     authorizationUrl: boundedText(4096),
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("awaiting-device-code"),
-    attemptId: Schema.UUID,
+    attemptId: GuidString,
     issuerHost: boundedText(256),
     verificationUri: boundedText(2048),
     verificationUriComplete: Schema.optional(boundedText(2048)),
-    userCode: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9-]{1,64}$/)),
+    userCode: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9-]{1,64}$/)),
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("signed-in"),
     /** The authorization server that issued the grant, for the row. */
     issuer: boundedText(256),
     account: Schema.optional(McpReportedAccount),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "revoked",
       "expired",
       "refresh-reused",
@@ -386,11 +390,11 @@ export const McpServerSignInView = Schema.Union(
       "permission-missing",
       "permission-mismatch",
       "identity-unavailable",
-    ),
-  }).annotations(strict),
+    ]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "no-sign-in-offered",
       "client-registration-unavailable",
       "issuer-unsupported",
@@ -400,12 +404,15 @@ export const McpServerSignInView = Schema.Union(
       "local-host-required",
       "sign-in-settled",
       "invalid",
-    ),
+    ]),
     message: boundedText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type McpServerSignInView = typeof McpServerSignInView.Type;
-export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
+export const decodeMcpServerSignInView = Schema.decodeUnknownSync(
+  McpServerSignInView,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * One-time callback relay sent by the paired device that began a PKCE attempt.
@@ -413,23 +420,24 @@ export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignI
  * logged, journaled, or returned.
  */
 export const McpServerSignInRelayRequest = Schema.Struct({
-  attemptId: Schema.UUID,
-  callbackUrl: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4352)),
-}).annotations(strict);
+  attemptId: GuidString,
+  callbackUrl: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4352)),
+});
 export type McpServerSignInRelayRequest = typeof McpServerSignInRelayRequest.Type;
 export const decodeMcpServerSignInRelayRequest = Schema.decodeUnknownSync(
   McpServerSignInRelayRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const McpServerSignInRelayResult = Schema.Union(
+export const McpServerSignInRelayResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("signed-in"),
     issuer: boundedText(256),
     account: Schema.optional(McpReportedAccount),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "revoked",
       "expired",
       "refresh-reused",
@@ -437,29 +445,30 @@ export const McpServerSignInRelayResult = Schema.Union(
       "permission-missing",
       "permission-mismatch",
       "identity-unavailable",
-    ),
-  }).annotations(strict),
+    ]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("retry"),
-    remainingAttempts: Schema.Literal(1, 2),
+    remainingAttempts: Schema.Literals([1, 2]),
     message: boundedText(512),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "sign-in-settled",
       "denied",
       "timeout",
       "unavailable",
       "local-host-required",
       "invalid",
-    ),
+    ]),
     message: boundedText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type McpServerSignInRelayResult = typeof McpServerSignInRelayResult.Type;
 export const decodeMcpServerSignInRelayResult = Schema.decodeUnknownSync(
   McpServerSignInRelayResult,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -468,22 +477,15 @@ export const decodeMcpServerSignInRelayResult = Schema.decodeUnknownSync(
  * stored sign-in record, and what the last connection attempt reported.
  * Reading it never connects, signs in, or asks a server for its tools.
  */
-export const McpServerConnectionState = Schema.Literal(
-  /** A session is open now. */
+export const McpServerConnectionState = Schema.Literals([
   "connected",
-  /** A task is opening a session now. */
   "connecting",
-  /** Nothing is wrong; the next task that uses it connects. */
   "ready",
-  /** The sign-in is missing, expired, or revoked. */
   "needs-sign-in",
-  /** The last connection attempt failed or the transport closed. */
   "failed",
-  /** The package or this server is switched off. */
   "off",
-  /** The host will not run it, for a reason the row names. */
   "blocked",
-);
+]);
 export type McpServerConnectionState = typeof McpServerConnectionState.Type;
 export const McpServerConnection = Schema.Struct({
   extensionId: ToolExtensionId,
@@ -492,7 +494,7 @@ export const McpServerConnection = Schema.Struct({
   /** The package's name, then the server's own name inside it. */
   packageName: boundedText(256),
   serverName: boundedText(256),
-  transport: Schema.Literal("stdio", "streamable-http", "unknown"),
+  transport: Schema.Literals(["stdio", "streamable-http", "unknown"]),
   state: McpServerConnectionState,
   /** One plain sentence on why the server is not connected; absent when nothing is wrong. */
   reason: Schema.optional(boundedText(512)),
@@ -502,15 +504,16 @@ export const McpServerConnection = Schema.Struct({
    * In a `thread-sign-in` answer, the request's own `references` that name
    * this server, so the composer resolves only those again once it is signed in.
    */
-  references: Schema.optional(Schema.Array(boundedText(256)).pipe(Schema.maxItems(32))),
-}).annotations(strict);
+  references: Schema.optional(Schema.Array(boundedText(256)).check(Schema.isMaxLength(32))),
+});
 export type McpServerConnection = typeof McpServerConnection.Type;
 export const McpServerConnectionListing = Schema.Struct({
-  servers: Schema.Array(McpServerConnection).pipe(Schema.maxItems(512)),
-}).annotations(strict);
+  servers: Schema.Array(McpServerConnection).check(Schema.isMaxLength(512)),
+});
 export type McpServerConnectionListing = typeof McpServerConnectionListing.Type;
 export const decodeMcpServerConnectionListing = Schema.decodeUnknownSync(
   McpServerConnectionListing,
+  STRICT_DECODE_OPTIONS,
 );
 /**
  * Reading the listing, or asking the host to drop a server's connection and
@@ -520,31 +523,35 @@ export const decodeMcpServerConnectionListing = Schema.decodeUnknownSync(
  * use until someone signs in. `selections` are the ones that turn would carry,
  * and `references` the `@` names in its draft the composer could not select.
  */
-export const McpServerConnectionRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("reconnect"), ...signInTarget }).annotations(strict),
+export const McpServerConnectionRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("list") }),
+  Schema.Struct({ kind: Schema.Literal("reconnect"), ...signInTarget }),
   Schema.Struct({
     kind: Schema.Literal("thread-sign-in"),
     mode: OctantMode,
-    threadId: Schema.UUID,
-    selections: Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32)),
-    references: Schema.Array(boundedText(256)).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
-);
+    threadId: GuidString,
+    selections: Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+    references: Schema.Array(boundedText(256)).check(Schema.isMaxLength(32)),
+  }),
+]);
 export type McpServerConnectionRequest = typeof McpServerConnectionRequest.Type;
 export const decodeMcpServerConnectionRequest = Schema.decodeUnknownSync(
   McpServerConnectionRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const McpServerReconnectResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("reconnecting") }).annotations(strict),
+export const McpServerReconnectResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("reconnecting") }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "local-host-required"),
+    reason: Schema.Literals(["not-found", "local-host-required"]),
     message: boundedText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type McpServerReconnectResult = typeof McpServerReconnectResult.Type;
-export const decodeMcpServerReconnectResult = Schema.decodeUnknownSync(McpServerReconnectResult);
+export const decodeMcpServerReconnectResult = Schema.decodeUnknownSync(
+  McpServerReconnectResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Plugins pinned to Projects: a pin offers the plugin on every Work or Code
@@ -555,34 +562,36 @@ export const decodeMcpServerReconnectResult = Schema.decodeUnknownSync(McpServer
 export const ExtensionProjectPin = Schema.Struct({
   projectId: ProjectId,
   extensionId: ToolExtensionId,
-}).annotations(strict);
+});
 export type ExtensionProjectPin = typeof ExtensionProjectPin.Type;
 export const ExtensionProjectPinListing = Schema.Struct({
   projects: Schema.Array(
     Schema.Struct({
       projectId: ProjectId,
       name: boundedText(256),
-      type: Schema.Literal("work", "code"),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(512)),
-  pins: Schema.Array(ExtensionProjectPin).pipe(Schema.maxItems(4096)),
-}).annotations(strict);
+      type: Schema.Literals(["work", "code"]),
+    }),
+  ).check(Schema.isMaxLength(512)),
+  pins: Schema.Array(ExtensionProjectPin).check(Schema.isMaxLength(4096)),
+});
 export type ExtensionProjectPinListing = typeof ExtensionProjectPinListing.Type;
 export const decodeExtensionProjectPinListing = Schema.decodeUnknownSync(
   ExtensionProjectPinListing,
+  STRICT_DECODE_OPTIONS,
 );
-export const ExtensionProjectPinRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+export const ExtensionProjectPinRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("list") }),
   Schema.Struct({
     kind: Schema.Literal("set"),
     projectId: ProjectId,
     extensionId: ToolExtensionId,
     pinned: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionProjectPinRequest = typeof ExtensionProjectPinRequest.Type;
 export const decodeExtensionProjectPinRequest = Schema.decodeUnknownSync(
   ExtensionProjectPinRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -595,49 +604,40 @@ export const RuntimeCompactionDefaults = Schema.Struct({
   claude: Schema.Struct({
     /** `false` when `autoCompactEnabled` is off, or `DISABLE_AUTO_COMPACT` is set in its settings. */
     autoCompact: Schema.Boolean,
-    autoCompactWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
+    autoCompactWindow: Schema.optional(PositiveInt),
+  }),
   codex: Schema.Struct({
-    autoCompactTokenLimit: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
-}).annotations(strict);
+    autoCompactTokenLimit: Schema.optional(PositiveInt),
+  }),
+});
 export type RuntimeCompactionDefaults = typeof RuntimeCompactionDefaults.Type;
 
-export const DiscoveredAgentToolingRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("compaction-defaults") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }).annotations(strict),
-);
+export const DiscoveredAgentToolingRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("list") }),
+  Schema.Struct({ kind: Schema.Literal("compaction-defaults") }),
+  Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }),
+  Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }),
+]);
 export type DiscoveredAgentToolingRequest = typeof DiscoveredAgentToolingRequest.Type;
 export const decodeDiscoveredAgentToolingRequest = Schema.decodeUnknownSync(
   DiscoveredAgentToolingRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const ExtensionCommand = Schema.Union(
+export const ExtensionCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("search-catalog"),
     query: boundedText(256),
     catalogId: Schema.optional(ExtensionCatalogId),
     cursor: Schema.optional(opaqueCursor),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("search-skills"),
     query: boundedText(256),
     cursor: Schema.optional(opaqueCursor),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("preview-skill"), source: ExtensionSource }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("preview-package"), source: ExtensionSource }).annotations(
-    strict,
-  ),
-  /**
-   * Looks a package up on the npm registry the person's npm configuration
-   * names, downloads and checks it, and answers with the review a person reads
-   * before installing. `range` is an exact version, a range, or a dist-tag;
-   * without it the `latest` tag is used. Nothing is installed.
-   */
+  }),
+  Schema.Struct({ kind: Schema.Literal("preview-skill"), source: ExtensionSource }),
+  Schema.Struct({ kind: Schema.Literal("preview-package"), source: ExtensionSource }),
   Schema.Struct({
     kind: Schema.Literal("resolve-npm-package"),
     packageName: boundedText(214),
@@ -648,139 +648,108 @@ export const ExtensionCommand = Schema.Union(
      * name now, and refuses a result that is not the same package.
      */
     updateOf: Schema.optional(ToolExtensionId),
-  }).annotations(strict),
-  /** Asks the registry an installed npm package came from whether a newer version exists. Installs nothing. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("check-npm-update"),
     extensionId: ToolExtensionId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("inspect-package"),
     source: ExtensionSource,
     expectedDigest: Schema.optional(ExtensionContentDigest),
-  }).annotations(strict),
-  /**
-   * `trust` installs and trusts in one confirmed step, and `enable` with it
-   * also turns the package and its components on; each step is journaled as
-   * its own event. For a package that holds a provider driver this is the one
-   * flow that admits an outside driver: it switches on the plugin and its
-   * driver component. Left out, the package installs untrusted and switched
-   * off, and trusting and turning on stay separate commands. Nothing is
-   * turned on without trust, so `enable` alone is refused.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("install-package"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
     enable: Schema.optional(Schema.Boolean),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
-  Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }).annotations(strict),
-  /**
-   * `restoreTrust` is the one step behind an Updated notice: rolling back to
-   * the version that notice names also trusts it and turns it on as it was,
-   * journaled as separate events. Anywhere else it changes nothing, and a
-   * roll back leaves the package untrusted and off. Every roll back ends the
-   * package's remembered approvals.
-   */
+  }).check(Schema.makeFilter((install) => install.enable !== true || install.trust === true)),
+  Schema.Struct({ kind: Schema.Literal("update-package"), ...versionedTarget }),
   Schema.Struct({
     kind: Schema.Literal("rollback-package"),
     ...versionedTarget,
     restoreTrust: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("uninstall-package"), ...packageTarget }).annotations(
-    strict,
-  ),
-  /** `trust` and `enable` compose the same steps as `install-package`, under one confirmation. */
+  }),
+  Schema.Struct({ kind: Schema.Literal("uninstall-package"), ...packageTarget }),
   Schema.Struct({
     kind: Schema.Literal("install-skill"),
     ...versionedTarget,
     trust: Schema.optional(Schema.Boolean),
     enable: Schema.optional(Schema.Boolean),
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((install) => install.enable !== true || install.trust === true)),
-  Schema.Struct({ kind: Schema.Literal("update-skill"), ...versionedTarget }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("reconcile-skills") }).annotations(strict),
+  }).check(Schema.makeFilter((install) => install.enable !== true || install.trust === true)),
+  Schema.Struct({ kind: Schema.Literal("update-skill"), ...versionedTarget }),
+  Schema.Struct({ kind: Schema.Literal("remove-skill"), ...packageTarget }),
+  Schema.Struct({ kind: Schema.Literal("reconcile-skills") }),
   Schema.Struct({
     kind: Schema.Literal("review-skill"),
     qualifiedId: boundedText(1024),
     digest: ExtensionContentDigest,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("trust-skill-source"),
     qualifiedId: boundedText(1024),
     digest: ExtensionContentDigest,
     trusted: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-skill-desired"),
     qualifiedId: boundedText(1024),
     digest: ExtensionContentDigest,
     desired: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("select-skill-collision"),
     name: boundedText(64),
     qualifiedId: boundedText(1024),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-source-trust"),
     ...desiredStateMutation,
     trusted: Schema.Boolean,
-  }).annotations(strict),
-  /**
-   * Re-trusts an outside provider driver held because a key other than the
-   * pinned one signed it. `publisherKey` is the new key the person saw beside
-   * the pinned one; the host refuses any other.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("trust-new-publisher"),
     ...desiredStateMutation,
     publisherKey: ExtensionPublisherKeyFingerprint,
-  }).annotations(strict),
-  /** Forgets the publisher key pinned for a package, installed or not. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("forget-publisher"),
     ...desiredStateMutation,
     publisherKey: ExtensionPublisherKeyFingerprint,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-plugin-desired"),
     ...desiredStateMutation,
     desired: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-component-desired"),
     ...desiredStateMutation,
     componentId: ExtensionComponentId,
     desired: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("query-effective-state"),
     commandVersion: stateCommandVersion,
     ...ExtensionEffectiveStateQuery.fields,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionCommand = typeof ExtensionCommand.Type;
 
 /** Host diagnostics for explicitly enabled provider/added skill roots; never a path or grant. */
 export const SkillRootStatus = Schema.Struct({
-  sourceRef: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(256),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  sourceRef: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(256),
+    Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
   ),
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  status: Schema.Literal("ready", "missing", "unreadable", "symlink", "not-directory"),
-  skillCount: Schema.Int.pipe(Schema.nonNegative()),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  status: Schema.Literals(["ready", "missing", "unreadable", "symlink", "not-directory"]),
+  skillCount: NonNegativeInt,
   watching: Schema.Boolean,
-}).annotations(strict);
+});
 export type SkillRootStatus = typeof SkillRootStatus.Type;
-export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath }).annotations(
-  strict,
-);
+export const SkillFolderSelection = Schema.Struct({ folderPath: SkillFolderPath });
 export type SkillFolderSelection = typeof SkillFolderSelection.Type;
 
 /**
@@ -788,22 +757,24 @@ export type SkillFolderSelection = typeof SkillFolderSelection.Type;
  * host kept the Project's copy and turned the other off.
  */
 export const ProjectSkillInUse = Schema.Struct({
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
   used: SourceQualifiedSkillId,
   gaveWay: SourceQualifiedSkillId,
-}).annotations(strict);
+});
 export type ProjectSkillInUse = typeof ProjectSkillInUse.Type;
 
 export const ExtensionSnapshot = Schema.Struct({
   sequence: GlobalSequence,
   snapshotAt: UtcTimestamp,
-  packages: Schema.Array(ExtensionPackageState).pipe(Schema.maxItems(4096)),
-  skills: Schema.optional(Schema.Array(StandaloneSkillRecord).pipe(Schema.maxItems(4096))),
-  skillRoots: Schema.optional(Schema.Array(SkillRootStatus).pipe(Schema.maxItems(34))),
-  collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
+  packages: Schema.Array(ExtensionPackageState).check(Schema.isMaxLength(4096)),
+  skills: Schema.optional(Schema.Array(StandaloneSkillRecord).check(Schema.isMaxLength(4096))),
+  skillRoots: Schema.optional(Schema.Array(SkillRootStatus).check(Schema.isMaxLength(34))),
+  collisions: Schema.Array(ExtensionSkillCollision).check(Schema.isMaxLength(4096)),
   /** Absent when the host chose no Project copy over another skill. */
-  projectSkillsInUse: Schema.optional(Schema.Array(ProjectSkillInUse).pipe(Schema.maxItems(4096))),
-}).annotations(strict);
+  projectSkillsInUse: Schema.optional(
+    Schema.Array(ProjectSkillInUse).check(Schema.isMaxLength(4096)),
+  ),
+});
 export type ExtensionSnapshot = typeof ExtensionSnapshot.Type;
 
 export const ExtensionEffectiveSnapshot = Schema.Struct({
@@ -811,11 +782,11 @@ export const ExtensionEffectiveSnapshot = Schema.Struct({
   snapshotAt: UtcTimestamp,
   scope: ExtensionActivationScope,
   catalogEpoch: ExtensionCatalogEpoch,
-  catalogStatus: Schema.Literal("available", "offline"),
+  catalogStatus: Schema.Literals(["available", "offline"]),
   stale: Schema.Boolean,
-  packages: Schema.Array(ExtensionEffectivePackageState).pipe(Schema.maxItems(4096)),
-  collisions: Schema.Array(ExtensionSkillCollision).pipe(Schema.maxItems(4096)),
-}).annotations(strict);
+  packages: Schema.Array(ExtensionEffectivePackageState).check(Schema.isMaxLength(4096)),
+  collisions: Schema.Array(ExtensionSkillCollision).check(Schema.isMaxLength(4096)),
+});
 export type ExtensionEffectiveSnapshot = typeof ExtensionEffectiveSnapshot.Type;
 
 export const ExtensionCatalogEntry = Schema.Struct({
@@ -826,7 +797,7 @@ export const ExtensionCatalogEntry = Schema.Struct({
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,
-}).annotations(strict);
+});
 export type ExtensionCatalogEntry = typeof ExtensionCatalogEntry.Type;
 
 export const MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH = 128 * 1024;
@@ -836,9 +807,9 @@ export const MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH = 128 * 1024;
  * absolute path, a `.` or `..` segment, or a backslash, so the review names
  * what the package holds and nothing about where this host keeps it.
  */
-const PackageRelativePath = Schema.String.pipe(
-  Schema.maxLength(1024),
-  Schema.filter(
+const PackageRelativePath = Schema.String.check(
+  Schema.isMaxLength(1024),
+  Schema.makeFilter(
     (path) =>
       path.length > 0 &&
       !path.startsWith("/") &&
@@ -857,10 +828,11 @@ export const ExtensionPackageReviewLanguageServer = Schema.Struct({
   ...ExtensionLanguageServerDeclaration.fields,
   binary: PackageRelativePath,
   binaryDigest: ExtensionContentDigest,
-}).annotations(strict);
+});
 export type ExtensionPackageReviewLanguageServer = typeof ExtensionPackageReviewLanguageServer.Type;
 export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSync(
   ExtensionPackageReviewLanguageServer,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -870,29 +842,30 @@ export const decodeExtensionPackageReviewLanguageServer = Schema.decodeUnknownSy
  * whether it also debugs the child processes of the program it starts.
  */
 export const ExtensionPackageReviewDebugAdapter = Schema.Struct({
-  runtimes: ExtensionDebugAdapterDeclaration.from.fields.runtimes,
-  launchArguments: ExtensionDebugAdapterDeclaration.from.fields.launchArguments,
-  importTypes: ExtensionDebugAdapterDeclaration.from.fields.importTypes,
-  debugPorts: ExtensionDebugAdapterDeclaration.from.fields.debugPorts,
-  childSessions: ExtensionDebugAdapterDeclaration.from.fields.childSessions,
-  childAnnouncement: ExtensionDebugAdapterDeclaration.from.fields.childAnnouncement,
+  runtimes: ExtensionDebugAdapterDeclaration.fields.runtimes,
+  launchArguments: ExtensionDebugAdapterDeclaration.fields.launchArguments,
+  importTypes: ExtensionDebugAdapterDeclaration.fields.importTypes,
+  debugPorts: ExtensionDebugAdapterDeclaration.fields.debugPorts,
+  childSessions: ExtensionDebugAdapterDeclaration.fields.childSessions,
+  childAnnouncement: ExtensionDebugAdapterDeclaration.fields.childAnnouncement,
   binary: PackageRelativePath,
   binaryDigest: ExtensionContentDigest,
-}).annotations(strict);
+});
 export type ExtensionPackageReviewDebugAdapter = typeof ExtensionPackageReviewDebugAdapter.Type;
 export const decodeExtensionPackageReviewDebugAdapter = Schema.decodeUnknownSync(
   ExtensionPackageReviewDebugAdapter,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const ExtensionPackageReviewComponent = Schema.Struct({
   id: ExtensionComponentId,
   kind: ExtensionComponentKind,
   displayName: boundedText(128),
-  declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
+  declaredCapabilities: Schema.Array(ExtensionCapability).check(Schema.isMaxLength(32)),
   instructions: Schema.optional(boundedText(MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH)),
   languageServer: Schema.optional(ExtensionPackageReviewLanguageServer),
   debugAdapter: Schema.optional(ExtensionPackageReviewDebugAdapter),
-}).annotations(strict);
+});
 export type ExtensionPackageReviewComponent = typeof ExtensionPackageReviewComponent.Type;
 
 export const ExtensionPackageReview = Schema.Struct({
@@ -900,19 +873,19 @@ export const ExtensionPackageReview = Schema.Struct({
   provenance: ExtensionProvenance,
   license: ExtensionLicense,
   compatibility: ExtensionCompatibility,
-  declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
-  components: Schema.Array(ExtensionPackageReviewComponent).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(256),
+  declaredCapabilities: Schema.Array(ExtensionCapability).check(Schema.isMaxLength(32)),
+  components: Schema.Array(ExtensionPackageReviewComponent).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(256),
   ),
-}).annotations(strict);
+});
 export type ExtensionPackageReview = typeof ExtensionPackageReview.Type;
 
 export const ExtensionPackagePreview = Schema.Struct({
   entry: ExtensionCatalogEntry,
   review: ExtensionPackageReview,
-  diagnostics: Schema.Array(ExtensionDiagnostic).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+  diagnostics: Schema.Array(ExtensionDiagnostic).check(Schema.isMaxLength(128)),
+});
 export type ExtensionPackagePreview = typeof ExtensionPackagePreview.Type;
 
 export const SkillMarketplaceEntry = Schema.Struct({
@@ -922,7 +895,7 @@ export const SkillMarketplaceEntry = Schema.Struct({
   displayName: boundedText(128),
   description: Schema.optional(boundedText(2048)),
   provenance: ExtensionProvenance,
-}).annotations(strict);
+});
 export type SkillMarketplaceEntry = typeof SkillMarketplaceEntry.Type;
 
 export const SkillPackagePreview = Schema.Struct({
@@ -931,12 +904,12 @@ export const SkillPackagePreview = Schema.Struct({
   packageId: ExtensionPackageId,
   license: ExtensionLicense,
   instructions: Schema.optional(boundedText(MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH)),
-  diagnostics: Schema.Array(ExtensionDiagnostic).pipe(Schema.maxItems(128)),
-}).annotations(strict);
+  diagnostics: Schema.Array(ExtensionDiagnostic).check(Schema.isMaxLength(128)),
+});
 export type SkillPackagePreview = typeof SkillPackagePreview.Type;
 
 export const ExtensionCommandFailure = Schema.Struct({
-  category: Schema.Literal(
+  category: Schema.Literals([
     "invalid",
     "unauthorized",
     "blocked",
@@ -945,45 +918,45 @@ export const ExtensionCommandFailure = Schema.Struct({
     "interrupted",
     "waiting",
     "failed",
-  ),
-  message: boundedText(1024).pipe(
-    Schema.filter(
+  ]),
+  message: boundedText(1024).check(
+    Schema.makeFilter(
       (message) => !message.includes("/") && !message.includes("\\") && !message.includes("\0"),
     ),
   ),
-}).annotations(strict);
+});
 export type ExtensionCommandFailure = typeof ExtensionCommandFailure.Type;
 
-export const ExtensionCommandResult = Schema.Union(
+export const ExtensionCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("catalog-search-results"),
-    entries: Schema.Array(ExtensionCatalogEntry).pipe(Schema.maxItems(256)),
+    entries: Schema.Array(ExtensionCatalogEntry).check(Schema.isMaxLength(256)),
     nextCursor: Schema.optional(opaqueCursor),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("skill-search-results"),
-    entries: Schema.Array(SkillMarketplaceEntry).pipe(Schema.maxItems(256)),
+    entries: Schema.Array(SkillMarketplaceEntry).check(Schema.isMaxLength(256)),
     nextCursor: Schema.optional(opaqueCursor),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("skill-package-preview"),
     preview: SkillPackagePreview,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("package-preview"),
     preview: ExtensionPackagePreview,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("package-inspected"),
     preview: ExtensionPackagePreview,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("npm-update-checked"),
     extensionId: ToolExtensionId,
     installedVersion: ExtensionPackageVersion,
     /** The newest version the registry offers, when it is newer than the installed one. */
     available: Schema.optional(ExtensionPackageVersion),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
@@ -991,41 +964,71 @@ export const ExtensionCommandResult = Schema.Union(
      * Set only when the one install-trust-enable flow stopped early: the step
      * the host refused. The steps before it stand, as the snapshot shows.
      */
-    stoppedAt: Schema.optional(Schema.Literal("trust", "enable")),
+    stoppedAt: Schema.optional(Schema.Literals(["trust", "enable"])),
     /** Set only when the update was a user-added server: the package that add created. */
     addedPackage: Schema.optional(
       Schema.Struct({
         extensionId: ToolExtensionId,
         componentId: Schema.optional(ExtensionComponentId),
-      }).annotations(strict),
+      }),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("extension-effective-state"),
     snapshot: ExtensionEffectiveSnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("extension-command-failed"),
     failure: ExtensionCommandFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ExtensionCommandResult = typeof ExtensionCommandResult.Type;
 
-export const decodeExtensionCommand = Schema.decodeUnknownSync(ExtensionCommand);
-export const decodeExtensionSnapshot = Schema.decodeUnknownSync(ExtensionSnapshot);
+export const decodeExtensionCommand = Schema.decodeUnknownSync(
+  ExtensionCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionSnapshot = Schema.decodeUnknownSync(
+  ExtensionSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeExtensionEffectiveStateQuery = Schema.decodeUnknownSync(
   ExtensionEffectiveStateQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeExtensionEffectiveSnapshot = Schema.decodeUnknownSync(
   ExtensionEffectiveSnapshot,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeExtensionCommandResult = Schema.decodeUnknownSync(ExtensionCommandResult);
-export const decodeExtensionCommandFailure = Schema.decodeUnknownSync(ExtensionCommandFailure);
-export const decodeExtensionToolApproval = Schema.decodeUnknownSync(ExtensionToolApproval);
-export const decodeExtensionToolApprovalList = Schema.decodeUnknownSync(ExtensionToolApprovalList);
+export const decodeExtensionCommandResult = Schema.decodeUnknownSync(
+  ExtensionCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionCommandFailure = Schema.decodeUnknownSync(
+  ExtensionCommandFailure,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionToolApproval = Schema.decodeUnknownSync(
+  ExtensionToolApproval,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionToolApprovalList = Schema.decodeUnknownSync(
+  ExtensionToolApprovalList,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeExtensionToolApprovalDecision = Schema.decodeUnknownSync(
   ExtensionToolApprovalDecision,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeExtensionToolGrant = Schema.decodeUnknownSync(ExtensionToolGrant);
-export const decodeExtensionToolGrantList = Schema.decodeUnknownSync(ExtensionToolGrantList);
-export const decodeExtensionToolGrantRequest = Schema.decodeUnknownSync(ExtensionToolGrantRequest);
+export const decodeExtensionToolGrant = Schema.decodeUnknownSync(
+  ExtensionToolGrant,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionToolGrantList = Schema.decodeUnknownSync(
+  ExtensionToolGrantList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeExtensionToolGrantRequest = Schema.decodeUnknownSync(
+  ExtensionToolGrantRequest,
+  STRICT_DECODE_OPTIONS,
+);

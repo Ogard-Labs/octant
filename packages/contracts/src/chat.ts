@@ -3,6 +3,7 @@ import {
   ConversationInputPolicy,
   ConversationInputReference,
 } from "./conversationInputs";
+import { GuidString, NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Questionnaire, QuestionnaireAnswerText } from "./questionnaire";
 import { SideChatSourceReceipt, SideChatDraftReturnReferences } from "./sideChatReturn";
 import { personDecides } from "./hostAnswer";
@@ -14,7 +15,7 @@ import {
   TurnStallNotice,
 } from "./turnLoopNotice";
 import { ProviderChildObservationState } from "./providers";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { AnyAttachmentMediaType } from "./attachmentMediaType";
 import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
@@ -61,11 +62,11 @@ import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const ContentDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 
 export const ChatThreadId = brandedUuid("ChatThreadId");
 export type ChatThreadId = typeof ChatThreadId.Type;
@@ -92,7 +93,7 @@ export type ThreadWorkItemId = typeof ThreadWorkItemId.Type;
  * SearXNG was the only backend so stored threads, settings, and older clients
  * read it unchanged, and the UI labels it "Octant web search".
  */
-export const ChatResearchRouting = Schema.Literal("automatic", "searxng", "provider-native");
+export const ChatResearchRouting = Schema.Literals(["automatic", "searxng", "provider-native"]);
 export type ChatResearchRouting = typeof ChatResearchRouting.Type;
 
 /**
@@ -114,7 +115,7 @@ export type ChatAttachmentMediaType = typeof ChatAttachmentMediaType.Type;
 export const MAX_CHAT_TURN_ATTACHMENTS = 16;
 export const MAX_CHAT_TURN_PREVIEW_SELECTIONS = 16;
 
-export const ChatAttemptOutcome = Schema.Literal(
+export const ChatAttemptOutcome = Schema.Literals([
   "queued",
   "streaming",
   "waiting",
@@ -122,32 +123,34 @@ export const ChatAttemptOutcome = Schema.Literal(
   "failed",
   "cancelled",
   "completed",
-);
+]);
 export type ChatAttemptOutcome = typeof ChatAttemptOutcome.Type;
 
 export const ChatContentReference = Schema.Struct({
   contentId: ChatContentId,
   digest: ContentDigest,
   byteLength: NonNegativeInt,
-}).annotations(strict);
+});
 export type ChatContentReference = typeof ChatContentReference.Type;
 
-export const ChatContentRole = Schema.Literal("user", "assistant", "research", "snippet");
+export const ChatContentRole = Schema.Literals(["user", "assistant", "research", "snippet"]);
 export type ChatContentRole = typeof ChatContentRole.Type;
 
-const ChatContentBodyText = Schema.String.pipe(Schema.maxLength(1_000_000));
-const ChatMessagePartText = Schema.String.pipe(Schema.maxLength(1_000_000));
+const ChatContentBodyText = Schema.String.check(Schema.isMaxLength(1_000_000));
+const ChatMessagePartText = Schema.String.check(Schema.isMaxLength(1_000_000));
 
-export const ChatToolPartStatus = Schema.Literal("running", "done", "failed");
+export const ChatToolPartStatus = Schema.Literals(["running", "done", "failed"]);
 export type ChatToolPartStatus = typeof ChatToolPartStatus.Type;
 
-const ChatQuestionText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000));
+const ChatQuestionText = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000));
 
 /** One answer a provider offered: what it is called and what choosing means. */
 export const ChatQuestionOption = Schema.Struct({
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
-}).annotations(strict);
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  description: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
+});
 export type ChatQuestionOption = typeof ChatQuestionOption.Type;
 
 /**
@@ -159,9 +162,9 @@ export type ChatQuestionOption = typeof ChatQuestionOption.Type;
  */
 export const ChatAttemptQuestion = Schema.Struct({
   questionnaire: Schema.optional(Questionnaire),
-  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  requestId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  options: Schema.Array(ChatQuestionOption).check(Schema.isMaxLength(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
   /**
@@ -171,22 +174,21 @@ export const ChatAttemptQuestion = Schema.Struct({
    */
   secret: Schema.optional(Schema.Literal(true)),
 })
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (question) =>
         (question.questionIndex === undefined) === (question.questionCount === undefined),
     ),
   )
-  .annotations(personDecides);
+  .annotate(personDecides);
 export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */
 export const ChatAttemptAnsweredQuestion = Schema.Struct({
   questionnaire: Schema.optional(Questionnaire),
-  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  requestId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   prompt: ChatQuestionText,
-  options: Schema.Array(ChatQuestionOption).pipe(Schema.maxItems(8)),
+  options: Schema.Array(ChatQuestionOption).check(Schema.isMaxLength(8)),
   questionIndex: Schema.optional(PositiveInt),
   questionCount: Schema.optional(PositiveInt),
   /** What the person answered; absent only on a secret question, whose value is kept nowhere. */
@@ -194,34 +196,32 @@ export const ChatAttemptAnsweredQuestion = Schema.Struct({
   /** The question asked for a secret and the person gave one; its value went to the provider only. */
   secret: Schema.optional(Schema.Literal(true)),
   answeredAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (question) =>
-        (question.questionIndex === undefined) === (question.questionCount === undefined) &&
-        (question.secret === true) === (question.answer === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (question) =>
+      (question.questionIndex === undefined) === (question.questionCount === undefined) &&
+      (question.secret === true) === (question.answer === undefined),
+  ),
+);
 export type ChatAttemptAnsweredQuestion = typeof ChatAttemptAnsweredQuestion.Type;
 
 /** Octant structured message parts (optional on content). */
-export const ChatMessagePart = Schema.Union(
+export const ChatMessagePart = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("reasoning"),
     text: ChatMessagePartText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("tool"),
-    name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+    name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
     status: ChatToolPartStatus,
     summary: ChatMessagePartText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("markdown"),
     text: ChatMessagePartText,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ChatMessagePart = typeof ChatMessagePart.Type;
 
 export const ChatContentBody = Schema.Struct({
@@ -231,33 +231,33 @@ export const ChatContentBody = Schema.Struct({
   digest: ContentDigest,
   byteLength: NonNegativeInt,
   /** Optional structured parts for Distilled clients; absent on legacy rows. */
-  parts: Schema.optional(Schema.Array(ChatMessagePart).pipe(Schema.maxItems(64))),
-}).annotations(strict);
+  parts: Schema.optional(Schema.Array(ChatMessagePart).check(Schema.isMaxLength(64))),
+});
 export type ChatContentBody = typeof ChatContentBody.Type;
 
 export const ChatAttachment = Schema.Struct({
   id: ChatAttachmentId,
   threadId: ChatThreadId,
   turnId: Schema.optional(ChatTurnId),
-  displayName: Schema.NonEmptyTrimmedString,
+  displayName: NonEmptyTrimmedString,
   mediaType: ChatAttachmentMediaType,
   byteLength: NonNegativeInt,
   digest: ContentDigest,
-  status: Schema.Literal("pending", "finalized", "purged"),
+  status: Schema.Literals(["pending", "finalized", "purged"]),
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatAttachment = typeof ChatAttachment.Type;
 
 export const ChatHandoffAttachmentOmission = Schema.Struct({
   attachmentId: ChatAttachmentId,
-  displayName: Schema.NonEmptyTrimmedString,
-  mediaType: Schema.NonEmptyTrimmedString,
-  reason: Schema.Literal(
+  displayName: NonEmptyTrimmedString,
+  mediaType: NonEmptyTrimmedString,
+  reason: Schema.Literals([
     "native-attachments-unsupported",
     "native-attachments-unavailable",
     "attachment-modality-unsupported",
-  ),
-}).annotations(strict);
+  ]),
+});
 export type ChatHandoffAttachmentOmission = typeof ChatHandoffAttachmentOmission.Type;
 
 export const ChatHandoffWarning = Schema.Struct({
@@ -265,7 +265,7 @@ export const ChatHandoffWarning = Schema.Struct({
   targetModelId: ProviderModelId,
   omittedAttachments: Schema.NonEmptyArray(ChatHandoffAttachmentOmission),
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatHandoffWarning = typeof ChatHandoffWarning.Type;
 
 export const ChatCitation = Schema.Struct({
@@ -273,19 +273,19 @@ export const ChatCitation = Schema.Struct({
   threadId: ChatThreadId,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-  sourceTitle: Schema.NonEmptyTrimmedString,
-  sourceUrl: Schema.NonEmptyTrimmedString,
+  sourceTitle: NonEmptyTrimmedString,
+  sourceUrl: NonEmptyTrimmedString,
   /** `searxng` is Octant's own search, whichever of the host's backends answered. */
-  backend: Schema.Literal("searxng", "provider-native"),
+  backend: Schema.Literals(["searxng", "provider-native"]),
   snippetRef: Schema.optional(ChatContentReference),
   retrievedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatCitation = typeof ChatCitation.Type;
 
 const Usage = Schema.Struct({
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
-}).annotations(strict);
+});
 
 /**
  * Why a terminal attempt ended, in a shape a client can render. The code is
@@ -301,8 +301,8 @@ const Usage = Schema.Struct({
 export const ChatAttemptFailure = Schema.Struct({
   code: DiagnosticFailureCode,
   diagnostic: Schema.optional(ProviderProcessDiagnostic),
-  message: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  message: Schema.optional(NonEmptyTrimmedString),
+});
 export type ChatAttemptFailure = typeof ChatAttemptFailure.Type;
 
 /**
@@ -321,19 +321,19 @@ export const ChatBranchConversationHandoff = Schema.Struct({
   nativeSessionTransferred: Schema.Literal(false),
   hiddenReasoningTransferred: Schema.Literal(false),
   inputReceipt: Schema.optional(ConversationInputReceipt),
-}).annotations(strict);
+});
 export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff.Type;
 
 /**
  * What a Chat attempt started its provider session with that it did not write
  * itself. Journaled with the attempt, before the provider is sent anything.
  */
-export const ChatAttemptHandoff = Schema.Union(
+export const ChatAttemptHandoff = Schema.Union([
   ProviderSwitchConversationHandoff,
   AccountMoveSessionHandoff,
   ChatBranchConversationHandoff,
   RewindConversationHandoff,
-);
+]);
 export type ChatAttemptHandoff = typeof ChatAttemptHandoff.Type;
 
 export const ChatAttempt = Schema.Struct({
@@ -359,8 +359,8 @@ export const ChatAttempt = Schema.Struct({
         name: DescribedImageName,
         describedBy: ImageDescribedBy,
         description: ChatContentReference,
-      }).annotations(strict),
-    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+      }),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_CHAT_TURN_ATTACHMENTS)),
   ),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
@@ -396,7 +396,7 @@ export const ChatAttempt = Schema.Struct({
    * provider's own event stamps and restated as the running total. A re-read
    * never sees reasoning text — only the number.
    */
-  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningMs: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   /**
    * A question the provider asked mid-turn and is blocked on, journaled so the
    * transcript can show it again after a reload. Present only while the turn
@@ -408,7 +408,7 @@ export const ChatAttempt = Schema.Struct({
    * exchange the reply grew from stays readable in the transcript.
    */
   answeredQuestions: Schema.optional(
-    Schema.Array(ChatAttemptAnsweredQuestion).pipe(Schema.maxItems(8)),
+    Schema.Array(ChatAttemptAnsweredQuestion).check(Schema.isMaxLength(8)),
   ),
   /**
    * Set when the attempt failed or was interrupted, so the transcript can
@@ -434,22 +434,20 @@ export const ChatAttempt = Schema.Struct({
   stallNotice: Schema.optional(TurnStallNotice),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (attempt) =>
-        attempt.failure === undefined ||
-        attempt.outcome === "failed" ||
-        attempt.outcome === "interrupted",
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (attempt) =>
+      attempt.failure === undefined ||
+      attempt.outcome === "failed" ||
+      attempt.outcome === "interrupted",
+  ),
+);
 export type ChatAttempt = typeof ChatAttempt.Type;
 
 export const ChatTurnRewound = Schema.Struct({
   rewindId: ChatRewindId,
   rewoundAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatTurnRewound = typeof ChatTurnRewound.Type;
 
 export const ChatTurn = Schema.Struct({
@@ -467,9 +465,11 @@ export const ChatTurn = Schema.Struct({
   trackerMentions: Schema.optional(TrackerMentions),
   attachmentIds: Schema.Array(ChatAttachmentId),
   originalInputs: Schema.optional(
-    Schema.Array(ConversationInputReference).pipe(Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+    Schema.Array(ConversationInputReference).check(Schema.isMaxLength(MAX_CHAT_TURN_ATTACHMENTS)),
   ),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   attempts: Schema.Array(ChatAttempt),
   /**
    * Set on a turn that re-ran the thread from an edited earlier message, which
@@ -503,9 +503,7 @@ export const ChatTurn = Schema.Struct({
    */
   steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   createdAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((turn) => turn.supersedes === undefined || turn.supersedes !== turn.id));
+}).check(Schema.makeFilter((turn) => turn.supersedes === undefined || turn.supersedes !== turn.id));
 export type ChatTurn = typeof ChatTurn.Type;
 
 /**
@@ -527,14 +525,14 @@ export const ChatThreadBranchOrigin = Schema.Struct({
   carriedTurnCount: NonNegativeInt,
   omittedAttachmentCount: NonNegativeInt,
   branchedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatThreadBranchOrigin = typeof ChatThreadBranchOrigin.Type;
 
 export const ChatThread = Schema.Struct({
   id: ChatThreadId,
   projectId: Schema.optional(ProjectId),
-  title: Schema.NonEmptyTrimmedString,
-  lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
+  title: NonEmptyTrimmedString,
+  lifecycle: Schema.Literals(["active", "archived", "deleting", "deleted"]),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   /**
@@ -546,7 +544,7 @@ export const ChatThread = Schema.Struct({
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
   researchEnabled: Schema.Boolean,
   researchRouting: ChatResearchRouting,
-  personalityInstructions: Schema.NonEmptyTrimmedString,
+  personalityInstructions: NonEmptyTrimmedString,
   handoffWarning: Schema.optional(ChatHandoffWarning),
   /**
    * Server-authoritative opt-in multi-model pool for this thread's parent
@@ -573,7 +571,9 @@ export const ChatThread = Schema.Struct({
    * holds the thread. It keeps its limit in history; the queue and the
    * composer read this to stop waiting on it.
    */
-  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  releasedStopId: Schema.optional(
+    Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  ),
   /**
    * Set when a person turned off **Continue after restart** for this thread:
    * an answer a host restart cuts off waits for them instead of continuing by
@@ -585,9 +585,7 @@ export const ChatThread = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((thread) => thread.branchedFrom?.threadId !== thread.id));
+}).check(Schema.makeFilter((thread) => thread.branchedFrom?.threadId !== thread.id));
 export type ChatThread = typeof ChatThread.Type;
 
 /**
@@ -599,7 +597,7 @@ export type ChatThread = typeof ChatThread.Type;
 export const ChatProviderFallback = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type ChatProviderFallback = typeof ChatProviderFallback.Type;
 
 export const ChatSettings = Schema.Struct({
@@ -607,8 +605,8 @@ export const ChatSettings = Schema.Struct({
   defaultModelId: Schema.optional(ProviderModelId),
   defaultResearchEnabled: Schema.Boolean,
   defaultResearchRouting: ChatResearchRouting,
-  searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
-  defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
+  searxngBaseUrl: Schema.optional(NonEmptyTrimmedString),
+  defaultPersonalityInstructions: NonEmptyTrimmedString,
   providerFallback: Schema.optional(ChatProviderFallback),
   /**
    * Settings › Chat & Work › Continue after restart: whether the host continues, by
@@ -618,15 +616,13 @@ export const ChatSettings = Schema.Struct({
   restartContinuation: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (settings) =>
-        (settings.defaultProviderInstanceId === undefined) ===
-        (settings.defaultModelId === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (settings) =>
+      (settings.defaultProviderInstanceId === undefined) ===
+      (settings.defaultModelId === undefined),
+  ),
+);
 export type ChatSettings = typeof ChatSettings.Type;
 
 const ChatThreadCommandFields = {
@@ -634,39 +630,39 @@ const ChatThreadCommandFields = {
   expectedVersion: AggregateVersion,
 } as const;
 
-const PromptText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000_000));
+const PromptText = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000_000));
 
 export const CreateChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("create-chat-thread"),
   threadId: Schema.optional(ChatThreadId),
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   // The authenticated transport owns host identity. Keep this optional for
   // internal callers while browser requests omit client-supplied identity.
   hostId: Schema.optional(HostId),
   projectId: Schema.optional(ProjectId),
   issueContext: Schema.optional(GithubIssueContextRequest),
   linearIssueContext: Schema.optional(LinearIssueContextRequest),
-}).annotations(strict);
+});
 
 export const MAX_CHAT_NDJSON_LINE_BYTES = 1_048_576;
 
 export const RenameChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("rename-chat-thread"),
   ...ChatThreadCommandFields,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 
 export const MoveChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("move-chat-thread"),
   ...ChatThreadCommandFields,
   projectId: Schema.optional(ProjectId),
-}).annotations(strict);
+});
 
 export const ChangeChatThreadLifecycleCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-thread-lifecycle"),
   ...ChatThreadCommandFields,
-  lifecycle: Schema.Literal("active", "archived"),
-}).annotations(strict);
+  lifecycle: Schema.Literals(["active", "archived"]),
+});
 
 /**
  * Put a finished thread away without archiving it. The host refuses while a
@@ -676,21 +672,21 @@ export const ChangeChatThreadLifecycleCommand = Schema.Struct({
 export const CompleteChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("complete-chat-thread"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 export const ReopenChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("reopen-chat-thread"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 /** Hide the thread until `until`; the host refuses a wake time that is not ahead. */
 export const SnoozeChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("snooze-chat-thread"),
   ...ChatThreadCommandFields,
   until: UtcTimestamp,
-}).annotations(strict);
+});
 export const WakeChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("wake-chat-thread"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 /**
  * Hide the thread until the current usage-limited stop's declared reset. The
  * host derives the wake time from the journaled limit fact rather than the
@@ -700,7 +696,7 @@ export const WakeChatThreadCommand = Schema.Struct({
 export const SnoozeChatThreadAtUsageResetCommand = Schema.Struct({
   kind: Schema.Literal("snooze-chat-thread-at-usage-reset"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 
 /**
  * Selects the thread's provider/model and, optionally, its model option values.
@@ -715,7 +711,7 @@ export const ChangeChatProviderCommand = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
-}).annotations(strict);
+});
 
 /**
  * The person moves the thread to another account (provider instance) of the
@@ -727,7 +723,7 @@ export const MoveChatThreadAccountCommand = Schema.Struct({
   kind: Schema.Literal("move-chat-thread-account"),
   ...ChatThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
-}).annotations(strict);
+});
 
 /**
  * The person's "when this account hits its usage limit, hand off to" choice
@@ -738,7 +734,7 @@ export const SetChatThreadUsageLimitHandoffCommand = Schema.Struct({
   kind: Schema.Literal("set-chat-thread-usage-limit-handoff"),
   ...ChatThreadCommandFields,
   providerInstanceId: Schema.optional(ProviderInstanceId),
-}).annotations(strict);
+});
 
 /**
  * Server-authoritative selection/clearing of a thread's multi-model pool
@@ -750,27 +746,27 @@ export const SelectChatMultiModelPoolCommand = Schema.Struct({
   kind: Schema.Literal("select-chat-multi-model-pool"),
   ...ChatThreadCommandFields,
   pool: Schema.optional(MultiModelPool),
-}).annotations(strict);
+});
 
 export const ChangeChatResearchCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-research"),
   ...ChatThreadCommandFields,
   researchEnabled: Schema.Boolean,
   researchRouting: ChatResearchRouting,
-}).annotations(strict);
+});
 
 export const ChangeChatInstructionsCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-instructions"),
   ...ChatThreadCommandFields,
-  personalityInstructions: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  personalityInstructions: NonEmptyTrimmedString,
+});
 
 /** The thread's Continue after restart switch; only a person at a local window. */
 export const SetChatThreadRestartContinuationCommand = Schema.Struct({
   kind: Schema.Literal("set-chat-thread-restart-continuation"),
   ...ChatThreadCommandFields,
   continueAfterRestart: Schema.Boolean,
-}).annotations(strict);
+});
 
 export const SendChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("send-chat-turn"),
@@ -789,21 +785,23 @@ export const SendChatTurnCommand = Schema.Struct({
   /** Optional for older clients; new clients preserve it across retry after an unknown outcome. */
   submissionId: Schema.optional(ChatSubmissionId),
   attachmentIds: Schema.optional(
-    Schema.Array(ChatAttachmentId).pipe(
-      Schema.filter((attachmentIds) => attachmentIds.length <= MAX_CHAT_TURN_ATTACHMENTS),
+    Schema.Array(ChatAttachmentId).check(
+      Schema.makeFilter((attachmentIds) => attachmentIds.length <= MAX_CHAT_TURN_ATTACHMENTS),
     ),
   ),
   previewSelections: Schema.optional(
-    Schema.Array(PreviewContextSelection).pipe(
-      Schema.filter((selections) => selections.length <= MAX_CHAT_TURN_PREVIEW_SELECTIONS),
+    Schema.Array(PreviewContextSelection).check(
+      Schema.makeFilter((selections) => selections.length <= MAX_CHAT_TURN_PREVIEW_SELECTIONS),
     ),
   ),
   canvasSelections: Schema.optional(
-    Schema.Array(CanvasContextSelection).pipe(
-      Schema.filter((selections) => selections.length <= MAX_CHAT_TURN_CANVAS_SELECTIONS),
+    Schema.Array(CanvasContextSelection).check(
+      Schema.makeFilter((selections) => selections.length <= MAX_CHAT_TURN_CANVAS_SELECTIONS),
     ),
   ),
-  extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
+  extensionSelections: Schema.optional(
+    Schema.Array(ExtensionSelection).check(Schema.isMaxLength(32)),
+  ),
   /**
    * `#thread` mentions this turn points at. Ids only: the server
    * re-derives the sender's Open authority over each thread and reads its
@@ -813,7 +811,7 @@ export const SendChatTurnCommand = Schema.Struct({
    */
   threadMentionIds: Schema.optional(ThreadMentionIds),
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
-}).annotations(strict);
+});
 
 /**
  * Rewind the thread in place to just before one of its turns, so that turn and
@@ -828,7 +826,7 @@ export const RewindChatThreadCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   /** The first turn the rewind removes; every later turn goes with it. */
   turnId: ChatTurnId,
-}).annotations(strict);
+});
 
 /**
  * Start a second Chat thread that carries this thread's conversation through
@@ -841,10 +839,10 @@ export const BranchChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("branch-chat-thread"),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   /** Optional caller-chosen id for the created branch; the server allocates one otherwise. */
   branchThreadId: Schema.optional(ChatThreadId),
-}).annotations(strict);
+});
 
 export const RetryChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("retry-chat-turn"),
@@ -852,7 +850,7 @@ export const RetryChatTurnCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-}).annotations(strict);
+});
 
 export const ResumeChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("resume-chat-turn"),
@@ -860,14 +858,14 @@ export const ResumeChatTurnCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-}).annotations(strict);
+});
 
 export const InterruptChatTurnCommand = Schema.Struct({
   kind: Schema.Literal("interrupt-chat-turn"),
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-}).annotations(strict);
+});
 
 /**
  * Kills the runtime process one running attempt is stuck in, after a normal
@@ -879,7 +877,7 @@ export const ForceStopChatTurnCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-}).annotations(strict);
+});
 
 /**
  * Opts this thread into resuming one usage-limited attempt when the provider's
@@ -892,7 +890,7 @@ export const ScheduleChatUsageResumeCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-}).annotations(strict);
+});
 
 /**
  * Withdraws the thread's pending usage-resume opt-in before it fires.
@@ -900,7 +898,7 @@ export const ScheduleChatUsageResumeCommand = Schema.Struct({
 export const CancelChatUsageResumeCommand = Schema.Struct({
   kind: Schema.Literal("cancel-chat-usage-resume"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 
 /**
  * Answers a question a running attempt asked and is blocked on. The server
@@ -913,7 +911,7 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
   ...ChatThreadCommandFields,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-  requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  requestId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   /** The answer to every question but a secret one. */
   answer: Schema.optional(QuestionnaireAnswerText),
   /**
@@ -923,12 +921,12 @@ export const AnswerChatTurnQuestionCommand = Schema.Struct({
    * failure never prints the value.
    */
   secretAnswer: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 
 export const DeleteChatThreadCommand = Schema.Struct({
   kind: Schema.Literal("delete-chat-thread"),
   ...ChatThreadCommandFields,
-}).annotations(strict);
+});
 
 /**
  * Host-owned: wakes the thread with a turn that carries a finished subagent
@@ -943,23 +941,21 @@ export const DeliverChatAgentResultCommand = Schema.Struct({
   runId: AgentRunId,
   runIds: Schema.optional(AgentRunResultDeliveryRunIds),
   runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((command) => {
-      const ids = command.runIds ?? [command.runId];
-      return (
-        ids.some((id) => String(id) === String(command.runId)) &&
-        (command.runGenerations === undefined ||
-          (command.runGenerations.length === ids.length &&
-            new Set(command.runGenerations.map((member) => String(member.runId))).size ===
-              ids.length &&
-            command.runGenerations.every((member) =>
-              ids.some((id) => String(id) === String(member.runId)),
-            )))
-      );
-    }),
-  );
+}).check(
+  Schema.makeFilter((command) => {
+    const ids = command.runIds ?? [command.runId];
+    return (
+      ids.some((id) => String(id) === String(command.runId)) &&
+      (command.runGenerations === undefined ||
+        (command.runGenerations.length === ids.length &&
+          new Set(command.runGenerations.map((member) => String(member.runId))).size ===
+            ids.length &&
+          command.runGenerations.every((member) =>
+            ids.some((id) => String(id) === String(member.runId)),
+          )))
+    );
+  }),
+);
 
 /**
  * Host-owned: wakes the thread with a turn that carries owed side-task
@@ -971,11 +967,11 @@ export const DeliverChatAgentResultCommand = Schema.Struct({
 export const DeliverChatSideTaskReportCommand = Schema.Struct({
   kind: Schema.Literal("deliver-chat-side-task-report"),
   ...ChatThreadCommandFields,
-  reportIds: Schema.Array(Schema.UUID).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE),
+  reportIds: Schema.Array(GuidString).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_SIDE_TASK_REPORT_DELIVERY_BATCH_SIZE),
   ),
-}).annotations(strict);
+});
 
 export const UpdateChatSettingsCommand = Schema.Struct({
   kind: Schema.Literal("update-chat-settings"),
@@ -984,106 +980,104 @@ export const UpdateChatSettingsCommand = Schema.Struct({
   defaultModelId: Schema.optional(ProviderModelId),
   defaultResearchEnabled: Schema.Boolean,
   defaultResearchRouting: ChatResearchRouting,
-  searxngBaseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
-  defaultPersonalityInstructions: Schema.NonEmptyTrimmedString,
+  searxngBaseUrl: Schema.optional(NonEmptyTrimmedString),
+  defaultPersonalityInstructions: NonEmptyTrimmedString,
   providerFallback: Schema.optional(ChatProviderFallback),
   /** Absent keeps the stored choice. */
   restartContinuation: Schema.optional(Schema.Boolean),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (settings) =>
-        (settings.defaultProviderInstanceId === undefined) ===
-        (settings.defaultModelId === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (settings) =>
+      (settings.defaultProviderInstanceId === undefined) ===
+      (settings.defaultModelId === undefined),
+  ),
+);
 
 export const AddChatWorkItemCommand = Schema.Struct({
   kind: Schema.Literal("add-chat-work-item"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   itemId: ThreadWorkItemId,
-  title: Schema.NonEmptyTrimmedString,
-  detail: Schema.optional(Schema.NonEmptyTrimmedString),
-  status: Schema.Literal("pending", "in-progress", "blocked", "completed", "cancelled"),
+  title: NonEmptyTrimmedString,
+  detail: Schema.optional(NonEmptyTrimmedString),
+  status: Schema.Literals(["pending", "in-progress", "blocked", "completed", "cancelled"]),
   position: NonNegativeInt,
-  origin: Schema.Literal("user", "agent", "provider"),
-}).annotations(strict);
+  origin: Schema.Literals(["user", "agent", "provider"]),
+});
 
 export const EditChatWorkItemCommand = Schema.Struct({
   kind: Schema.Literal("edit-chat-work-item"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   itemId: ThreadWorkItemId,
-  title: Schema.optional(Schema.NonEmptyTrimmedString),
-  detail: Schema.optional(Schema.NonEmptyTrimmedString),
+  title: Schema.optional(NonEmptyTrimmedString),
+  detail: Schema.optional(NonEmptyTrimmedString),
   position: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 
 export const CompleteChatWorkItemCommand = Schema.Struct({
   kind: Schema.Literal("complete-chat-work-item"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   itemId: ThreadWorkItemId,
-}).annotations(strict);
+});
 
 export const CancelChatWorkItemCommand = Schema.Struct({
   kind: Schema.Literal("cancel-chat-work-item"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   itemId: ThreadWorkItemId,
-}).annotations(strict);
+});
 
 export const ReopenChatWorkItemCommand = Schema.Struct({
   kind: Schema.Literal("reopen-chat-work-item"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   itemId: ThreadWorkItemId,
-}).annotations(strict);
+});
 
 export const ReorderChatWorkItemsCommand = Schema.Struct({
   kind: Schema.Literal("reorder-chat-work-items"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
-  itemIds: Schema.Array(ThreadWorkItemId).pipe(
-    Schema.filter((ids) => new Set(ids).size === ids.length),
+  itemIds: Schema.Array(ThreadWorkItemId).check(
+    Schema.makeFilter((ids) => new Set(ids).size === ids.length),
   ),
-}).annotations(strict);
+});
 
 export const OpenChatFollowUpCommand = Schema.Struct({
   kind: Schema.Literal("open-chat-follow-up"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
-  reason: Schema.NonEmptyTrimmedString,
-  origin: Schema.Literal("manual", "automatic"),
+  reason: NonEmptyTrimmedString,
+  origin: Schema.Literals(["manual", "automatic"]),
   triggerSequence: NonNegativeInt,
-}).annotations(strict);
+});
 
 export const CompleteChatFollowUpCommand = Schema.Struct({
   kind: Schema.Literal("complete-chat-follow-up"),
   threadId: ChatThreadId,
   expectedVersion: AggregateVersion,
   acknowledgedThroughSequence: NonNegativeInt,
-}).annotations(strict);
+});
 
-export const ThreadWorkCommand = Schema.Union(
+export const ThreadWorkCommand = Schema.Union([
   AddChatWorkItemCommand,
   EditChatWorkItemCommand,
   CompleteChatWorkItemCommand,
   CancelChatWorkItemCommand,
   ReopenChatWorkItemCommand,
   ReorderChatWorkItemsCommand,
-);
+]);
 export type ThreadWorkCommand = typeof ThreadWorkCommand.Type;
 
-export const ThreadFollowUpCommand = Schema.Union(
+export const ThreadFollowUpCommand = Schema.Union([
   OpenChatFollowUpCommand,
   CompleteChatFollowUpCommand,
-);
+]);
 export type ThreadFollowUpCommand = typeof ThreadFollowUpCommand.Type;
 
-export const ChatCommand = Schema.Union(
+export const ChatCommand = Schema.Union([
   CreateChatThreadCommand,
   RenameChatThreadCommand,
   MoveChatThreadCommand,
@@ -1116,10 +1110,10 @@ export const ChatCommand = Schema.Union(
   UpdateChatSettingsCommand,
   ThreadWorkCommand,
   ThreadFollowUpCommand,
-);
+]);
 export type ChatCommand = typeof ChatCommand.Type;
 
-export const ChatFailureCategory = Schema.Literal(
+export const ChatFailureCategory = Schema.Literals([
   "unavailable",
   "tools-changed",
   "unauthorized",
@@ -1130,49 +1124,49 @@ export const ChatFailureCategory = Schema.Literal(
   "disconnected",
   "stale",
   "invalid",
-);
+]);
 export type ChatFailureCategory = typeof ChatFailureCategory.Type;
 
 export const ChatFailure = Schema.Struct({
   category: ChatFailureCategory,
-  message: Schema.NonEmptyTrimmedString,
+  message: NonEmptyTrimmedString,
   retryAfterMs: Schema.optional(PositiveInt),
-}).annotations(strict);
+});
 export type ChatFailure = typeof ChatFailure.Type;
 
-export const ThreadWorkItemStatus = Schema.Literal(
+export const ThreadWorkItemStatus = Schema.Literals([
   "pending",
   "in-progress",
   "blocked",
   "completed",
   "cancelled",
-);
+]);
 export type ThreadWorkItemStatus = typeof ThreadWorkItemStatus.Type;
 
 export const ThreadWorkItem = Schema.Struct({
   id: ThreadWorkItemId,
   threadId: ChatThreadId,
-  title: Schema.NonEmptyTrimmedString,
-  detail: Schema.optional(Schema.NonEmptyTrimmedString),
+  title: NonEmptyTrimmedString,
+  detail: Schema.optional(NonEmptyTrimmedString),
   status: ThreadWorkItemStatus,
   position: NonNegativeInt,
-  origin: Schema.Literal("user", "agent", "provider"),
+  origin: Schema.Literals(["user", "agent", "provider"]),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadWorkItem = typeof ThreadWorkItem.Type;
 
 export const ThreadFollowUp = Schema.Struct({
   threadId: ChatThreadId,
-  state: Schema.Literal("open", "completed"),
-  origin: Schema.Literal("manual", "automatic"),
-  reason: Schema.NonEmptyTrimmedString,
+  state: Schema.Literals(["open", "completed"]),
+  origin: Schema.Literals(["manual", "automatic"]),
+  reason: NonEmptyTrimmedString,
   triggerSequence: NonNegativeInt,
   acknowledgedThroughSequence: NonNegativeInt,
   createdAt: UtcTimestamp,
   completedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type ThreadFollowUp = typeof ThreadFollowUp.Type;
 
 /**
@@ -1186,7 +1180,7 @@ export const ChatTurnRouteDecision = Schema.Struct({
   turnId: ChatTurnId,
   decision: MultiModelRouteDecisionReceipt,
   decidedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatTurnRouteDecision = typeof ChatTurnRouteDecision.Type;
 
 export const ChatThreadView = Schema.Struct({
@@ -1202,7 +1196,7 @@ export const ChatThreadView = Schema.Struct({
   followUp: Schema.optional(ThreadFollowUp),
   /** Present only for threads that have decided at least one turn route. */
   routeDecisions: Schema.optional(Schema.Array(ChatTurnRouteDecision)),
-}).annotations(strict);
+});
 export type ChatThreadView = typeof ChatThreadView.Type;
 
 /** The most active turns one Chat window read answers; the client asks for fewer. */
@@ -1222,9 +1216,7 @@ export const ChatThreadWindow = Schema.Struct({
   view: ChatThreadView,
   ...ThreadWindowBoundsFields,
   supersededTurnCount: NonNegativeInt,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((window) => window.view.turns.length <= MAX_CHAT_THREAD_WINDOW_TURNS));
+}).check(Schema.makeFilter((window) => window.view.turns.length <= MAX_CHAT_THREAD_WINDOW_TURNS));
 export type ChatThreadWindow = typeof ChatThreadWindow.Type;
 
 /**
@@ -1234,19 +1226,17 @@ export type ChatThreadWindow = typeof ChatThreadWindow.Type;
  * page that ends with it.
  */
 export const ChatThreadWindowRequest = Schema.Struct({
-  limit: Schema.Int.pipe(Schema.between(1, MAX_CHAT_THREAD_WINDOW_TURNS)),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_CHAT_THREAD_WINDOW_TURNS })),
   before: Schema.optional(ChatTurnId),
   after: Schema.optional(ChatTurnId),
   through: Schema.optional(ChatTurnId),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (request) =>
-        [request.before, request.after, request.through].filter((anchor) => anchor !== undefined)
-          .length <= 1,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (request) =>
+      [request.before, request.after, request.through].filter((anchor) => anchor !== undefined)
+        .length <= 1,
+  ),
+);
 export type ChatThreadWindowRequest = typeof ChatThreadWindowRequest.Type;
 
 export const ChatBootstrap = Schema.Struct({
@@ -1258,7 +1248,7 @@ export const ChatBootstrap = Schema.Struct({
    * that predates the backend list, where Chat's SearXNG address decides.
    */
   webSearchReady: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type ChatBootstrap = typeof ChatBootstrap.Type;
 
 /**
@@ -1278,11 +1268,9 @@ export const MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH = 160;
  * renderer can highlight without re-scanning the original body.
  */
 export const ChatTranscriptSearchMatchRange = Schema.Struct({
-  start: Schema.Int.pipe(Schema.nonNegative()),
-  end: Schema.Int.pipe(Schema.positive()),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((range) => range.end > range.start));
+  start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  end: Schema.Int.check(Schema.isGreaterThan(0)),
+}).check(Schema.makeFilter((range) => range.end > range.start));
 export type ChatTranscriptSearchMatchRange = typeof ChatTranscriptSearchMatchRange.Type;
 
 /**
@@ -1292,24 +1280,24 @@ export type ChatTranscriptSearchMatchRange = typeof ChatTranscriptSearchMatchRan
  */
 export const ChatTranscriptSearchHit = Schema.Struct({
   threadId: ChatThreadId,
-  title: Schema.NonEmptyTrimmedString,
-  lifecycle: Schema.Literal("active", "archived"),
+  title: NonEmptyTrimmedString,
+  lifecycle: Schema.Literals(["active", "archived"]),
   projectId: Schema.optional(ProjectId),
   turnId: ChatTurnId,
-  snippet: Schema.String.pipe(Schema.maxLength(MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH)),
+  snippet: Schema.String.check(Schema.isMaxLength(MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH)),
   matchRanges: Schema.optional(
-    Schema.Array(ChatTranscriptSearchMatchRange).pipe(Schema.maxItems(8)),
+    Schema.Array(ChatTranscriptSearchMatchRange).check(Schema.isMaxLength(8)),
   ),
-}).annotations(strict);
+});
 export type ChatTranscriptSearchHit = typeof ChatTranscriptSearchHit.Type;
 
 export const ChatTranscriptSearch = Schema.Struct({
-  query: Schema.String.pipe(Schema.maxLength(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH)),
-  hits: Schema.Array(ChatTranscriptSearchHit).pipe(
-    Schema.maxItems(MAX_CHAT_TRANSCRIPT_SEARCH_HITS),
+  query: Schema.String.check(Schema.isMaxLength(MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH)),
+  hits: Schema.Array(ChatTranscriptSearchHit).check(
+    Schema.isMaxLength(MAX_CHAT_TRANSCRIPT_SEARCH_HITS),
   ),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type ChatTranscriptSearch = typeof ChatTranscriptSearch.Type;
 
 /**
@@ -1325,12 +1313,12 @@ export type ChatTranscriptSearch = typeof ChatTranscriptSearch.Type;
 export const ChatNavigationThread = Schema.Struct({
   id: ChatThreadId,
   projectId: Schema.optional(ProjectId),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   providerInstanceId: ProviderInstanceId,
   updatedAt: UtcTimestamp,
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
-  executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  executing: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   /**
    * The thread's running turn is parked on the person: the agent's own harness
    * approval, or a question the turn asked, is waiting. Carried only when
@@ -1343,45 +1331,47 @@ export const ChatNavigationThread = Schema.Struct({
    * What the person is asked, carried with `awaitingInput`. Absent from an
    * older host, which only ever reported an approval.
    */
-  awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
+  awaitingKind: Schema.optional(Schema.Literals(["approval", "user-input"])),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
   /** The latest attempt's current usage-limit stop; absent otherwise. */
   ...ThreadLimitedFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
   ...ThreadRestFields,
-}).annotations(strict);
+});
 export type ChatNavigationThread = typeof ChatNavigationThread.Type;
 
 /** Keep a pathological number of archived/recent rows from becoming a hot read payload. */
 export const MAX_CHAT_NAVIGATION_THREADS = 1_000;
 export const ChatNavigation = Schema.Struct({
-  threads: Schema.Array(ChatNavigationThread).pipe(Schema.maxItems(MAX_CHAT_NAVIGATION_THREADS)),
-}).annotations(strict);
+  threads: Schema.Array(ChatNavigationThread).check(
+    Schema.isMaxLength(MAX_CHAT_NAVIGATION_THREADS),
+  ),
+});
 export type ChatNavigation = typeof ChatNavigation.Type;
 
 export const ChatSettingsUpdated = Schema.Struct({
   kind: Schema.Literal("settings-updated"),
   settings: ChatSettings,
-}).annotations(strict);
+});
 export type ChatSettingsUpdated = typeof ChatSettingsUpdated.Type;
 
 export const ChatThreadCreated = Schema.Struct({
   kind: Schema.Literal("thread-created"),
   thread: ChatThread,
-}).annotations(strict);
+});
 export type ChatThreadCreated = typeof ChatThreadCreated.Type;
 
 export const ChatThreadUpdated = Schema.Struct({
   kind: Schema.Literal("thread-updated"),
   thread: ChatThread,
-}).annotations(strict);
+});
 export type ChatThreadUpdated = typeof ChatThreadUpdated.Type;
 
 export const ChatTurnCreated = Schema.Struct({
   kind: Schema.Literal("turn-created"),
   turn: ChatTurn,
-}).annotations(strict);
+});
 export type ChatTurnCreated = typeof ChatTurnCreated.Type;
 
 /** The most turns one rewind names; a longer tail is refused rather than half removed. */
@@ -1398,15 +1388,17 @@ export const ChatThreadRewound = Schema.Struct({
   thread: ChatThread,
   rewindId: ChatRewindId,
   fromTurnId: ChatTurnId,
-  removedTurnIds: Schema.NonEmptyArray(ChatTurnId).pipe(Schema.maxItems(MAX_CHAT_REWOUND_TURNS)),
+  removedTurnIds: Schema.NonEmptyArray(ChatTurnId).check(
+    Schema.isMaxLength(MAX_CHAT_REWOUND_TURNS),
+  ),
   rewoundAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatThreadRewound = typeof ChatThreadRewound.Type;
 
 export const ChatAttemptUpdated = Schema.Struct({
   kind: Schema.Literal("attempt-updated"),
   attempt: ChatAttempt,
-}).annotations(strict);
+});
 export type ChatAttemptUpdated = typeof ChatAttemptUpdated.Type;
 
 /**
@@ -1423,7 +1415,7 @@ export const ChatAttemptResponseAppended = Schema.Struct({
   attemptId: ChatAttemptId,
   responseRef: ChatContentReference,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatAttemptResponseAppended = typeof ChatAttemptResponseAppended.Type;
 
 /**
@@ -1447,9 +1439,9 @@ export const ChatAttemptToolStepChanged = Schema.Struct({
    * The attempt's cumulative reasoning total, restated; absent when the
    * frame carries a step change only. Never reasoning text.
    */
-  reasoningMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  reasoningMs: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatAttemptToolStepChanged = typeof ChatAttemptToolStepChanged.Type;
 
 export const ChatTurnLoopNoticed = Schema.Struct({
@@ -1460,7 +1452,7 @@ export const ChatTurnLoopNoticed = Schema.Struct({
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatTurnLoopNoticed = typeof ChatTurnLoopNoticed.Type;
 
 export const ChatTurnLoopStopped = Schema.Struct({
@@ -1471,7 +1463,7 @@ export const ChatTurnLoopStopped = Schema.Struct({
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatTurnLoopStopped = typeof ChatTurnLoopStopped.Type;
 
 export const ChatTurnStallNoticed = Schema.Struct({
@@ -1479,56 +1471,56 @@ export const ChatTurnStallNoticed = Schema.Struct({
   threadId: ChatThreadId,
   turnId: ChatTurnId,
   attemptId: ChatAttemptId,
-  idleMs: Schema.Int.pipe(Schema.positive()),
+  idleMs: Schema.Int.check(Schema.isGreaterThan(0)),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatTurnStallNoticed = typeof ChatTurnStallNoticed.Type;
 
 export const ChatTurnRouteDecided = Schema.Struct({
   kind: Schema.Literal("turn-route-decided"),
   decision: ChatTurnRouteDecision,
-}).annotations(strict);
+});
 export type ChatTurnRouteDecided = typeof ChatTurnRouteDecided.Type;
 
 export const ChatAttachmentUpdated = Schema.Struct({
   kind: Schema.Literal("attachment-updated"),
   attachment: ChatAttachment,
-}).annotations(strict);
+});
 export type ChatAttachmentUpdated = typeof ChatAttachmentUpdated.Type;
 
 export const ChatCitationRecorded = Schema.Struct({
   kind: Schema.Literal("citation-recorded"),
   citation: ChatCitation,
-}).annotations(strict);
+});
 export type ChatCitationRecorded = typeof ChatCitationRecorded.Type;
 
 export const ThreadWorkUpdated = Schema.Struct({
   kind: Schema.Literal("work-updated"),
   workItem: ThreadWorkItem,
-}).annotations(strict);
+});
 export type ThreadWorkUpdated = typeof ThreadWorkUpdated.Type;
 
 export const ThreadFollowUpUpdated = Schema.Struct({
   kind: Schema.Literal("follow-up-updated"),
   followUp: ThreadFollowUp,
-}).annotations(strict);
+});
 export type ThreadFollowUpUpdated = typeof ThreadFollowUpUpdated.Type;
 
 export const ChatDeletionRequested = Schema.Struct({
   kind: Schema.Literal("deletion-requested"),
   threadId: ChatThreadId,
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatDeletionRequested = typeof ChatDeletionRequested.Type;
 
 export const ChatDeleted = Schema.Struct({
   kind: Schema.Literal("deleted"),
   threadId: ChatThreadId,
   deletedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ChatDeleted = typeof ChatDeleted.Type;
 
-export const ChatPublicEvent = Schema.Union(
+export const ChatPublicEvent = Schema.Union([
   ChatSettingsUpdated,
   ChatThreadCreated,
   ChatThreadUpdated,
@@ -1547,7 +1539,7 @@ export const ChatPublicEvent = Schema.Union(
   ThreadFollowUpUpdated,
   ChatDeletionRequested,
   ChatDeleted,
-);
+]);
 export type ChatPublicEvent = typeof ChatPublicEvent.Type;
 
 export const ChatCommandResult = ChatPublicEvent;
@@ -1562,12 +1554,12 @@ export const ChatCompactionSettled = Schema.Struct({
   kind: Schema.Literal("compaction-settled"),
   threadId: ChatThreadId,
   compaction: ContextCompactionSettledRecord,
-}).annotations(strict);
+});
 export type ChatCompactionSettled = typeof ChatCompactionSettled.Type;
 
 export const ChatEventFrame = Schema.Struct({
   threadId: ChatThreadId,
-  sequence: GlobalSequence.pipe(Schema.positive()),
+  sequence: GlobalSequence.check(Schema.isGreaterThan(0)),
   /**
    * `compaction-settled` is sent only to subscribers that asked for it,
    * because a client decoding frames strictly would refuse an event it does
@@ -1575,7 +1567,7 @@ export const ChatEventFrame = Schema.Struct({
    * without `appended` receive the attempt as a full `attempt-updated` frame
    * instead. So is `attempt-tool-step`, for subscribers without `toolSteps`.
    */
-  event: Schema.Union(ChatPublicEvent, ChatCompactionSettled),
+  event: Schema.Union([ChatPublicEvent, ChatCompactionSettled]),
   /**
    * The body of the reference an `attempt-updated` or
    * `attempt-response-appended` event just appended, so a subscriber can grow
@@ -1583,8 +1575,8 @@ export const ChatEventFrame = Schema.Struct({
    * text delta. Sent only to subscribers that asked for it, because a client
    * decoding frames strictly would refuse the field.
    */
-  contents: Schema.optional(Schema.Array(ChatContentBody).pipe(Schema.maxItems(1))),
-}).annotations(strict);
+  contents: Schema.optional(Schema.Array(ChatContentBody).check(Schema.isMaxLength(1))),
+});
 export type ChatEventFrame = typeof ChatEventFrame.Type;
 
 export const CHAT_EVENT_NAMES = [
@@ -1608,69 +1600,180 @@ export const CHAT_EVENT_NAMES = [
   "chat.deleted@1",
 ] as const;
 
-export const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId);
-export const decodeChatSubmissionId = Schema.decodeUnknownSync(ChatSubmissionId);
-export const decodeChatTurnId = Schema.decodeUnknownSync(ChatTurnId);
-export const decodeChatRewindId = Schema.decodeUnknownSync(ChatRewindId);
-export const decodeChatAttemptId = Schema.decodeUnknownSync(ChatAttemptId);
-export const decodeChatContentId = Schema.decodeUnknownSync(ChatContentId);
-export const decodeChatAttachmentId = Schema.decodeUnknownSync(ChatAttachmentId);
-export const decodeChatCitationId = Schema.decodeUnknownSync(ChatCitationId);
-export const decodeThreadWorkItemId = Schema.decodeUnknownSync(ThreadWorkItemId);
+export const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId, STRICT_DECODE_OPTIONS);
+export const decodeChatSubmissionId = Schema.decodeUnknownSync(
+  ChatSubmissionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTurnId = Schema.decodeUnknownSync(ChatTurnId, STRICT_DECODE_OPTIONS);
+export const decodeChatRewindId = Schema.decodeUnknownSync(ChatRewindId, STRICT_DECODE_OPTIONS);
+export const decodeChatAttemptId = Schema.decodeUnknownSync(ChatAttemptId, STRICT_DECODE_OPTIONS);
+export const decodeChatContentId = Schema.decodeUnknownSync(ChatContentId, STRICT_DECODE_OPTIONS);
+export const decodeChatAttachmentId = Schema.decodeUnknownSync(
+  ChatAttachmentId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatCitationId = Schema.decodeUnknownSync(ChatCitationId, STRICT_DECODE_OPTIONS);
+export const decodeThreadWorkItemId = Schema.decodeUnknownSync(
+  ThreadWorkItemId,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeChatResearchRouting = Schema.decodeUnknownSync(ChatResearchRouting);
-export const decodeChatAttemptOutcome = Schema.decodeUnknownSync(ChatAttemptOutcome);
-export const decodeChatContentReference = Schema.decodeUnknownSync(ChatContentReference);
-export const decodeChatContentBody = Schema.decodeUnknownSync(ChatContentBody);
-export const decodeChatMessagePart = Schema.decodeUnknownSync(ChatMessagePart);
-export const decodeChatToolPartStatus = Schema.decodeUnknownSync(ChatToolPartStatus);
-export const decodeChatAttachmentMediaType = Schema.decodeUnknownSync(ChatAttachmentMediaType);
-export const decodeChatContentRole = Schema.decodeUnknownSync(ChatContentRole);
-export const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachment);
-export const decodeChatCitation = Schema.decodeUnknownSync(ChatCitation);
-export const decodeChatAttemptQuestion = Schema.decodeUnknownSync(ChatAttemptQuestion);
-export const decodeChatAttempt = Schema.decodeUnknownSync(ChatAttempt);
-export const decodeChatTurn = Schema.decodeUnknownSync(ChatTurn);
-export const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
-export const decodeChatThreadBranchOrigin = Schema.decodeUnknownSync(ChatThreadBranchOrigin);
-export const decodeChatThreadView = Schema.decodeUnknownSync(ChatThreadView);
-export const decodeChatThreadWindow = Schema.decodeUnknownSync(ChatThreadWindow);
-export const decodeChatThreadWindowRequest = Schema.decodeUnknownSync(ChatThreadWindowRequest);
-export const decodeChatBootstrap = Schema.decodeUnknownSync(ChatBootstrap);
+export const decodeChatResearchRouting = Schema.decodeUnknownSync(
+  ChatResearchRouting,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttemptOutcome = Schema.decodeUnknownSync(
+  ChatAttemptOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatContentReference = Schema.decodeUnknownSync(
+  ChatContentReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatContentBody = Schema.decodeUnknownSync(
+  ChatContentBody,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatMessagePart = Schema.decodeUnknownSync(
+  ChatMessagePart,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatToolPartStatus = Schema.decodeUnknownSync(
+  ChatToolPartStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttachmentMediaType = Schema.decodeUnknownSync(
+  ChatAttachmentMediaType,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatContentRole = Schema.decodeUnknownSync(
+  ChatContentRole,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttachment = Schema.decodeUnknownSync(ChatAttachment, STRICT_DECODE_OPTIONS);
+export const decodeChatCitation = Schema.decodeUnknownSync(ChatCitation, STRICT_DECODE_OPTIONS);
+export const decodeChatAttemptQuestion = Schema.decodeUnknownSync(
+  ChatAttemptQuestion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttempt = Schema.decodeUnknownSync(ChatAttempt, STRICT_DECODE_OPTIONS);
+export const decodeChatTurn = Schema.decodeUnknownSync(ChatTurn, STRICT_DECODE_OPTIONS);
+export const decodeChatThread = Schema.decodeUnknownSync(ChatThread, STRICT_DECODE_OPTIONS);
+export const decodeChatThreadBranchOrigin = Schema.decodeUnknownSync(
+  ChatThreadBranchOrigin,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatThreadView = Schema.decodeUnknownSync(ChatThreadView, STRICT_DECODE_OPTIONS);
+export const decodeChatThreadWindow = Schema.decodeUnknownSync(
+  ChatThreadWindow,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatThreadWindowRequest = Schema.decodeUnknownSync(
+  ChatThreadWindowRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatBootstrap = Schema.decodeUnknownSync(ChatBootstrap, STRICT_DECODE_OPTIONS);
 export const decodeChatTranscriptSearchMatchRange = Schema.decodeUnknownSync(
   ChatTranscriptSearchMatchRange,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeChatTranscriptSearchHit = Schema.decodeUnknownSync(ChatTranscriptSearchHit);
-export const decodeChatTranscriptSearch = Schema.decodeUnknownSync(ChatTranscriptSearch);
-export const decodeChatNavigationThread = Schema.decodeUnknownSync(ChatNavigationThread);
-export const decodeChatNavigation = Schema.decodeUnknownSync(ChatNavigation);
-export const decodeChatSettings = Schema.decodeUnknownSync(ChatSettings);
-export const decodeChatCommand = Schema.decodeUnknownSync(ChatCommand);
-export const decodeChatFailure = Schema.decodeUnknownSync(ChatFailure);
-export const decodeChatPublicEvent = Schema.decodeUnknownSync(ChatPublicEvent);
-export const decodeChatCommandResult = Schema.decodeUnknownSync(ChatCommandResult);
-export const decodeChatEventFrame = Schema.decodeUnknownSync(ChatEventFrame);
+export const decodeChatTranscriptSearchHit = Schema.decodeUnknownSync(
+  ChatTranscriptSearchHit,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTranscriptSearch = Schema.decodeUnknownSync(
+  ChatTranscriptSearch,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatNavigationThread = Schema.decodeUnknownSync(
+  ChatNavigationThread,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatNavigation = Schema.decodeUnknownSync(ChatNavigation, STRICT_DECODE_OPTIONS);
+export const decodeChatSettings = Schema.decodeUnknownSync(ChatSettings, STRICT_DECODE_OPTIONS);
+export const decodeChatCommand = Schema.decodeUnknownSync(ChatCommand, STRICT_DECODE_OPTIONS);
+export const decodeChatFailure = Schema.decodeUnknownSync(ChatFailure, STRICT_DECODE_OPTIONS);
+export const decodeChatPublicEvent = Schema.decodeUnknownSync(
+  ChatPublicEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatCommandResult = Schema.decodeUnknownSync(
+  ChatCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatEventFrame = Schema.decodeUnknownSync(ChatEventFrame, STRICT_DECODE_OPTIONS);
 
-export const decodeChatSettingsUpdated = Schema.decodeUnknownSync(ChatSettingsUpdated);
-export const decodeChatThreadCreated = Schema.decodeUnknownSync(ChatThreadCreated);
-export const decodeChatThreadUpdated = Schema.decodeUnknownSync(ChatThreadUpdated);
-export const decodeChatTurnCreated = Schema.decodeUnknownSync(ChatTurnCreated);
-export const decodeChatThreadRewound = Schema.decodeUnknownSync(ChatThreadRewound);
-export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpdated);
+export const decodeChatSettingsUpdated = Schema.decodeUnknownSync(
+  ChatSettingsUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatThreadCreated = Schema.decodeUnknownSync(
+  ChatThreadCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatThreadUpdated = Schema.decodeUnknownSync(
+  ChatThreadUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTurnCreated = Schema.decodeUnknownSync(
+  ChatTurnCreated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatThreadRewound = Schema.decodeUnknownSync(
+  ChatThreadRewound,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(
+  ChatAttemptUpdated,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeChatAttemptToolStepChanged = Schema.decodeUnknownSync(
   ChatAttemptToolStepChanged,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeChatTurnLoopNoticed = Schema.decodeUnknownSync(ChatTurnLoopNoticed);
-export const decodeChatTurnLoopStopped = Schema.decodeUnknownSync(ChatTurnLoopStopped);
-export const decodeChatTurnStallNoticed = Schema.decodeUnknownSync(ChatTurnStallNoticed);
+export const decodeChatTurnLoopNoticed = Schema.decodeUnknownSync(
+  ChatTurnLoopNoticed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTurnLoopStopped = Schema.decodeUnknownSync(
+  ChatTurnLoopStopped,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTurnStallNoticed = Schema.decodeUnknownSync(
+  ChatTurnStallNoticed,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
   ChatAttemptResponseAppended,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeChatTurnRouteDecision = Schema.decodeUnknownSync(ChatTurnRouteDecision);
-export const decodeChatTurnRouteDecided = Schema.decodeUnknownSync(ChatTurnRouteDecided);
-export const decodeChatAttachmentUpdated = Schema.decodeUnknownSync(ChatAttachmentUpdated);
-export const decodeChatCitationRecorded = Schema.decodeUnknownSync(ChatCitationRecorded);
-export const decodeThreadWorkUpdated = Schema.decodeUnknownSync(ThreadWorkUpdated);
-export const decodeThreadFollowUpUpdated = Schema.decodeUnknownSync(ThreadFollowUpUpdated);
-export const decodeChatDeletionRequested = Schema.decodeUnknownSync(ChatDeletionRequested);
-export const decodeChatDeleted = Schema.decodeUnknownSync(ChatDeleted);
+export const decodeChatTurnRouteDecision = Schema.decodeUnknownSync(
+  ChatTurnRouteDecision,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatTurnRouteDecided = Schema.decodeUnknownSync(
+  ChatTurnRouteDecided,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatAttachmentUpdated = Schema.decodeUnknownSync(
+  ChatAttachmentUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatCitationRecorded = Schema.decodeUnknownSync(
+  ChatCitationRecorded,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadWorkUpdated = Schema.decodeUnknownSync(
+  ThreadWorkUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadFollowUpUpdated = Schema.decodeUnknownSync(
+  ThreadFollowUpUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatDeletionRequested = Schema.decodeUnknownSync(
+  ChatDeletionRequested,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeChatDeleted = Schema.decodeUnknownSync(ChatDeleted, STRICT_DECODE_OPTIONS);

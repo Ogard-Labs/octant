@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   BrowserActionKind,
   BrowserActionRequest,
@@ -12,8 +13,7 @@ import { StoredBrowserProfile } from "./browserProfiles";
 import { UtcTimestamp } from "./events";
 import { ImageArtifactMediaType } from "./imageGeneration";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const ContentDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 
 /**
  * Browser captures a thread keeps: the explicit `screenshot` action and the
@@ -60,11 +60,14 @@ export const BROWSER_CAPTURE_KEPT = "browser.capture-kept@1";
 export const BrowserCapture = Schema.Struct({
   captureId: BrowserCaptureId,
   threadId: BrowserThreadId,
-  origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
-  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-  title: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  origin: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+  url: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  title: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
   hash: ContentDigest,
-  size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_BROWSER_RECORDING_BYTES)),
+  size: Schema.Int.check(
+    Schema.isGreaterThan(0),
+    Schema.isLessThanOrEqualTo(MAX_BROWSER_RECORDING_BYTES),
+  ),
   mime: ImageArtifactMediaType,
   capturedAt: UtcTimestamp,
   /**
@@ -78,32 +81,30 @@ export const BrowserCapture = Schema.Struct({
    * page during one call it asked to record. Absent, it is a screenshot.
    */
   recording: Schema.optional(BrowserRecordingFacts),
-})
-  .annotations(strict)
-  .pipe(
-    // A screenshot is the picture the model received, so it keeps the
-    // screenshot envelope; only a recording, always an animated PNG, may be
-    // larger.
-    Schema.filter((capture) =>
+}).pipe(
+  // A screenshot is the picture the model received, so it keeps the
+  // screenshot envelope; only a recording, always an animated PNG, may be
+  // larger.
+  Schema.check(
+    Schema.makeFilter((capture) =>
       capture.recording === undefined
         ? capture.size <= MAX_BROWSER_CAPTURE_BYTES
         : capture.mime === "image/png",
     ),
-  );
+  ),
+);
 export type BrowserCapture = typeof BrowserCapture.Type;
 
 export const BrowserCaptureKept = BrowserCapture;
 export type BrowserCaptureKept = BrowserCapture;
 
-export const BrowserCapturesCommand = Schema.Struct({ threadId: BrowserThreadId }).annotations(
-  strict,
-);
+export const BrowserCapturesCommand = Schema.Struct({ threadId: BrowserThreadId });
 export type BrowserCapturesCommand = typeof BrowserCapturesCommand.Type;
 
 /** Newest first. */
 export const BrowserCapturesResponse = Schema.Struct({
-  captures: Schema.Array(BrowserCapture).pipe(Schema.maxItems(MAX_BROWSER_CAPTURES_PER_THREAD)),
-}).annotations(strict);
+  captures: Schema.Array(BrowserCapture).check(Schema.isMaxLength(MAX_BROWSER_CAPTURES_PER_THREAD)),
+});
 export type BrowserCapturesResponse = typeof BrowserCapturesResponse.Type;
 
 /**
@@ -114,21 +115,21 @@ export type BrowserCapturesResponse = typeof BrowserCapturesResponse.Type;
 export const BrowserCaptureTakeCommand = Schema.Struct({
   threadId: BrowserThreadId,
   request: BrowserActionRequest,
-}).annotations(strict);
+});
 export type BrowserCaptureTakeCommand = typeof BrowserCaptureTakeCommand.Type;
 
 export const BrowserCaptureImageCommand = Schema.Struct({
   threadId: BrowserThreadId,
   captureId: BrowserCaptureId,
-}).annotations(strict);
+});
 export type BrowserCaptureImageCommand = typeof BrowserCaptureImageCommand.Type;
 
 export const BrowserCaptureImage = Schema.Struct({
   captureId: BrowserCaptureId,
-  dataUrl: Schema.String.pipe(
-    Schema.pattern(/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/),
+  dataUrl: Schema.String.check(
+    Schema.isPattern(/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*$/),
   ),
-}).annotations(strict);
+});
 export type BrowserCaptureImage = typeof BrowserCaptureImage.Type;
 
 /**
@@ -141,7 +142,7 @@ export const MAX_BROWSER_STEPS_PER_THREAD = 50;
 export const BROWSER_STEP_AGGREGATE_TYPE = "browser-step";
 export const BROWSER_STEP_RECORDED = "browser.step-recorded@1";
 
-export const BrowserStepFailureCategory = Schema.Literal(
+export const BrowserStepFailureCategory = Schema.Literals([
   "invalid",
   "unauthorized",
   "unavailable",
@@ -151,7 +152,7 @@ export const BrowserStepFailureCategory = Schema.Literal(
   "interrupted",
   "failed",
   "stale",
-);
+]);
 export type BrowserStepFailureCategory = typeof BrowserStepFailureCategory.Type;
 
 /**
@@ -167,20 +168,20 @@ export const BrowserStep = Schema.Struct({
   operation: BrowserActionKind,
   element: Schema.optional(
     Schema.Struct({
-      role: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-      name: Schema.String.pipe(Schema.maxLength(160)),
-    }).annotations(strict),
+      role: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+      name: Schema.String.check(Schema.isMaxLength(160)),
+    }),
   ),
-  origin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
-  path: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-  changed: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  origin: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048))),
+  path: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+  changed: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
   failure: Schema.optional(BrowserStepFailureCategory),
   /** The capture this step kept, when it was a screenshot that was kept. */
   captureId: Schema.optional(BrowserCaptureId),
   recordedAt: UtcTimestamp,
   /** The Project or Personal profile the page lived in, as a capture records it. */
   profile: Schema.optional(StoredBrowserProfile),
-}).annotations(strict);
+});
 export type BrowserStep = typeof BrowserStep.Type;
 
 export const BrowserStepsCommand = BrowserCapturesCommand;
@@ -188,19 +189,41 @@ export type BrowserStepsCommand = BrowserCapturesCommand;
 
 /** Oldest first. */
 export const BrowserStepsResponse = Schema.Struct({
-  steps: Schema.Array(BrowserStep).pipe(Schema.maxItems(MAX_BROWSER_STEPS_PER_THREAD)),
-}).annotations(strict);
+  steps: Schema.Array(BrowserStep).check(Schema.isMaxLength(MAX_BROWSER_STEPS_PER_THREAD)),
+});
 export type BrowserStepsResponse = typeof BrowserStepsResponse.Type;
 
-export const decodeBrowserStep = Schema.decodeUnknownSync(BrowserStep);
-export const decodeBrowserStepsCommand = Schema.decodeUnknownSync(BrowserStepsCommand);
-export const decodeBrowserStepsResponse = Schema.decodeUnknownSync(BrowserStepsResponse);
-export const decodeBrowserCapture = Schema.decodeUnknownSync(BrowserCapture);
-export const decodeBrowserCaptureKept = Schema.decodeUnknownSync(BrowserCaptureKept);
-export const decodeBrowserCapturesCommand = Schema.decodeUnknownSync(BrowserCapturesCommand);
-export const decodeBrowserCapturesResponse = Schema.decodeUnknownSync(BrowserCapturesResponse);
-export const decodeBrowserCaptureTakeCommand = Schema.decodeUnknownSync(BrowserCaptureTakeCommand);
+export const decodeBrowserStep = Schema.decodeUnknownSync(BrowserStep, STRICT_DECODE_OPTIONS);
+export const decodeBrowserStepsCommand = Schema.decodeUnknownSync(
+  BrowserStepsCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserStepsResponse = Schema.decodeUnknownSync(
+  BrowserStepsResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserCapture = Schema.decodeUnknownSync(BrowserCapture, STRICT_DECODE_OPTIONS);
+export const decodeBrowserCaptureKept = Schema.decodeUnknownSync(
+  BrowserCaptureKept,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserCapturesCommand = Schema.decodeUnknownSync(
+  BrowserCapturesCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserCapturesResponse = Schema.decodeUnknownSync(
+  BrowserCapturesResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserCaptureTakeCommand = Schema.decodeUnknownSync(
+  BrowserCaptureTakeCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeBrowserCaptureImageCommand = Schema.decodeUnknownSync(
   BrowserCaptureImageCommand,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeBrowserCaptureImage = Schema.decodeUnknownSync(BrowserCaptureImage);
+export const decodeBrowserCaptureImage = Schema.decodeUnknownSync(
+  BrowserCaptureImage,
+  STRICT_DECODE_OPTIONS,
+);

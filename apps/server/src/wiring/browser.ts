@@ -1134,7 +1134,7 @@ export function isRestrictedBrowserDevice(input: {
   );
 }
 
-export type BrowserWiring = Effect.Effect.Success<ReturnType<typeof wireBrowser>>;
+export type BrowserWiring = Effect.Success<ReturnType<typeof wireBrowser>>;
 
 /**
  * Host-owned persistence callbacks for Browser "Always allow" approvals

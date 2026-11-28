@@ -14,18 +14,16 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ScaffoldId } from "./scaffolds";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_WORKSPACE_PRESET_PANES = 6;
 export const MAX_WORKSPACE_PRESET_SKILLS = 8;
 
 export const WorkspacePresetId = Schema.String.pipe(
-  Schema.pattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/),
-  Schema.maxLength(64),
+  Schema.check(Schema.isPattern(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), Schema.isMaxLength(64)),
   Schema.brand("WorkspacePresetId"),
 );
 export type WorkspacePresetId = typeof WorkspacePresetId.Type;
@@ -37,30 +35,31 @@ export type WorkspacePresetId = typeof WorkspacePresetId.Type;
  * itself: a preset arranges what the thread has, and is never a way to reach a
  * surface the thread could not open on its own.
  */
-export const WorkspacePresetPane = Schema.Literal(
+export const WorkspacePresetPane = Schema.Literals([
   "code-overview",
   "browser",
   "side-chat",
   "files",
   "code-terminal",
-);
+]);
 export type WorkspacePresetPane = typeof WorkspacePresetPane.Type;
 
-const WorkspacePresetSkillName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(/^[a-z0-9][a-z0-9-]*$/),
+const WorkspacePresetSkillName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/),
 );
 
 export const WorkspacePreset = Schema.Struct({
   id: WorkspacePresetId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(80)),
-  summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(240)),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(80)),
+  summary: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(240)),
   /** Code for now: the panes a preset arranges are a Code thread's. */
   mode: Schema.Literal("code"),
   /** The scaffold this preset starts from, when it starts from one. */
   scaffoldId: Schema.optional(ScaffoldId),
-  panes: Schema.Array(WorkspacePresetPane).pipe(
-    Schema.filter(
+  panes: Schema.Array(WorkspacePresetPane).check(
+    Schema.makeFilter(
       (panes) =>
         panes.length > 0 &&
         panes.length <= MAX_WORKSPACE_PRESET_PANES &&
@@ -68,13 +67,13 @@ export const WorkspacePreset = Schema.Struct({
     ),
   ),
   /** Skills this kind of work usually wants. Named, never enabled. */
-  defaultSkills: Schema.Array(WorkspacePresetSkillName).pipe(
-    Schema.filter(
+  defaultSkills: Schema.Array(WorkspacePresetSkillName).check(
+    Schema.makeFilter(
       (names) =>
         names.length <= MAX_WORKSPACE_PRESET_SKILLS && new Set(names).size === names.length,
     ),
   ),
-}).annotations(strict);
+});
 export type WorkspacePreset = typeof WorkspacePreset.Type;
 
 /**
@@ -83,11 +82,11 @@ export type WorkspacePreset = typeof WorkspacePreset.Type;
  */
 export const WorkspacePresetCatalogListing = Schema.Struct({
   kind: Schema.Literal("workspace-preset-catalog-listing"),
-  presets: Schema.Array(WorkspacePreset).pipe(
-    Schema.filter((presets) => new Set(presets.map((p) => p.id)).size === presets.length),
+  presets: Schema.Array(WorkspacePreset).check(
+    Schema.makeFilter((presets) => new Set(presets.map((p) => p.id)).size === presets.length),
   ),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkspacePresetCatalogListing = typeof WorkspacePresetCatalogListing.Type;
 
 /**
@@ -97,17 +96,17 @@ export type WorkspacePresetCatalogListing = typeof WorkspacePresetCatalogListing
  * about what is missing, not steps the preset took: applying a preset installs
  * nothing, trusts nothing, and enables nothing.
  */
-export const WorkspacePresetSkillStatus = Schema.Literal(
+export const WorkspacePresetSkillStatus = Schema.Literals([
   "active",
   "installed-not-enabled",
   "not-installed",
-);
+]);
 export type WorkspacePresetSkillStatus = typeof WorkspacePresetSkillStatus.Type;
 
 export const WorkspacePresetSkillReport = Schema.Struct({
   name: WorkspacePresetSkillName,
   status: WorkspacePresetSkillStatus,
-}).annotations(strict);
+});
 export type WorkspacePresetSkillReport = typeof WorkspacePresetSkillReport.Type;
 
 /**
@@ -123,7 +122,7 @@ export const WorkspacePresetApplyRequest = Schema.Struct({
   presetId: WorkspacePresetId,
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-}).annotations(strict);
+});
 export type WorkspacePresetApplyRequest = typeof WorkspacePresetApplyRequest.Type;
 
 export const WorkspacePresetApplied = Schema.Struct({
@@ -133,15 +132,26 @@ export const WorkspacePresetApplied = Schema.Struct({
   /** Panes the host opened, in the order it opened them. */
   opened: Schema.Array(WorkspacePresetPane),
   skills: Schema.Array(WorkspacePresetSkillReport),
-}).annotations(strict);
+});
 export type WorkspacePresetApplied = typeof WorkspacePresetApplied.Type;
 
-export const decodeWorkspacePresetId = Schema.decodeUnknownSync(WorkspacePresetId);
-export const decodeWorkspacePreset = Schema.decodeUnknownSync(WorkspacePreset);
+export const decodeWorkspacePresetId = Schema.decodeUnknownSync(
+  WorkspacePresetId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkspacePreset = Schema.decodeUnknownSync(
+  WorkspacePreset,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkspacePresetCatalogListing = Schema.decodeUnknownSync(
   WorkspacePresetCatalogListing,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeWorkspacePresetApplyRequest = Schema.decodeUnknownSync(
   WorkspacePresetApplyRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeWorkspacePresetApplied = Schema.decodeUnknownSync(WorkspacePresetApplied);
+export const decodeWorkspacePresetApplied = Schema.decodeUnknownSync(
+  WorkspacePresetApplied,
+  STRICT_DECODE_OPTIONS,
+);

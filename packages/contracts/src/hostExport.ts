@@ -8,6 +8,7 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasDefinition, CanvasId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -22,8 +23,7 @@ import { ProjectId, ProjectMemoryView } from "./projects";
 import { ThreadExportBundle } from "./threadExport";
 import { ThreadPurgeTombstone, ThreadRetentionWindowEntry } from "./threadRetention";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
 export const HOST_EXPORT_FORMAT = "octant.host-export/1" as const;
 export const HostExportFormat = Schema.Literal(HOST_EXPORT_FORMAT);
@@ -37,7 +37,7 @@ export const HostExportHeader = Schema.Struct({
   hostId: HostId,
   generatedAt: UtcTimestamp,
   threadCount: NonNegativeInt,
-}).annotations(strict);
+});
 export type HostExportHeader = typeof HostExportHeader.Type;
 
 /**
@@ -45,10 +45,10 @@ export type HostExportHeader = typeof HostExportHeader.Type;
  */
 export const HostExportProject = Schema.Struct({
   projectId: ProjectId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  type: Schema.Literal("chat", "work", "code"),
-  lifecycle: Schema.Literal("active", "archived"),
-}).annotations(strict);
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  type: Schema.Literals(["chat", "work", "code"]),
+  lifecycle: Schema.Literals(["active", "archived"]),
+});
 export type HostExportProject = typeof HostExportProject.Type;
 
 export const HostExportProjectMemory = ProjectMemoryView;
@@ -65,10 +65,10 @@ export const HostExportCanvas = Schema.Struct({
   canvasId: CanvasId,
   projectId: Schema.NullOr(ProjectId),
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
   updatedAt: UtcTimestamp,
   definition: CanvasDefinition,
-}).annotations(strict);
+});
 export type HostExportCanvas = typeof HostExportCanvas.Type;
 
 /**
@@ -78,9 +78,9 @@ export type HostExportCanvas = typeof HostExportCanvas.Type;
 export const HostExportSettingsSummary = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
-  themeMode: Schema.Literal("system", "light", "dark", "unknown"),
+  themeMode: Schema.Literals(["system", "light", "dark", "unknown"]),
   streamReplies: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type HostExportSettingsSummary = typeof HostExportSettingsSummary.Type;
 
 /**
@@ -88,14 +88,14 @@ export type HostExportSettingsSummary = typeof HostExportSettingsSummary.Type;
  * attribution categories. Prompt text and credential material are absent.
  */
 export const HostExportUsageRow = Schema.Struct({
-  reconciliationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  subjectType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  reconciliationId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  subjectType: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   /** Null for usage whose thread was purged: the row keeps its counts, not its identity. */
-  subjectId: Schema.NullOr(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
-  providerInstanceId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  modelId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  requestShape: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-  quality: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
+  subjectId: Schema.NullOr(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
+  providerInstanceId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  modelId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  requestShape: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  quality: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(32)),
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
   reasoningTokens: Schema.optional(NonNegativeInt),
@@ -105,11 +105,11 @@ export const HostExportUsageRow = Schema.Struct({
   plannedInputTokens: Schema.optional(NonNegativeInt),
   varianceTokens: Schema.optional(Schema.Int),
   observedAt: UtcTimestamp,
-  attributionCategories: Schema.String.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  attributionCategories: Schema.String.check(Schema.isMaxLength(512)),
+});
 export type HostExportUsageRow = typeof HostExportUsageRow.Type;
 
-export const HostExportOmissionSubject = Schema.Literal(
+export const HostExportOmissionSubject = Schema.Literals([
   "credentials",
   "filesystem-paths",
   "attachment-bytes",
@@ -118,24 +118,24 @@ export const HostExportOmissionSubject = Schema.Literal(
   "paired-device-keys",
   "window-capabilities",
   "unrepresentable-record",
-);
+]);
 export type HostExportOmissionSubject = typeof HostExportOmissionSubject.Type;
 
 export const HostExportOmission = Schema.Struct({
   subject: HostExportOmissionSubject,
-  reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
-}).annotations(strict);
+  reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
+});
 export type HostExportOmission = typeof HostExportOmission.Type;
 
-const pageItems = <A, I, R>(item: Schema.Schema<A, I, R>) =>
-  Schema.Array(item).pipe(Schema.maxItems(HOST_EXPORT_MAX_PAGE_ITEMS));
+const pageItems = <S extends Schema.Top>(item: S) =>
+  Schema.Array(item).check(Schema.isMaxLength(HOST_EXPORT_MAX_PAGE_ITEMS));
 
 /** The instructions the person wrote for Octant, exactly as written. */
 export const HostExportInstructions = Schema.Struct({
   yours: PersonInstructionsText,
   /** The orchestration text for coordinator threads. Absent in older cuts. */
   orchestration: Schema.optional(OrchestrationInstructionsText),
-}).annotations(strict);
+});
 export type HostExportInstructions = typeof HostExportInstructions.Type;
 
 /**
@@ -146,74 +146,72 @@ export type HostExportInstructions = typeof HostExportInstructions.Type;
 export const HostExportProjectInstructions = Schema.Struct({
   projectId: ProjectId,
   instructions: ProjectInstructionsText,
-}).annotations(strict);
+});
 export type HostExportProjectInstructions = typeof HostExportProjectInstructions.Type;
 
-export const HostExportPage = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("header"), octant: HostExportHeader }).annotations(strict),
+export const HostExportPage = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("header"), octant: HostExportHeader }),
   Schema.Struct({
     kind: Schema.Literal("threads"),
     threads: pageItems(ThreadExportBundle),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("projects"),
     projects: pageItems(HostExportProject),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-memory"),
     projectMemory: pageItems(HostExportProjectMemory),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("person-memory"),
     entries: pageItems(PersonMemoryEntry),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("instructions"),
     instructions: HostExportInstructions,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-instructions"),
     projectInstructions: pageItems(HostExportProjectInstructions),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("canvases"),
     canvases: pageItems(HostExportCanvas),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("settings"),
     settings: HostExportSettingsSummary,
-  }).annotations(strict),
-  // Exports made before SSH targets were removed carry this page. It is read
-  // and dropped, so those exports still assemble.
+  }),
   Schema.Struct({
     kind: Schema.Literal("ssh-targets"),
     sshTargets: Schema.Array(Schema.Unknown),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("usage"),
     usage: pageItems(HostExportUsageRow),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("retention-windows"),
     windows: pageItems(ThreadRetentionWindowEntry),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("retention-tombstones"),
     tombstones: pageItems(ThreadPurgeTombstone),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("omissions"),
-    omissions: Schema.Array(HostExportOmission).pipe(Schema.maxItems(16)),
-  }).annotations(strict),
+    omissions: Schema.Array(HostExportOmission).check(Schema.isMaxLength(16)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("complete"),
     threadCount: NonNegativeInt,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal("local-owner-only", "unrepresentable"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["local-owner-only", "unrepresentable"]),
+  }),
+]);
 export type HostExportPage = typeof HostExportPage.Type;
 
 /**
@@ -237,14 +235,29 @@ export const HostExportBundle = Schema.Struct({
   retention: Schema.Struct({
     windows: Schema.Array(ThreadRetentionWindowEntry),
     tombstones: Schema.Array(ThreadPurgeTombstone),
-  }).annotations(strict),
-  omissions: Schema.Array(HostExportOmission).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  }),
+  omissions: Schema.Array(HostExportOmission).check(Schema.isMaxLength(16)),
+});
 export type HostExportBundle = typeof HostExportBundle.Type;
 
-export const decodeHostExportBundle = Schema.decodeUnknownSync(HostExportBundle);
-export const decodeHostExportPage = Schema.decodeUnknownSync(HostExportPage);
-export const decodeHostExportSettingsSummary = Schema.decodeUnknownSync(HostExportSettingsSummary);
-export const decodeHostExportProject = Schema.decodeUnknownSync(HostExportProject);
-export const decodeHostExportCanvas = Schema.decodeUnknownSync(HostExportCanvas);
-export const decodeHostExportUsageRow = Schema.decodeUnknownSync(HostExportUsageRow);
+export const decodeHostExportBundle = Schema.decodeUnknownSync(
+  HostExportBundle,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostExportPage = Schema.decodeUnknownSync(HostExportPage, STRICT_DECODE_OPTIONS);
+export const decodeHostExportSettingsSummary = Schema.decodeUnknownSync(
+  HostExportSettingsSummary,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostExportProject = Schema.decodeUnknownSync(
+  HostExportProject,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostExportCanvas = Schema.decodeUnknownSync(
+  HostExportCanvas,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostExportUsageRow = Schema.decodeUnknownSync(
+  HostExportUsageRow,
+  STRICT_DECODE_OPTIONS,
+);

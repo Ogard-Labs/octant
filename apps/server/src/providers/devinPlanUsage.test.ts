@@ -36,7 +36,7 @@ function recordingFetch(response: () => Response) {
 // A person's refresh is the reading that waits on the endpoint.
 function observe(facts: ReturnType<typeof makeDevinPlanUsageFacts>, onDemand = true) {
   return Effect.runPromise(
-    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand }))),
+    Effect.scoped(Effect.result(facts.observeServiceLimits({ instanceId, onDemand }))),
   );
 }
 
@@ -55,10 +55,10 @@ describe("Devin plan usage", () => {
       }),
     );
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("available");
-    expect(outcome.right.rateLimitWindows).toEqual([
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("available");
+    expect(outcome.success.rateLimitWindows).toEqual([
       {
         window: "one_day",
         status: "allowed",
@@ -98,18 +98,18 @@ describe("Devin plan usage", () => {
 
     // The first turn has no reading yet and does not wait for one.
     expect(await observe(facts, false)).toMatchObject({
-      _tag: "Left",
-      left: { category: "unavailable" },
+      _tag: "Failure",
+      failure: { category: "unavailable" },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(http.requests).toHaveLength(1);
 
-    expect((await observe(facts, false))._tag).toBe("Right");
-    expect((await observe(facts, false))._tag).toBe("Right");
+    expect((await observe(facts, false))._tag).toBe("Success");
+    expect((await observe(facts, false))._tag).toBe("Success");
     expect(http.requests).toHaveLength(1);
 
     now += 5 * 60_000;
-    expect((await observe(facts, false))._tag).toBe("Right");
+    expect((await observe(facts, false))._tag).toBe("Success");
     expect(http.requests).toHaveLength(2);
   });
 
@@ -132,10 +132,10 @@ describe("Devin plan usage", () => {
       }),
     );
 
-    expect(outcome._tag).toBe("Right");
-    if (outcome._tag !== "Right") return;
-    expect(outcome.right.quota).toBe("exhausted");
-    expect(outcome.right.rateLimitWindows?.map((window) => window.window)).toEqual(["seven_day"]);
+    expect(outcome._tag).toBe("Success");
+    if (outcome._tag !== "Success") return;
+    expect(outcome.success.quota).toBe("exhausted");
+    expect(outcome.success.rateLimitWindows?.map((window) => window.window)).toEqual(["seven_day"]);
     expect(http.requests[0]?.url.startsWith("https://server.codeium.com/")).toBe(true);
   });
 
@@ -154,7 +154,7 @@ describe("Devin plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unavailable" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unavailable" } });
     expect(http.requests).toHaveLength(0);
   });
 
@@ -171,7 +171,7 @@ describe("Devin plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "protocol" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "protocol" } });
     expect(JSON.stringify(outcome)).not.toContain("devin-key-1");
   });
 
@@ -189,7 +189,7 @@ describe("Devin plan usage", () => {
       }),
     );
 
-    expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unauthenticated" } });
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { category: "unauthenticated" } });
     expect(http.requests[0]?.url.startsWith("https://server.codeium.com/")).toBe(true);
   });
 });

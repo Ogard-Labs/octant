@@ -203,7 +203,7 @@ describe("OpenCode driver", () => {
 
       const refused = driverFixture({ process: windowsProcess(false) });
       const unready = await Effect.runPromise(
-        Effect.either(Effect.scoped(refused.driver.probe({ instanceId }))),
+        Effect.result(Effect.scoped(refused.driver.probe({ instanceId }))),
       );
       expect(JSON.stringify(unready)).toContain("Windows does not have yet");
     } finally {
@@ -453,7 +453,7 @@ describe("OpenCode driver", () => {
               Effect.flatMap((connection) =>
                 Effect.gen(function* () {
                   const stream = yield* connection.subscribe;
-                  const collector = yield* Effect.fork(
+                  const collector = yield* Effect.forkChild(
                     Stream.runCollect(
                       stream.pipe(
                         Stream.takeUntil((event) =>
@@ -581,7 +581,7 @@ describe("OpenCode driver", () => {
               Effect.flatMap((connection) =>
                 Effect.gen(function* () {
                   const stream = yield* connection.subscribe;
-                  const collector = yield* Effect.fork(
+                  const collector = yield* Effect.forkChild(
                     Stream.runCollect(
                       stream.pipe(Stream.takeUntil((event) => event.kind === "approval-request")),
                     ),
@@ -867,7 +867,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil(
@@ -929,7 +929,7 @@ describe("OpenCode driver", () => {
             projectRoot: "/tmp/project",
           });
           const stream = yield* connection.subscribe;
-          const collector = yield* Effect.fork(
+          const collector = yield* Effect.forkChild(
             Stream.runCollect(
               stream.pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
@@ -974,7 +974,7 @@ describe("OpenCode driver", () => {
             projectRoot: "/tmp/project",
           });
           const stream = yield* connection.subscribe;
-          const collector = yield* Effect.fork(
+          const collector = yield* Effect.forkChild(
             Stream.runCollect(
               stream.pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
@@ -1038,7 +1038,7 @@ describe("OpenCode driver", () => {
             projectRoot: "/tmp/project",
           });
           const stream = yield* connection.subscribe;
-          const collector = yield* Effect.fork(
+          const collector = yield* Effect.forkChild(
             Stream.runCollect(
               stream.pipe(
                 Stream.filter((event) => event.sessionId === sessionId),
@@ -1137,7 +1137,7 @@ describe("OpenCode driver", () => {
           fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
             Effect.flatMap((connection) =>
               Effect.gen(function* () {
-                const subscriber = yield* Effect.fork(
+                const subscriber = yield* Effect.forkChild(
                   (yield* connection.subscribe).pipe(
                     Stream.filter(
                       (event) =>
@@ -1242,29 +1242,26 @@ describe("OpenCode driver", () => {
             Effect.gen(function* () {
               const first = yield* connection.subscribe;
               const second = yield* connection.subscribe;
-              const collectors = yield* Effect.all(
-                [
-                  Effect.fork(
-                    Stream.runCollect(
-                      first.pipe(
-                        Stream.takeUntil((event) =>
-                          ["completed", "failed", "interrupted"].includes(event.kind),
-                        ),
+              const collectors = [
+                yield* Effect.forkChild(
+                  Stream.runCollect(
+                    first.pipe(
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
                       ),
                     ),
                   ),
-                  Effect.fork(
-                    Stream.runCollect(
-                      second.pipe(
-                        Stream.takeUntil((event) =>
-                          ["completed", "failed", "interrupted"].includes(event.kind),
-                        ),
+                ),
+                yield* Effect.forkChild(
+                  Stream.runCollect(
+                    second.pipe(
+                      Stream.takeUntil((event) =>
+                        ["completed", "failed", "interrupted"].includes(event.kind),
                       ),
                     ),
                   ),
-                ],
-                { concurrency: 2 },
-              );
+                ),
+              ];
               yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
               yield* connection.start({
                 sessionId,
@@ -1771,7 +1768,7 @@ describe("OpenCode driver", () => {
             permissionPersistence: "current-session",
           });
           const stream = yield* connection.subscribe;
-          yield* Effect.fork(
+          yield* Effect.forkChild(
             Stream.runForEach(stream, (event) =>
               Effect.sync(() => {
                 if (event.kind === "approval-request") approvals.push(event.description);
@@ -2155,7 +2152,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -2196,7 +2193,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -2316,7 +2313,7 @@ describe("OpenCode driver", () => {
             Effect.flatMap((connection) =>
               Effect.gen(function* () {
                 const stream = yield* connection.subscribe;
-                const collector = yield* Effect.fork(
+                const collector = yield* Effect.forkChild(
                   Stream.runCollect(
                     stream.pipe(
                       Stream.takeUntil((event) =>
@@ -2840,8 +2837,10 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
               Effect.tap(() =>
-                // Another Project's session started since and left its own list.
-                fixture.registry.setObservedCommands(instanceId, [{ name: "deploy" }]),
+                Effect.sync(() => {
+                  // Another Project's session started since and left its own list.
+                  fixture.registry.setObservedCommands(instanceId, [{ name: "deploy" }]);
+                }),
               ),
               Effect.flatMap(() =>
                 Effect.all([
@@ -3010,7 +3009,7 @@ describe("OpenCode driver", () => {
               connection
                 .start({ sessionId, modelId, executionPolicy: "approval-gated" })
                 .pipe(
-                  Effect.zipRight(
+                  Effect.andThen(
                     connection
                       .start({ sessionId, modelId, executionPolicy: "approval-gated" })
                       .pipe(Effect.exit),
@@ -3101,7 +3100,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -3167,7 +3166,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -3245,7 +3244,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -3362,7 +3361,7 @@ describe("OpenCode driver", () => {
             Effect.flatMap((connection) =>
               Effect.gen(function* () {
                 const stream = yield* connection.subscribe;
-                yield* Effect.fork(
+                yield* Effect.forkChild(
                   Stream.runForEach(stream, (event) =>
                     Effect.sync(() => {
                       if (event.kind === "approval-request") approvals.push(event.description);
@@ -3464,7 +3463,7 @@ describe("OpenCode driver", () => {
             Effect.flatMap((connection) =>
               Effect.gen(function* () {
                 const stream = yield* connection.subscribe;
-                const collector = yield* Effect.fork(
+                const collector = yield* Effect.forkChild(
                   Stream.runCollect(
                     stream.pipe(
                       Stream.takeUntil((event) =>
@@ -3574,7 +3573,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -3730,7 +3729,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(Stream.takeUntil((event) => event.kind === "completed")),
                 ),
@@ -3786,7 +3785,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(Stream.takeUntil((event) => event.kind === "approval-request")),
                 ),
@@ -3834,7 +3833,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -3922,7 +3921,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -4011,7 +4010,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -4083,7 +4082,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -4123,7 +4122,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -4185,7 +4184,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const toolRequest = yield* Effect.fork(
+              const toolRequest = yield* Effect.forkChild(
                 Stream.runHead(
                   stream.pipe(Stream.filter((event) => event.kind === "tool-request")),
                 ),
@@ -4360,7 +4359,7 @@ describe("OpenCode driver", () => {
           Effect.flatMap((connection) =>
             Effect.gen(function* () {
               const stream = yield* connection.subscribe;
-              const collector = yield* Effect.fork(
+              const collector = yield* Effect.forkChild(
                 Stream.runCollect(
                   stream.pipe(
                     Stream.takeUntil((event) =>
@@ -5300,7 +5299,7 @@ async function runTurn(
         Effect.flatMap((connection) =>
           Effect.gen(function* () {
             const stream = yield* connection.subscribe;
-            const collector = yield* Effect.fork(
+            const collector = yield* Effect.forkChild(
               Stream.runCollect(
                 stream.pipe(
                   Stream.takeUntil((event) =>

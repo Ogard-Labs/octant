@@ -10,13 +10,17 @@ import {
   UtcTimestamp,
 } from "./events";
 
-const decodeAppend = Schema.decodeUnknownSync(AppendEventsRequest);
-const decodeCommittedAppend = Schema.decodeUnknownSync(CommittedAppend);
-const decodeActor = Schema.decodeUnknownSync(EventActor);
-const decodeEnvelope = Schema.decodeUnknownSync(EventEnvelope);
-const decodeProjectionCheckpoint = Schema.decodeUnknownSync(ProjectionCheckpoint);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
-const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+const decodeAppend = Schema.decodeUnknownSync(AppendEventsRequest, { onExcessProperty: "error" });
+const decodeCommittedAppend = Schema.decodeUnknownSync(CommittedAppend, {
+  onExcessProperty: "error",
+});
+const decodeActor = Schema.decodeUnknownSync(EventActor, { onExcessProperty: "error" });
+const decodeEnvelope = Schema.decodeUnknownSync(EventEnvelope, { onExcessProperty: "error" });
+const decodeProjectionCheckpoint = Schema.decodeUnknownSync(ProjectionCheckpoint, {
+  onExcessProperty: "error",
+});
+const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor, { onExcessProperty: "error" });
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestamp, { onExcessProperty: "error" });
 
 const pendingEvent = {
   eventId: "1c1a16a0-6f54-4a6c-9266-ae5288238e42",

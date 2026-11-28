@@ -55,63 +55,73 @@ import { SECRET_SCAN_LIMIT_BYTES } from "./codeThreadMoveGit";
  */
 export const MOVED_WORK_FOLDER_ENTRIES_MAX = 10_000;
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** A path inside the folder, held to the rules a thread's working directory follows. */
 const MovedWorkPath = ThreadWorkingDirectory.pipe(
-  Schema.filter((path) => path !== "." || "A moved path names something inside the folder."),
+  Schema.check(
+    Schema.makeFilter((path) => path !== "." || "A moved path names something inside the folder."),
+  ),
 );
 const isMovedWorkPath = Schema.is(MovedWorkPath);
 
 /** Permission bits only (`mode & 0o777`): setuid, setgid, and sticky bits never travel. */
-const PermissionBits = Schema.Int.pipe(Schema.between(0, 0o777));
+const PermissionBits = Schema.Int.pipe(
+  Schema.check(Schema.isBetween({ minimum: 0, maximum: 0o777 })),
+);
 
 /** What the moved transcript says about the folder's files. */
 export const MovedWorkFolder = Schema.Struct({
   /** Where the thread worked, under its Project's main folder. */
   workingDirectory: MovedWorkPath,
   /** The part that holds every file, back to back in list order; absent when none travels. */
-  partId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+  partId: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64))),
+  ),
   files: Schema.Array(
     Schema.Struct({
       path: MovedWorkPath,
-      bytes: Schema.Int.pipe(Schema.nonNegative()),
-      sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+      bytes: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+      sha256: Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
       /**
        * The file's permission bits (`mode & 0o777`), so a script stays
        * runnable and a private file stays private. Setuid, setgid, and
        * sticky bits never travel.
        */
       mode: PermissionBits,
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
-  emptyFolders: Schema.Array(MovedWorkPath).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
+    }),
+  ).pipe(Schema.check(Schema.isMaxLength(MOVED_WORK_FOLDER_ENTRIES_MAX))),
+  emptyFolders: Schema.Array(MovedWorkPath).pipe(
+    Schema.check(Schema.isMaxLength(MOVED_WORK_FOLDER_ENTRIES_MAX)),
+  ),
   /**
    * The folder's own permission bits and those of every folder inside it
    * that travels, so a private folder stays private where it lands.
    */
   rootMode: PermissionBits,
-  folderModes: Schema.Array(
-    Schema.Struct({ path: MovedWorkPath, mode: PermissionBits }).annotations(strict),
-  ).pipe(Schema.maxItems(MOVED_WORK_FOLDER_ENTRIES_MAX)),
-})
-  .pipe(
-    Schema.filter((folder) =>
+  folderModes: Schema.Array(Schema.Struct({ path: MovedWorkPath, mode: PermissionBits })).pipe(
+    Schema.check(Schema.isMaxLength(MOVED_WORK_FOLDER_ENTRIES_MAX)),
+  ),
+}).pipe(
+  Schema.check(
+    Schema.makeFilter((folder) =>
       folder.files.length + folder.emptyFolders.length <= MOVED_WORK_FOLDER_ENTRIES_MAX
         ? true
         : "A move carries at most 10,000 files and empty folders from a Work folder.",
     ),
-    Schema.filter((folder) => {
+  ),
+  Schema.check(
+    Schema.makeFilter((folder) => {
       const paths = [...folder.files.map((file) => file.path), ...folder.emptyFolders];
       return new Set(paths).size === paths.length ? true : "A moved path must not repeat.";
     }),
-    Schema.filter((folder) =>
+  ),
+  Schema.check(
+    Schema.makeFilter((folder) =>
       (folder.partId !== undefined) === folder.files.length > 0
         ? true
         : "The files part is named exactly when a file travels.",
     ),
-  )
-  .annotations(strict);
+  ),
+);
 export type MovedWorkFolder = typeof MovedWorkFolder.Type;
 
 /** Whose folder a Work thread works in, as a move judges it. */
@@ -483,7 +493,9 @@ export async function captureWorkFolderForMove(input: {
   const files: Array<MovedWorkFolder["files"][number]> = [];
   const identities: PackedFileIdentity[] = [];
   const left = [...walked.left];
-  const workingDirectory = Schema.decodeSync(MovedWorkPath)(input.workingDirectory);
+  const workingDirectory = Schema.decodeSync(MovedWorkPath, { onExcessProperty: "error" })(
+    input.workingDirectory,
+  );
   let part: FileHandle | undefined;
   // Where the next file starts in the part; a file that fails partway is cut
   // back off, so every listed file sits exactly at the sum of those before it.
@@ -532,7 +544,7 @@ export async function captureWorkFolderForMove(input: {
       offset += bytes;
       identities.push({ dev: file.dev, ino: file.ino });
       files.push({
-        path: Schema.decodeSync(MovedWorkPath)(file.path),
+        path: Schema.decodeSync(MovedWorkPath, { onExcessProperty: "error" })(file.path),
         bytes,
         sha256: hash.digest("hex"),
         mode: file.mode,
@@ -548,7 +560,9 @@ export async function captureWorkFolderForMove(input: {
       workingDirectory,
       ...(files.length === 0 ? {} : { partId: input.partId }),
       files,
-      emptyFolders: walked.emptyFolders.map((path) => Schema.decodeSync(MovedWorkPath)(path)),
+      emptyFolders: walked.emptyFolders.map((path) =>
+        Schema.decodeSync(MovedWorkPath, { onExcessProperty: "error" })(path),
+      ),
       rootMode: walked.rootMode,
       folderModes: carriedFolderModes(
         files.map((entry) => String(entry.path)),
@@ -580,7 +594,7 @@ function carriedFolderModes(
     }
   }
   return [...folders].sort().map((path) => ({
-    path: Schema.decodeSync(MovedWorkPath)(path),
+    path: Schema.decodeSync(MovedWorkPath, { onExcessProperty: "error" })(path),
     mode: modes.get(path) ?? 0o700,
   }));
 }
@@ -662,7 +676,7 @@ export async function landWorkFolderFromMove(input: {
   // so a folder swapped for a link never carries the files outside it.
   const root = await realpath(input.root).catch(() => undefined);
   if (root === undefined || !(await folderIsItself(root))) return { status: "refused" };
-  const fresh = Schema.decodeUnknownOption(MovedWorkPath)(
+  const fresh = Schema.decodeUnknownOption(MovedWorkPath, { onExcessProperty: "error" })(
     `${index.workingDirectory}-moved-${input.moveId.slice(0, 8)}`,
   );
   const candidates = [index.workingDirectory, ...Option.toArray(fresh)];

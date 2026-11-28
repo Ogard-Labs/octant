@@ -276,11 +276,11 @@ try {
         }),
       ).pipe(Effect.provide(PersistenceLive));
       const exit = await Effect.runPromiseExit(program, { signal: abortController.signal });
-      if (Exit.isFailure(exit) && !Cause.isInterruptedOnly(exit.cause)) {
+      if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
         // A defect (a failed listen, an fs error) has no typed failure; squash
         // keeps it so the report can name the cause category.
         const failure =
-          Option.getOrUndefined(Cause.failureOption(exit.cause)) ?? Cause.squash(exit.cause);
+          Option.getOrUndefined(Cause.findErrorOption(exit.cause)) ?? Cause.squash(exit.cause);
         console.error(fatalStartupOutput(failure));
         failedStartup = true;
         process.exitCode = 1;

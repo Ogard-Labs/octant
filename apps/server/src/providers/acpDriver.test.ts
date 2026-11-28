@@ -435,7 +435,7 @@ describe("requested ACP compaction capability", () => {
               },
             });
             expect(
-              (yield* Effect.either(
+              (yield* Effect.result(
                 connection.send({
                   sessionId,
                   prompt: "competing turn",
@@ -443,7 +443,7 @@ describe("requested ACP compaction capability", () => {
                   tools: [],
                 }),
               ))._tag,
-            ).toBe("Left");
+            ).toBe("Failure");
             yield* Effect.sleep(1);
             expect(late).toEqual([]);
             expect(f.client.prompt).toHaveBeenCalledOnce();
@@ -773,7 +773,9 @@ describe("verified ACP usage", () => {
               });
             } else yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
             const stream = yield* connection.subscribe;
-            const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+            const collected = yield* Effect.forkChild(
+              Effect.promise(() => collectTerminal(stream)),
+            );
             yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
             const events = yield* Fiber.join(collected);
             expect(events.at(-1)?.kind).toBe(
@@ -866,7 +868,7 @@ describe("verified ACP usage", () => {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "full-access" });
           const stream = yield* connection.subscribe;
-          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          const collected = yield* Effect.forkChild(Effect.promise(() => collectTerminal(stream)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
           const settlement = deriveTurnMetrics({
@@ -971,7 +973,9 @@ describe("verified ACP usage", () => {
             const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
             yield* connection.start({ sessionId, modelId, executionPolicy });
             const stream = yield* connection.subscribe;
-            const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+            const collected = yield* Effect.forkChild(
+              Effect.promise(() => collectTerminal(stream)),
+            );
             yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
             const events = yield* Fiber.join(collected);
             expect(events.filter((event) => event.kind === "usage")).toHaveLength(reported);
@@ -996,7 +1000,7 @@ describe("standard ACP usage", () => {
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const stream = yield* connection.subscribe;
-          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          const collected = yield* Effect.forkChild(Effect.promise(() => collectTerminal(stream)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
           yield* connection.stop(sessionId);
@@ -1073,7 +1077,7 @@ describe("standard ACP usage", () => {
             executionPolicy: "approval-gated",
           });
           const stream = yield* connection.subscribe;
-          const collected = yield* Effect.fork(Effect.promise(() => collectTerminal(stream)));
+          const collected = yield* Effect.forkChild(Effect.promise(() => collectTerminal(stream)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           const events = yield* Fiber.join(collected);
           yield* connection.stop(sessionId);
@@ -1411,7 +1415,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           Effect.gen(function* () {
             const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-            return yield* Effect.either(
+            return yield* Effect.result(
               connection.send({ sessionId, prompt: "look", attachments: [image], tools: [] }),
             );
           }),
@@ -1422,14 +1426,14 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const offered = await run(true);
     expect(offered.probed.capabilities.nativeAttachments).toBe("supported");
     expect(offered.probed.models[0]?.inputModalities).toEqual(["text", "image"]);
-    expect(offered.sent._tag).toBe("Right");
+    expect(offered.sent._tag).toBe("Success");
     expect(offered.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
       { type: "image", mimeType: "image/png", data: "AQID" },
     ]);
     const textOnly = await run(false);
     expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
     expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
-    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.sent).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
   });
 
@@ -1451,13 +1455,13 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         Effect.gen(function* () {
           const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          return yield* Effect.either(
+          return yield* Effect.result(
             connection.send({ sessionId, prompt: "listen", attachments: [memo], tools: [] }),
           );
         }),
       ),
     );
-    expect(sent._tag).toBe("Right");
+    expect(sent._tag).toBe("Success");
     expect(f.client.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
       { type: "audio", mimeType: "audio/wav", data: Buffer.from(memo.bytes).toString("base64") },
     ]);
@@ -1487,7 +1491,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           Effect.gen(function* () {
             const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-            return yield* Effect.either(
+            return yield* Effect.result(
               connection.send({
                 sessionId,
                 prompt: "read these",
@@ -1503,7 +1507,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const embedded = await run(true);
     expect(embedded.probed.capabilities.nativeAttachments).toBe("supported");
     expect(embedded.probed.models[0]?.inputModalities).toEqual(["text", "document"]);
-    expect(embedded.sent._tag).toBe("Right");
+    expect(embedded.sent._tag).toBe("Success");
     // Text goes as text; bytes that are not UTF-8 text go as a base64 blob.
     expect(embedded.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
       {
@@ -1525,7 +1529,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     ]);
     const textOnly = await run(false);
     expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
-    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.sent).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(textOnly.prompt).not.toHaveBeenCalled();
   });
 
@@ -1543,7 +1547,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
               attachmentsFolder,
             });
             // An agent that cannot run read-only refuses Chat before it launches.
-            yield* Effect.either(
+            yield* Effect.result(
               connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
             );
           }),
@@ -1566,7 +1570,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         Effect.gen(function* () {
           const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          return yield* Effect.either(
+          return yield* Effect.result(
             connection.send({
               sessionId,
               prompt: "look",
@@ -1584,7 +1588,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         }),
       ),
     );
-    expect(sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(sent).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
     expect(f.client.prompt).not.toHaveBeenCalled();
   });
 
@@ -1789,7 +1793,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
               '{"operation":"read-page"}',
               controller.signal,
             );
-            const requestFiber = yield* Effect.fork(
+            const requestFiber = yield* Effect.forkChild(
               Stream.runCollect(
                 stream.pipe(
                   Stream.filter((event) => event.kind === "tool-request"),
@@ -1935,7 +1939,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
                   modelId,
                   executionPolicy: "approval-gated",
                 });
-                const events = yield* Effect.fork(
+                const events = yield* Effect.forkChild(
                   Stream.runCollect(
                     (yield* connection.subscribe).pipe(
                       Stream.takeUntil((event) => event.kind === "completed"),
@@ -2015,7 +2019,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
               Effect.gen(function* () {
                 const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
                 yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-                const events = yield* Effect.fork(
+                const events = yield* Effect.forkChild(
                   Stream.runCollect(
                     (yield* connection.subscribe).pipe(
                       Stream.takeUntil((event) => event.kind === "completed"),
@@ -2062,7 +2066,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          const starting = yield* Effect.fork(
+          const starting = yield* Effect.forkChild(
             Effect.flip(
               connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
             ),
@@ -2470,7 +2474,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
@@ -2504,7 +2508,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
           });
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
@@ -2525,7 +2529,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
@@ -2684,7 +2688,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
             yield* Effect.sleep("1 millis");
             expect(catchRejection).toHaveBeenCalledOnce();
             const runtimeEvents = yield* connection.subscribe;
-            const collected = yield* Effect.fork(
+            const collected = yield* Effect.forkChild(
               Effect.promise(() => collectTerminal(runtimeEvents)),
             );
             yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
@@ -2891,25 +2895,25 @@ describe("ACP provider driver profile quirks", () => {
               projectRoot,
               mode: productMode,
             });
-            const started = yield* Effect.either(
+            const started = yield* Effect.result(
               connection.start({ sessionId, modelId, executionPolicy }),
             );
-            if (started._tag === "Right") yield* connection.stop(sessionId);
+            if (started._tag === "Success") yield* connection.stop(sessionId);
             return started;
           }),
         ),
       );
       if (outcome === "refused") {
         expect(result).toMatchObject({
-          _tag: "Left",
-          left: {
+          _tag: "Failure",
+          failure: {
             category: "unsupported",
             message: expect.stringMatching(/cannot be asked per command.*Full access/),
           },
         });
         expect(starts).toEqual([]);
       } else {
-        expect(result._tag).toBe("Right");
+        expect(result._tag).toBe("Success");
         expect(starts).toHaveLength(1);
       }
     },
@@ -3648,7 +3652,7 @@ describe("ACP provider driver profile quirks", () => {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           client.request({
@@ -3911,7 +3915,7 @@ it("keeps a retained native session identity reserved while it is idle", async (
           executionPolicy: "approval-gated",
         });
         const events = yield* connection.subscribe;
-        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
         yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
         yield* Fiber.join(terminal);
         yield* connection.stop(sessionId);
@@ -3940,7 +3944,7 @@ it.each([
           const connection = yield* driver.acquire({ instanceId, mode: "code", projectRoot });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
-          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           yield* Fiber.join(terminal);
           yield* connection.stop(sessionId);
@@ -3973,7 +3977,7 @@ it.each([
             executionPolicy: "approval-gated",
           });
           const events = yield* connection.subscribe;
-          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           yield* Fiber.join(terminal);
           yield* connection.stop(sessionId);
@@ -4050,7 +4054,7 @@ it("never takes up a retained session opened under another reviewer or another o
             ...first,
           });
           const events = yield* connection.subscribe;
-          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           yield* Fiber.join(terminal);
           yield* connection.stop(sessionId);
@@ -4098,7 +4102,7 @@ it("never takes up a retained session that may remember approvals once the threa
                 });
           cursor = handle.resumeCursor;
           const events = yield* connection.subscribe;
-          const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+          const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
           yield* Fiber.join(terminal);
           yield* connection.stop(sessionId);
@@ -4214,7 +4218,7 @@ it("forwards ACP client capability requests through managed tools and answers th
             tools: [readTool],
           });
           const events = yield* connection.subscribe;
-          const send = yield* Effect.fork(
+          const send = yield* Effect.forkChild(
             connection.send({
               sessionId,
               prompt: "Read the file",
@@ -4224,7 +4228,7 @@ it("forwards ACP client capability requests through managed tools and answers th
           );
           yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
 
-          const firstEventFiber = yield* Effect.fork(
+          const firstEventFiber = yield* Effect.forkChild(
             Stream.runHead(events.pipe(Stream.filter((event) => event.kind === "tool-request"))),
           );
           client.request({
@@ -4261,7 +4265,7 @@ it("forwards ACP client capability requests through managed tools and answers th
           process.on("unhandledRejection", onUnhandled);
           client.respond.mockRejectedValueOnce(new Error("transport closed"));
           const closedEvents = yield* connection.subscribe;
-          const closedEventFiber = yield* Effect.fork(
+          const closedEventFiber = yield* Effect.forkChild(
             Stream.runHead(
               closedEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
             ),
@@ -4290,7 +4294,7 @@ it("forwards ACP client capability requests through managed tools and answers th
           expect(unhandled).toEqual([]);
 
           const secondEvents = yield* connection.subscribe;
-          const secondEventFiber = yield* Effect.fork(
+          const secondEventFiber = yield* Effect.forkChild(
             Stream.runHead(
               secondEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
             ),
@@ -4318,7 +4322,7 @@ it("forwards ACP client capability requests through managed tools and answers th
           expect(client.reject).toHaveBeenCalledWith("read-2", -32000, "file-unreadable");
 
           const thirdEvents = yield* connection.subscribe;
-          const thirdEventFiber = yield* Effect.fork(
+          const thirdEventFiber = yield* Effect.forkChild(
             Stream.runHead(
               thirdEvents.pipe(Stream.filter((event) => event.kind === "tool-request")),
             ),
@@ -4409,7 +4413,7 @@ it("serves native ACP client capabilities without negotiating the HTTP MCP bridg
           },
         });
         const events = yield* connection.subscribe;
-        yield* Effect.fork(
+        yield* Effect.forkChild(
           connection.send({
             sessionId,
             prompt: "Read the file",
@@ -4418,7 +4422,7 @@ it("serves native ACP client capabilities without negotiating the HTTP MCP bridg
           }),
         );
         yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
-        const eventFiber = yield* Effect.fork(
+        const eventFiber = yield* Effect.forkChild(
           Stream.runHead(events.pipe(Stream.filter((event) => event.kind === "tool-request"))),
         );
         client.request({
@@ -4881,7 +4885,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode });
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             connection.start({
               sessionId,
               modelId,
@@ -4890,7 +4894,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
               ...(launch.strict === false ? { strict: false } : {}),
             }),
           );
-          if (result._tag === "Right") yield* connection.stop(sessionId);
+          if (result._tag === "Success") yield* connection.stop(sessionId);
           return result;
         }),
       ),
@@ -4911,13 +4915,13 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
     async (kind, file) => {
       const { outcome, starts } = startIn(acpProviderProfiles[kind], projectWith(file));
       const result = await outcome;
-      expect(result._tag).toBe("Left");
-      if (result._tag !== "Left") return;
-      expect(result.left).toMatchObject({ category: "incompatible" });
+      expect(result._tag).toBe("Failure");
+      if (result._tag !== "Failure") return;
+      expect(result.failure).toMatchObject({ category: "incompatible" });
       const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
-      expect(result.left.message).toContain(`\`${entry}\``);
-      expect(result.left.message).toMatch(/only once you allow this Project's code/);
-      expect(result.left.message).toMatch(/remove or rename/);
+      expect(result.failure.message).toContain(`\`${entry}\``);
+      expect(result.failure.message).toMatch(/only once you allow this Project's code/);
+      expect(result.failure.message).toMatch(/remove or rename/);
       expect(starts).toEqual([]);
     },
   );
@@ -4938,14 +4942,14 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
         projectCode: true,
       } as const;
       const started = startIn(acpProviderProfiles[kind], root, "code", trusted);
-      expect((await started.outcome)._tag).toBe("Right");
+      expect((await started.outcome)._tag).toBe("Success");
       expect(started.starts).toHaveLength(1);
       // Plan and an untrusted Project carry no Project code.
       const held = startIn(acpProviderProfiles[kind], root, "code", {
         ...trusted,
         projectCode: false,
       });
-      expect((await held.outcome)._tag).toBe("Left");
+      expect((await held.outcome)._tag).toBe("Failure");
     },
   );
 
@@ -4970,14 +4974,14 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
         ...plan,
         strict: false,
       });
-      expect((await open.outcome)._tag).toBe("Right");
+      expect((await open.outcome)._tag).toBe("Success");
       expect(open.starts).toHaveLength(1);
       const strict = startIn(acpProviderProfiles[kind], root, "code", planSetup, plan);
-      expect((await strict.outcome)._tag).toBe("Left");
+      expect((await strict.outcome)._tag).toBe("Failure");
       const turnedOff = startIn(acpProviderProfiles[kind], root, "code", undefined, {
         strict: false,
       });
-      expect((await turnedOff.outcome)._tag).toBe("Left");
+      expect((await turnedOff.outcome)._tag).toBe("Failure");
     },
   );
 
@@ -4987,7 +4991,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       const root = projectWith(`.${kind === "gemini" ? "gemini" : "qwen"}/GEMINI.md`, "AGENTS.md");
       mkdirSync(join(root, `.${kind === "gemini" ? "gemini" : "qwen"}/agents`));
       const { outcome, starts } = startIn(acpProviderProfiles[kind], root);
-      expect((await outcome)._tag).toBe("Right");
+      expect((await outcome)._tag).toBe("Success");
       expect(starts).toHaveLength(1);
     },
   );
@@ -5003,7 +5007,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       const root = join(parent, "packages/app");
       mkdirSync(root, { recursive: true });
       const { outcome } = startIn(acpProviderProfiles[kind], root);
-      expect((await outcome)._tag).toBe("Right");
+      expect((await outcome)._tag).toBe("Success");
     },
   );
 
@@ -5013,7 +5017,7 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       projectWith(".gemini/settings.json"),
       "chat",
     );
-    expect((await outcome)._tag).toBe("Right");
+    expect((await outcome)._tag).toBe("Success");
   });
 
   it("leaves every other ACP runtime without a Project refusal", () => {
@@ -5160,9 +5164,7 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
     executionPolicy: "approval-gated" | "plan",
     persistence: "current-session" | "project-default",
     answer: (
-      connection: Effect.Effect.Success<
-        ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
-      >,
+      connection: Effect.Success<ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>>,
     ) => Effect.Effect<unknown, unknown>,
     answersOncePerCall?: true,
   ) => {
@@ -5182,7 +5184,7 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
             ...(answersOncePerCall === undefined ? {} : { answersOncePerCall }),
           });
           const events = yield* connection.subscribe;
-          yield* Effect.fork(
+          yield* Effect.forkChild(
             Stream.runForEach(events, (event) => Effect.sync(() => offered.push(event))),
           );
           yield* Effect.sleep("1 millis");
@@ -5263,11 +5265,7 @@ describe("Google Antigravity's allow-always offer without allow-once", () => {
     const refusals: unknown[] = [];
     const approveThenDeny =
       (scope: "once" | undefined) =>
-      (
-        connection: Effect.Effect.Success<
-          ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>
-        >,
-      ) =>
+      (connection: Effect.Success<ReturnType<ReturnType<typeof fixture>["driver"]["acquire"]>>) =>
         Effect.gen(function* () {
           refusals.push(
             yield* Effect.flip(
@@ -5338,7 +5336,7 @@ it("sends Google Antigravity its own command first and Octant's context after it
         const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         const events = yield* connection.subscribe;
-        const terminal = yield* Effect.fork(Effect.promise(() => collectTerminal(events)));
+        const terminal = yield* Effect.forkChild(Effect.promise(() => collectTerminal(events)));
         yield* connection.send({
           sessionId,
           prompt: "/compact",
@@ -5395,7 +5393,7 @@ describe("steering a running ACP turn", () => {
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           expect(yield* steer({ sessionId, message: "too early" })).toBe("unsupported");
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
@@ -5428,7 +5426,7 @@ describe("steering a running ACP turn", () => {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const runtimeEvents = yield* connection.subscribe;
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Effect.promise(() => collectTerminal(runtimeEvents)),
           );
           yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });

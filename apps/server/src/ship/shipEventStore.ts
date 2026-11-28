@@ -9,8 +9,6 @@ import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * The journal frames a ship writes.
  *
@@ -19,8 +17,8 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * what was refused, because "it did not publish and nobody knows why" is the
  * failure this record exists to prevent.
  */
-export const ShipTargetChanged = Schema.Struct({ target: ShipTarget }).annotations(strict);
-export const ShipRecorded = Schema.Struct({ receipt: ShipReceipt }).annotations(strict);
+export const ShipTargetChanged = Schema.Struct({ target: ShipTarget });
+export const ShipRecorded = Schema.Struct({ receipt: ShipReceipt });
 
 export function registerShipEvents(registry: EventRegistry): EventRegistry {
   return registry

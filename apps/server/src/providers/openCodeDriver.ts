@@ -1870,7 +1870,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const withSessionClient: OpenCodeSessionClient = async (projectRoot, use) => {
     const probesTurnJail = !openCodeChatPlanAdmitted(platform);
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           acquireRuntime(
             options,
@@ -1890,8 +1890,8 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
         ),
       ),
     );
-    if (result._tag === "Left") throw result.left;
-    return result.right;
+    if (result._tag === "Failure") throw result.failure;
+    return result.success;
   };
   const sessionOwnership = options.sessionOwnership;
   return {
@@ -2117,7 +2117,7 @@ function acquireRuntime(
             .pipe(Effect.provideService(Scope.Scope, scope)),
         );
         if (Exit.isFailure(serverExit)) {
-          const typedFailure = Option.getOrUndefined(Cause.failureOption(serverExit.cause));
+          const typedFailure = Option.getOrUndefined(Cause.findErrorOption(serverExit.cause));
           throw (
             typedFailure ??
             fail("provider-failed", "OpenCode process failed without a typed provider failure.")
@@ -2263,7 +2263,7 @@ function makeConnection(
         ),
       );
     };
-    let runtimeScope: Scope.CloseableScope | undefined;
+    let runtimeScope: Scope.Closeable | undefined;
     let processMonitor: { readonly exited: Promise<void>; readonly cancel: () => void } | undefined;
     let runtimePolicy: ProviderExecutionPolicy | undefined;
     // Whether the running server was launched inside the Full access sandbox.
@@ -2779,7 +2779,7 @@ function makeConnection(
                 .pipe(Effect.provideService(Scope.Scope, scope)),
             );
             if (Exit.isFailure(startedExit)) {
-              throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+              throw Option.getOrElse(Cause.findErrorOption(startedExit.cause), () =>
                 fail("provider-failed", "OpenCode process failed without a typed failure."),
               );
             }
@@ -3197,7 +3197,7 @@ function makeConnection(
             await releaseManagedTools(state);
           }),
         ),
-        Effect.zipRight(Effect.fail(failure)),
+        Effect.andThen(Effect.fail(failure)),
       );
 
     return {
@@ -3206,7 +3206,7 @@ function makeConnection(
         const state = source === undefined ? undefined : sessionsBySource.get(source);
         return state?.pendingToolAnswers.get(requestId)?.controller.signal ?? AbortSignal.abort();
       },
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
+      subscribe: Effect.map(PubSub.subscribe(events), Stream.fromSubscription),
       start: (input) =>
         Effect.suspend(() => {
           if (sourceBySession.has(input.sessionId)) {
@@ -3259,8 +3259,8 @@ function makeConnection(
                       url: state.managedTools.bridge.url,
                     });
               return request(() => attachManagedTools).pipe(
-                Effect.zipRight(ensureSubscription(runtimeClient)),
-                Effect.zipRight(
+                Effect.andThen(ensureSubscription(runtimeClient)),
+                Effect.andThen(
                   request(() =>
                     runtimeClient.createSession({ model: splitModelId(input.modelId) }),
                   ),
@@ -3393,7 +3393,7 @@ function makeConnection(
                   await releaseManagedTools(priorState);
                 }
               }).pipe(
-                Effect.zipRight(prepareManagedTools(state, tools)),
+                Effect.andThen(prepareManagedTools(state, tools)),
                 Effect.flatMap(() =>
                   ensureRuntime(
                     input.executionPolicy,
@@ -3419,8 +3419,8 @@ function makeConnection(
                           url: state.managedTools.bridge.url,
                         });
                   return request(() => attachManagedTools).pipe(
-                    Effect.zipRight(ensureSubscription(runtimeClient)),
-                    Effect.zipRight(
+                    Effect.andThen(ensureSubscription(runtimeClient)),
+                    Effect.andThen(
                       request(() => runtimeClient.getSession(input.resumeCursor.value)).pipe(
                         Effect.mapError(() =>
                           fail("stale-resume", "Provider resume session is no longer available."),
@@ -3430,7 +3430,7 @@ function makeConnection(
                     Effect.flatMap((session) =>
                       session.id === input.resumeCursor.value
                         ? holdSessionToLevel(runtimeClient, state, session.id).pipe(
-                            Effect.zipRight(holdResumedChildren(runtimeClient, state, session.id)),
+                            Effect.andThen(holdResumedChildren(runtimeClient, state, session.id)),
                             Effect.map((children) => ({ runtimeClient, session, children })),
                           )
                         : Effect.succeed({ runtimeClient, session, children: [] }),
@@ -3604,7 +3604,7 @@ function makeConnection(
                     prepareManagedTools(state, turn.tools).pipe(
                       Effect.flatMap(() =>
                         Effect.gen(function* () {
-                          state.usageTotals = undefined;
+                          if (state.turnSent === true) state.usageTotals = undefined;
                           state.turnSent = true;
                           if (command !== undefined && runCommand !== undefined) {
                             const context =
@@ -3702,7 +3702,7 @@ function makeConnection(
                   reason: "runtime-version-unsupported",
                 });
               }
-              return Effect.async<ProviderSessionCompaction>((resume) => {
+              return Effect.callback<ProviderSessionCompaction>((resume) => {
                 const pending: PendingCompaction = {
                   outcome: undefined,
                   settle: (outcome) => {
@@ -3772,7 +3772,7 @@ function makeConnection(
               state.questions.clear();
               state.questionAnswers.clear();
             }).pipe(
-              Effect.zipRight(
+              Effect.andThen(
                 activeClient === undefined
                   ? Effect.fail(fail("protocol", "OpenCode provider process is not active."))
                   : request(() => activeClient.abort(source)),
@@ -3785,7 +3785,7 @@ function makeConnection(
           Effect.flatMap(([source, state]) => {
             const activeClient = client;
             return Effect.sync(() => retireState(state)).pipe(
-              Effect.zipRight(
+              Effect.andThen(
                 activeClient === undefined
                   ? Effect.void
                   : request(() => activeClient.abort(source)),

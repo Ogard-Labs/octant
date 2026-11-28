@@ -22,7 +22,9 @@ import { Schema } from "effect";
 describe("outside image generation protocol", () => {
   it("speaks image-generation/1 beside harness-endpoint/1, and tells the two families apart", () => {
     expect(HOST_IMAGE_GENERATION_PROTOCOL_VERSIONS).toEqual(["image-generation/1"]);
-    const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion);
+    const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion, {
+      onExcessProperty: "error",
+    });
     expect(outsideDriverProtocolFamily(decode("image-generation/1"))).toBe("image-generation");
     expect(outsideDriverProtocolFamily(decode("harness-endpoint/1"))).toBe("harness-endpoint");
     expect(() => decode("audio-generation/1")).toThrow();
@@ -35,7 +37,7 @@ describe("outside image generation protocol", () => {
       { status: "completed", images: [{ url: "https://cdn.example.test/1.png" }] },
       { status: "refused" },
     ]) {
-      expect(decodeOutsideDriverImageGenerateResult(result)._tag).toBe("Right");
+      expect(decodeOutsideDriverImageGenerateResult(result)._tag).toBe("Success");
     }
   });
 
@@ -46,7 +48,7 @@ describe("outside image generation protocol", () => {
         method: "image/chunk",
         params: { requestId: 4, image: 0, data: "iVBORw0K" },
       })._tag,
-    ).toBe("Right");
+    ).toBe("Success");
     for (const params of [
       { requestId: 4, image: 16, data: "iVBORw0K" },
       { requestId: 4, image: 0, data: "iVBORw0" },
@@ -54,14 +56,14 @@ describe("outside image generation protocol", () => {
     ]) {
       expect(
         decodeOutsideDriverToHostMessage({ jsonrpc: "2.0", method: "image/chunk", params })._tag,
-      ).toBe("Left");
+      ).toBe("Failure");
     }
     expect(
       decodeOutsideDriverImageGenerateResult({
         status: "completed",
         images: [{ mediaType: "image/png", chunked: true }],
       })._tag,
-    ).toBe("Right");
+    ).toBe("Success");
   });
 
   it("refuses a job result carrying anything the protocol does not name", () => {
@@ -72,12 +74,14 @@ describe("outside image generation protocol", () => {
       { status: "completed", images: [{ mediaType: "image/png", data: "not base64!" }] },
       { status: "completed", images: [{ url: "x" }], usdMicros: 1 },
     ]) {
-      expect(decodeOutsideDriverImageGenerateResult(result)._tag).toBe("Left");
+      expect(decodeOutsideDriverImageGenerateResult(result)._tag).toBe("Failure");
     }
   });
 
   it("caps reference image base64 at the 2.5 MiB broker-safe ceiling", () => {
-    const decodeParams = Schema.decodeUnknownEither(OutsideDriverImageGenerateParams);
+    const decodeParams = Schema.decodeUnknownResult(OutsideDriverImageGenerateParams, {
+      onExcessProperty: "error",
+    });
     const atCeiling = "A".repeat(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS);
     expect(
       decodeParams({
@@ -86,7 +90,7 @@ describe("outside image generation protocol", () => {
         variantCount: 1,
         references: [{ mediaType: "image/png", data: atCeiling }],
       })._tag,
-    ).toBe("Right");
+    ).toBe("Success");
     const overCeiling = "A".repeat(OUTSIDE_DRIVER_REFERENCE_IMAGE_BASE64_CHARACTERS + 4);
     expect(
       decodeParams({
@@ -95,20 +99,22 @@ describe("outside image generation protocol", () => {
         variantCount: 1,
         references: [{ mediaType: "image/png", data: overCeiling }],
       })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
   });
 });
 
 describe("outside video generation protocol", () => {
   it("speaks video-generation/1 as a family of its own", () => {
     expect(HOST_VIDEO_GENERATION_PROTOCOL_VERSIONS).toEqual(["video-generation/1"]);
-    const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion);
+    const decode = Schema.decodeUnknownSync(OutsideProviderDriverProtocolVersion, {
+      onExcessProperty: "error",
+    });
     expect(outsideDriverProtocolFamily(decode("video-generation/1"))).toBe("video-generation");
   });
 
   it("reads a started job, a running, finished, refused, failed and cancelled one, and a removal", () => {
     for (const result of [{ status: "started", remoteId: "job-1" }, { status: "refused" }]) {
-      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Right");
+      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Success");
     }
     for (const result of [
       { status: "running" },
@@ -122,9 +128,9 @@ describe("outside video generation protocol", () => {
       { status: "failed", category: "provider-failed", billed: true, usage: { billedSeconds: 2 } },
       { status: "cancelled" },
     ]) {
-      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Right");
+      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Success");
     }
-    expect(decodeOutsideDriverVideoForgetResult({ status: "removed" })._tag).toBe("Right");
+    expect(decodeOutsideDriverVideoForgetResult({ status: "removed" })._tag).toBe("Success");
   });
 
   it("takes no price, free text, inline clip or empty usage from a running driver", () => {
@@ -133,7 +139,7 @@ describe("outside video generation protocol", () => {
       { status: "started", remoteId: "x".repeat(513) },
       { status: "refused", message: "attacker text" },
     ]) {
-      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Left");
+      expect(decodeOutsideDriverVideoStartResult(result)._tag).toBe("Failure");
     }
     for (const result of [
       { status: "completed", url: "https://cdn.example.test/c.mp4", usage: { costUsdMicros: 1 } },
@@ -144,7 +150,7 @@ describe("outside video generation protocol", () => {
       { status: "failed", category: "provider-failed", message: "attacker text" },
       { status: "failed", category: "made-up" },
     ]) {
-      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Left");
+      expect(decodeOutsideDriverVideoPollResult(result)._tag).toBe("Failure");
     }
   });
 });
@@ -180,7 +186,7 @@ describe("outside driver wire protocol", () => {
         },
       },
     ]) {
-      expect(decodeOutsideDriverToHostMessage(message)._tag).toBe("Right");
+      expect(decodeOutsideDriverToHostMessage(message)._tag).toBe("Success");
     }
   });
 
@@ -233,27 +239,27 @@ describe("outside driver wire protocol", () => {
       },
     ],
   ])("refuses %s", (_name, message) => {
-    expect(decodeOutsideDriverToHostMessage(message)._tag).toBe("Left");
+    expect(decodeOutsideDriverToHostMessage(message)._tag).toBe("Failure");
   });
 
   it("refuses a probe or answer carrying facts only the host may state", () => {
     expect(decodeOutsideDriverProbeResult({ models: [], verifiedToolModelIds: ["m"] })._tag).toBe(
-      "Left",
+      "Failure",
     );
     expect(
       decodeOutsideDriverProbeResult({ models: [], claims: { sessionCompaction: {} } })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
     expect(
       decodeOutsideDriverSessionSendResult({ text: "", toolCalls: [], servedModelId: "m" })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
   });
 
   it("reads a failure only as structure, never as free text", () => {
     expect(
       decodeOutsideDriverFailureData({ category: "rate-limited", retryAfterMs: 10 })._tag,
-    ).toBe("Right");
+    ).toBe("Success");
     expect(decodeOutsideDriverFailureData({ category: "rate-limited", message: "x" })._tag).toBe(
-      "Left",
+      "Failure",
     );
   });
 });

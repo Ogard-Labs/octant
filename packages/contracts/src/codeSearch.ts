@@ -1,8 +1,7 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Bound on how many matches one search reports. A quick-open list nobody
@@ -34,7 +33,7 @@ export const MAX_CODE_SEARCH_PREVIEW_LENGTH = 240;
  * they answer the same question from the same walk under the same confinement,
  * and a client picks between them by intent, not by endpoint.
  */
-export const CodeSearchScope = Schema.Literal("path", "content");
+export const CodeSearchScope = Schema.Literals(["path", "content"]);
 export type CodeSearchScope = typeof CodeSearchScope.Type;
 
 /**
@@ -47,28 +46,28 @@ export type CodeSearchScope = typeof CodeSearchScope.Type;
  * `path` is relative to it. Absent means the checkout. The explorer and editor
  * address the checkout only, so a match with a folder is shown but not opened.
  */
-export const CodeSearchFolder = Schema.String.pipe(
-  Schema.filter((value) => value.startsWith("/") && value.length > 1 && !value.includes("\0")),
+export const CodeSearchFolder = Schema.String.check(
+  Schema.makeFilter((value) => value.startsWith("/") && value.length > 1 && !value.includes("\0")),
 );
 export type CodeSearchFolder = typeof CodeSearchFolder.Type;
 
-export const CodeSearchMatch = Schema.Union(
+export const CodeSearchMatch = Schema.Union([
   Schema.Struct({
     scope: Schema.Literal("path"),
     fileId: CodeFileId,
     path: CodeRelativePath,
     folder: Schema.optional(CodeSearchFolder),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     scope: Schema.Literal("content"),
     fileId: CodeFileId,
     path: CodeRelativePath,
     folder: Schema.optional(CodeSearchFolder),
-    line: Schema.Int.pipe(Schema.positive()),
-    column: Schema.Int.pipe(Schema.positive()),
-    preview: Schema.String.pipe(Schema.maxLength(MAX_CODE_SEARCH_PREVIEW_LENGTH)),
-  }).annotations(strict),
-);
+    line: PositiveInt,
+    column: PositiveInt,
+    preview: Schema.String.check(Schema.isMaxLength(MAX_CODE_SEARCH_PREVIEW_LENGTH)),
+  }),
+]);
 export type CodeSearchMatch = typeof CodeSearchMatch.Type;
 
 /**
@@ -83,31 +82,37 @@ export const CodeSearch = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   scope: CodeSearchScope,
-  query: Schema.String.pipe(Schema.maxLength(MAX_CODE_SEARCH_QUERY_LENGTH)),
-  matches: Schema.Array(CodeSearchMatch).pipe(Schema.maxItems(MAX_CODE_SEARCH_MATCHES)),
+  query: Schema.String.check(Schema.isMaxLength(MAX_CODE_SEARCH_QUERY_LENGTH)),
+  matches: Schema.Array(CodeSearchMatch).check(Schema.isMaxLength(MAX_CODE_SEARCH_MATCHES)),
   truncated: Schema.Boolean,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodeSearch = typeof CodeSearch.Type;
 
 export const CodeSearchFailure = Schema.Struct({
-  category: Schema.Literal("invalid", "unauthorized", "unavailable", "not-found"),
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  category: Schema.Literals(["invalid", "unauthorized", "unavailable", "not-found"]),
+  message: NonEmptyTrimmedString,
+});
 export type CodeSearchFailure = typeof CodeSearchFailure.Type;
 
-export const CodeSearchResult = Schema.Union(
+export const CodeSearchResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("searched"),
     search: CodeSearch,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     failure: CodeSearchFailure,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CodeSearchResult = typeof CodeSearchResult.Type;
 
-export const decodeCodeSearchMatch = Schema.decodeUnknownSync(CodeSearchMatch);
-export const decodeCodeSearch = Schema.decodeUnknownSync(CodeSearch);
-export const decodeCodeSearchResult = Schema.decodeUnknownSync(CodeSearchResult);
+export const decodeCodeSearchMatch = Schema.decodeUnknownSync(
+  CodeSearchMatch,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCodeSearch = Schema.decodeUnknownSync(CodeSearch, STRICT_DECODE_OPTIONS);
+export const decodeCodeSearchResult = Schema.decodeUnknownSync(
+  CodeSearchResult,
+  STRICT_DECODE_OPTIONS,
+);

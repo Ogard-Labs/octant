@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ThreadRestFields, ThreadLimitedFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
@@ -25,8 +26,8 @@ import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { FinishedReceiptId } from "./finishedReceipt";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const WorkThreadId = brandedUuid("WorkThreadId");
 export type WorkThreadId = typeof WorkThreadId.Type;
@@ -38,10 +39,13 @@ export type WorkThreadId = typeof WorkThreadId.Type;
  */
 export const WorkThreadForkOrigin = Schema.Struct({
   threadId: WorkThreadId,
-  throughRequestId: Schema.UUID.pipe(Schema.brand("WorkTurnRequestId")),
+  throughRequestId: Schema.String.pipe(
+    Schema.check(Schema.isGUID()),
+    Schema.brand("WorkTurnRequestId"),
+  ),
   /** Source turns the fork carried, oldest first, through the fork point. */
-  carriedTurnCount: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  carriedTurnCount: PositiveInt,
+});
 export type WorkThreadForkOrigin = typeof WorkThreadForkOrigin.Type;
 
 /**
@@ -50,9 +54,9 @@ export type WorkThreadForkOrigin = typeof WorkThreadForkOrigin.Type;
  * `completionConfirmed`.
  */
 export const WorkThreadCompletionEvidence = Schema.Struct({
-  deliveryTarget: Schema.NonEmptyTrimmedString,
-  satisfactionEvidence: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-}).annotations(strict);
+  deliveryTarget: NonEmptyTrimmedString,
+  satisfactionEvidence: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+});
 export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.Type;
 
 /**
@@ -60,13 +64,13 @@ export type WorkThreadCompletionEvidence = typeof WorkThreadCompletionEvidence.T
  * mode) offer: every Work level, Plan included (maintainer decision,
  * 2026-11-21), so a new thread may start read-only.
  */
-export const WorkDefaultAccess = Schema.Literal(
+export const WorkDefaultAccess = Schema.Literals([
   "ask-first",
   "auto-accept-edits",
   "auto",
   "full-access",
   "plan",
-);
+]);
 export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
 
 /**
@@ -82,20 +86,20 @@ export type WorkDefaultAccess = typeof WorkDefaultAccess.Type;
  * threads recorded before the levels were shared, so older journals replay
  * unchanged.
  */
-export const WorkAccess = Schema.Literal(
+export const WorkAccess = Schema.Literals([
   "ask-first",
   "auto-accept-edits",
   "auto",
   "full-access",
   "plan",
-);
+]);
 export type WorkAccess = typeof WorkAccess.Type;
 
 /**
  * The level a Work thread in Plan returns to when the person approves its
  * plan: a guarded level, never Full access, which only the person chooses.
  */
-export const WorkPlanReturnAccess = Schema.Literal("ask-first", "auto-accept-edits", "auto");
+export const WorkPlanReturnAccess = Schema.Literals(["ask-first", "auto-accept-edits", "auto"]);
 export type WorkPlanReturnAccess = typeof WorkPlanReturnAccess.Type;
 
 /** The access a Work thread starts with when nothing else is set. */
@@ -116,14 +120,14 @@ export const WorkThreadAdoptedSession = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   workingDirectory: ThreadWorkingDirectory,
   workingFolderId: Schema.optional(ProjectWorkingFolderId),
-}).annotations(strict);
+});
 export type WorkThreadAdoptedSession = typeof WorkThreadAdoptedSession.Type;
 
 export const WorkThread = Schema.Struct({
   id: WorkThreadId,
   projectId: ProjectId,
-  title: Schema.NonEmptyTrimmedString,
-  lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
+  title: NonEmptyTrimmedString,
+  lifecycle: Schema.Literals(["active", "archived", "deleting", "deleted"]),
   completionConfirmed: Schema.optional(Schema.Boolean),
   completionEvidence: Schema.optional(WorkThreadCompletionEvidence),
   /** Fresh finished receipt recorded as completion evidence when a person marked the thread Done. */
@@ -140,7 +144,7 @@ export const WorkThread = Schema.Struct({
    * created, and changed from its composer since. A thread journaled before
    * access existed decodes as ask-first, which is what it had.
    */
-  access: Schema.optionalWith(WorkAccess, { default: () => DEFAULT_WORK_ACCESS }),
+  access: WorkAccess.pipe(Schema.withDecodingDefaultType(Effect.succeed(DEFAULT_WORK_ACCESS))),
   /**
    * The level the thread returns to when the person approves its plan,
    * recorded while the thread is in Plan and dropped when it leaves; never
@@ -206,7 +210,7 @@ export const WorkThread = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type WorkThread = typeof WorkThread.Type;
 
 const WorkThreadCommandFields = {
@@ -220,7 +224,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   access: Schema.optional(WorkAccess),
   threadId: WorkThreadId,
   projectId: ProjectId,
-  title: Schema.NonEmptyTrimmedString,
+  title: NonEmptyTrimmedString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
@@ -243,7 +247,7 @@ export const CreateWorkThreadCommand = Schema.Struct({
   strict: Schema.optional(Schema.Boolean),
   /** The person passed the per-run `octant agent --full-access` flag. */
   fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
 /**
@@ -256,23 +260,26 @@ export const ForkWorkThreadCommand = Schema.Struct({
   /** The new thread's id. */
   threadId: WorkThreadId,
   sourceThreadId: WorkThreadId,
-  throughRequestId: Schema.UUID.pipe(Schema.brand("WorkTurnRequestId")),
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  throughRequestId: Schema.String.pipe(
+    Schema.check(Schema.isGUID()),
+    Schema.brand("WorkTurnRequestId"),
+  ),
+  title: NonEmptyTrimmedString,
+});
 export type ForkWorkThreadCommand = typeof ForkWorkThreadCommand.Type;
 
 export const RenameWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("rename-work-thread"),
   ...WorkThreadCommandFields,
-  title: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  title: NonEmptyTrimmedString,
+});
 export type RenameWorkThreadCommand = typeof RenameWorkThreadCommand.Type;
 
 export const ChangeWorkThreadLifecycleCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-lifecycle"),
   ...WorkThreadCommandFields,
-  lifecycle: Schema.Literal("active", "archived"),
-}).annotations(strict);
+  lifecycle: Schema.Literals(["active", "archived"]),
+});
 export type ChangeWorkThreadLifecycleCommand = typeof ChangeWorkThreadLifecycleCommand.Type;
 
 /**
@@ -283,24 +290,24 @@ export type ChangeWorkThreadLifecycleCommand = typeof ChangeWorkThreadLifecycleC
 export const CompleteWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("complete-work-thread"),
   ...WorkThreadCommandFields,
-}).annotations(strict);
+});
 export type CompleteWorkThreadCommand = typeof CompleteWorkThreadCommand.Type;
 export const ReopenWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("reopen-work-thread"),
   ...WorkThreadCommandFields,
-}).annotations(strict);
+});
 export type ReopenWorkThreadCommand = typeof ReopenWorkThreadCommand.Type;
 /** Hide the thread until `until`; the host refuses a wake time that is not ahead. */
 export const SnoozeWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("snooze-work-thread"),
   ...WorkThreadCommandFields,
   until: UtcTimestamp,
-}).annotations(strict);
+});
 export type SnoozeWorkThreadCommand = typeof SnoozeWorkThreadCommand.Type;
 export const WakeWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("wake-work-thread"),
   ...WorkThreadCommandFields,
-}).annotations(strict);
+});
 export type WakeWorkThreadCommand = typeof WakeWorkThreadCommand.Type;
 /**
  * Hide the thread until the current usage-limited stop's declared reset. The
@@ -311,7 +318,7 @@ export type WakeWorkThreadCommand = typeof WakeWorkThreadCommand.Type;
 export const SnoozeWorkThreadAtUsageResetCommand = Schema.Struct({
   kind: Schema.Literal("snooze-work-thread-at-usage-reset"),
   ...WorkThreadCommandFields,
-}).annotations(strict);
+});
 export type SnoozeWorkThreadAtUsageResetCommand = typeof SnoozeWorkThreadAtUsageResetCommand.Type;
 
 /**
@@ -323,13 +330,15 @@ export const ConfirmWorkThreadCompletionCommand = Schema.Struct({
   kind: Schema.Literal("confirm-work-thread-completion"),
   ...WorkThreadCommandFields,
   /** Must exactly identify the authoritative current delivery target. */
-  deliveryTarget: Schema.NonEmptyTrimmedString,
+  deliveryTarget: NonEmptyTrimmedString,
   /**
    * An optional note on what was delivered. Clients before the mark became
    * final always sent one; the host records it when present.
    */
-  satisfactionEvidence: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
-}).annotations(strict);
+  satisfactionEvidence: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  ),
+});
 export type ConfirmWorkThreadCompletionCommand = typeof ConfirmWorkThreadCompletionCommand.Type;
 
 export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
@@ -337,7 +346,7 @@ export const ChangeWorkThreadWorkingDirectoryCommand = Schema.Struct({
   ...WorkThreadCommandFields,
   workingDirectory: ThreadWorkingDirectory,
   workingFolderId: Schema.optional(ProjectWorkingFolderId),
-}).annotations(strict);
+});
 export type ChangeWorkThreadWorkingDirectoryCommand =
   typeof ChangeWorkThreadWorkingDirectoryCommand.Type;
 
@@ -350,7 +359,7 @@ export const MoveWorkThreadCommand = Schema.Struct({
   kind: Schema.Literal("move-work-thread"),
   ...WorkThreadCommandFields,
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type MoveWorkThreadCommand = typeof MoveWorkThreadCommand.Type;
 
 export const ChangeWorkThreadProviderCommand = Schema.Struct({
@@ -359,7 +368,7 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   modelOptionValues: Schema.optional(ProviderModelOptionValues),
-}).annotations(strict);
+});
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
 /**
@@ -372,7 +381,7 @@ export const MoveWorkThreadAccountCommand = Schema.Struct({
   kind: Schema.Literal("move-work-thread-account"),
   ...WorkThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
-}).annotations(strict);
+});
 export type MoveWorkThreadAccountCommand = typeof MoveWorkThreadAccountCommand.Type;
 
 /**
@@ -383,7 +392,7 @@ export const SetWorkThreadUsageLimitHandoffCommand = Schema.Struct({
   kind: Schema.Literal("set-work-thread-usage-limit-handoff"),
   ...WorkThreadCommandFields,
   providerInstanceId: Schema.optional(ProviderInstanceId),
-}).annotations(strict);
+});
 export type SetWorkThreadUsageLimitHandoffCommand =
   typeof SetWorkThreadUsageLimitHandoffCommand.Type;
 
@@ -391,7 +400,7 @@ export const ChangeWorkThreadBrowserProfileCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-browser-profile"),
   ...WorkThreadCommandFields,
   browserTaskProfile: BrowserProfileChoice,
-}).annotations(strict);
+});
 export type ChangeWorkThreadBrowserProfileCommand =
   typeof ChangeWorkThreadBrowserProfileCommand.Type;
 
@@ -405,7 +414,7 @@ export const ChangeWorkThreadDocumentDeliveryCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-document-delivery"),
   ...WorkThreadCommandFields,
   documentDelivery: ThreadDocumentDelivery,
-}).annotations(strict);
+});
 export type ChangeWorkThreadDocumentDeliveryCommand =
   typeof ChangeWorkThreadDocumentDeliveryCommand.Type;
 
@@ -441,7 +450,7 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
    * current choice; null returns it to its Project's and Settings' default.
    */
   strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
-}).annotations(strict);
+});
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 
 /**
@@ -456,7 +465,7 @@ export const ScheduleWorkUsageResumeCommand = Schema.Struct({
   // Branded inline: importing WorkTurnId would cycle with workTurns.ts, which
   // already reads WorkThreadId from this module.
   turnId: brandedUuid("WorkTurnId"),
-}).annotations(strict);
+});
 export type ScheduleWorkUsageResumeCommand = typeof ScheduleWorkUsageResumeCommand.Type;
 
 /**
@@ -465,7 +474,7 @@ export type ScheduleWorkUsageResumeCommand = typeof ScheduleWorkUsageResumeComma
 export const CancelWorkUsageResumeCommand = Schema.Struct({
   kind: Schema.Literal("cancel-work-usage-resume"),
   ...WorkThreadCommandFields,
-}).annotations(strict);
+});
 export type CancelWorkUsageResumeCommand = typeof CancelWorkUsageResumeCommand.Type;
 
 /**
@@ -489,15 +498,13 @@ export const WorkSettings = Schema.Struct({
   restartContinuation: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (settings) =>
-        (settings.defaultProviderInstanceId === undefined) ===
-        (settings.defaultModelId === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (settings) =>
+      (settings.defaultProviderInstanceId === undefined) ===
+      (settings.defaultModelId === undefined),
+  ),
+);
 export type WorkSettings = typeof WorkSettings.Type;
 
 export const UpdateWorkSettingsCommand = Schema.Struct({
@@ -512,15 +519,12 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   defaultStrict: Schema.optional(Schema.Boolean),
   /** Absent keeps the stored choice. */
   restartContinuation: Schema.optional(Schema.Boolean),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        (command.defaultProviderInstanceId === undefined) ===
-        (command.defaultModelId === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (command) =>
+      (command.defaultProviderInstanceId === undefined) === (command.defaultModelId === undefined),
+  ),
+);
 export type UpdateWorkSettingsCommand = typeof UpdateWorkSettingsCommand.Type;
 
 /** The thread's Continue after restart switch; only a person at a local window. */
@@ -528,7 +532,7 @@ export const SetWorkThreadRestartContinuationCommand = Schema.Struct({
   kind: Schema.Literal("set-work-thread-restart-continuation"),
   ...WorkThreadCommandFields,
   continueAfterRestart: Schema.Boolean,
-}).annotations(strict);
+});
 export type SetWorkThreadRestartContinuationCommand =
   typeof SetWorkThreadRestartContinuationCommand.Type;
 
@@ -537,10 +541,10 @@ export const SetWorkThreadMessageWakeCommand = Schema.Struct({
   kind: Schema.Literal("set-work-thread-message-wake"),
   ...WorkThreadCommandFields,
   wake: Schema.Boolean,
-}).annotations(strict);
+});
 export type SetWorkThreadMessageWakeCommand = typeof SetWorkThreadMessageWakeCommand.Type;
 
-export const WorkThreadCommand = Schema.Union(
+export const WorkThreadCommand = Schema.Union([
   CreateWorkThreadCommand,
   ForkWorkThreadCommand,
   RenameWorkThreadCommand,
@@ -564,10 +568,10 @@ export const WorkThreadCommand = Schema.Union(
   SetWorkThreadRestartContinuationCommand,
   SetWorkThreadMessageWakeCommand,
   UpdateWorkSettingsCommand,
-);
+]);
 export type WorkThreadCommand = typeof WorkThreadCommand.Type;
 
-export const WorkThreadFailureCategory = Schema.Literal(
+export const WorkThreadFailureCategory = Schema.Literals([
   "unavailable",
   "unauthorized",
   "unsupported",
@@ -577,46 +581,46 @@ export const WorkThreadFailureCategory = Schema.Literal(
   "disconnected",
   "stale",
   "invalid",
-);
+]);
 export type WorkThreadFailureCategory = typeof WorkThreadFailureCategory.Type;
 
 export const WorkThreadFailure = Schema.Struct({
   category: WorkThreadFailureCategory,
-  message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  message: NonEmptyTrimmedString,
+});
 export type WorkThreadFailure = typeof WorkThreadFailure.Type;
 
 export const WorkThreadCreated = Schema.Struct({
   kind: Schema.Literal("thread-created"),
   thread: WorkThread,
-}).annotations(strict);
+});
 export type WorkThreadCreated = typeof WorkThreadCreated.Type;
 
 export const WorkThreadUpdated = Schema.Struct({
   kind: Schema.Literal("thread-updated"),
   thread: WorkThread,
-}).annotations(strict);
+});
 export type WorkThreadUpdated = typeof WorkThreadUpdated.Type;
 
 export const WorkThreadCompletionConfirmed = Schema.Struct({
   kind: Schema.Literal("thread-completion-confirmed"),
   thread: WorkThread,
-}).annotations(strict);
+});
 export type WorkThreadCompletionConfirmed = typeof WorkThreadCompletionConfirmed.Type;
 
 export const WorkSettingsUpdated = Schema.Struct({
   kind: Schema.Literal("settings-updated"),
   settings: WorkSettings,
-}).annotations(strict);
+});
 export type WorkSettingsUpdated = typeof WorkSettingsUpdated.Type;
 
-export const WorkThreadCommandResult = Schema.Union(
+export const WorkThreadCommandResult = Schema.Union([
   WorkThreadCreated,
   WorkThreadUpdated,
   WorkThreadCompletionConfirmed,
   WorkSettingsUpdated,
   WorkThreadFailure,
-);
+]);
 export type WorkThreadCommandResult = typeof WorkThreadCommandResult.Type;
 
 /**
@@ -636,7 +640,7 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
    * The kind of request currently waiting on the person. Optional so older
    * hosts decode; absent means the request kind is unknown.
    */
-  awaitingKind: Schema.optional(Schema.Literal("approval", "user-input")),
+  awaitingKind: Schema.optional(Schema.Literals(["approval", "user-input"])),
   /**
    * A dated line in the Project's `STATUS.md` that has passed or is near,
    * carried on the Project's newest open thread so the inbox can surface the
@@ -648,7 +652,7 @@ export const WorkThreadNavigationRuntime = Schema.Struct({
   ...ThreadLiveTurnFields,
   /** The latest turn's current usage-limit stop; absent otherwise. */
   ...ThreadLimitedFields,
-}).annotations(strict);
+});
 export type WorkThreadNavigationRuntime = typeof WorkThreadNavigationRuntime.Type;
 
 export const WorkThreadBootstrap = Schema.Struct({
@@ -657,12 +661,12 @@ export const WorkThreadBootstrap = Schema.Struct({
    * Optional so a remote client talking to an older host still bootstraps; an
    * empty list means no thread is reported executing.
    */
-  runtime: Schema.optionalWith(Schema.Array(WorkThreadNavigationRuntime), {
-    default: () => [],
-  }),
+  runtime: Schema.Array(WorkThreadNavigationRuntime).pipe(
+    Schema.withDecodingDefaultType(Effect.sync(() => [])),
+  ),
   /** Optional so a remote client talking to an older host still bootstraps. */
   settings: Schema.optional(WorkSettings),
-}).annotations(strict);
+});
 export type WorkThreadBootstrap = typeof WorkThreadBootstrap.Type;
 
 /**
@@ -672,17 +676,33 @@ export type WorkThreadBootstrap = typeof WorkThreadBootstrap.Type;
 export const WorkThreadNavigation = Schema.Struct({
   threads: Schema.Array(WorkThread),
   runtime: Schema.Array(WorkThreadNavigationRuntime),
-}).annotations(strict);
+});
 export type WorkThreadNavigation = typeof WorkThreadNavigation.Type;
 
-export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(WorkSettingsUpdated);
+export const decodeWorkSettingsUpdated = Schema.decodeUnknownSync(
+  WorkSettingsUpdated,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId);
-export const decodeWorkThread = Schema.decodeUnknownSync(WorkThread);
-export const decodeWorkThreadCommand = Schema.decodeUnknownSync(WorkThreadCommand);
-export const decodeWorkThreadCommandResult = Schema.decodeUnknownSync(WorkThreadCommandResult);
-export const decodeWorkThreadBootstrap = Schema.decodeUnknownSync(WorkThreadBootstrap);
-export const decodeWorkThreadNavigation = Schema.decodeUnknownSync(WorkThreadNavigation);
+export const decodeWorkThreadId = Schema.decodeUnknownSync(WorkThreadId, STRICT_DECODE_OPTIONS);
+export const decodeWorkThread = Schema.decodeUnknownSync(WorkThread, STRICT_DECODE_OPTIONS);
+export const decodeWorkThreadCommand = Schema.decodeUnknownSync(
+  WorkThreadCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadCommandResult = Schema.decodeUnknownSync(
+  WorkThreadCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadBootstrap = Schema.decodeUnknownSync(
+  WorkThreadBootstrap,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeWorkThreadNavigation = Schema.decodeUnknownSync(
+  WorkThreadNavigation,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeWorkThreadNavigationRuntime = Schema.decodeUnknownSync(
   WorkThreadNavigationRuntime,
+  STRICT_DECODE_OPTIONS,
 );

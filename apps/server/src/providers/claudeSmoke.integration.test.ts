@@ -88,7 +88,7 @@ describe("installed Claude subscription runtime", () => {
             );
             let approvals = 0;
             const eventsPromise = collectTurn(
-              Stream.unwrapScoped(acquired.connection.subscribe),
+              Stream.unwrap(acquired.connection.subscribe),
               sessionId,
               (event) => {
                 if (event.kind !== "approval-request") return Effect.void;
@@ -228,10 +228,7 @@ async function runInstalledClaudeSmoke(
           }),
         );
         assertSmoke(handle.resumeCursor?.driverKind === "claude", "Resume cursor was missing.");
-        const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
-          ids.plan,
-        );
+        const eventsPromise = collectTurn(Stream.unwrap(acquired.connection.subscribe), ids.plan);
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.plan,
@@ -266,7 +263,7 @@ async function runInstalledClaudeSmoke(
         );
         let approvals = 0;
         const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
+          Stream.unwrap(acquired.connection.subscribe),
           ids.decline,
           (event) => {
             if (event.kind !== "approval-request") return Effect.void;
@@ -308,7 +305,7 @@ async function runInstalledClaudeSmoke(
         );
         let approvals = 0;
         const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
+          Stream.unwrap(acquired.connection.subscribe),
           ids.accept,
           (event) => {
             if (event.kind !== "approval-request") return Effect.void;
@@ -353,7 +350,7 @@ async function runInstalledClaudeSmoke(
         );
         let questions = 0;
         const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
+          Stream.unwrap(acquired.connection.subscribe),
           ids.question,
           (event) => {
             if (event.kind !== "user-input-request") return Effect.void;
@@ -392,7 +389,7 @@ async function runInstalledClaudeSmoke(
         );
         let interruptedAfterOutput = false;
         const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
+          Stream.unwrap(acquired.connection.subscribe),
           ids.interrupt,
           (event) => {
             if (event.kind !== "text-delta" || interruptedAfterOutput) return Effect.void;
@@ -432,10 +429,7 @@ async function runInstalledClaudeSmoke(
             resumed.resumeCursor.value === resumeCursor.value,
           "Exact resume returned a different cursor.",
         );
-        const eventsPromise = collectTurn(
-          Stream.unwrapScoped(acquired.connection.subscribe),
-          ids.plan,
-        );
+        const eventsPromise = collectTurn(Stream.unwrap(acquired.connection.subscribe), ids.plan);
         await Effect.runPromise(
           acquired.connection.send({
             sessionId: ids.plan,

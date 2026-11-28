@@ -2714,7 +2714,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         if (facts === undefined) return undefined;
         const outcome = await Effect.runPromise(
           Effect.scoped(
-            Effect.either(
+            Effect.result(
               facts.observeServiceLimits({
                 instanceId: instance.id,
                 ...(onDemand ? { onDemand: true } : {}),
@@ -2723,14 +2723,14 @@ export function wireProviders(deps: ProvidersDependencies) {
           ),
           { signal },
         );
-        if (outcome._tag === "Left") {
-          if (outcome.left.category === "unsupported") {
+        if (outcome._tag === "Failure") {
+          if (outcome.failure.category === "unsupported") {
             return { source: "provider-runtime", unavailableReason: "plan-limits-do-not-apply" };
           }
-          if (outcome.left.category === "unavailable") return undefined;
-          throw outcome.left;
+          if (outcome.failure.category === "unavailable") return undefined;
+          throw outcome.failure;
         }
-        const limits = outcome.right;
+        const limits = outcome.success;
         const directory = claudePlanUsageStateDirectory(instance, homedir());
         if (directory !== undefined) {
           await providerAccountPlanUsageStore.replace({
@@ -2959,7 +2959,7 @@ export function wireProviders(deps: ProvidersDependencies) {
   });
 }
 
-export type ProvidersWiring = Effect.Effect.Success<ReturnType<typeof wireProviders>>;
+export type ProvidersWiring = Effect.Success<ReturnType<typeof wireProviders>>;
 
 /** The Settings key for a driver whose tools a person may block, if it is one. */
 function blockableToolProvider(kind: ProviderDriverKind): BlockableToolProvider | undefined {

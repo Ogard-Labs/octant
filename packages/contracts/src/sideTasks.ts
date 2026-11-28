@@ -14,13 +14,12 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { FollowUpSuggestedBy } from "./followUpSuggestions";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const SIDE_TASK_TOOL_NAME = "octant_offer_side_task";
 /**
@@ -43,11 +42,14 @@ export const MAX_SIDE_TASK_VIEW_ENTRIES = 10;
  */
 export const MAX_STARTED_SIDE_TASK_RECEIPTS = 50;
 
-export const SideTaskId = Schema.UUID.pipe(Schema.brand("SideTaskId"));
+export const SideTaskId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("SideTaskId"),
+);
 export type SideTaskId = typeof SideTaskId.Type;
 
 /** A worktree needs a checkout, so only a Code thread can offer one. */
-export const SideTaskTarget = Schema.Literal("new-thread", "new-worktree");
+export const SideTaskTarget = Schema.Literals(["new-thread", "new-worktree"]);
 export type SideTaskTarget = typeof SideTaskTarget.Type;
 
 /**
@@ -56,26 +58,37 @@ export type SideTaskTarget = typeof SideTaskTarget.Type;
  * needs the offering turn to have finished; in Code it always gets its own
  * worktree, because a fork carries the checkout as that turn left it.
  */
-export const SideTaskContext = Schema.Literal("fresh", "fork");
+export const SideTaskContext = Schema.Literals(["fresh", "fork"]);
 export type SideTaskContext = typeof SideTaskContext.Type;
 
-export const SideTaskStatus = Schema.Literal("offered", "started", "continued-here", "dismissed");
+export const SideTaskStatus = Schema.Literals([
+  "offered",
+  "started",
+  "continued-here",
+  "dismissed",
+]);
 export type SideTaskStatus = typeof SideTaskStatus.Type;
 
 /** Unconfirmed is a durable dispatch claim, never permission to replay it. */
-export const SideTaskHereDelivery = Schema.Literal("sent", "queued", "unconfirmed");
+export const SideTaskHereDelivery = Schema.Literals(["sent", "queued", "unconfirmed"]);
 
 export const SideTaskOffer = Schema.Struct({
   id: SideTaskId,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
   suggestedBy: FollowUpSuggestedBy,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
   /** What the model noticed and why it belongs elsewhere, in one sentence. */
-  reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_REASON_LENGTH)),
+  reason: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_SIDE_TASK_REASON_LENGTH),
+  ),
   /** Standalone: the new thread starts with this and nothing else. */
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_PROMPT_LENGTH)),
+  prompt: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_SIDE_TASK_PROMPT_LENGTH),
+  ),
   target: SideTaskTarget,
   /** Absent on offers made before forks existed; those start fresh. */
   context: Schema.optional(SideTaskContext),
@@ -85,9 +98,9 @@ export const SideTaskOffer = Schema.Struct({
    * transcript and the point a fork is taken through. Absent on offers made
    * before cards were placed inline.
    */
-  turnId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  turnId: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
   offeredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskOffer = typeof SideTaskOffer.Type;
 
 /**
@@ -97,14 +110,14 @@ export type SideTaskOffer = typeof SideTaskOffer.Type;
  * navigation projections when the thread's tasks are read, never journaled,
  * and absent when the child cannot be read.
  */
-export const SideTaskChildState = Schema.Literal("working", "attention", "quiet");
+export const SideTaskChildState = Schema.Literals(["working", "attention", "quiet"]);
 export type SideTaskChildState = typeof SideTaskChildState.Type;
 
 export const SideTask = Schema.Struct({
   offer: SideTaskOffer,
   status: SideTaskStatus,
   /** The thread a start created, present once started. */
-  startedThreadId: Schema.optional(Schema.UUID),
+  startedThreadId: Schema.optional(GuidString),
   /** Whether a new thread was forked from this conversation; present once started. */
   startedWith: Schema.optional(SideTaskContext),
   /** Confirmed delivery or a durable claim whose outcome is still unknown. */
@@ -117,25 +130,25 @@ export const SideTask = Schema.Struct({
    * the report aggregate reads it now. Read-time only, like `childState`:
    * absent when the host cannot say, and `on` unless the person stopped it.
    */
-  reporting: Schema.optional(Schema.Literal("on", "stopped")),
-}).annotations(strict);
+  reporting: Schema.optional(Schema.Literals(["on", "stopped"])),
+});
 export type SideTask = typeof SideTask.Type;
 
 export const ThreadSideTasks = Schema.Struct({
-  threadId: Schema.UUID,
-  tasks: Schema.Array(SideTask).pipe(
-    Schema.maxItems(MAX_SIDE_TASK_VIEW_ENTRIES + MAX_STARTED_SIDE_TASK_RECEIPTS),
+  threadId: GuidString,
+  tasks: Schema.Array(SideTask).check(
+    Schema.isMaxLength(MAX_SIDE_TASK_VIEW_ENTRIES + MAX_STARTED_SIDE_TASK_RECEIPTS),
   ),
-}).annotations(strict);
+});
 export type ThreadSideTasks = typeof ThreadSideTasks.Type;
 
 export const SideTaskStarted = Schema.Struct({
   sideTaskId: SideTaskId,
-  startedThreadId: Schema.UUID,
+  startedThreadId: GuidString,
   /** Absent on starts recorded before forks existed, which were all fresh. */
   startedWith: Schema.optional(SideTaskContext),
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskStarted = typeof SideTaskStarted.Type;
 
 /** The person chose to have the offering thread do the work itself. */
@@ -144,20 +157,20 @@ export const SideTaskContinuedHere = Schema.Struct({
   /** Claimed before dispatch, then confirmed as sent or queued when possible. */
   delivery: SideTaskHereDelivery,
   continuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskContinuedHere = typeof SideTaskContinuedHere.Type;
 
 /** A claimed continuation was explicitly refused before it dispatched anything. */
 export const SideTaskContinuationRefused = Schema.Struct({
   sideTaskId: SideTaskId,
   refusedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskContinuationRefused = typeof SideTaskContinuationRefused.Type;
 
 export const SideTaskDismissed = Schema.Struct({
   sideTaskId: SideTaskId,
   dismissedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskDismissed = typeof SideTaskDismissed.Type;
 
 /**
@@ -169,35 +182,35 @@ export const StartSideTask = Schema.Struct({
   sideTaskId: SideTaskId,
   confirmed: Schema.Literal(true),
   context: Schema.optional(SideTaskContext),
-}).annotations(strict);
+});
 export type StartSideTask = typeof StartSideTask.Type;
 
 /** "Do it here": the person confirms the offering thread should take the work on. */
 export const ContinueSideTaskHere = Schema.Struct({
   sideTaskId: SideTaskId,
   confirmed: Schema.Literal(true),
-}).annotations(strict);
+});
 export type ContinueSideTaskHere = typeof ContinueSideTaskHere.Type;
 
 export const DismissSideTask = Schema.Struct({
   sideTaskId: SideTaskId,
-}).annotations(strict);
+});
 export type DismissSideTask = typeof DismissSideTask.Type;
 
 /** The person stops or resumes the reports a started child owes this thread. */
 export const SetSideTaskReporting = Schema.Struct({
   sideTaskId: SideTaskId,
   on: Schema.Boolean,
-}).annotations(strict);
+});
 export type SetSideTaskReporting = typeof SetSideTaskReporting.Type;
 
-export const SideTaskResult = Schema.Union(
+export const SideTaskResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("side-task-started"),
     sideTaskId: SideTaskId,
     mode: OctantMode,
-    threadId: Schema.UUID,
-    title: Schema.NonEmptyTrimmedString,
+    threadId: GuidString,
+    title: NonEmptyTrimmedString,
     projectId: Schema.optional(ProjectId),
     startedWith: SideTaskContext,
     /**
@@ -205,17 +218,17 @@ export const SideTaskResult = Schema.Union(
      * prompt then waits in the new thread's composer for the person to send.
      */
     sent: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("side-task-continued-here"),
     sideTaskId: SideTaskId,
-    threadId: Schema.UUID,
+    threadId: GuidString,
     delivery: SideTaskHereDelivery,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("side-task-dismissed"),
     sideTaskId: SideTaskId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("side-task-refused"),
     sideTaskId: Schema.String,
@@ -223,15 +236,15 @@ export const SideTaskResult = Schema.Union(
      * `turn-running`: a fork waits for the offering turn to finish, because
      * a fork point must be a settled turn.
      */
-    reason: Schema.Literal("not-found", "already-settled", "target-unavailable", "turn-running"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
+    reason: Schema.Literals(["not-found", "already-settled", "target-unavailable", "turn-running"]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("side-task-reporting"),
     sideTaskId: SideTaskId,
-    reporting: Schema.Literal("on", "stopped"),
-  }).annotations(strict),
-);
+    reporting: Schema.Literals(["on", "stopped"]),
+  }),
+]);
 export type SideTaskResult = typeof SideTaskResult.Type;
 
 export const THREAD_SIDE_TASKS_AGGREGATE_TYPE = "thread-side-tasks";
@@ -243,14 +256,26 @@ export const THREAD_SIDE_TASK_EVENT_NAMES = {
   continuationRefused: "side-task-continuation-refused@1",
 } as const;
 
-export const decodeSideTaskId = Schema.decodeUnknownSync(SideTaskId);
-export const decodeSideTaskOffer = Schema.decodeUnknownSync(SideTaskOffer);
-export const decodeThreadSideTasks = Schema.decodeUnknownSync(ThreadSideTasks);
-export const decodeStartSideTask = Schema.decodeUnknownSync(StartSideTask);
-export const decodeDismissSideTask = Schema.decodeUnknownSync(DismissSideTask);
-export const decodeContinueSideTaskHere = Schema.decodeUnknownSync(ContinueSideTaskHere);
-export const decodeSetSideTaskReporting = Schema.decodeUnknownSync(SetSideTaskReporting);
-export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult);
+export const decodeSideTaskId = Schema.decodeUnknownSync(SideTaskId, STRICT_DECODE_OPTIONS);
+export const decodeSideTaskOffer = Schema.decodeUnknownSync(SideTaskOffer, STRICT_DECODE_OPTIONS);
+export const decodeThreadSideTasks = Schema.decodeUnknownSync(
+  ThreadSideTasks,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeStartSideTask = Schema.decodeUnknownSync(StartSideTask, STRICT_DECODE_OPTIONS);
+export const decodeDismissSideTask = Schema.decodeUnknownSync(
+  DismissSideTask,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContinueSideTaskHere = Schema.decodeUnknownSync(
+  ContinueSideTaskHere,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSetSideTaskReporting = Schema.decodeUnknownSync(
+  SetSideTaskReporting,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideTaskResult = Schema.decodeUnknownSync(SideTaskResult, STRICT_DECODE_OPTIONS);
 
 // ── Completion reports back to the offering thread ──────────────────────────
 //
@@ -279,7 +304,7 @@ export const THREAD_SIDE_TASK_REPORT_EVENT_NAMES = {
 } as const;
 
 /** How the child's turn ended; only completions carry the reply's text. */
-export const SideTaskReportOutcome = Schema.Literal("completed", "failed", "cancelled");
+export const SideTaskReportOutcome = Schema.Literals(["completed", "failed", "cancelled"]);
 export type SideTaskReportOutcome = typeof SideTaskReportOutcome.Type;
 
 /**
@@ -289,27 +314,27 @@ export type SideTaskReportOutcome = typeof SideTaskReportOutcome.Type;
  * anything that happens to the offering thread's own records in between.
  */
 export const SideTaskReportOwed = Schema.Struct({
-  reportId: Schema.UUID,
-  parentThreadId: Schema.UUID,
+  reportId: GuidString,
+  parentThreadId: GuidString,
   parentMode: OctantMode,
   /**
    * The thread whose turn ended. A title can be shared by several side tasks,
    * so only this says which one reported. Absent on reports journaled before
    * it was carried.
    */
-  childThreadId: Schema.optional(Schema.UUID),
+  childThreadId: Schema.optional(GuidString),
   /** The offer's title: how the parent and its agent know the task. */
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SIDE_TASK_TITLE_LENGTH)),
   outcome: SideTaskReportOutcome,
   /** The finished turn's reply, honestly truncated; absent on failure and cancellation. */
   text: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SIDE_TASK_REPORT_TEXT_LENGTH)),
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SIDE_TASK_REPORT_TEXT_LENGTH)),
   ),
   /** True when the reply was cut to fit; the report says so rather than pretending completeness. */
   truncated: Schema.optional(Schema.Literal(true)),
   endedAt: UtcTimestamp,
   owedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskReportOwed = typeof SideTaskReportOwed.Type;
 
 /**
@@ -318,9 +343,9 @@ export type SideTaskReportOwed = typeof SideTaskReportOwed.Type;
  * honestly labelled, and nothing is marked delivered that was not in it.
  */
 export const SideTaskReportDelivered = Schema.Struct({
-  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
+  reportIds: Schema.Array(GuidString).check(Schema.isMinLength(1)),
   deliveredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskReportDelivered = typeof SideTaskReportDelivered.Type;
 
 /**
@@ -329,28 +354,43 @@ export type SideTaskReportDelivered = typeof SideTaskReportDelivered.Type;
  * forever and never silently dropped — the refusal is journaled with why.
  */
 export const SideTaskReportRefused = Schema.Struct({
-  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
-  detail: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  reportIds: Schema.Array(GuidString).check(Schema.isMinLength(1)),
+  detail: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   refusedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskReportRefused = typeof SideTaskReportRefused.Type;
 
 /** The person asked the child to stop reporting; new turns in it owe nothing. */
 export const SideTaskReportingStopped = Schema.Struct({
   stoppedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskReportingStopped = typeof SideTaskReportingStopped.Type;
 
 export const SideTaskReportingResumed = Schema.Struct({
   resumedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideTaskReportingResumed = typeof SideTaskReportingResumed.Type;
 
-export const decodeSideTaskReportOwed = Schema.decodeUnknownSync(SideTaskReportOwed);
-export const decodeSideTaskReportDelivered = Schema.decodeUnknownSync(SideTaskReportDelivered);
-export const decodeSideTaskReportRefused = Schema.decodeUnknownSync(SideTaskReportRefused);
-export const decodeSideTaskReportingStopped = Schema.decodeUnknownSync(SideTaskReportingStopped);
-export const decodeSideTaskReportingResumed = Schema.decodeUnknownSync(SideTaskReportingResumed);
+export const decodeSideTaskReportOwed = Schema.decodeUnknownSync(
+  SideTaskReportOwed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideTaskReportDelivered = Schema.decodeUnknownSync(
+  SideTaskReportDelivered,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideTaskReportRefused = Schema.decodeUnknownSync(
+  SideTaskReportRefused,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideTaskReportingStopped = Schema.decodeUnknownSync(
+  SideTaskReportingStopped,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideTaskReportingResumed = Schema.decodeUnknownSync(
+  SideTaskReportingResumed,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The idempotency mark a delivery turn carries when it entered the parent:
@@ -361,13 +401,13 @@ export const decodeSideTaskReportingResumed = Schema.decodeUnknownSync(SideTaskR
  */
 export const SideTaskReportDeliveryMark = Schema.Struct({
   kind: Schema.Literal("side-task-report"),
-  reportIds: Schema.Array(Schema.UUID).pipe(Schema.minItems(1)),
-}).annotations(strict);
+  reportIds: Schema.Array(GuidString).check(Schema.isMinLength(1)),
+});
 export type SideTaskReportDeliveryMark = typeof SideTaskReportDeliveryMark.Type;
 
 /** What a journaled delivery turn may carry as its idempotency mark. */
-export const ThreadDeliveryMark = Schema.Union(
+export const ThreadDeliveryMark = Schema.Union([
   AgentRunResultDeliveryMark,
   SideTaskReportDeliveryMark,
-);
+]);
 export type ThreadDeliveryMark = typeof ThreadDeliveryMark.Type;

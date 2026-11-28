@@ -29,7 +29,7 @@ export interface SubscribeThenSendInput<A, E, R, SendError, SendR> {
  */
 export function subscribeThenSend<A, E, R, SendError, SendR>(
   input: SubscribeThenSendInput<A, E, R, SendError, SendR>,
-): Effect.Effect<Fiber.RuntimeFiber<A, E>, SendError, R | SendR | Scope.Scope> {
+): Effect.Effect<Fiber.Fiber<A, E>, SendError, R | SendR | Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* input.connection.subscribe;
     const consumer = yield* Effect.forkScoped(

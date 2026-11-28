@@ -8,46 +8,50 @@ import {
   type ProviderFileReviewRead,
 } from "@octant/contracts/provider-file-review";
 
-const owner = Schema.Union(
+const owner = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("agent"),
-    turnId: Schema.Int.pipe(Schema.between(0, 2_147_483_647)),
+    turnId: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 2_147_483_647 }))),
   }),
   Schema.Struct({
     kind: Schema.Literal("manual"),
-    index: Schema.Int.pipe(Schema.between(0, 2_147_483_646)),
+    index: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 2_147_483_646 }))),
   }),
-);
-const nativePath = Schema.String.pipe(Schema.maxLength(4_096));
+]);
+const nativePath = Schema.String.pipe(Schema.check(Schema.isMaxLength(4_096)));
 const state = Schema.Struct({
-  files: Schema.Array(Schema.Struct({ path: nativePath })).pipe(Schema.maxItems(1_024)),
+  files: Schema.Array(Schema.Struct({ path: nativePath })).pipe(
+    Schema.check(Schema.isMaxLength(1_024)),
+  ),
   scopes: Schema.Array(
     Schema.Struct({
       owner,
-      files: Schema.Array(Schema.Struct({ path: nativePath })).pipe(Schema.maxItems(1_024)),
+      files: Schema.Array(Schema.Struct({ path: nativePath })).pipe(
+        Schema.check(Schema.isMaxLength(1_024)),
+      ),
     }),
-  ).pipe(Schema.maxItems(MAX_PROVIDER_FILE_REVIEW_SCOPES)),
+  ).pipe(Schema.check(Schema.isMaxLength(MAX_PROVIDER_FILE_REVIEW_SCOPES))),
 });
 const baseline = Schema.Struct({
-  content: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_FILE_REVIEW_TEXT)),
+  content: Schema.String.pipe(Schema.check(Schema.isMaxLength(MAX_PROVIDER_FILE_REVIEW_TEXT))),
 });
 const diff = Schema.Struct({
-  status: Schema.Literal("modified", "created", "deleted", "binary_or_undecodable"),
-  baseline: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_FILE_REVIEW_TEXT)),
-  current: Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_FILE_REVIEW_TEXT)),
+  status: Schema.Literals(["modified", "created", "deleted", "binary_or_undecodable"]),
+  baseline: Schema.String.pipe(Schema.check(Schema.isMaxLength(MAX_PROVIDER_FILE_REVIEW_TEXT))),
+  current: Schema.String.pipe(Schema.check(Schema.isMaxLength(MAX_PROVIDER_FILE_REVIEW_TEXT))),
 });
 const hunks = Schema.Struct({
   hunks: Schema.Array(
     Schema.Struct({
-      side: Schema.Literal("additions", "deletions"),
-      line: Schema.Int.pipe(Schema.between(0, 2_147_483_646)),
+      side: Schema.Literals(["additions", "deletions"]),
+      line: Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 0, maximum: 2_147_483_646 }))),
     }),
-  ).pipe(Schema.maxItems(MAX_PROVIDER_FILE_REVIEW_ANCHORS)),
+  ).pipe(Schema.check(Schema.isMaxLength(MAX_PROVIDER_FILE_REVIEW_ANCHORS))),
 });
-const decodeState = Schema.decodeUnknownEither(state);
-const decodeBaseline = Schema.decodeUnknownEither(baseline);
-const decodeDiff = Schema.decodeUnknownEither(diff);
-const decodeHunks = Schema.decodeUnknownEither(hunks);
+const decodeState = Schema.decodeUnknownResult(state);
+const decodeBaseline = Schema.decodeUnknownResult(baseline);
+const decodeDiff = Schema.decodeUnknownResult(diff);
+const decodeHunks = Schema.decodeUnknownResult(hunks);
 const validPath = Schema.is(ProviderFileReviewPath);
 type Refused = Extract<ProviderFileReviewRead, { readonly status: "refused" }>;
 const refused = (reason: Refused["reason"]): Refused => ({ status: "refused", reason });
@@ -121,15 +125,15 @@ export async function readAcpFileReview(input: AcpFileReviewRead): Promise<Provi
   // owner list afterwards rather than inventing an agent owner for that edit.
   const firstHunks = await call("_review/hunks", { path: input.path });
   if (firstHunks.status === "refused") return firstHunks;
-  if (decodeHunks(firstHunks.value)._tag === "Left") return refused("malformed");
+  if (decodeHunks(firstHunks.value)._tag === "Failure") return refused("malformed");
   const stateRead = await call("_review/state", {});
   if (stateRead.status === "refused") return stateRead;
   const decodedState = decodeState(stateRead.value);
-  if (decodedState._tag === "Left") return refused("malformed");
+  if (decodedState._tag === "Failure") return refused("malformed");
   const selectedPath = (path: string) =>
     path === input.path ||
     (input.root !== undefined && path === `${input.root.replace(/\/$/, "")}/${input.path}`);
-  const scopes = decodedState.right.scopes
+  const scopes = decodedState.success.scopes
     .filter((scope) => scope.files.some((file) => selectedPath(file.path)))
     .map((scope) => ({
       nativeOwner: scope.owner,
@@ -158,14 +162,14 @@ export async function readAcpFileReview(input: AcpFileReviewRead): Promise<Provi
   )
     return refused("too-large");
   const decodedBase = decodeBaseline(baseRead.value);
-  if (decodedBase._tag === "Left") return refused("malformed");
+  if (decodedBase._tag === "Failure") return refused("malformed");
   const normalizedScopes = scopes.map(({ id, label, source }) => ({ id, label, source }));
   if (selected === undefined)
     return {
       status: "ready",
       file: {
         path: input.path,
-        checkpoint: decodedBase.right.content,
+        checkpoint: decodedBase.success.content,
         scopes: normalizedScopes,
         anchors: [],
       },
@@ -183,32 +187,32 @@ export async function readAcpFileReview(input: AcpFileReviewRead): Promise<Provi
   )
     return refused("too-large");
   const decodedDiff = decodeDiff(scopedRead.value);
-  if (decodedDiff._tag === "Left") return refused("malformed");
+  if (decodedDiff._tag === "Failure") return refused("malformed");
   const scopedHunks = await call("_review/hunks", {
     path: input.path,
     owner: selected.nativeOwner,
   });
   if (scopedHunks.status === "refused") return scopedHunks;
   const decodedHunks = decodeHunks(scopedHunks.value);
-  if (decodedHunks._tag === "Left") return refused("malformed");
+  if (decodedHunks._tag === "Failure") return refused("malformed");
   return (
     current() ??
     decodeProviderFileReviewRead({
       status: "ready",
       file: {
         path: input.path,
-        checkpoint: decodedBase.right.content,
+        checkpoint: decodedBase.success.content,
         scopes: normalizedScopes,
         comparison: {
           scopeId: selected.id,
           change:
-            decodedDiff.right.status === "binary_or_undecodable"
+            decodedDiff.success.status === "binary_or_undecodable"
               ? "opaque"
-              : decodedDiff.right.status,
-          before: decodedDiff.right.baseline,
-          after: decodedDiff.right.current,
+              : decodedDiff.success.status,
+          before: decodedDiff.success.baseline,
+          after: decodedDiff.success.current,
         },
-        anchors: decodedHunks.right.hunks.map((hunk) => ({
+        anchors: decodedHunks.success.hunks.map((hunk) => ({
           side: hunk.side === "additions" ? "after" : "before",
           line: hunk.line + 1,
         })),

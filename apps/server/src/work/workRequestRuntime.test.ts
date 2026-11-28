@@ -289,7 +289,7 @@ describe("WorkRequestRuntime", () => {
     );
     const received: ProviderRuntimeEvent[] = [];
     await Effect.runPromise(
-      Stream.unwrapScoped(acquired.subscribe).pipe(
+      Stream.unwrap(acquired.subscribe).pipe(
         Stream.runForEach((next) => Effect.sync(() => received.push(next))),
       ),
     );
@@ -591,7 +591,7 @@ describe("WorkRequestRuntime", () => {
             },
           });
           current = { signal: laterTurn.signal, reviewed: laterReviewed };
-          yield* Stream.unwrapScoped(acquired.subscribe).pipe(Stream.runDrain);
+          yield* Stream.unwrap(acquired.subscribe).pipe(Stream.runDrain);
         }),
       ),
     );
@@ -750,7 +750,7 @@ describe("WorkRequestRuntime", () => {
               mode: "work",
               workRequest: { projectId, threadId, sessionId, onApprovalReviewed: reviewed },
             });
-            yield* Stream.unwrapScoped(acquired.subscribe).pipe(
+            yield* Stream.unwrap(acquired.subscribe).pipe(
               Stream.runForEach((next) => Effect.sync(() => received.push(next))),
             );
           }),

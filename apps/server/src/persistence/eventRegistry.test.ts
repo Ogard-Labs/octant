@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, SchemaTransformation } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   DuplicateEventRegistration,
@@ -13,14 +13,19 @@ const currentFixturePayload = Schema.Struct({
   value: Schema.String,
   current: Schema.Boolean,
 });
-const persistedFixturePayload = Schema.transform(Schema.Unknown, currentFixturePayload, {
-  strict: false,
-  decode: (persisted) =>
-    typeof persisted === "object" && persisted !== null && !("current" in persisted)
-      ? { ...persisted, current: true }
-      : persisted,
-  encode: (_persisted, current) => current,
-});
+const persistedFixturePayload = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.Unknown,
+    SchemaTransformation.transform({
+      decode: (persisted) =>
+        typeof persisted === "object" && persisted !== null && !("current" in persisted)
+          ? { ...persisted, current: true }
+          : persisted,
+      encode: (current) => current,
+    }),
+  ),
+  Schema.decodeTo(currentFixturePayload),
+);
 
 describe("EventRegistry", () => {
   it("decodes a registered event payload", () => {

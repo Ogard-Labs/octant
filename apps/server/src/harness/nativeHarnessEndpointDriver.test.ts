@@ -112,7 +112,7 @@ function runTurn(
   import("effect").Scope.Scope
 > {
   return Effect.gen(function* () {
-    const events = yield* Effect.fork(
+    const events = yield* Effect.forkChild(
       Stream.runCollect(
         (yield* connection.subscribe).pipe(
           Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),
@@ -350,7 +350,7 @@ describe("native harness endpoint port", () => {
             resumeCursor: handle.resumeCursor,
             executionPolicy: "plan",
           });
-          const done = yield* Effect.fork(
+          const done = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),

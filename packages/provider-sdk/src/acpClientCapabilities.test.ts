@@ -36,13 +36,13 @@ describe("ACP client capability schemas", () => {
 
   it("rejects extra fields and wrong types", () => {
     expect(() =>
-      Schema.decodeUnknownSync(AcpClientReadTextFileInput)({
+      Schema.decodeUnknownSync(AcpClientReadTextFileInput, { onExcessProperty: "error" })({
         path: "/checkout/README.md",
         sessionId: "not-in-backing-schema",
       }),
     ).toThrow();
     expect(() =>
-      Schema.decodeUnknownSync(AcpClientTerminalCreateInput)({
+      Schema.decodeUnknownSync(AcpClientTerminalCreateInput, { onExcessProperty: "error" })({
         command: 7,
       }),
     ).toThrow();

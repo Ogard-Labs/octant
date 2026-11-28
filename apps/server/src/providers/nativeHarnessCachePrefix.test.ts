@@ -185,7 +185,7 @@ async function runTurns(
         });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         for (const prompt of prompts) {
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event: ProviderRuntimeEvent) => event.sessionId === sessionId),

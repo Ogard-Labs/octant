@@ -1,9 +1,9 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 /** Days of host-health samples a host keeps. */
 export const HOST_HEALTH_RETENTION_DAYS = 14;
@@ -14,12 +14,12 @@ export const MAX_HOST_HEALTH_POINTS = 2_016;
 
 /** One host measurement's latency inside a sample window. */
 export const HostHealthLatency = Schema.Struct({
-  key: Schema.String.pipe(Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
+  key: Schema.String.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]{0,63}$/)),
   count: PositiveInt,
   p50Ms: NonNegativeInt,
   p95Ms: NonNegativeInt,
   maxMs: NonNegativeInt,
-}).annotations(strict);
+});
 export type HostHealthLatency = typeof HostHealthLatency.Type;
 
 /**
@@ -40,11 +40,11 @@ export const HostHealthSample = Schema.Struct({
   eventLoopLagWorstMs: NonNegativeInt,
   slowStatementCount: NonNegativeInt,
   slowStatementWorstMs: NonNegativeInt,
-  latency: Schema.Array(HostHealthLatency).pipe(Schema.maxItems(16)),
-}).annotations(strict);
+  latency: Schema.Array(HostHealthLatency).check(Schema.isMaxLength(16)),
+});
 export type HostHealthSample = typeof HostHealthSample.Type;
 
-export const HostHealthResolution = Schema.Literal("minute", "hour");
+export const HostHealthResolution = Schema.Literals(["minute", "hour"]);
 export type HostHealthResolution = typeof HostHealthResolution.Type;
 
 export const HostHealthHistoryRequest = Schema.Struct({
@@ -56,14 +56,12 @@ export const HostHealthHistoryRequest = Schema.Struct({
    * `MAX_HOST_HEALTH_POINTS` of them.
    */
   resolution: Schema.optional(HostHealthResolution),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (request) =>
-        request.from === undefined || request.to === undefined || request.from <= request.to,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (request) =>
+      request.from === undefined || request.to === undefined || request.from <= request.to,
+  ),
+);
 export type HostHealthHistoryRequest = typeof HostHealthHistoryRequest.Type;
 
 /**
@@ -83,11 +81,20 @@ export const HostHealthHistory = Schema.Struct({
    * recorded before the span; a process that started inside the span, after one
    * recorded before it, is.
    */
-  restarts: Schema.Array(UtcTimestamp).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
-  samples: Schema.Array(HostHealthSample).pipe(Schema.maxItems(MAX_HOST_HEALTH_POINTS)),
-}).annotations(strict);
+  restarts: Schema.Array(UtcTimestamp).check(Schema.isMaxLength(MAX_HOST_HEALTH_POINTS)),
+  samples: Schema.Array(HostHealthSample).check(Schema.isMaxLength(MAX_HOST_HEALTH_POINTS)),
+});
 export type HostHealthHistory = typeof HostHealthHistory.Type;
 
-export const decodeHostHealthSample = Schema.decodeUnknownSync(HostHealthSample);
-export const decodeHostHealthHistoryRequest = Schema.decodeUnknownSync(HostHealthHistoryRequest);
-export const decodeHostHealthHistory = Schema.decodeUnknownSync(HostHealthHistory);
+export const decodeHostHealthSample = Schema.decodeUnknownSync(
+  HostHealthSample,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostHealthHistoryRequest = Schema.decodeUnknownSync(
+  HostHealthHistoryRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostHealthHistory = Schema.decodeUnknownSync(
+  HostHealthHistory,
+  STRICT_DECODE_OPTIONS,
+);

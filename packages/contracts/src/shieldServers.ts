@@ -11,10 +11,9 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, UtcTimestamp } from "./events";
 import { HubMemberId } from "./hubAndSpokes";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const SHIELD_SERVERS_AGGREGATE = "shield-servers";
 /** The account list's aggregate id; a Project's own list lives under the Project's id. */
@@ -55,31 +54,31 @@ export const MAX_SHIELD_REMOTE_COMMAND_LENGTH = 2_048;
  * the person described; Admin adds config edits. Lock-out and destructive
  * actions go to the person at every profile.
  */
-export const ShieldServerProfile = Schema.Literal("read-only", "operate", "admin");
+export const ShieldServerProfile = Schema.Literals(["read-only", "operate", "admin"]);
 export type ShieldServerProfile = typeof ShieldServerProfile.Type;
 
 /** A `Host` alias as an SSH config names it: no spaces, patterns, or leading dash. */
-export const ShieldServerAlias = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(253),
-  Schema.pattern(/^[A-Za-z0-9_][A-Za-z0-9._-]*$/),
+export const ShieldServerAlias = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(253),
+  Schema.isPattern(/^[A-Za-z0-9_][A-Za-z0-9._-]*$/),
 );
 /** A login name on the server. */
-export const ShieldServerUser = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(32),
-  Schema.pattern(/^[A-Za-z_][A-Za-z0-9._-]*$/),
+export const ShieldServerUser = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(32),
+  Schema.isPattern(/^[A-Za-z_][A-Za-z0-9._-]*$/),
 );
 /** A command the person described as a deploy, run on the server exactly as written. */
-export const ShieldServerDeployCommand = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(MAX_SHIELD_DEPLOY_COMMAND_LENGTH),
+export const ShieldServerDeployCommand = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_SHIELD_DEPLOY_COMMAND_LENGTH),
 );
 /** An absolute path to the person's notes for the server, read as context and never as authority. */
-export const ShieldServerRunbookPath = Schema.String.pipe(
-  Schema.minLength(2),
-  Schema.maxLength(MAX_SHIELD_RUNBOOK_PATH_LENGTH),
-  Schema.filter((path) => path.startsWith("/") && !path.includes("\u0000")),
+export const ShieldServerRunbookPath = Schema.String.check(
+  Schema.isMinLength(2),
+  Schema.isMaxLength(MAX_SHIELD_RUNBOOK_PATH_LENGTH),
+  Schema.makeFilter((path) => path.startsWith("/") && !path.includes("\u0000")),
 );
 
 /**
@@ -88,53 +87,53 @@ export const ShieldServerRunbookPath = Schema.String.pipe(
  * or with a key Octant made for this server and keeps in its credential
  * broker, which signs the login and never hands the key out.
  */
-export const ShieldServerSignIn = Schema.Literal("ssh-agent", "octant-key");
+export const ShieldServerSignIn = Schema.Literals(["ssh-agent", "octant-key"]);
 export type ShieldServerSignIn = typeof ShieldServerSignIn.Type;
 
 /** The public line of a key Octant keeps, as `authorized_keys` takes it. */
-export const ShieldServerPublicKey = Schema.String.pipe(
-  Schema.maxLength(256),
-  Schema.pattern(/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/),
+export const ShieldServerPublicKey = Schema.String.check(
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$/),
 );
 
 export const ShieldServerFields = Schema.Struct({
   alias: ShieldServerAlias,
   user: ShieldServerUser,
   profile: ShieldServerProfile,
-  deployCommands: Schema.Array(ShieldServerDeployCommand).pipe(
-    Schema.maxItems(MAX_SHIELD_SERVER_DEPLOY_COMMANDS),
+  deployCommands: Schema.Array(ShieldServerDeployCommand).check(
+    Schema.isMaxLength(MAX_SHIELD_SERVER_DEPLOY_COMMANDS),
   ),
   runbookPath: Schema.optional(ShieldServerRunbookPath),
   signIn: Schema.optional(ShieldServerSignIn),
-}).annotations(strict);
+});
 export type ShieldServerFields = typeof ShieldServerFields.Type;
 
 export const ShieldServer = Schema.Struct({
   serverId: AggregateId,
   ...ShieldServerFields.fields,
-}).annotations(strict);
+});
 export type ShieldServer = typeof ShieldServer.Type;
 
 /**
  * Only the host's own person changes the registry: at a local window, or on a
  * device that person paired, whose id the event's actor names.
  */
-const ShieldServerPerson = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("person-paired-device") }).annotations(strict),
-);
+const ShieldServerPerson = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("local-window") }),
+  Schema.Struct({ kind: Schema.Literal("person-paired-device") }),
+]);
 
 /** One server registered or changed, as a whole record that replaces the one before. */
 export const ShieldServerSetPayload = Schema.Struct({
   server: ShieldServer,
   principal: ShieldServerPerson,
-}).annotations(strict);
+});
 export type ShieldServerSetPayload = typeof ShieldServerSetPayload.Type;
 
 export const ShieldServerRemovedPayload = Schema.Struct({
   serverId: AggregateId,
   principal: ShieldServerPerson,
-}).annotations(strict);
+});
 export type ShieldServerRemovedPayload = typeof ShieldServerRemovedPayload.Type;
 
 /**
@@ -143,25 +142,25 @@ export type ShieldServerRemovedPayload = typeof ShieldServerRemovedPayload.Type;
  */
 export const ShieldProjectServersSetPayload = Schema.Struct({
   projectId: AggregateId,
-  servers: Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  servers: Schema.Array(ShieldServer).check(Schema.isMaxLength(MAX_SHIELD_SERVERS)),
   principal: ShieldServerPerson,
-}).annotations(strict);
+});
 export type ShieldProjectServersSetPayload = typeof ShieldProjectServersSetPayload.Type;
 
 /** A Project goes back to the account list. */
 export const ShieldProjectServersClearedPayload = Schema.Struct({
   projectId: AggregateId,
   principal: ShieldServerPerson,
-}).annotations(strict);
+});
 export type ShieldProjectServersClearedPayload = typeof ShieldProjectServersClearedPayload.Type;
 
 /** How a remote command ended, as the shell that ran it saw it. */
-export const ShieldRemoteCommandStatus = Schema.Literal(
+export const ShieldRemoteCommandStatus = Schema.Literals([
   "ran",
   "timed-out",
   "cancelled",
   "unavailable",
-);
+]);
 export type ShieldRemoteCommandStatus = typeof ShieldRemoteCommandStatus.Type;
 
 /**
@@ -175,11 +174,11 @@ export const ShieldRemoteCommandRanPayload = Schema.Struct({
   host: Schema.optional(ShieldServerAlias),
   /** The registered server the host named, when it is one. */
   serverId: Schema.optional(AggregateId),
-  command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_REMOTE_COMMAND_LENGTH)),
+  command: Schema.String.check(Schema.isMaxLength(MAX_SHIELD_REMOTE_COMMAND_LENGTH)),
   status: ShieldRemoteCommandStatus,
   exitCode: Schema.optional(Schema.Int),
   ranAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ShieldRemoteCommandRanPayload = typeof ShieldRemoteCommandRanPayload.Type;
 
 /**
@@ -188,54 +187,50 @@ export type ShieldRemoteCommandRanPayload = typeof ShieldRemoteCommandRanPayload
  * person's SSH agent is there to use.
  */
 export const ShieldServersView = Schema.Struct({
-  servers: Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
+  servers: Schema.Array(ShieldServer).check(Schema.isMaxLength(MAX_SHIELD_SERVERS)),
   project: Schema.optional(
     Schema.Struct({
       projectId: AggregateId,
-      override: Schema.NullOr(Schema.Array(ShieldServer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS))),
-    }).annotations(strict),
+      override: Schema.NullOr(
+        Schema.Array(ShieldServer).check(Schema.isMaxLength(MAX_SHIELD_SERVERS)),
+      ),
+    }),
   ),
-  sshAgent: Schema.Literal("available", "missing"),
-}).annotations(strict);
+  sshAgent: Schema.Literals(["available", "missing"]),
+});
 export type ShieldServersView = typeof ShieldServersView.Type;
 
-export const ShieldServersCommand = Schema.Union(
+export const ShieldServersCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("register-server"),
     server: ShieldServerFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-server"),
     serverId: AggregateId,
     server: ShieldServerFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remove-server"),
     serverId: AggregateId,
-  }).annotations(strict),
-  /** Gives a Project its own whole list, which replaces the account list there. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-project-servers"),
     projectId: AggregateId,
-    servers: Schema.Array(ShieldServerFields).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
-  }).annotations(strict),
+    servers: Schema.Array(ShieldServerFields).check(Schema.isMaxLength(MAX_SHIELD_SERVERS)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("clear-project-override"),
     projectId: AggregateId,
-  }).annotations(strict),
-  /**
-   * The public line of the key Octant keeps for a server that signs in with
-   * one, making the key the first time, for the person to add to the
-   * server's `authorized_keys`.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("show-server-key"),
     serverId: AggregateId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ShieldServersCommand = typeof ShieldServersCommand.Type;
 
-export const ShieldServersRefusalReason = Schema.Literal(
+export const ShieldServersRefusalReason = Schema.Literals([
   "needs-local-window",
   "duplicate-alias",
   "invalid-runbook-path",
@@ -247,25 +242,25 @@ export const ShieldServersRefusalReason = Schema.Literal(
   "signs-in-with-agent",
   "key-unavailable",
   "unavailable",
-);
+]);
 export type ShieldServersRefusalReason = typeof ShieldServersRefusalReason.Type;
 
-export const ShieldServersCommandResult = Schema.Union(
+export const ShieldServersCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("shield-servers-updated"),
     view: ShieldServersView,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("shield-server-key"),
     serverId: AggregateId,
     publicKey: ShieldServerPublicKey,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("shield-servers-refused"),
     reason: ShieldServersRefusalReason,
     message: Schema.String,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ShieldServersCommandResult = typeof ShieldServersCommandResult.Type;
 
 /**
@@ -274,7 +269,7 @@ export type ShieldServersCommandResult = typeof ShieldServersCommandResult.Type;
  * the login, listening on a private address, and joined to this computer's
  * hub. Canonical: docs/design/hub-and-spokes.md § Adding a computer over SSH.
  */
-export const MemberInstallTarget = Schema.Literal("darwin-arm64", "linux-x64", "linux-arm64");
+export const MemberInstallTarget = Schema.Literals(["darwin-arm64", "linux-x64", "linux-arm64"]);
 export type MemberInstallTarget = typeof MemberInstallTarget.Type;
 
 /** The steps in the order they run; a failed step stops every step after it. */
@@ -286,11 +281,11 @@ export const MEMBER_INSTALL_STEPS = [
   "listen",
   "join",
 ] as const;
-export const MemberInstallStep = Schema.Literal(...MEMBER_INSTALL_STEPS);
+export const MemberInstallStep = Schema.Literals(MEMBER_INSTALL_STEPS);
 export type MemberInstallStep = typeof MemberInstallStep.Type;
 
 /** Why a step failed, as a closed list: the journal never holds a server's own words. */
-export const MemberInstallFailure = Schema.Literal(
+export const MemberInstallFailure = Schema.Literals([
   "server-unreachable",
   "digest-mismatch",
   "build-mismatch",
@@ -298,13 +293,13 @@ export const MemberInstallFailure = Schema.Literal(
   "join-code-unavailable",
   "comparison-mismatch",
   "timed-out",
-);
+]);
 export type MemberInstallFailure = typeof MemberInstallFailure.Type;
 
-const MemberInstallReleaseRing = Schema.Literal("stable", "preview", "candidate");
-const MemberInstallVersion = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
-const MemberInstallAddress = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(253));
-const MemberInstallPort = Schema.Int.pipe(Schema.between(1, 65_535));
+const MemberInstallReleaseRing = Schema.Literals(["stable", "preview", "candidate"]);
+const MemberInstallVersion = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64));
+const MemberInstallAddress = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(253));
+const MemberInstallPort = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }));
 
 /**
  * The person confirmed the sheet. Journaled before anything runs on the
@@ -320,7 +315,7 @@ export const MemberInstallRequestedPayload = Schema.Struct({
   listenAddress: MemberInstallAddress,
   listenPort: MemberInstallPort,
   joins: Schema.Literal("hub"),
-}).annotations(strict);
+});
 export type MemberInstallRequestedPayload = typeof MemberInstallRequestedPayload.Type;
 
 /** How one step ended, journaled as it ends, with the same actor as the request. */
@@ -328,7 +323,7 @@ export const MemberInstallStepRecordedPayload = Schema.Struct({
   installId: AggregateId,
   serverId: AggregateId,
   step: MemberInstallStep,
-  outcome: Schema.Literal("succeeded", "failed"),
+  outcome: Schema.Literals(["succeeded", "failed"]),
   failure: Schema.optional(MemberInstallFailure),
   /**
    * On a succeeded join: the hub member the server became, read from the
@@ -336,14 +331,14 @@ export const MemberInstallStepRecordedPayload = Schema.Struct({
    * this identity, never on whichever member holds the listener address later.
    */
   memberId: Schema.optional(HubMemberId),
-}).annotations(strict);
+});
 export type MemberInstallStepRecordedPayload = typeof MemberInstallStepRecordedPayload.Type;
 
 /** A private address the server reported, which the person may pick to listen on. */
 export const MemberInstallAddressOption = Schema.Struct({
   address: MemberInstallAddress,
-  network: Schema.Literal("tailscale", "lan-private"),
-}).annotations(strict);
+  network: Schema.Literals(["tailscale", "lan-private"]),
+});
 export type MemberInstallAddressOption = typeof MemberInstallAddressOption.Type;
 
 /** What the sheet states before anything runs, every fact read now. */
@@ -353,42 +348,47 @@ export const MemberInstallPlan = Schema.Struct({
   alias: ShieldServerAlias,
   user: ShieldServerUser,
   /** `uname -sm` as the server answered it over SSH. */
-  system: Schema.String.pipe(Schema.maxLength(128)),
+  system: Schema.String.check(Schema.isMaxLength(128)),
   target: MemberInstallTarget,
   artifactVersion: MemberInstallVersion,
   ring: MemberInstallReleaseRing,
   /** The ring's release signature and every file's digest checked on this computer. */
   signature: Schema.Literal("verified"),
   /** The login's own data folder; nothing outside it, and no sudo. */
-  installRoot: Schema.String.pipe(Schema.minLength(2), Schema.maxLength(1_024)),
-  service: Schema.Literal("systemd-user", "launchd-agent"),
+  installRoot: Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(1_024)),
+  service: Schema.Literals(["systemd-user", "launchd-agent"]),
   /** Whether the server already starts the login's services with no one logged in. */
   startsAtBoot: Schema.Boolean,
   /** The one administrator command for starting at boot, for the person to run; absent when none applies. */
-  bootCommand: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
-  addresses: Schema.Array(MemberInstallAddressOption).pipe(Schema.minItems(1), Schema.maxItems(16)),
+  bootCommand: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
+  addresses: Schema.Array(MemberInstallAddressOption).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(16),
+  ),
   listenPort: MemberInstallPort,
   joins: Schema.Struct({
     kind: Schema.Literal("hub"),
-    hubName: Schema.String.pipe(Schema.maxLength(128)),
-  }).annotations(strict),
-}).annotations(strict);
+    hubName: Schema.String.check(Schema.isMaxLength(128)),
+  }),
+});
 export type MemberInstallPlan = typeof MemberInstallPlan.Type;
 
 export const MemberInstallStepState = Schema.Struct({
   step: MemberInstallStep,
-  state: Schema.Literal("waiting", "running", "succeeded", "failed", "not-run"),
+  state: Schema.Literals(["waiting", "running", "succeeded", "failed", "not-run"]),
   /** What to fix, for a failed step. Shown in the sheet; never journaled. */
-  message: Schema.optional(Schema.String.pipe(Schema.maxLength(1_024))),
-}).annotations(strict);
+  message: Schema.optional(Schema.String.check(Schema.isMaxLength(1_024))),
+});
 export type MemberInstallStepState = typeof MemberInstallStepState.Type;
 
 export const MemberInstallProgress = Schema.Struct({
   installId: AggregateId,
   serverId: AggregateId,
-  state: Schema.Literal("running", "joined", "failed"),
-  steps: Schema.Array(MemberInstallStepState).pipe(Schema.maxItems(MEMBER_INSTALL_STEPS.length)),
-}).annotations(strict);
+  state: Schema.Literals(["running", "joined", "failed"]),
+  steps: Schema.Array(MemberInstallStepState).check(
+    Schema.isMaxLength(MEMBER_INSTALL_STEPS.length),
+  ),
+});
 export type MemberInstallProgress = typeof MemberInstallProgress.Type;
 
 /**
@@ -406,33 +406,31 @@ export const MemberComputer = Schema.Struct({
   listenPort: MemberInstallPort,
   /** The hub member the join made it; absent for a join recorded without one. */
   memberId: Schema.optional(HubMemberId),
-}).annotations(strict);
+});
 export type MemberComputer = typeof MemberComputer.Type;
 
 /** The update's steps in the order they run; `roll-back` runs only after a failed swap or confirmation. */
 export const MEMBER_UPDATE_STEPS = ["copy", "verify", "drain", "swap", "confirm"] as const;
-export const MemberUpdateStep = Schema.Literal(...MEMBER_UPDATE_STEPS, "roll-back");
+export const MemberUpdateStep = Schema.Literals([...MEMBER_UPDATE_STEPS, "roll-back"]);
 export type MemberUpdateStep = typeof MemberUpdateStep.Type;
 
 /**
  * Why an update step failed, as a closed list. The last four are why the
  * confirmation refused the swapped build, and so why it was rolled back.
  */
-export const MemberUpdateFailure = Schema.Literal(
+export const MemberUpdateFailure = Schema.Literals([
   "server-unreachable",
   "digest-mismatch",
   "build-mismatch",
   "command-failed",
   "timed-out",
-  /** `octant server upgrade` stopped the build and left the store for a person to restore. */
   "recovery-required",
-  /** The store was migrated, so the previous build is not started against it. */
   "rollback-unsafe",
   "health-check-failed",
   "hello-unproven",
   "version-mismatch",
   "protocol-not-covered",
-);
+]);
 export type MemberUpdateFailure = typeof MemberUpdateFailure.Type;
 
 /** The longest the person may have an update wait for running turns. */
@@ -445,15 +443,17 @@ export const MEMBER_UPDATE_MAX_WAIT_MINUTES = 60;
  * way the member's owner stops gracefully, and the turns the stop cuts off
  * continue by themselves once it starts again.
  */
-export const MemberUpdateDrain = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("stop-now") }).annotations(strict),
+export const MemberUpdateDrain = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("stop-now") }),
   Schema.Struct({
     kind: Schema.Literal("wait"),
-    minutes: Schema.Int.pipe(Schema.between(1, MEMBER_UPDATE_MAX_WAIT_MINUTES)),
-  }).annotations(strict),
-);
+    minutes: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: MEMBER_UPDATE_MAX_WAIT_MINUTES }),
+    ),
+  }),
+]);
 export type MemberUpdateDrain = typeof MemberUpdateDrain.Type;
-export const MemberUpdateDrainKind = Schema.Literal("wait", "stop-now");
+export const MemberUpdateDrainKind = Schema.Literals(["wait", "stop-now"]);
 export type MemberUpdateDrainKind = typeof MemberUpdateDrainKind.Type;
 
 /** The person confirmed an update. Journaled before anything runs on the server; it names builds, never a key. */
@@ -465,34 +465,34 @@ export const MemberUpdateRequestedPayload = Schema.Struct({
   toVersion: MemberInstallVersion,
   ring: MemberInstallReleaseRing,
   drain: MemberUpdateDrain,
-}).annotations(strict);
+});
 export type MemberUpdateRequestedPayload = typeof MemberUpdateRequestedPayload.Type;
 
 /** `shield-servers.member-update-requested@1`, whose only drain was stopping now. */
 export const MemberUpdateRequestedPayloadV1 = Schema.Struct({
   ...MemberUpdateRequestedPayload.fields,
   drain: Schema.Literal("stop-now"),
-}).annotations(strict);
+});
 export type MemberUpdateRequestedPayloadV1 = typeof MemberUpdateRequestedPayloadV1.Type;
 
 export const MemberUpdateStepRecordedPayload = Schema.Struct({
   updateId: AggregateId,
   serverId: AggregateId,
   step: MemberUpdateStep,
-  outcome: Schema.Literal("succeeded", "failed"),
+  outcome: Schema.Literals(["succeeded", "failed"]),
   failure: Schema.optional(MemberUpdateFailure),
-}).annotations(strict);
+});
 export type MemberUpdateStepRecordedPayload = typeof MemberUpdateStepRecordedPayload.Type;
 
 export const MEMBER_REMOVAL_STEPS = ["leave", "stop", "delete"] as const;
-export const MemberRemovalStep = Schema.Literal(...MEMBER_REMOVAL_STEPS);
+export const MemberRemovalStep = Schema.Literals(MEMBER_REMOVAL_STEPS);
 export type MemberRemovalStep = typeof MemberRemovalStep.Type;
 
-export const MemberRemovalFailure = Schema.Literal(
+export const MemberRemovalFailure = Schema.Literals([
   "server-unreachable",
   "command-failed",
   "timed-out",
-);
+]);
 export type MemberRemovalFailure = typeof MemberRemovalFailure.Type;
 
 /** The person confirmed removing Octant; `deleteData` is true only when they ticked it. */
@@ -500,21 +500,27 @@ export const MemberRemovalRequestedPayload = Schema.Struct({
   removalId: AggregateId,
   serverId: AggregateId,
   deleteData: Schema.Boolean,
-}).annotations(strict);
+});
 export type MemberRemovalRequestedPayload = typeof MemberRemovalRequestedPayload.Type;
 
 export const MemberRemovalStepRecordedPayload = Schema.Struct({
   removalId: AggregateId,
   serverId: AggregateId,
   step: MemberRemovalStep,
-  outcome: Schema.Literal("succeeded", "failed"),
+  outcome: Schema.Literals(["succeeded", "failed"]),
   failure: Schema.optional(MemberRemovalFailure),
-}).annotations(strict);
+});
 export type MemberRemovalStepRecordedPayload = typeof MemberRemovalStepRecordedPayload.Type;
 
-const MemberStepRunState = Schema.Literal("waiting", "running", "succeeded", "failed", "not-run");
-const MemberStepMessage = Schema.String.pipe(Schema.maxLength(1_024));
-const MemberInstallPath = Schema.String.pipe(Schema.minLength(2), Schema.maxLength(1_024));
+const MemberStepRunState = Schema.Literals([
+  "waiting",
+  "running",
+  "succeeded",
+  "failed",
+  "not-run",
+]);
+const MemberStepMessage = Schema.String.check(Schema.isMaxLength(1_024));
+const MemberInstallPath = Schema.String.check(Schema.isMinLength(2), Schema.isMaxLength(1_024));
 
 /**
  * Downloading the signed headless build for a server's target from this
@@ -523,29 +529,23 @@ const MemberInstallPath = Schema.String.pipe(Schema.minLength(2), Schema.maxLeng
  * is kept in the data folder's `headless-builds` folder. The sheet reads it
  * until it is ready, then reads its plan again.
  */
-export const MemberBuildDownloadState = Schema.Literal(
+export const MemberBuildDownloadState = Schema.Literals([
   "downloading",
   "verifying",
   "ready",
   "refused",
-);
+]);
 export type MemberBuildDownloadState = typeof MemberBuildDownloadState.Type;
 
 /** Why a download kept nothing, as a closed list. */
-export const MemberBuildDownloadRefusal = Schema.Literal(
-  /** The ring could not be reached, or lists no build for the target. */
+export const MemberBuildDownloadRefusal = Schema.Literals([
   "unreachable",
-  /** This computer follows a ring that carries no headless build. */
   "no-release",
-  /** The ring's build is not newer than the one the server runs. */
   "no-newer-release",
-  /** The listing did not verify against the ring's release keys, or names another target or ring. */
   "untrusted-listing",
-  /** The bytes downloaded do not hash to the digest the signed listing names. */
   "digest-mismatch",
-  /** The build failed its own check: its files, its signature, or its version. */
   "build-unverified",
-);
+]);
 export type MemberBuildDownloadRefusal = typeof MemberBuildDownloadRefusal.Type;
 
 export const MemberBuildDownload = Schema.Struct({
@@ -557,7 +557,7 @@ export const MemberBuildDownload = Schema.Struct({
   version: Schema.optional(MemberInstallVersion),
   refusal: Schema.optional(MemberBuildDownloadRefusal),
   message: Schema.optional(MemberStepMessage),
-}).annotations(strict);
+});
 export type MemberBuildDownload = typeof MemberBuildDownload.Type;
 
 /** What the Update sheet states before anything runs, every fact read now. */
@@ -576,25 +576,27 @@ export const MemberUpdatePlan = Schema.Struct({
   /** The new build migrates the member's store; `octant server upgrade` takes a verified backup first. */
   storeMigration: Schema.Boolean,
   /** The ways to drain on offer, the one the sheet starts on first. */
-  drains: Schema.Array(MemberUpdateDrainKind).pipe(Schema.minItems(1), Schema.maxItems(2)),
-}).annotations(strict);
+  drains: Schema.Array(MemberUpdateDrainKind).check(Schema.isMinLength(1), Schema.isMaxLength(2)),
+});
 export type MemberUpdatePlan = typeof MemberUpdatePlan.Type;
 
 export const MemberUpdateStepState = Schema.Struct({
   step: MemberUpdateStep,
   state: MemberStepRunState,
   message: Schema.optional(MemberStepMessage),
-}).annotations(strict);
+});
 export type MemberUpdateStepState = typeof MemberUpdateStepState.Type;
 
 export const MemberUpdateProgress = Schema.Struct({
   updateId: AggregateId,
   serverId: AggregateId,
-  state: Schema.Literal("running", "updated", "rolled-back", "failed"),
-  steps: Schema.Array(MemberUpdateStepState).pipe(Schema.maxItems(MEMBER_UPDATE_STEPS.length + 1)),
+  state: Schema.Literals(["running", "updated", "rolled-back", "failed"]),
+  steps: Schema.Array(MemberUpdateStepState).check(
+    Schema.isMaxLength(MEMBER_UPDATE_STEPS.length + 1),
+  ),
   /** Why the swapped build was rolled back, when it was. */
   rollbackReason: Schema.optional(MemberUpdateFailure),
-}).annotations(strict);
+});
 export type MemberUpdateProgress = typeof MemberUpdateProgress.Type;
 
 /** What the Remove Octant sheet states before anything runs. */
@@ -606,86 +608,81 @@ export const MemberRemovalPlan = Schema.Struct({
   installRoot: MemberInstallPath,
   /** The login's Octant data folder: kept unless the person ticks to delete it. */
   dataFolder: MemberInstallPath,
-  service: Schema.Literal("systemd-user", "launchd-agent"),
-}).annotations(strict);
+  service: Schema.Literals(["systemd-user", "launchd-agent"]),
+});
 export type MemberRemovalPlan = typeof MemberRemovalPlan.Type;
 
 export const MemberRemovalStepState = Schema.Struct({
   step: MemberRemovalStep,
   state: MemberStepRunState,
   message: Schema.optional(MemberStepMessage),
-}).annotations(strict);
+});
 export type MemberRemovalStepState = typeof MemberRemovalStepState.Type;
 
 export const MemberRemovalProgress = Schema.Struct({
   removalId: AggregateId,
   serverId: AggregateId,
-  state: Schema.Literal("running", "removed", "failed"),
+  state: Schema.Literals(["running", "removed", "failed"]),
   deleteData: Schema.Boolean,
-  steps: Schema.Array(MemberRemovalStepState).pipe(Schema.maxItems(MEMBER_REMOVAL_STEPS.length)),
-}).annotations(strict);
+  steps: Schema.Array(MemberRemovalStepState).check(
+    Schema.isMaxLength(MEMBER_REMOVAL_STEPS.length),
+  ),
+});
 export type MemberRemovalProgress = typeof MemberRemovalProgress.Type;
 
-export const MemberInstallCommand = Schema.Union(
-  /** Reads the server and this computer's build, and states the plan; changes nothing. */
+export const MemberInstallCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("prepare-member-install"),
     serverId: AggregateId,
-  }).annotations(strict),
-  /** The person's one confirmation: it runs the plan and approves that one hub join. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-member-install"),
     planId: AggregateId,
     listenAddress: MemberInstallAddress,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("read-member-install"),
     installId: AggregateId,
-  }).annotations(strict),
-  /** The servers this computer made Octant computers, which offer Update and Remove Octant. */
-  Schema.Struct({ kind: Schema.Literal("list-member-computers") }).annotations(strict),
-  /** Reads the server's install and this computer's newer build; changes nothing. */
+  }),
+  Schema.Struct({ kind: Schema.Literal("list-member-computers") }),
   Schema.Struct({
     kind: Schema.Literal("prepare-member-update"),
     serverId: AggregateId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-member-update"),
     planId: AggregateId,
     drain: MemberUpdateDrain,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("read-member-update"),
     updateId: AggregateId,
-  }).annotations(strict),
-  /** Reads where Octant is installed on the server; changes nothing. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("prepare-member-removal"),
     serverId: AggregateId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-member-removal"),
     planId: AggregateId,
     deleteData: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("read-member-removal"),
     removalId: AggregateId,
-  }).annotations(strict),
-  /** A build download a prepare started, read until it is ready or refused. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("read-member-build-download"),
     downloadId: AggregateId,
-  }).annotations(strict),
-  /** The sheet reading that download closed; the last one to close stops it. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("leave-member-build-download"),
     downloadId: AggregateId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type MemberInstallCommand = typeof MemberInstallCommand.Type;
 
-export const MemberInstallRefusalReason = Schema.Literal(
+export const MemberInstallRefusalReason = Schema.Literals([
   "not-the-person",
   "server-not-found",
   "server-unreachable",
@@ -701,92 +698,113 @@ export const MemberInstallRefusalReason = Schema.Literal(
   "install-not-found",
   "already-installing",
   "unavailable",
-  /** The server is not one this computer made an Octant computer, or its install is gone. */
   "not-a-member",
   "no-newer-build",
   "update-not-found",
   "removal-not-found",
   "download-not-found",
-);
+]);
 export type MemberInstallRefusalReason = typeof MemberInstallRefusalReason.Type;
 
-export const MemberInstallResult = Schema.Union(
+export const MemberInstallResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("member-install-plan"),
     plan: MemberInstallPlan,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-install-progress"),
     progress: MemberInstallProgress,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-computers"),
-    members: Schema.Array(MemberComputer).pipe(Schema.maxItems(MAX_SHIELD_SERVERS)),
-  }).annotations(strict),
+    members: Schema.Array(MemberComputer).check(Schema.isMaxLength(MAX_SHIELD_SERVERS)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-update-plan"),
     plan: MemberUpdatePlan,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-update-progress"),
     progress: MemberUpdateProgress,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-removal-plan"),
     plan: MemberRemovalPlan,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-removal-progress"),
     progress: MemberRemovalProgress,
-  }).annotations(strict),
-  /** No suitable build is on this computer, so preparing started, or joined, its download. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-build-download"),
     download: MemberBuildDownload,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("member-install-refused"),
     reason: MemberInstallRefusalReason,
     message: Schema.String,
-  }).annotations(strict),
-);
+  }),
+]);
 export type MemberInstallResult = typeof MemberInstallResult.Type;
 
-export const decodeMemberInstallCommand = Schema.decodeUnknownSync(MemberInstallCommand);
+export const decodeMemberInstallCommand = Schema.decodeUnknownSync(
+  MemberInstallCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeMemberInstallRequestedPayload = Schema.decodeUnknownSync(
   MemberInstallRequestedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberInstallStepRecordedPayload = Schema.decodeUnknownSync(
   MemberInstallStepRecordedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberUpdateRequestedPayload = Schema.decodeUnknownSync(
   MemberUpdateRequestedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberUpdateRequestedPayloadV1 = Schema.decodeUnknownSync(
   MemberUpdateRequestedPayloadV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberUpdateStepRecordedPayload = Schema.decodeUnknownSync(
   MemberUpdateStepRecordedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberRemovalRequestedPayload = Schema.decodeUnknownSync(
   MemberRemovalRequestedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeMemberRemovalStepRecordedPayload = Schema.decodeUnknownSync(
   MemberRemovalStepRecordedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const decodeShieldServersCommand = Schema.decodeUnknownSync(ShieldServersCommand);
-export const decodeShieldServersView = Schema.decodeUnknownSync(ShieldServersView);
-export const decodeShieldServerSetPayload = Schema.decodeUnknownSync(ShieldServerSetPayload);
+export const decodeShieldServersCommand = Schema.decodeUnknownSync(
+  ShieldServersCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShieldServersView = Schema.decodeUnknownSync(
+  ShieldServersView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeShieldServerSetPayload = Schema.decodeUnknownSync(
+  ShieldServerSetPayload,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeShieldServerRemovedPayload = Schema.decodeUnknownSync(
   ShieldServerRemovedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeShieldProjectServersSetPayload = Schema.decodeUnknownSync(
   ShieldProjectServersSetPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeShieldProjectServersClearedPayload = Schema.decodeUnknownSync(
   ShieldProjectServersClearedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeShieldRemoteCommandRanPayload = Schema.decodeUnknownSync(
   ShieldRemoteCommandRanPayload,
+  STRICT_DECODE_OPTIONS,
 );

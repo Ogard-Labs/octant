@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AuditActingPrincipal } from "./auditEvents";
 import {
   DelegatedAuthority,
@@ -10,9 +11,8 @@ import {
 } from "./hubAndSpokes";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const bounded = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
 
 /**
  * Every delegation a host sends or receives is journaled as one of these, with
@@ -21,15 +21,13 @@ const bounded = (maxLength: number) =>
  */
 export const HUB_DELEGATION_RECORDED = "hub-and-spokes.delegation-recorded@1" as const;
 
-export const HubDelegationChange = Schema.Literal(
-  // On the receiving spoke.
+export const HubDelegationChange = Schema.Literals([
   "received",
   "cancel-requested",
-  // On the delegating spoke.
   "sent",
   "result-recorded",
   "cancel-sent",
-);
+]);
 export type HubDelegationChange = typeof HubDelegationChange.Type;
 
 export const HubDelegationRecordedPayload = Schema.Struct({
@@ -42,10 +40,11 @@ export const HubDelegationRecordedPayload = Schema.Struct({
   delegatedFrom: Schema.optional(DelegatingThreadReference),
   /** The thread the delegation runs as on the receiving spoke. */
   threadId: Schema.optional(bounded(64)),
-}).annotations(strict);
+});
 export type HubDelegationRecordedPayload = typeof HubDelegationRecordedPayload.Type;
 export const decodeHubDelegationRecordedPayload = Schema.decodeUnknownSync(
   HubDelegationRecordedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** A delegation the receiving spoke accepted, with the authority it clamped the request to. */
@@ -53,22 +52,22 @@ export const DelegationAccepted = Schema.Struct({
   status: Schema.Literal("accepted"),
   requestId: DelegationRequestId,
   authority: DelegatedAuthority,
-}).annotations(strict);
+});
 export type DelegationAccepted = typeof DelegationAccepted.Type;
 
 /** The status read and the cancel name one delegation and nothing else. */
 export const DelegationReference = Schema.Struct({
   requestId: DelegationRequestId,
-}).annotations(strict);
+});
 export type DelegationReference = typeof DelegationReference.Type;
 
-export const DelegationChildState = Schema.Literal(
+export const DelegationChildState = Schema.Literals([
   "running",
   "waiting-for-approval",
   "completed",
   "failed",
   "cancelled",
-);
+]);
 export type DelegationChildState = typeof DelegationChildState.Type;
 
 /**
@@ -79,35 +78,50 @@ export type DelegationChildState = typeof DelegationChildState.Type;
  */
 export const DelegationStatus = Schema.Struct({
   requestId: DelegationRequestId,
-  state: Schema.Union(DelegationChildState, Schema.Literal("starting")),
+  state: Schema.Union([DelegationChildState, Schema.Literal("starting")]),
   result: Schema.optional(DelegationResult),
-}).annotations(strict);
+});
 export type DelegationStatus = typeof DelegationStatus.Type;
 
 export const DelegationCancelAnswer = Schema.Struct({
-  status: Schema.Literal("cancelled", "already-finished"),
+  status: Schema.Literals(["cancelled", "already-finished"]),
   requestId: DelegationRequestId,
-}).annotations(strict);
+});
 export type DelegationCancelAnswer = typeof DelegationCancelAnswer.Type;
 
 /** What a person at a window on the delegating spoke asks for: a remote child run for a parent thread. */
 export const DelegationStartCommand = Schema.Struct({
   parent: Schema.Struct({
     mode: PeerDelegationMode,
-    threadId: Schema.UUID,
-  }).annotations(strict),
+    threadId: GuidString,
+  }),
   targetMemberId: HubMemberId,
   projectId: ProjectId,
   task: bounded(32_768),
   authority: DelegatedAuthority,
-}).annotations(strict);
+});
 export type DelegationStartCommand = typeof DelegationStartCommand.Type;
 
-export const decodeDelegationAccepted = Schema.decodeUnknownSync(DelegationAccepted);
-export const decodeDelegationReference = Schema.decodeUnknownSync(DelegationReference);
-export const decodeDelegationStatus = Schema.decodeUnknownSync(DelegationStatus);
-export const decodeDelegationCancelAnswer = Schema.decodeUnknownSync(DelegationCancelAnswer);
-export const decodeDelegationStartCommand = Schema.decodeUnknownSync(DelegationStartCommand);
+export const decodeDelegationAccepted = Schema.decodeUnknownSync(
+  DelegationAccepted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDelegationReference = Schema.decodeUnknownSync(
+  DelegationReference,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDelegationStatus = Schema.decodeUnknownSync(
+  DelegationStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDelegationCancelAnswer = Schema.decodeUnknownSync(
+  DelegationCancelAnswer,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDelegationStartCommand = Schema.decodeUnknownSync(
+  DelegationStartCommand,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The Projects a member may delegate to on another member, as that member
@@ -118,23 +132,25 @@ export const DelegationProjectListing = Schema.Struct({
   projects: Schema.Array(
     Schema.Struct({
       projectId: ProjectId,
-      name: Schema.String.pipe(Schema.maxLength(200)),
-      modes: Schema.Array(PeerDelegationMode).pipe(Schema.minItems(1)),
+      name: Schema.String.check(Schema.isMaxLength(200)),
+      modes: Schema.Array(PeerDelegationMode).check(Schema.isMinLength(1)),
     }),
-  ).pipe(Schema.maxItems(500)),
+  ).check(Schema.isMaxLength(500)),
   /** False once the member's person stopped accepting delegated work; it then lists no Projects. */
   accepting: Schema.optional(Schema.Boolean),
   /** How busy the member is, changed only once a new level has held, for placing work. */
-  load: Schema.optional(Schema.Literal("light", "busy", "heavy")),
+  load: Schema.optional(Schema.Literals(["light", "busy", "heavy"])),
 });
 export type DelegationProjectListing = typeof DelegationProjectListing.Type;
-export const decodeDelegationProjectListing = Schema.decodeUnknownSync(DelegationProjectListing);
+export const decodeDelegationProjectListing = Schema.decodeUnknownSync(
+  DelegationProjectListing,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window's switch for whether this member takes delegated work from other members. */
-export const DelegationAcceptingRequest = Schema.Struct({ accepting: Schema.Boolean }).annotations(
-  strict,
-);
+export const DelegationAcceptingRequest = Schema.Struct({ accepting: Schema.Boolean });
 export type DelegationAcceptingRequest = typeof DelegationAcceptingRequest.Type;
 export const decodeDelegationAcceptingRequest = Schema.decodeUnknownSync(
   DelegationAcceptingRequest,
+  STRICT_DECODE_OPTIONS,
 );

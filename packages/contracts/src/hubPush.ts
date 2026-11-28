@@ -1,9 +1,9 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { RemotePushGatewayRefusalCode, RemotePushGatewayUrl } from "./remotePushNotifications";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const base64Url = (maximum: number) =>
-  Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]+$/), Schema.maxLength(maximum));
+  Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/), Schema.isMaxLength(maximum));
 
 /**
  * The most a spoke may hand the hub for one notification. A delivery request is
@@ -24,21 +24,19 @@ export const HUB_PUSH_BODY_MAX_BYTES = 16_384;
  * gateway when it is absent and refuses a name that is not its own.
  */
 export const HubPushHandoff = Schema.Struct({
-  body: Schema.String.pipe(
-    Schema.filter(
+  body: Schema.String.check(
+    Schema.makeFilter(
       (value) => new TextEncoder().encode(value).byteLength <= HUB_PUSH_BODY_MAX_BYTES,
-      {
-        message: () => "A sealed delivery request is small.",
-      },
+      { message: "A sealed delivery request is small." },
     ),
   ),
   hostKey: base64Url(512),
-  timestamp: Schema.String.pipe(Schema.maxLength(40)),
+  timestamp: Schema.String.check(Schema.isMaxLength(40)),
   signature: base64Url(256),
   gatewayUrl: Schema.optional(RemotePushGatewayUrl),
-}).annotations(strict);
+});
 export type HubPushHandoff = typeof HubPushHandoff.Type;
-export const decodeHubPushHandoff = Schema.decodeUnknownSync(HubPushHandoff);
+export const decodeHubPushHandoff = Schema.decodeUnknownSync(HubPushHandoff, STRICT_DECODE_OPTIONS);
 
 /**
  * The gateway's answer, relayed to the spoke as data. The spoke classifies it
@@ -46,17 +44,17 @@ export const decodeHubPushHandoff = Schema.decodeUnknownSync(HubPushHandoff);
  */
 export const HubPushAnswer = Schema.Struct({
   status: Schema.Literal("forwarded"),
-  gatewayStatus: Schema.Int.pipe(Schema.between(100, 599)),
+  gatewayStatus: Schema.Int.check(Schema.isBetween({ minimum: 100, maximum: 599 })),
   code: Schema.optional(RemotePushGatewayRefusalCode),
-}).annotations(strict);
+});
 export type HubPushAnswer = typeof HubPushAnswer.Type;
-export const decodeHubPushAnswer = Schema.decodeUnknownSync(HubPushAnswer);
+export const decodeHubPushAnswer = Schema.decodeUnknownSync(HubPushAnswer, STRICT_DECODE_OPTIONS);
 
 /**
  * Why a push forward or a grant check came to nothing. The journal keeps this
  * word and a size, never a capability, an envelope, or a gateway's message.
  */
-export const HubPushReason = Schema.Literal(
+export const HubPushReason = Schema.Literals([
   "push-service-off",
   "not-a-spoke",
   "not-coordinating",
@@ -71,26 +69,30 @@ export const HubPushReason = Schema.Literal(
   "push-not-granted",
   "standby-not-granted",
   "hub-reachable",
-);
+]);
 export type HubPushReason = typeof HubPushReason.Type;
 
 /** What a spoke answers when the hub, or a standby, asks whether its grant ticks Push. */
-export const HubPushGrantAnswer = Schema.Struct({ status: Schema.Literal("granted") }).annotations(
-  strict,
-);
+export const HubPushGrantAnswer = Schema.Struct({ status: Schema.Literal("granted") });
 export type HubPushGrantAnswer = typeof HubPushGrantAnswer.Type;
-export const decodeHubPushGrantAnswer = Schema.decodeUnknownSync(HubPushGrantAnswer);
+export const decodeHubPushGrantAnswer = Schema.decodeUnknownSync(
+  HubPushGrantAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The hub tells a standby whether its push switch is on, so the standby forwards only when it is. */
-export const HubPushCopy = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
+export const HubPushCopy = Schema.Struct({ enabled: Schema.Boolean });
 export type HubPushCopy = typeof HubPushCopy.Type;
-export const decodeHubPushCopy = Schema.decodeUnknownSync(HubPushCopy);
+export const decodeHubPushCopy = Schema.decodeUnknownSync(HubPushCopy, STRICT_DECODE_OPTIONS);
 
 /** The person turning the hub's push switch on or off in a window. */
-export const HubPushSwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
+export const HubPushSwitchRequest = Schema.Struct({ enabled: Schema.Boolean });
 export type HubPushSwitchRequest = typeof HubPushSwitchRequest.Type;
-export const decodeHubPushSwitchRequest = Schema.decodeUnknownSync(HubPushSwitchRequest);
+export const decodeHubPushSwitchRequest = Schema.decodeUnknownSync(
+  HubPushSwitchRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** How the last forward for one spoke ended, for Settings and `octant hub status`. */
-export const HubPushResult = Schema.Literal("forwarded", "refused", "failed");
+export const HubPushResult = Schema.Literals(["forwarded", "refused", "failed"]);
 export type HubPushResult = typeof HubPushResult.Type;

@@ -16,15 +16,18 @@ export const CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH = 128;
  */
 export const CANVAS_DESIGN_BRAND_TOKEN_KINDS = ["color", "font", "radius", "space"] as const;
 export type CanvasDesignBrandTokenKind = (typeof CANVAS_DESIGN_BRAND_TOKEN_KINDS)[number];
-export const CanvasDesignBrandTokenName = Schema.String.pipe(
-  Schema.pattern(/^(?:color|font|radius|space)-[a-z0-9][a-z0-9-]{0,31}$/),
+export const CanvasDesignBrandTokenName = Schema.String.check(
+  Schema.isPattern(/^(?:color|font|radius|space)-[a-z0-9][a-z0-9-]{0,31}$/),
 );
-export const CanvasDesignBrand = Schema.Record({
-  key: CanvasDesignBrandTokenName,
-  value: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH)),
-}).pipe(
-  Schema.filter((brand) => Object.keys(brand).length <= CANVAS_MAX_DESIGN_BRAND_TOKENS, {
-    message: () => `A brand holds at most ${String(CANVAS_MAX_DESIGN_BRAND_TOKENS)} tokens.`,
+export const CanvasDesignBrand = Schema.Record(
+  CanvasDesignBrandTokenName,
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH),
+  ),
+).check(
+  Schema.makeFilter((brand) => Object.keys(brand).length <= CANVAS_MAX_DESIGN_BRAND_TOKENS, {
+    message: `A brand holds at most ${String(CANVAS_MAX_DESIGN_BRAND_TOKENS)} tokens.`,
   }),
 );
 export type CanvasDesignBrand = typeof CanvasDesignBrand.Type;

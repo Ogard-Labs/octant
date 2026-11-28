@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import {
@@ -9,13 +10,15 @@ import {
 } from "./automation";
 import { RemotePushNotificationKind } from "./remotePushNotifications";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
@@ -26,7 +29,7 @@ const boundedNonEmptyText = (maximumBytes: number) =>
 export const AutomationNotificationKind = RemotePushNotificationKind;
 export type AutomationNotificationKind = typeof AutomationNotificationKind.Type;
 
-export const AutomationNotificationMode = Schema.Literal("work", "code");
+export const AutomationNotificationMode = Schema.Literals(["work", "code"]);
 export type AutomationNotificationMode = typeof AutomationNotificationMode.Type;
 
 /**
@@ -38,7 +41,7 @@ export const AutomationNotificationNavigationTarget = Schema.Struct({
   surface: Schema.Literal("automation-center"),
   automationId: AutomationId,
   runId: AutomationRunId,
-}).annotations(strict);
+});
 export type AutomationNotificationNavigationTarget =
   typeof AutomationNotificationNavigationTarget.Type;
 
@@ -57,7 +60,7 @@ export const AutomationNotificationPayloadV1 = Schema.Struct({
   title: boundedNonEmptyText(80),
   body: boundedText(120),
   navigation: AutomationNotificationNavigationTarget,
-}).annotations(strict);
+});
 export type AutomationNotificationPayloadV1 = typeof AutomationNotificationPayloadV1.Type;
 
 /** Host-scoped opt-in preferences. Default is fully disabled (privacy-preserving). */
@@ -69,7 +72,7 @@ export const AutomationNotificationPreferences = Schema.Struct({
   completion: Schema.Boolean,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationNotificationPreferences = typeof AutomationNotificationPreferences.Type;
 
 export const DEFAULT_AUTOMATION_NOTIFICATION_PREFERENCES: Omit<
@@ -91,7 +94,7 @@ export const UpdateAutomationNotificationPreferences = Schema.Struct({
   failure: Schema.Boolean,
   completion: Schema.Boolean,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type UpdateAutomationNotificationPreferences =
   typeof UpdateAutomationNotificationPreferences.Type;
 
@@ -99,19 +102,19 @@ export type UpdateAutomationNotificationPreferences =
  * Honest delivery availability for local/browser settings and remote clients.
  * Never includes tokens, provider credentials, or host-only secrets.
  */
-export const AutomationNotificationProviderDelivery = Schema.Literal("available", "unavailable");
+export const AutomationNotificationProviderDelivery = Schema.Literals(["available", "unavailable"]);
 export type AutomationNotificationProviderDelivery =
   typeof AutomationNotificationProviderDelivery.Type;
 
 export const AutomationNotificationDeliveryStatus = Schema.Struct({
   preferences: AutomationNotificationPreferences,
   providerDelivery: AutomationNotificationProviderDelivery,
-  registeredDestinationCount: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+  registeredDestinationCount: NonNegativeInt,
   deliveryEnabled: Schema.Boolean,
-}).annotations(strict);
+});
 export type AutomationNotificationDeliveryStatus = typeof AutomationNotificationDeliveryStatus.Type;
 
-export const AutomationNotificationDeliveryOutcome = Schema.Literal(
+export const AutomationNotificationDeliveryOutcome = Schema.Literals([
   "queued",
   "delivered",
   "failed",
@@ -120,7 +123,7 @@ export const AutomationNotificationDeliveryOutcome = Schema.Literal(
   "skipped-no-destination",
   "skipped-duplicate",
   "exhausted",
-);
+]);
 export type AutomationNotificationDeliveryOutcome =
   typeof AutomationNotificationDeliveryOutcome.Type;
 
@@ -135,11 +138,11 @@ export const AutomationNotificationDeliveryReceipt = Schema.Struct({
   kind: AutomationNotificationKind,
   dedupeKey: boundedNonEmptyText(256),
   outcome: AutomationNotificationDeliveryOutcome,
-  attemptCount: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0), Schema.lessThanOrEqualTo(32)),
-  destinationCount: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+  attemptCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(32)),
+  destinationCount: NonNegativeInt,
   failureCategory: Schema.optional(boundedNonEmptyText(64)),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationNotificationDeliveryReceipt =
   typeof AutomationNotificationDeliveryReceipt.Type;
 
@@ -152,16 +155,16 @@ export const MAX_AUTOMATION_NOTIFICATION_DELIVERY_QUERY = 100;
 
 export const AutomationNotificationDeliveryQueryResponse = Schema.Struct({
   status: AutomationNotificationDeliveryStatus,
-  receipts: Schema.Array(AutomationNotificationDeliveryReceipt).pipe(
-    Schema.maxItems(MAX_AUTOMATION_NOTIFICATION_DELIVERY_QUERY),
+  receipts: Schema.Array(AutomationNotificationDeliveryReceipt).check(
+    Schema.isMaxLength(MAX_AUTOMATION_NOTIFICATION_DELIVERY_QUERY),
   ),
-}).annotations(strict);
+});
 export type AutomationNotificationDeliveryQueryResponse =
   typeof AutomationNotificationDeliveryQueryResponse.Type;
 
 export const AutomationNotificationDeliveryRecorded = Schema.Struct({
   receipt: AutomationNotificationDeliveryReceipt,
-}).annotations(strict);
+});
 export type AutomationNotificationDeliveryRecorded =
   typeof AutomationNotificationDeliveryRecorded.Type;
 
@@ -178,22 +181,29 @@ export type AutomationNotificationEventName = (typeof AUTOMATION_NOTIFICATION_EV
 
 export const decodeAutomationNotificationPayloadV1 = Schema.decodeUnknownSync(
   AutomationNotificationPayloadV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationNotificationPreferences = Schema.decodeUnknownSync(
   AutomationNotificationPreferences,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeUpdateAutomationNotificationPreferences = Schema.decodeUnknownSync(
   UpdateAutomationNotificationPreferences,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationNotificationDeliveryStatus = Schema.decodeUnknownSync(
   AutomationNotificationDeliveryStatus,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationNotificationDeliveryQueryResponse = Schema.decodeUnknownSync(
   AutomationNotificationDeliveryQueryResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationNotificationDeliveryReceipt = Schema.decodeUnknownSync(
   AutomationNotificationDeliveryReceipt,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationNotificationDeliveryRecorded = Schema.decodeUnknownSync(
   AutomationNotificationDeliveryRecorded,
+  STRICT_DECODE_OPTIONS,
 );

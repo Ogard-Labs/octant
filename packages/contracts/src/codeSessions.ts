@@ -1,9 +1,8 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { CodeNativeSessionId } from "./codeOperations";
 import { ImportedSessionHistory } from "./importedSessionHistory";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Why the host opened a turn the runtime started by itself in a thread's kept
@@ -23,9 +22,9 @@ export const PLAN_APPROVED_TURN_PROMPT =
 
 /** One background task a thread's kept session still runs. */
 export const CodeLiveTask = Schema.Struct({
-  taskId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  taskId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  description: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+});
 export type CodeLiveTask = typeof CodeLiveTask.Type;
 
 /**
@@ -35,25 +34,28 @@ export type CodeLiveTask = typeof CodeLiveTask.Type;
  */
 export const CodeLiveTasks = Schema.Struct({
   threadId: CodeThreadId,
-  tasks: Schema.Array(CodeLiveTask).pipe(Schema.maxItems(64)),
+  tasks: Schema.Array(CodeLiveTask).check(Schema.isMaxLength(64)),
   /** A turn holds the session now: the person's, or one the runtime started. */
   turnRunning: Schema.Boolean,
-}).annotations(strict);
+});
 export type CodeLiveTasks = typeof CodeLiveTasks.Type;
 
 /** The person stops a thread's live tasks, and the session that runs them. */
 export const StopCodeLiveTasks = Schema.Struct({
   kind: Schema.Literal("stop-code-live-tasks"),
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type StopCodeLiveTasks = typeof StopCodeLiveTasks.Type;
-export const decodeStopCodeLiveTasks = Schema.decodeUnknownSync(StopCodeLiveTasks);
+export const decodeStopCodeLiveTasks = Schema.decodeUnknownSync(
+  StopCodeLiveTasks,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const StopCodeLiveTasksResult = Schema.Struct({
   kind: Schema.Literal("code-live-tasks-stopped"),
   /** Whether a kept session was running; false when there was nothing to stop. */
   stopped: Schema.Boolean,
-}).annotations(strict);
+});
 export type StopCodeLiveTasksResult = typeof StopCodeLiveTasksResult.Type;
 
 /**
@@ -64,11 +66,11 @@ export type StopCodeLiveTasksResult = typeof StopCodeLiveTasksResult.Type;
  */
 export const CodeNativeSession = Schema.Struct({
   nativeSessionId: CodeNativeSessionId,
-  title: Schema.optional(Schema.String.pipe(Schema.maxLength(200))),
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
   /** When the runtime last wrote the session, in milliseconds since the epoch. */
-  lastModified: Schema.Number.pipe(Schema.nonNegative()),
-  gitBranch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
-}).annotations(strict);
+  lastModified: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)),
+  gitBranch: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
+});
 export type CodeNativeSession = typeof CodeNativeSession.Type;
 
 /**
@@ -88,12 +90,12 @@ export const CodeNativeSessions = Schema.Struct({
        * Absent on a thread adopted before Octant imported any.
        */
       history: Schema.optional(ImportedSessionHistory),
-    }).annotations(strict),
+    }),
   ),
-  sessions: Schema.Array(CodeNativeSession).pipe(Schema.maxItems(50)),
+  sessions: Schema.Array(CodeNativeSession).check(Schema.isMaxLength(50)),
   /** Why the thread cannot start from a session, when it cannot. */
-  unavailable: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  unavailable: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+});
 export type CodeNativeSessions = typeof CodeNativeSessions.Type;
 
 /**
@@ -104,19 +106,22 @@ export const AdoptCodeNativeSession = Schema.Struct({
   kind: Schema.Literal("adopt-code-native-session"),
   threadId: CodeThreadId,
   nativeSessionId: CodeNativeSessionId,
-}).annotations(strict);
+});
 export type AdoptCodeNativeSession = typeof AdoptCodeNativeSession.Type;
-export const decodeAdoptCodeNativeSession = Schema.decodeUnknownSync(AdoptCodeNativeSession);
+export const decodeAdoptCodeNativeSession = Schema.decodeUnknownSync(
+  AdoptCodeNativeSession,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const AdoptCodeNativeSessionResult = Schema.Union(
+export const AdoptCodeNativeSessionResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("code-native-session-adopted"),
     threadId: CodeThreadId,
     nativeSessionId: CodeNativeSessionId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code-native-session-refused"),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type AdoptCodeNativeSessionResult = typeof AdoptCodeNativeSessionResult.Type;

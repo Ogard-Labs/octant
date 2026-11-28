@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
@@ -27,17 +28,17 @@ export const ThreadBoardPullRequestIdentity = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type ThreadBoardPullRequestIdentity = typeof ThreadBoardPullRequestIdentity.Type;
 
-export const ThreadBoardPullRequestState = Schema.Literal(
+export const ThreadBoardPullRequestState = Schema.Literals([
   "unknown",
   "draft",
   "open",
   "merged",
   "closed",
-);
+]);
 export type ThreadBoardPullRequestState = typeof ThreadBoardPullRequestState.Type;
 
 /**
@@ -45,31 +46,31 @@ export type ThreadBoardPullRequestState = typeof ThreadBoardPullRequestState.Typ
  * unauthenticated, or offline — which is a different promise than `stale`
  * (reachable, but the facts are older than the last successful refresh).
  */
-export const ThreadBoardPullRequestFreshness = Schema.Literal("fresh", "stale", "unavailable");
+export const ThreadBoardPullRequestFreshness = Schema.Literals(["fresh", "stale", "unavailable"]);
 export type ThreadBoardPullRequestFreshness = typeof ThreadBoardPullRequestFreshness.Type;
 
-export const ThreadBoardPullRequestMergeability = Schema.Literal(
+export const ThreadBoardPullRequestMergeability = Schema.Literals([
   "mergeable",
   "conflicting",
   "unknown",
-);
+]);
 export type ThreadBoardPullRequestMergeability = typeof ThreadBoardPullRequestMergeability.Type;
 
-export const ThreadBoardPullRequestChecksSummary = Schema.Literal(
+export const ThreadBoardPullRequestChecksSummary = Schema.Literals([
   "unknown",
   "pending",
   "passing",
   "failing",
-);
+]);
 export type ThreadBoardPullRequestChecksSummary = typeof ThreadBoardPullRequestChecksSummary.Type;
 
-export const ThreadBoardPullRequestReviewSummary = Schema.Literal(
+export const ThreadBoardPullRequestReviewSummary = Schema.Literals([
   "unknown",
   "none",
   "pending",
   "approved",
   "changes-requested",
-);
+]);
 export type ThreadBoardPullRequestReviewSummary = typeof ThreadBoardPullRequestReviewSummary.Type;
 
 /**
@@ -81,7 +82,9 @@ export const MAX_PULL_REQUEST_LINE_COUNT = 100_000_000;
 export const MAX_PULL_REQUEST_CHECK_COUNT = 10_000;
 
 /** Added or removed lines of the whole pull request, as the forge counts them. */
-export const PullRequestLineCount = Schema.Int.pipe(Schema.between(0, MAX_PULL_REQUEST_LINE_COUNT));
+export const PullRequestLineCount = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: MAX_PULL_REQUEST_LINE_COUNT }),
+);
 
 /**
  * How many checks passed out of how many were counted. A check is counted when
@@ -91,11 +94,9 @@ export const PullRequestLineCount = Schema.Int.pipe(Schema.between(0, MAX_PULL_R
  * checks read "passing" always has `passed === total`.
  */
 export const PullRequestCheckCounts = Schema.Struct({
-  passed: Schema.Int.pipe(Schema.between(0, MAX_PULL_REQUEST_CHECK_COUNT)),
-  total: Schema.Int.pipe(Schema.between(1, MAX_PULL_REQUEST_CHECK_COUNT)),
-})
-  .pipe(Schema.filter((counts) => counts.passed <= counts.total))
-  .annotations(strict);
+  passed: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_PULL_REQUEST_CHECK_COUNT })),
+  total: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PULL_REQUEST_CHECK_COUNT })),
+}).check(Schema.makeFilter((counts) => counts.passed <= counts.total));
 export type PullRequestCheckCounts = typeof PullRequestCheckCounts.Type;
 
 /**
@@ -103,14 +104,14 @@ export type PullRequestCheckCounts = typeof PullRequestCheckCounts.Type;
  * switched on, so it merges by itself once its requirements pass; `queued`
  * means it is in the repository's merge queue.
  */
-export const PullRequestMerging = Schema.Literal("auto-merge", "queued");
+export const PullRequestMerging = Schema.Literals(["auto-merge", "queued"]);
 export type PullRequestMerging = typeof PullRequestMerging.Type;
 
 /**
  * How a Work board card reaches pull-request evidence through a Code thread.
  * Code board cards omit this field.
  */
-export const ThreadBoardPullRequestRelationship = Schema.Literal("linked", "promoted");
+export const ThreadBoardPullRequestRelationship = Schema.Literals(["linked", "promoted"]);
 export type ThreadBoardPullRequestRelationship = typeof ThreadBoardPullRequestRelationship.Type;
 
 /**
@@ -121,17 +122,15 @@ export type ThreadBoardPullRequestRelationship = typeof ThreadBoardPullRequestRe
  * on two layers of four still reads "2 of 4".
  */
 export const PullRequestStackPlace = Schema.Struct({
-  position: Schema.Int.pipe(Schema.positive()),
-  size: Schema.Int.pipe(Schema.greaterThanOrEqualTo(2)),
-  parent: Schema.optional(Schema.Int.pipe(Schema.positive())),
-})
-  .pipe(
-    Schema.filter(
-      (place) =>
-        place.position <= place.size && (place.parent === undefined) === (place.position === 1),
-    ),
-  )
-  .annotations(strict);
+  position: PositiveInt,
+  size: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
+  parent: Schema.optional(PositiveInt),
+}).check(
+  Schema.makeFilter(
+    (place) =>
+      place.position <= place.size && (place.parent === undefined) === (place.position === 1),
+  ),
+);
 export type PullRequestStackPlace = typeof PullRequestStackPlace.Type;
 
 /**
@@ -162,15 +161,15 @@ export const ThreadBoardPullRequestSummary = Schema.Struct({
   merging: Schema.optional(PullRequestMerging),
   /** Absent on a pull request of no stack, and on a board card, which has no room for it. */
   stack: Schema.optional(PullRequestStackPlace),
-}).annotations(strict);
+});
 export type ThreadBoardPullRequestSummary = typeof ThreadBoardPullRequestSummary.Type;
 
 export const ThreadBoardPullRequestSummaries = Schema.Struct({
-  items: Schema.Array(ThreadBoardPullRequestSummary).pipe(
-    Schema.maxItems(MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY),
+  items: Schema.Array(ThreadBoardPullRequestSummary).check(
+    Schema.isMaxLength(MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY),
   ),
-  hiddenCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  hiddenCount: NonNegativeInt,
+});
 export type ThreadBoardPullRequestSummaries = typeof ThreadBoardPullRequestSummaries.Type;
 
 /**
@@ -178,21 +177,25 @@ export type ThreadBoardPullRequestSummaries = typeof ThreadBoardPullRequestSumma
  * entry instead. The decoded shape is identical, so one renderer reads both.
  */
 export const ThreadNavigationPullRequestSummaries = Schema.Struct({
-  items: Schema.Array(ThreadBoardPullRequestSummary).pipe(
-    Schema.maxItems(MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY),
+  items: Schema.Array(ThreadBoardPullRequestSummary).check(
+    Schema.isMaxLength(MAX_THREAD_NAVIGATION_PULL_REQUEST_DISPLAY),
   ),
-  hiddenCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  hiddenCount: NonNegativeInt,
+});
 
 export const decodeThreadBoardPullRequestIdentity = Schema.decodeUnknownSync(
   ThreadBoardPullRequestIdentity,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadBoardPullRequestSummary = Schema.decodeUnknownSync(
   ThreadBoardPullRequestSummary,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadBoardPullRequestSummaries = Schema.decodeUnknownSync(
   ThreadBoardPullRequestSummaries,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadNavigationPullRequestSummaries = Schema.decodeUnknownSync(
   ThreadNavigationPullRequestSummaries,
+  STRICT_DECODE_OPTIONS,
 );

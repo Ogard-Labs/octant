@@ -335,7 +335,7 @@ describe("ChatTurnRunner", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           runner.run({
             inputsCurrent: () => current,
@@ -376,8 +376,8 @@ describe("ChatTurnRunner", () => {
 
     expect(acquireInputs[0]).toMatchObject({ mode: "chat", projectRoot: scratchRoot });
     expect(result).toMatchObject({
-      _tag: "Left",
-      left: { message: expect.stringContaining("original continuation inputs") },
+      _tag: "Failure",
+      failure: { message: expect.stringContaining("original continuation inputs") },
     });
     expect(connection.send).not.toHaveBeenCalled();
   });
@@ -845,7 +845,7 @@ describe("ChatTurnRunner", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           runner.run({
             thread: thread(),
@@ -890,7 +890,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+    expect(result).toMatchObject({ _tag: "Failure", failure: { category: "failed" } });
     expect(updates.at(-1)?.outcome).toBe("failed");
     expect(updates.at(-1)?.failure).toEqual({ code: "tool-timed-out" });
     expect(toolSignals.at(-1)?.aborted).toBe(true);
@@ -975,7 +975,7 @@ describe("ChatTurnRunner", () => {
         }),
       });
       const turn = Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.scoped(
             runner.run({
               thread: thread(),
@@ -1070,7 +1070,7 @@ describe("ChatTurnRunner", () => {
         },
       });
 
-      expect(result._tag).toBe("Right");
+      expect(result._tag).toBe("Success");
       expect(runs()).toBe(1);
       expect(updates.at(-1)?.outcome).not.toBe("failed");
       expect(updates.some((update) => update.failure?.code === "tool-timed-out")).toBe(false);
@@ -1124,7 +1124,7 @@ describe("ChatTurnRunner", () => {
       });
 
       expect(runs()).toBe(1);
-      expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+      expect(result).toMatchObject({ _tag: "Failure", failure: { category: "failed" } });
       expect(updates.at(-1)?.failure).toEqual({ code: "tool-timed-out" });
     });
   });
@@ -1247,7 +1247,7 @@ describe("ChatTurnRunner", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           runner.run({
             thread: thread(),
@@ -1291,7 +1291,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(result).toMatchObject({ _tag: "Left", left: { category: "failed" } });
+    expect(result).toMatchObject({ _tag: "Failure", failure: { category: "failed" } });
     expect(updates.at(-1)?.outcome).toBe("failed");
     expect(updates.at(-1)?.failure).toEqual({ code: "tool-failed" });
   });
@@ -1328,7 +1328,7 @@ describe("ChatTurnRunner", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           runner.run({
             thread: thread(),
@@ -1380,7 +1380,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
     expect(updates.some((entry) => entry.failure?.code === "tool-failed")).toBe(false);
     expect(updates.at(-1)?.outcome).toBe("cancelled");
   });
@@ -1409,7 +1409,7 @@ describe("ChatTurnRunner", () => {
     });
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           runner.run({
             thread: thread(),
@@ -1446,7 +1446,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
     expect(providerFailures).toEqual([]);
     expect(updates.at(-1)?.outcome).toBe("interrupted");
     expect(updates.at(-1)?.failure).toEqual({ code: "incomplete" });
@@ -2505,7 +2505,7 @@ describe("ChatTurnRunner", () => {
     const completed = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
+          const fiber = yield* Effect.forkChild(
             runner.run({
               thread: thread(),
               attempt: attempt(),
@@ -2686,7 +2686,7 @@ describe("ChatTurnRunner", () => {
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const fiber = yield* Effect.fork(
+            const fiber = yield* Effect.forkChild(
               runner.run({
                 thread: thread(),
                 attempt: attempt(),
@@ -3063,7 +3063,7 @@ describe("ChatTurnRunner", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const fiber = yield* Effect.fork(
+          const fiber = yield* Effect.forkChild(
             runner.run({
               thread: thread(),
               attempt: attempt(),
@@ -3156,7 +3156,7 @@ describe("ChatTurnRunner", () => {
       });
 
       const result = await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           Effect.scoped(
             runner.run({
               thread: thread(),
@@ -3193,7 +3193,7 @@ describe("ChatTurnRunner", () => {
         ),
       );
 
-      expect(result).toMatchObject({ _tag: "Left", left: { category: publicCategory } });
+      expect(result).toMatchObject({ _tag: "Failure", failure: { category: publicCategory } });
       expect(updates.at(-1)?.outcome).toBe(durableOutcome);
       if (durableOutcome === "waiting") {
         expect(updates.at(-1)?.failure).toBeUndefined();

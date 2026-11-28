@@ -8,6 +8,7 @@ import {
   MAX_AUTOMATION_FILE_START_LIMIT,
   MAX_AUTOMATION_SOURCE_FILES,
 } from "./automationFileArrival";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 export * from "./automationFileArrival";
 import {
   AUTOMATION_WEBHOOK_INTEGRATION_ID,
@@ -31,12 +32,12 @@ import {
   ProviderModelId,
 } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const positiveInteger = Schema.Int.pipe(Schema.positive());
-const nonNegativeInteger = Schema.Int.pipe(Schema.greaterThanOrEqualTo(0));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const positiveInteger = PositiveInt;
+const nonNegativeInteger = NonNegativeInt;
 
 export const MAX_AUTOMATION_DISPLAY_NAME_LENGTH = 255;
 export const MAX_AUTOMATION_TASK_PROMPT_LENGTH = 8_192;
@@ -48,8 +49,10 @@ export const MAX_AUTOMATION_QUERY_LIMIT = 100;
 export const MAX_AUTOMATION_QUERY_CURSOR_LENGTH = 256;
 export const MAX_AUTOMATION_MISSED_RUN_CAP = 10_000;
 export const AutomationMissedRunCap = Schema.Int.pipe(
-  Schema.greaterThanOrEqualTo(1),
-  Schema.lessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),
+  Schema.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),
+  ),
   Schema.brand("AutomationMissedRunCap"),
 );
 export type AutomationMissedRunCap = typeof AutomationMissedRunCap.Type;
@@ -76,14 +79,14 @@ export const AutomationThreadId = brandedUuid("AutomationThreadId");
 export type AutomationThreadId = typeof AutomationThreadId.Type;
 
 const AutomationDefinitionRevision = positiveInteger.pipe(
-  Schema.lessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),
+  Schema.check(Schema.isLessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP)),
   Schema.brand("AutomationDefinitionRevision"),
 );
 export { AutomationDefinitionRevision };
 export type AutomationDefinitionRevision = typeof AutomationDefinitionRevision.Type;
 
 const AutomationRunGeneration = positiveInteger.pipe(
-  Schema.lessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP),
+  Schema.check(Schema.isLessThanOrEqualTo(MAX_AUTOMATION_MISSED_RUN_CAP)),
   Schema.brand("AutomationRunGeneration"),
 );
 export { AutomationRunGeneration };
@@ -101,16 +104,16 @@ const AutomationFailureMessage = boundedText(MAX_AUTOMATION_FAILURE_MESSAGE_LENG
 
 // ── Trigger contracts ──────────────────────────────────────────────────────
 
-export const AutomationTriggerKind = Schema.Literal(
+export const AutomationTriggerKind = Schema.Literals([
   "once",
   "interval",
   "weekly-local",
   "file-arrival",
   "integration-event",
-);
+]);
 export type AutomationTriggerKind = typeof AutomationTriggerKind.Type;
 
-export const AutomationMissedRunPolicy = Schema.Literal("skip", "run-once");
+export const AutomationMissedRunPolicy = Schema.Literals(["skip", "run-once"]);
 export type AutomationMissedRunPolicy = typeof AutomationMissedRunPolicy.Type;
 
 /**
@@ -119,7 +122,7 @@ export type AutomationMissedRunPolicy = typeof AutomationMissedRunPolicy.Type;
  * prompt as a new turn in the thread the routine came from, so the agent has
  * that conversation. Only a once trigger may use it.
  */
-export const AutomationTargetPolicy = Schema.Literal("new-thread", "same-thread");
+export const AutomationTargetPolicy = Schema.Literals(["new-thread", "same-thread"]);
 export type AutomationTargetPolicy = typeof AutomationTargetPolicy.Type;
 
 /**
@@ -148,10 +151,10 @@ export function parseAutomationFollowUpTurnPrompt(text: string): string | undefi
   return text.startsWith(prefix) ? text.slice(prefix.length) : undefined;
 }
 
-export const AutomationLifecycle = Schema.Literal("enabled", "paused", "exhausted", "archived");
+export const AutomationLifecycle = Schema.Literals(["enabled", "paused", "exhausted", "archived"]);
 export type AutomationLifecycle = typeof AutomationLifecycle.Type;
 
-export const AutomationRunLifecycle = Schema.Literal(
+export const AutomationRunLifecycle = Schema.Literals([
   "queued",
   "awaiting-confirmation",
   "dispatching",
@@ -163,7 +166,7 @@ export const AutomationRunLifecycle = Schema.Literal(
   "cancelled",
   "interrupted",
   "skipped",
-);
+]);
 export type AutomationRunLifecycle = typeof AutomationRunLifecycle.Type;
 const AUTOMATION_POST_LAUNCH_LIFECYCLES: ReadonlySet<AutomationRunLifecycle> = new Set([
   "running",
@@ -183,68 +186,71 @@ export const AutomationRunStatus = AutomationRunLifecycle;
 export type AutomationRunStatus = AutomationRunLifecycle;
 
 export const AutomationWeekday = Schema.Int.pipe(
-  Schema.greaterThanOrEqualTo(1),
-  Schema.lessThanOrEqualTo(7),
+  Schema.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThanOrEqualTo(7)),
   Schema.brand("AutomationWeekday"),
 );
 export type AutomationWeekday = typeof AutomationWeekday.Type;
 
-const AutomationWeekdays = Schema.NonEmptyArray(AutomationWeekday).pipe(
-  Schema.maxItems(7),
-  Schema.filter((weekdays) => new Set(weekdays).size === weekdays.length),
+const AutomationWeekdays = Schema.NonEmptyArray(AutomationWeekday).check(
+  Schema.isMaxLength(7),
+  Schema.makeFilter((weekdays) => new Set(weekdays).size === weekdays.length),
 );
 export { AutomationWeekdays };
 export type AutomationWeekdays = typeof AutomationWeekdays.Type;
 
 export const AutomationLocalTime = Schema.String.pipe(
-  Schema.pattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  Schema.check(Schema.isPattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/)),
   Schema.brand("AutomationLocalTime"),
 );
 export type AutomationLocalTime = typeof AutomationLocalTime.Type;
 
 export const AutomationLocalDate = Schema.String.pipe(
-  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
-  Schema.filter((date) => {
-    const parsed = new Date(`${date}T00:00:00.000Z`);
-    return parsed.toISOString().slice(0, 10) === date;
-  }),
+  Schema.check(
+    Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/),
+    Schema.makeFilter((date) => {
+      const parsed = new Date(`${date}T00:00:00.000Z`);
+      return parsed.toISOString().slice(0, 10) === date;
+    }),
+  ),
   Schema.brand("AutomationLocalDate"),
 );
 export type AutomationLocalDate = typeof AutomationLocalDate.Type;
 
 export const AutomationWeeklyResolution = Schema.Struct({
-  resolutionVersion: positiveInteger.pipe(Schema.lessThanOrEqualTo(32)),
-  timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  resolutionVersion: positiveInteger.check(Schema.isLessThanOrEqualTo(32)),
+  timeZone: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   timeZoneDatabase: boundedText(64),
   resolvedAt: UtcTimestamp,
   resolvedLocalDate: AutomationLocalDate,
   resolvedLocalTime: AutomationLocalTime,
-  utcOffsetMinutes: Schema.Int.pipe(
-    Schema.greaterThanOrEqualTo(-1_440),
-    Schema.lessThanOrEqualTo(1_440),
+  utcOffsetMinutes: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(-1_440),
+    Schema.isLessThanOrEqualTo(1_440),
   ),
-  resolution: Schema.Literal("exact", "gap-forward", "fold-earlier"),
-}).annotations(strict);
+  resolution: Schema.Literals(["exact", "gap-forward", "fold-earlier"]),
+});
 export type AutomationWeeklyResolution = typeof AutomationWeeklyResolution.Type;
 
 /** An IANA identifier validated against the host runtime's timezone database. */
-export const AutomationTimeZone = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter((timeZone) => {
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone }).format();
-      return true;
-    } catch {
-      return false;
-    }
-  }),
+export const AutomationTimeZone = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(128),
+    Schema.makeFilter((timeZone) => {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone }).format();
+        return true;
+      } catch {
+        return false;
+      }
+    }),
+  ),
   Schema.brand("AutomationTimeZone"),
 );
 export type AutomationTimeZone = typeof AutomationTimeZone.Type;
 
 export const AutomationIntervalMinutes = Schema.Int.pipe(
-  Schema.greaterThanOrEqualTo(15),
-  Schema.lessThanOrEqualTo(43_200),
+  Schema.check(Schema.isGreaterThanOrEqualTo(15), Schema.isLessThanOrEqualTo(43_200)),
   Schema.brand("AutomationIntervalMinutes"),
 );
 export type AutomationIntervalMinutes = typeof AutomationIntervalMinutes.Type;
@@ -252,14 +258,14 @@ export type AutomationIntervalMinutes = typeof AutomationIntervalMinutes.Type;
 export const AutomationOnceTrigger = Schema.Struct({
   kind: Schema.Literal("once"),
   scheduledAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationOnceTrigger = typeof AutomationOnceTrigger.Type;
 
 export const AutomationIntervalTrigger = Schema.Struct({
   kind: Schema.Literal("interval"),
   anchorAt: UtcTimestamp,
   intervalMinutes: AutomationIntervalMinutes,
-}).annotations(strict);
+});
 export type AutomationIntervalTrigger = typeof AutomationIntervalTrigger.Type;
 
 export const AutomationWeeklyLocalTrigger = Schema.Struct({
@@ -267,25 +273,25 @@ export const AutomationWeeklyLocalTrigger = Schema.Struct({
   weekdays: AutomationWeekdays,
   localTime: AutomationLocalTime,
   timeZone: AutomationTimeZone,
-}).annotations(strict);
+});
 export type AutomationWeeklyLocalTrigger = typeof AutomationWeeklyLocalTrigger.Type;
 
-export const AutomationScheduledTrigger = Schema.Union(
+export const AutomationScheduledTrigger = Schema.Union([
   AutomationOnceTrigger,
   AutomationIntervalTrigger,
   AutomationWeeklyLocalTrigger,
-);
+]);
 export type AutomationScheduledTrigger = typeof AutomationScheduledTrigger.Type;
-export const AutomationTrigger = Schema.Union(
+export const AutomationTrigger = Schema.Union([
   AutomationScheduledTrigger,
   AutomationFileArrivalTrigger,
   AutomationIntegrationEventTrigger,
-);
+]);
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 
 // ── Authority, principal, and binding receipts ─────────────────────────────
 
-export const AutomationMode = Schema.Literal("chat", "work", "code");
+export const AutomationMode = Schema.Literals(["chat", "work", "code"]);
 export type AutomationMode = typeof AutomationMode.Type;
 
 /**
@@ -294,13 +300,13 @@ export type AutomationMode = typeof AutomationMode.Type;
  * return to a thread of any mode, Chat included (maintainer decision,
  * 2026-11-21), so it takes {@link AutomationMode}.
  */
-export const AutomationThreadMode = Schema.Literal("work", "code");
+export const AutomationThreadMode = Schema.Literals(["work", "code"]);
 export type AutomationThreadMode = typeof AutomationThreadMode.Type;
 
 const AutomationLocalUserPrincipal = Schema.Struct({
   kind: Schema.Literal("local-user"),
   actorId: ActorId,
-}).annotations(strict);
+});
 
 const AutomationLocalWindowPrincipal = Schema.Struct({
   kind: Schema.Literal("local-window"),
@@ -308,7 +314,7 @@ const AutomationLocalWindowPrincipal = Schema.Struct({
   // The current authenticated desktop principal uses generation zero until
   // a durable capability-generation counter exists on the wire.
   capabilityGeneration: nonNegativeInteger,
-}).annotations(strict);
+});
 
 const AutomationRemoteDevicePrincipal = Schema.Struct({
   kind: Schema.Literal("remote-device"),
@@ -322,28 +328,32 @@ const AutomationRemoteDevicePrincipal = Schema.Struct({
   // Who let the device onto the host, as the remote gateway marks every
   // device principal. A command carries the authenticated principal whole, so
   // a strict struct without this refused every paired device's command.
-  admittedBy: Schema.optional(Schema.Literal("host-person", "hub-roster")),
+  admittedBy: Schema.optional(Schema.Literals(["host-person", "hub-roster"])),
   // A narrowed device's level, marked beside its admission for the same reason.
-  accessLevel: Schema.optional(Schema.Literal("approve-and-steer", "read-only")),
-}).annotations(strict);
+  accessLevel: Schema.optional(Schema.Literals(["approve-and-steer", "read-only"])),
+});
 
 /** Authenticated principals accepted on mutation commands. */
-export const AutomationClientPrincipal = Schema.Union(
+export const AutomationClientPrincipal = Schema.Union([
   AutomationLocalWindowPrincipal,
   AutomationRemoteDevicePrincipal,
-);
+]);
 export type AutomationClientPrincipal = typeof AutomationClientPrincipal.Type;
 export const ClientPrincipal = AutomationClientPrincipal;
 export type ClientPrincipal = AutomationClientPrincipal;
 
-const reviewCounter = Schema.Int.pipe(Schema.between(0, Number.MAX_SAFE_INTEGER));
-const reviewPositiveCounter = Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER));
+const reviewCounter = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+);
+const reviewPositiveCounter = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+);
 const AutomationFileSourceReviewFields = {
   expectedDefinitionVersion: reviewPositiveCounter,
   previousObservationRevision: reviewPositiveCounter,
   previousSourceIdentity: AutomationSourceDigest,
   previousBatchDigest: AutomationSourceDigest,
-  disposition: Schema.Literal("skip", "run-once"),
+  disposition: Schema.Literals(["skip", "run-once"]),
   reviewedAt: UtcTimestamp,
 } as const;
 
@@ -354,19 +364,17 @@ const AutomationFileSourceReviewFields = {
  * routine's author from it, so it carries the whole device principal. A
  * hub-introduced or restricted device never reviews, so its form is refused.
  */
-export const AutomationFileSourceReview = Schema.Union(
+export const AutomationFileSourceReview = Schema.Union([
   Schema.Struct({
     ...AutomationFileSourceReviewFields,
-    reviewedWindowId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    reviewedWindowId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
     reviewedCapabilityGeneration: reviewCounter,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...AutomationFileSourceReviewFields,
     reviewedDevice: AutomationRemoteDevicePrincipal,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((review) => review.reviewedDevice.admittedBy === "host-person")),
-);
+  }).check(Schema.makeFilter((review) => review.reviewedDevice.admittedBy === "host-person")),
+]);
 export type AutomationFileSourceReview = typeof AutomationFileSourceReview.Type;
 
 /**
@@ -396,51 +404,49 @@ function fileSourceReviewMatchesAuthor(
 
 export const AutomationFileArrivalReceipt = Schema.Struct({
   checkpoint: AutomationFileSourceCheckpoint,
-  files: Schema.Array(AutomationSourceRelativePath).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_AUTOMATION_SOURCE_FILES),
+  files: Schema.Array(AutomationSourceRelativePath).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_AUTOMATION_SOURCE_FILES),
   ),
-  automaticStartOrdinal: Schema.Int.pipe(Schema.between(1, MAX_AUTOMATION_FILE_START_LIMIT)),
+  automaticStartOrdinal: Schema.Int.check(
+    Schema.isBetween({ minimum: 1, maximum: MAX_AUTOMATION_FILE_START_LIMIT }),
+  ),
   rearm: Schema.optional(AutomationFileSourceReview),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (receipt) =>
-        (receipt.rearm === undefined || receipt.rearm.disposition === "run-once") &&
-        receipt.automaticStartOrdinal === receipt.checkpoint.automaticStarts &&
-        receipt.checkpoint.baselineReady &&
-        (receipt.checkpoint.phase === "watching" ||
-          (receipt.checkpoint.phase === "needs-rearm" &&
-            receipt.checkpoint.reason === "automatic-start-limit")) &&
-        new Set(receipt.files).size === receipt.files.length &&
-        receipt.files.every((path) =>
-          receipt.checkpoint.baseline.some((file) => file.path === path),
-        ),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (receipt) =>
+      (receipt.rearm === undefined || receipt.rearm.disposition === "run-once") &&
+      receipt.automaticStartOrdinal === receipt.checkpoint.automaticStarts &&
+      receipt.checkpoint.baselineReady &&
+      (receipt.checkpoint.phase === "watching" ||
+        (receipt.checkpoint.phase === "needs-rearm" &&
+          receipt.checkpoint.reason === "automatic-start-limit")) &&
+      new Set(receipt.files).size === receipt.files.length &&
+      receipt.files.every((path) => receipt.checkpoint.baseline.some((file) => file.path === path)),
+  ),
+);
 export type AutomationFileArrivalReceipt = typeof AutomationFileArrivalReceipt.Type;
 
 /** Separate author attribution may retain the local actor identity. */
-export const AutomationAuthorPrincipal = Schema.Union(
+export const AutomationAuthorPrincipal = Schema.Union([
   AutomationLocalUserPrincipal,
   AutomationLocalWindowPrincipal,
   AutomationRemoteDevicePrincipal,
-);
+]);
 export type AutomationAuthorPrincipal = typeof AutomationAuthorPrincipal.Type;
 
 // Keep the authenticated command principal separate from author attribution:
 // a local-user actor UUID is not proof of an authenticated request.
 
-export const AutomationOrigin = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("interactive") }).annotations(strict),
+export const AutomationOrigin = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("interactive") }),
   Schema.Struct({
     kind: Schema.Literal("automation-run"),
     automationId: AutomationId,
     runId: AutomationRunId,
     occurrenceKey: AutomationOpaqueReference,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationOrigin = typeof AutomationOrigin.Type;
 export const AutomationRunOrigin = AutomationOrigin;
 export type AutomationRunOrigin = AutomationOrigin;
@@ -449,15 +455,13 @@ export type AutomationRunOrigin = AutomationOrigin;
 export const AutomationAuthority = AgentRunAuthority;
 export type AutomationAuthority = AgentRunAuthority;
 
-export const AutomationBindingReceipt = Schema.Union(
-  // A Chat Project holds no folder, so its receipt names only the Project
-  // version the person saw.
+export const AutomationBindingReceipt = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat"),
     hostId: HostId,
     projectId: ProjectId,
     projectVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("work"),
     hostId: HostId,
@@ -465,7 +469,7 @@ export const AutomationBindingReceipt = Schema.Union(
     projectVersion: AggregateVersion,
     bindingRevisionId: BindingRevisionId,
     bindingReceiptId: BindingReceiptId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code"),
     hostId: HostId,
@@ -475,8 +479,8 @@ export const AutomationBindingReceipt = Schema.Union(
     repositoryId: CodeRepositoryId,
     checkoutId: CodeCheckoutId,
     worktreeReceiptId: WorktreeReceiptId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationBindingReceipt = typeof AutomationBindingReceipt.Type;
 
 export const AutomationExecutionProfileReceipt = Schema.Struct({
@@ -489,7 +493,7 @@ export const AutomationExecutionProfileReceipt = Schema.Struct({
   modelId: ProviderModelId,
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
-}).annotations(strict);
+});
 export type AutomationExecutionProfileReceipt = typeof AutomationExecutionProfileReceipt.Type;
 
 export const AutomationAuthorityProfileReceipt = Schema.Struct({
@@ -498,7 +502,7 @@ export const AutomationAuthorityProfileReceipt = Schema.Struct({
   requested: AgentRunAuthority,
   effective: AgentRunAuthority,
   effectiveAuthorityDigest: AutomationDigest,
-}).annotations(strict);
+});
 export type AutomationAuthorityProfileReceipt = typeof AutomationAuthorityProfileReceipt.Type;
 
 const automationAuthorityExecutionPolicyRank: Record<AgentRunAuthority["executionPolicy"], number> =
@@ -559,16 +563,14 @@ export const AutomationAuthoritySnapshot = Schema.Struct({
   effective: AgentRunAuthority,
   effectiveAuthorityDigest: AutomationDigest,
   capturedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (snapshot) =>
-        snapshot.requested.executionPolicy !== "full-access" &&
-        snapshot.effective.executionPolicy !== "full-access" &&
-        automationAuthorityDoesNotWiden(snapshot.requested, snapshot.effective),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (snapshot) =>
+      snapshot.requested.executionPolicy !== "full-access" &&
+      snapshot.effective.executionPolicy !== "full-access" &&
+      automationAuthorityDoesNotWiden(snapshot.requested, snapshot.effective),
+  ),
+);
 export type AutomationAuthoritySnapshot = typeof AutomationAuthoritySnapshot.Type;
 
 export const AutomationDeliveryTargetTemplate = Schema.Struct({
@@ -579,7 +581,7 @@ export const AutomationDeliveryTargetTemplate = Schema.Struct({
   confirmed: Schema.Literal(true),
   confirmedBy: ActorId,
   confirmedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationDeliveryTargetTemplate = typeof AutomationDeliveryTargetTemplate.Type;
 
 export const AutomationDeliveryTargetReceipt = AutomationDeliveryTargetTemplate;
@@ -587,7 +589,7 @@ export type AutomationDeliveryTargetReceipt = AutomationDeliveryTargetTemplate;
 
 // ── Definition, occurrence, and run aggregates ─────────────────────────────
 
-export const AutomationBlockReason = Schema.Literal(
+export const AutomationBlockReason = Schema.Literals([
   "missed-run-cap-exceeded",
   "host-mismatch",
   "project-mismatch",
@@ -599,31 +601,26 @@ export const AutomationBlockReason = Schema.Literal(
   "full-access-ineligible",
   "unsupported-mode",
   "automation-recursion",
-  // A follow-up's own thread at fire time: gone, archived, or in another
-  // Project; or marked Done or Complete.
   "thread-unavailable",
   "thread-done",
-  // No longer recorded: a follow-up now waits for a busy thread. Kept so
-  // journals written while a busy thread was skipped still decode.
   "thread-busy",
-  // A follow-up the host could not run within its missed window.
   "follow-up-missed",
-);
+]);
 export type AutomationBlockReason = typeof AutomationBlockReason.Type;
 
-export const AutomationRuntimeFailureReason = Schema.Literal(
+export const AutomationRuntimeFailureReason = Schema.Literals([
   "dispatch-failed",
   "thread-creation-failed",
   "provider-launch-failed",
   "recovery-failed",
   "runtime-failed",
-);
+]);
 export type AutomationRuntimeFailureReason = typeof AutomationRuntimeFailureReason.Type;
 
-export const AutomationRunFailureReason = Schema.Union(
+export const AutomationRunFailureReason = Schema.Union([
   AutomationBlockReason,
   AutomationRuntimeFailureReason,
-);
+]);
 export type AutomationRunFailureReason = typeof AutomationRunFailureReason.Type;
 
 /**
@@ -645,12 +642,12 @@ export type AutomationProjectLevel = typeof AutomationProjectLevel.Type;
  * person at a window on this host sets it, and a routine an agent proposed
  * never has it. A Chat routine has no level because Chat has none to widen.
  */
-export const AutomationRunLevel = Schema.Literal(
+export const AutomationRunLevel = Schema.Literals([
   "ask-first",
   "auto-accept-edits",
   "auto",
   "full-access",
-);
+]);
 export type AutomationRunLevel = typeof AutomationRunLevel.Type;
 
 /**
@@ -681,7 +678,7 @@ export const AutomationDefinitionDraft = Schema.Struct({
   projectLevel: Schema.optional(AutomationProjectLevel),
   runLevel: Schema.optional(AutomationRunLevel),
   agentMerge: Schema.optional(AutomationAgentMerge),
-}).annotations(strict);
+});
 export type AutomationDefinitionDraft = typeof AutomationDefinitionDraft.Type;
 
 function automationAuthorityIsChat(authority: AgentRunAuthority): boolean {
@@ -779,7 +776,7 @@ export const AutomationDefinition = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationDefinition = typeof AutomationDefinition.Type;
 
 function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefinition): boolean {
@@ -824,35 +821,30 @@ function automationPersistedDefinitionMatchesPolicy(definition: AutomationDefini
   );
 }
 
-const AutomationPersistedDefinition = AutomationDefinition.pipe(
-  Schema.filter(automationPersistedDefinitionMatchesPolicy),
+const AutomationPersistedDefinition = AutomationDefinition.check(
+  Schema.makeFilter(automationPersistedDefinitionMatchesPolicy),
 );
 
 export const AutomationDefinitionSnapshot = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
   ...AutomationDefinitionDraft.fields,
-})
-  .annotations(strict)
-  .pipe(Schema.filter(automationDefinitionDraftMatchesPolicy));
+}).check(Schema.makeFilter(automationDefinitionDraftMatchesPolicy));
 export type AutomationDefinitionSnapshot = typeof AutomationDefinitionSnapshot.Type;
 
 export const AutomationScheduledOccurrence = Schema.Struct({
   kind: Schema.Literal("scheduled"),
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
-  triggerKind: Schema.Literal("once", "interval", "weekly-local"),
+  triggerKind: Schema.Literals(["once", "interval", "weekly-local"]),
   scheduledAt: UtcTimestamp,
   resolutionEvidence: Schema.optional(AutomationWeeklyResolution),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (occurrence) =>
-        (occurrence.triggerKind === "weekly-local") ===
-        (occurrence.resolutionEvidence !== undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (occurrence) =>
+      (occurrence.triggerKind === "weekly-local") === (occurrence.resolutionEvidence !== undefined),
+  ),
+);
 export type AutomationScheduledOccurrence = typeof AutomationScheduledOccurrence.Type;
 
 export const AutomationManualOccurrence = Schema.Struct({
@@ -863,15 +855,13 @@ export const AutomationManualOccurrence = Schema.Struct({
   retryOfRunId: Schema.optional(AutomationRunId),
   fileSource: Schema.optional(AutomationFileArrivalReceipt),
   eventSource: Schema.optional(AutomationIntegrationEventReceipt),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (occurrence) =>
-        (occurrence.fileSource === undefined && occurrence.eventSource === undefined) ||
-        occurrence.retryOfRunId !== undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (occurrence) =>
+      (occurrence.fileSource === undefined && occurrence.eventSource === undefined) ||
+      occurrence.retryOfRunId !== undefined,
+  ),
+);
 export type AutomationManualOccurrence = typeof AutomationManualOccurrence.Type;
 
 export const AutomationFileArrivalOccurrence = Schema.Struct({
@@ -879,7 +869,7 @@ export const AutomationFileArrivalOccurrence = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
   source: AutomationFileArrivalReceipt,
-}).annotations(strict);
+});
 export type AutomationFileArrivalOccurrence = typeof AutomationFileArrivalOccurrence.Type;
 
 export const AutomationIntegrationEventOccurrence = Schema.Struct({
@@ -887,15 +877,15 @@ export const AutomationIntegrationEventOccurrence = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
   source: AutomationIntegrationEventReceipt,
-}).annotations(strict);
+});
 export type AutomationIntegrationEventOccurrence = typeof AutomationIntegrationEventOccurrence.Type;
 
-export const AutomationOccurrence = Schema.Union(
+export const AutomationOccurrence = Schema.Union([
   AutomationScheduledOccurrence,
   AutomationManualOccurrence,
   AutomationFileArrivalOccurrence,
   AutomationIntegrationEventOccurrence,
-);
+]);
 export type AutomationOccurrence = typeof AutomationOccurrence.Type;
 
 export const AutomationOccurrenceKey = AutomationOccurrence;
@@ -907,6 +897,7 @@ export const AutomationOccurrenceKeyText = boundedText(512).pipe(
 export type AutomationOccurrenceKeyText = typeof AutomationOccurrenceKeyText.Type;
 export const decodeAutomationOccurrenceKeyText = Schema.decodeUnknownSync(
   AutomationOccurrenceKeyText,
+  STRICT_DECODE_OPTIONS,
 );
 
 export function deriveAutomationOccurrenceKey(
@@ -1060,7 +1051,7 @@ export const AutomationDispatchIntent = Schema.Struct({
   authoritySnapshot: AutomationAuthoritySnapshot,
   promptDigest: AutomationDigest,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationDispatchIntent = typeof AutomationDispatchIntent.Type;
 
 export const AutomationRuntimeLaunchClaim = Schema.Struct({
@@ -1068,28 +1059,26 @@ export const AutomationRuntimeLaunchClaim = Schema.Struct({
   generation: AutomationRunGeneration,
   leaseExpiresAt: UtcTimestamp,
   claimedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((claim) => claim.leaseExpiresAt > claim.claimedAt));
+}).check(Schema.makeFilter((claim) => claim.leaseExpiresAt > claim.claimedAt));
 export type AutomationRuntimeLaunchClaim = typeof AutomationRuntimeLaunchClaim.Type;
 
 export const AutomationCancellationTombstone = Schema.Struct({
   requestId: AutomationCancelRunRequestId,
   cancelledAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationCancellationTombstone = typeof AutomationCancellationTombstone.Type;
 
 export const AutomationFirstTurnAcceptanceReceipt = Schema.Struct({
   firstTurnRequestId: AutomationFirstTurnRequestId,
   runtimeReceipt: AutomationOpaqueReference,
   acceptedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationFirstTurnAcceptanceReceipt = typeof AutomationFirstTurnAcceptanceReceipt.Type;
 
 export const AutomationRunFailure = Schema.Struct({
   reason: AutomationRunFailureReason,
   message: AutomationFailureMessage,
-}).annotations(strict);
+});
 export type AutomationRunFailure = typeof AutomationRunFailure.Type;
 
 /**
@@ -1097,17 +1086,17 @@ export type AutomationRunFailure = typeof AutomationRunFailure.Type;
  * lifecycle stays the host's: a reported "failed" never fails a run, and a
  * reported "succeeded" never completes one.
  */
-export const AutomationRunResultOutcome = Schema.Literal(
+export const AutomationRunResultOutcome = Schema.Literals([
   "succeeded",
   "nothing-to-do",
   "needs-attention",
   "failed",
-);
+]);
 export type AutomationRunResultOutcome = typeof AutomationRunResultOutcome.Type;
 export const MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES = 1_024;
 const automationTextEncoder = new TextEncoder();
-const AutomationRunResultSummary = boundedText(MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES).pipe(
-  Schema.filter(
+const AutomationRunResultSummary = boundedText(MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES).check(
+  Schema.makeFilter(
     (summary) =>
       automationTextEncoder.encode(summary).byteLength <= MAX_AUTOMATION_RUN_RESULT_SUMMARY_BYTES,
   ),
@@ -1117,7 +1106,7 @@ export const AutomationRunReportedResult = Schema.Struct({
   outcome: AutomationRunResultOutcome,
   summary: AutomationRunResultSummary,
   reportedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationRunReportedResult = typeof AutomationRunReportedResult.Type;
 
 /**
@@ -1127,7 +1116,7 @@ export type AutomationRunReportedResult = typeof AutomationRunReportedResult.Typ
 export const AutomationRunReference = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
-}).annotations(strict);
+});
 export type AutomationRunReference = typeof AutomationRunReference.Type;
 
 export const AutomationRun = Schema.Struct({
@@ -1147,8 +1136,8 @@ export const AutomationRun = Schema.Struct({
   firstTurnAcceptance: Schema.optional(AutomationFirstTurnAcceptanceReceipt),
   lifecycle: AutomationRunLifecycle,
   failure: Schema.optional(AutomationRunFailure),
-  notificationRefs: Schema.Array(AutomationOpaqueReference).pipe(
-    Schema.maxItems(MAX_AUTOMATION_NOTIFICATION_REFERENCES),
+  notificationRefs: Schema.Array(AutomationOpaqueReference).check(
+    Schema.isMaxLength(MAX_AUTOMATION_NOTIFICATION_REFERENCES),
   ),
   /** The result the run's own agent reported, if any; at most one per run. */
   reportedResult: Schema.optional(AutomationRunReportedResult),
@@ -1156,109 +1145,105 @@ export const AutomationRun = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((run) => {
-      const fileSource =
-        run.occurrence.kind === "file-arrival"
-          ? run.occurrence.source
-          : run.occurrence.kind === "manual"
-            ? run.occurrence.fileSource
-            : undefined;
-      const eventSource =
-        run.occurrence.kind === "integration-event"
-          ? run.occurrence.source
-          : run.occurrence.kind === "manual"
-            ? run.occurrence.eventSource
-            : undefined;
-      const occurrenceIdentityMatches =
-        !(fileSource !== undefined && eventSource !== undefined) &&
-        (fileSource === undefined ||
-          (run.definitionSnapshot.trigger.kind === "file-arrival" &&
-            fileSource.automaticStartOrdinal <=
-              run.definitionSnapshot.trigger.automaticStartLimit)) &&
-        (eventSource === undefined ||
-          (run.definitionSnapshot.trigger.kind === "integration-event" &&
-            eventSource.checkpoint.sourceIdentity ===
-              run.definitionSnapshot.trigger.sourceIdentity &&
-            eventSource.checkpoint.automaticStarts > 0 &&
-            eventSource.checkpoint.automaticStarts <=
-              run.definitionSnapshot.trigger.automaticStartLimit)) &&
-        run.automationId === run.occurrence.automationId &&
-        run.definitionSnapshot.automationId === run.occurrence.automationId &&
-        run.definitionSnapshot.definitionRevision === run.occurrence.definitionRevision &&
-        (run.occurrence.kind === "scheduled"
-          ? run.scheduledAt === run.occurrence.scheduledAt &&
-            run.occurrence.triggerKind === run.definitionSnapshot.trigger.kind &&
-            automationScheduledAtMatchesPersistedOccurrence(
-              run.definitionSnapshot.trigger,
-              run.occurrence.scheduledAt,
-              run.occurrence.resolutionEvidence,
-            ) &&
-            (run.definitionSnapshot.trigger.kind !== "once" ||
-              run.occurrence.scheduledAt === run.definitionSnapshot.trigger.scheduledAt)
-          : run.scheduledAt === null &&
-            (run.occurrence.kind !== "file-arrival" ||
-              (run.definitionSnapshot.trigger.kind === "file-arrival" &&
-                run.occurrence.source.automaticStartOrdinal <=
-                  run.definitionSnapshot.trigger.automaticStartLimit)));
-      const launchReceiptsMatch = [
-        run.dispatchIntent,
-        run.runtimeLaunchClaim,
-        run.firstTurnAcceptance,
-      ].every(
-        (receipt) => receipt === undefined || receipt.firstTurnRequestId === run.firstTurnRequestId,
-      );
-      const launchReceiptsHaveDispatchIntent =
-        (run.runtimeLaunchClaim === undefined && run.firstTurnAcceptance === undefined) ||
-        (run.dispatchIntent !== undefined && run.threadId !== undefined);
-      const dispatchIntentMatches =
-        run.dispatchIntent === undefined ||
-        (run.threadId !== undefined &&
-          run.dispatchIntent.threadId === run.threadId &&
-          automationAuthoritySnapshotsMatch(
-            run.dispatchIntent.authoritySnapshot,
-            run.authoritySnapshot,
-          ));
-      const authoritySnapshotMatchesDefinition = automationAuthoritySnapshotMatchesDefinition(
-        run.authoritySnapshot,
-        run.definitionSnapshot,
-      );
-      const cancellationTombstoneMatchesLifecycle =
-        run.cancellationTombstone === undefined ||
-        (run.lifecycle === "cancelled" && run.firstTurnAcceptance === undefined);
-      const postLaunchEvidenceMatches =
-        !AUTOMATION_POST_LAUNCH_LIFECYCLES.has(run.lifecycle) ||
-        (run.threadId !== undefined &&
-          run.dispatchIntent !== undefined &&
-          run.firstTurnAcceptance !== undefined);
-      const preLaunchAcceptanceAbsent =
-        !AUTOMATION_PRE_LAUNCH_LIFECYCLES.has(run.lifecycle) ||
-        run.firstTurnAcceptance === undefined;
-      const queuedLaunchEvidenceAbsent =
-        (run.lifecycle !== "queued" && run.lifecycle !== "awaiting-confirmation") ||
-        (run.threadId === undefined &&
-          run.dispatchIntent === undefined &&
-          run.runtimeLaunchClaim === undefined &&
-          run.firstTurnAcceptance === undefined);
-      const failedRunHasFailure = run.lifecycle !== "failed" || run.failure !== undefined;
+}).check(
+  Schema.makeFilter((run) => {
+    const fileSource =
+      run.occurrence.kind === "file-arrival"
+        ? run.occurrence.source
+        : run.occurrence.kind === "manual"
+          ? run.occurrence.fileSource
+          : undefined;
+    const eventSource =
+      run.occurrence.kind === "integration-event"
+        ? run.occurrence.source
+        : run.occurrence.kind === "manual"
+          ? run.occurrence.eventSource
+          : undefined;
+    const occurrenceIdentityMatches =
+      !(fileSource !== undefined && eventSource !== undefined) &&
+      (fileSource === undefined ||
+        (run.definitionSnapshot.trigger.kind === "file-arrival" &&
+          fileSource.automaticStartOrdinal <=
+            run.definitionSnapshot.trigger.automaticStartLimit)) &&
+      (eventSource === undefined ||
+        (run.definitionSnapshot.trigger.kind === "integration-event" &&
+          eventSource.checkpoint.sourceIdentity === run.definitionSnapshot.trigger.sourceIdentity &&
+          eventSource.checkpoint.automaticStarts > 0 &&
+          eventSource.checkpoint.automaticStarts <=
+            run.definitionSnapshot.trigger.automaticStartLimit)) &&
+      run.automationId === run.occurrence.automationId &&
+      run.definitionSnapshot.automationId === run.occurrence.automationId &&
+      run.definitionSnapshot.definitionRevision === run.occurrence.definitionRevision &&
+      (run.occurrence.kind === "scheduled"
+        ? run.scheduledAt === run.occurrence.scheduledAt &&
+          run.occurrence.triggerKind === run.definitionSnapshot.trigger.kind &&
+          automationScheduledAtMatchesPersistedOccurrence(
+            run.definitionSnapshot.trigger,
+            run.occurrence.scheduledAt,
+            run.occurrence.resolutionEvidence,
+          ) &&
+          (run.definitionSnapshot.trigger.kind !== "once" ||
+            run.occurrence.scheduledAt === run.definitionSnapshot.trigger.scheduledAt)
+        : run.scheduledAt === null &&
+          (run.occurrence.kind !== "file-arrival" ||
+            (run.definitionSnapshot.trigger.kind === "file-arrival" &&
+              run.occurrence.source.automaticStartOrdinal <=
+                run.definitionSnapshot.trigger.automaticStartLimit)));
+    const launchReceiptsMatch = [
+      run.dispatchIntent,
+      run.runtimeLaunchClaim,
+      run.firstTurnAcceptance,
+    ].every(
+      (receipt) => receipt === undefined || receipt.firstTurnRequestId === run.firstTurnRequestId,
+    );
+    const launchReceiptsHaveDispatchIntent =
+      (run.runtimeLaunchClaim === undefined && run.firstTurnAcceptance === undefined) ||
+      (run.dispatchIntent !== undefined && run.threadId !== undefined);
+    const dispatchIntentMatches =
+      run.dispatchIntent === undefined ||
+      (run.threadId !== undefined &&
+        run.dispatchIntent.threadId === run.threadId &&
+        automationAuthoritySnapshotsMatch(
+          run.dispatchIntent.authoritySnapshot,
+          run.authoritySnapshot,
+        ));
+    const authoritySnapshotMatchesDefinition = automationAuthoritySnapshotMatchesDefinition(
+      run.authoritySnapshot,
+      run.definitionSnapshot,
+    );
+    const cancellationTombstoneMatchesLifecycle =
+      run.cancellationTombstone === undefined ||
+      (run.lifecycle === "cancelled" && run.firstTurnAcceptance === undefined);
+    const postLaunchEvidenceMatches =
+      !AUTOMATION_POST_LAUNCH_LIFECYCLES.has(run.lifecycle) ||
+      (run.threadId !== undefined &&
+        run.dispatchIntent !== undefined &&
+        run.firstTurnAcceptance !== undefined);
+    const preLaunchAcceptanceAbsent =
+      !AUTOMATION_PRE_LAUNCH_LIFECYCLES.has(run.lifecycle) || run.firstTurnAcceptance === undefined;
+    const queuedLaunchEvidenceAbsent =
+      (run.lifecycle !== "queued" && run.lifecycle !== "awaiting-confirmation") ||
+      (run.threadId === undefined &&
+        run.dispatchIntent === undefined &&
+        run.runtimeLaunchClaim === undefined &&
+        run.firstTurnAcceptance === undefined);
+    const failedRunHasFailure = run.lifecycle !== "failed" || run.failure !== undefined;
 
-      return (
-        occurrenceKeyMatches(run) &&
-        occurrenceIdentityMatches &&
-        authoritySnapshotMatchesDefinition &&
-        launchReceiptsMatch &&
-        launchReceiptsHaveDispatchIntent &&
-        dispatchIntentMatches &&
-        cancellationTombstoneMatchesLifecycle &&
-        postLaunchEvidenceMatches &&
-        preLaunchAcceptanceAbsent &&
-        queuedLaunchEvidenceAbsent &&
-        failedRunHasFailure
-      );
-    }),
-  );
+    return (
+      occurrenceKeyMatches(run) &&
+      occurrenceIdentityMatches &&
+      authoritySnapshotMatchesDefinition &&
+      launchReceiptsMatch &&
+      launchReceiptsHaveDispatchIntent &&
+      dispatchIntentMatches &&
+      cancellationTombstoneMatchesLifecycle &&
+      postLaunchEvidenceMatches &&
+      preLaunchAcceptanceAbsent &&
+      queuedLaunchEvidenceAbsent &&
+      failedRunHasFailure
+    );
+  }),
+);
 export type AutomationRun = typeof AutomationRun.Type;
 
 // ── Commands and query contracts ────────────────────────────────────────────
@@ -1270,31 +1255,28 @@ const AutomationCommandFields = {
   origin: AutomationOrigin,
 } as const;
 
-export const AutomationCommand = Schema.Union(
+export const AutomationCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("rearm-file-automation"),
     ...AutomationCommandFields,
     sourceIdentity: AutomationSourceDigest,
-    observationRevision: Schema.Int.pipe(Schema.between(1, Number.MAX_SAFE_INTEGER)),
+    observationRevision: Schema.Int.check(
+      Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    ),
     batchDigest: AutomationSourceDigest,
-    disposition: Schema.Literal("skip", "run-once"),
-  }).annotations(strict),
-  /**
-   * Raise a file routine's activity window (`activityWindowLimit`) or clear
-   * the runs it holds (`clear`). Clearing is the person vouching that those
-   * runs' work is finished; it is refused while any of them still runs.
-   */
+    disposition: Schema.Literals(["skip", "run-once"]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("change-file-automation-activity-window"),
     ...AutomationCommandFields,
-    change: Schema.Union(
+    change: Schema.Union([
       Schema.Struct({
         kind: Schema.Literal("raise"),
         activityWindowLimit: AutomationFileActivityWindowLimit,
-      }).annotations(strict),
-      Schema.Struct({ kind: Schema.Literal("clear") }).annotations(strict),
-    ),
-  }).annotations(strict),
+      }),
+      Schema.Struct({ kind: Schema.Literal("clear") }),
+    ]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("create-automation"),
     ...AutomationCommandFields,
@@ -1302,52 +1284,52 @@ export const AutomationCommand = Schema.Union(
     // Omitted means enabled. A routine that must not run until a person resumes
     // it is journaled paused from its first event, never created then paused.
     initialLifecycle: Schema.optional(Schema.Literal("paused")),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("update-automation"),
     ...AutomationCommandFields,
     definition: AutomationDefinitionDraft,
     rearmEvents: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pause-automation"),
     ...AutomationCommandFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resume-automation"),
     ...AutomationCommandFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("archive-automation"),
     ...AutomationCommandFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("run-now-automation"),
     ...AutomationCommandFields,
     runNowRequestId: AutomationRunNowRequestId,
     retryRunId: Schema.optional(AutomationRunId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-automation-run"),
     ...AutomationCommandFields,
     runId: AutomationRunId,
     expectedRunVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-current-automation-run"),
     ...AutomationCommandFields,
     runId: AutomationRunId,
     cancelRunRequestId: AutomationCancelRunRequestId,
     expectedRunVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationCommand = typeof AutomationCommand.Type;
 export const AutomationDefinitionCommand = AutomationCommand;
 export type AutomationDefinitionCommand = AutomationCommand;
 
 export const AutomationCommandFailure = Schema.Struct({
   kind: Schema.Literal("automation-command-failed"),
-  reason: Schema.Literal(
+  reason: Schema.Literals([
     "invalid",
     "unauthorized",
     "not-found",
@@ -1356,54 +1338,54 @@ export const AutomationCommandFailure = Schema.Struct({
     "blocked",
     "terminal",
     "unsupported",
-  ),
+  ]),
   message: AutomationFailureMessage,
   automationId: Schema.optional(AutomationId),
   runId: Schema.optional(AutomationRunId),
-}).annotations(strict);
+});
 export type AutomationCommandFailure = typeof AutomationCommandFailure.Type;
 
-export const AutomationCommandResult = Schema.Union(
+export const AutomationCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("automation-created"),
     automation: AutomationDefinition,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-updated"),
     automation: AutomationDefinition,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-paused"),
     automation: AutomationDefinition,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-resumed"),
     automation: AutomationDefinition,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-archived"),
     automation: AutomationDefinition,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-run-accepted"),
     run: AutomationRun,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-run-confirmed"),
     run: AutomationRun,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-run-cancelled"),
     run: AutomationRun,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("automation-run-active-conflict"),
     automationId: AutomationId,
     runId: AutomationRunId,
     lifecycle: AutomationRunLifecycle,
-  }).annotations(strict),
+  }),
   AutomationCommandFailure,
-);
+]);
 export type AutomationCommandResult = typeof AutomationCommandResult.Type;
 
 export const AutomationSummary = Schema.Struct({
@@ -1412,7 +1394,7 @@ export const AutomationSummary = Schema.Struct({
       event: AutomationIntegrationEvent,
       runId: AutomationRunId,
       lifecycle: AutomationRunLifecycle,
-    }).annotations(strict),
+    }),
   ),
   eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   id: AutomationId,
@@ -1437,9 +1419,9 @@ export const AutomationSummary = Schema.Struct({
    * these as a pass/fail strip without a request per routine.
    */
   recentRuns: Schema.optional(
-    Schema.Array(
-      Schema.Struct({ lifecycle: AutomationRunLifecycle, at: UtcTimestamp }).annotations(strict),
-    ).pipe(Schema.maxItems(7)),
+    Schema.Array(Schema.Struct({ lifecycle: AutomationRunLifecycle, at: UtcTimestamp })).check(
+      Schema.isMaxLength(7),
+    ),
   ),
   /** See {@link AutomationDefinition}'s `originThreadId`. */
   originThreadId: Schema.optional(AutomationThreadId),
@@ -1447,7 +1429,7 @@ export const AutomationSummary = Schema.Struct({
   targetPolicy: Schema.optional(AutomationTargetPolicy),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationSummary = typeof AutomationSummary.Type;
 
 // ── Routine proposals from a thread ────────────────────────────────────────
@@ -1479,7 +1461,7 @@ export const RoutineProposal = Schema.Struct({
   /** The first time it would run, resolved by the host when it was proposed. */
   firstRunAt: UtcTimestamp,
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RoutineProposal = typeof RoutineProposal.Type;
 
 /**
@@ -1494,7 +1476,7 @@ export const RoutineChangeRequest = Schema.Struct({
   mode: AutomationThreadMode,
   projectId: ProjectId,
   automationId: AutomationId,
-  change: Schema.Literal("pause", "archive"),
+  change: Schema.Literals(["pause", "archive"]),
   displayName: boundedText(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
   /** Present when the routine is a follow-up, whose archive the person knows as cancel. */
   targetPolicy: Schema.optional(AutomationTargetPolicy),
@@ -1503,41 +1485,38 @@ export const RoutineChangeRequest = Schema.Struct({
   /** Why the agent asks, in its own words. */
   reason: Schema.optional(boundedText(500)),
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RoutineChangeRequest = typeof RoutineChangeRequest.Type;
 
 /** What a thread's agent is waiting on the person for: a new routine, or a change to one. */
-export const RoutineAgentRequest = Schema.Union(RoutineProposal, RoutineChangeRequest);
+export const RoutineAgentRequest = Schema.Union([RoutineProposal, RoutineChangeRequest]);
 export type RoutineAgentRequest = typeof RoutineAgentRequest.Type;
 
 export const RoutineProposalList = Schema.Struct({
   kind: Schema.Literal("routine-proposal-list"),
-  proposals: Schema.Array(RoutineAgentRequest).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  proposals: Schema.Array(RoutineAgentRequest).check(Schema.isMaxLength(32)),
+});
 export type RoutineProposalList = typeof RoutineProposalList.Type;
 
 export const RoutineProposalDecision = Schema.Struct({
   proposalId: RoutineProposalId,
-  decision: Schema.Literal("confirm", "decline"),
-}).annotations(strict);
+  decision: Schema.Literals(["confirm", "decline"]),
+});
 export type RoutineProposalDecision = typeof RoutineProposalDecision.Type;
 
-export const RoutineProposalDecisionResult = Schema.Union(
-  /** The routine created, or for a change request, the routine as paused or archived. */
+export const RoutineProposalDecisionResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("routine-proposal-confirmed"),
     automation: AutomationDefinition,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("routine-proposal-declined") }).annotations(strict),
-  /** The proposal is no longer waiting: answered, expired, or withdrawn. */
-  Schema.Struct({ kind: Schema.Literal("routine-proposal-gone") }).annotations(strict),
-  /** The answer could not be journaled, so the proposal is still waiting and may be answered again. */
+  }),
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-declined") }),
+  Schema.Struct({ kind: Schema.Literal("routine-proposal-gone") }),
   Schema.Struct({
     kind: Schema.Literal("routine-proposal-answer-unrecorded"),
     message: AutomationFailureMessage,
-  }).annotations(strict),
+  }),
   AutomationCommandFailure,
-);
+]);
 export type RoutineProposalDecisionResult = typeof RoutineProposalDecisionResult.Type;
 
 /**
@@ -1546,7 +1525,7 @@ export type RoutineProposalDecisionResult = typeof RoutineProposalDecisionResult
  * confirmed proposal; the body names only the thread, the time, and the
  * prompt.
  */
-export const AutomationFollowUpRequest = Schema.Union(
+export const AutomationFollowUpRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("schedule-follow-up"),
     threadId: AutomationThreadId,
@@ -1554,14 +1533,14 @@ export const AutomationFollowUpRequest = Schema.Union(
     projectId: ProjectId,
     scheduledAt: UtcTimestamp,
     taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reschedule-follow-up"),
     automationId: AutomationId,
     expectedVersion: AggregateVersion,
     scheduledAt: UtcTimestamp,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationFollowUpRequest = typeof AutomationFollowUpRequest.Type;
 
 /**
@@ -1578,47 +1557,47 @@ export const AutomationThreadRoutineRequest = Schema.Struct({
   taskPrompt: boundedText(MAX_AUTOMATION_TASK_PROMPT_LENGTH),
   trigger: AutomationScheduledTrigger,
   missedRunPolicy: AutomationMissedRunPolicy,
-}).annotations(strict);
+});
 export type AutomationThreadRoutineRequest = typeof AutomationThreadRoutineRequest.Type;
 
-export const AutomationQuery = Schema.Union(
+export const AutomationQuery = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("list-automations"),
     hostId: HostId,
-    mode: Schema.Literal("all", "chat", "work", "code"),
+    mode: Schema.Literals(["all", "chat", "work", "code"]),
     projectId: Schema.optional(ProjectId),
     search: Schema.optional(boundedText(128)),
-    limit: Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(MAX_AUTOMATION_QUERY_LIMIT),
+    limit: Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(MAX_AUTOMATION_QUERY_LIMIT),
     ),
     cursor: Schema.optional(
-      Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
+      Schema.String.check(Schema.isMaxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("get-automation"),
     automationId: AutomationId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("list-automation-runs"),
     automationId: AutomationId,
-    limit: Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(MAX_AUTOMATION_HISTORY_ENTRIES),
+    limit: Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(MAX_AUTOMATION_HISTORY_ENTRIES),
     ),
     cursor: Schema.optional(
-      Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
+      Schema.String.check(Schema.isMaxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationQuery = typeof AutomationQuery.Type;
 export const AutomationQueryRequest = AutomationQuery;
 export type AutomationQueryRequest = AutomationQuery;
 
 export const AutomationListResponse = Schema.Struct({
   kind: Schema.Literal("automation-list"),
-  items: Schema.Array(AutomationSummary).pipe(Schema.maxItems(MAX_AUTOMATION_QUERY_LIMIT)),
+  items: Schema.Array(AutomationSummary).check(Schema.isMaxLength(MAX_AUTOMATION_QUERY_LIMIT)),
   /**
    * Present when the host could not rebuild Automation history at start: the
    * list is empty because nothing loaded, not because none exist, and nothing
@@ -1626,7 +1605,7 @@ export const AutomationListResponse = Schema.Struct({
    */
   historyUnavailable: Schema.optional(Schema.Literal(true)),
   nextCursor: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
   ),
   /**
    * Counts over every Automation the caller may see on this host for the
@@ -1640,9 +1619,9 @@ export const AutomationListResponse = Schema.Struct({
       windowDays: Schema.Literal(30),
       runs: nonNegativeInteger,
       succeeded: nonNegativeInteger,
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type AutomationListResponse = typeof AutomationListResponse.Type;
 
 export const AutomationDetailResponse = Schema.Struct({
@@ -1650,25 +1629,25 @@ export const AutomationDetailResponse = Schema.Struct({
   fileSource: Schema.optional(AutomationFileSourceSummary),
   kind: Schema.Literal("automation-detail"),
   automation: AutomationDefinition,
-  runs: Schema.Array(AutomationRun).pipe(Schema.maxItems(MAX_AUTOMATION_HISTORY_ENTRIES)),
-}).annotations(strict);
+  runs: Schema.Array(AutomationRun).check(Schema.isMaxLength(MAX_AUTOMATION_HISTORY_ENTRIES)),
+});
 export type AutomationDetailResponse = typeof AutomationDetailResponse.Type;
 
 export const AutomationHistoryResponse = Schema.Struct({
   kind: Schema.Literal("automation-history"),
   automationId: AutomationId,
-  runs: Schema.Array(AutomationRun).pipe(Schema.maxItems(MAX_AUTOMATION_HISTORY_ENTRIES)),
+  runs: Schema.Array(AutomationRun).check(Schema.isMaxLength(MAX_AUTOMATION_HISTORY_ENTRIES)),
   nextCursor: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
   ),
-}).annotations(strict);
+});
 export type AutomationHistoryResponse = typeof AutomationHistoryResponse.Type;
 
-export const AutomationQueryResponse = Schema.Union(
+export const AutomationQueryResponse = Schema.Union([
   AutomationListResponse,
   AutomationDetailResponse,
   AutomationHistoryResponse,
-);
+]);
 export type AutomationQueryResponse = typeof AutomationQueryResponse.Type;
 export const AutomationQueryResult = AutomationQueryResponse;
 export type AutomationQueryResult = AutomationQueryResponse;
@@ -1679,23 +1658,21 @@ export const AutomationDefinitionCreated = Schema.Struct({
   eventSource: Schema.optional(AutomationEventSourceCheckpoint),
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (event) =>
-        (event.eventSource === undefined ||
-          (event.automation.trigger.kind === "integration-event" &&
-            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
-            !event.eventSource.baselineReady &&
-            event.eventSource.automaticStarts === 0)) &&
-        (event.fileSource === undefined ||
-          (event.automation.trigger.kind === "file-arrival" &&
-            !event.fileSource.baselineReady &&
-            event.fileSource.observationRevision === 1 &&
-            event.fileSource.armGeneration === 1)),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (event) =>
+      (event.eventSource === undefined ||
+        (event.automation.trigger.kind === "integration-event" &&
+          event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+          !event.eventSource.baselineReady &&
+          event.eventSource.automaticStarts === 0)) &&
+      (event.fileSource === undefined ||
+        (event.automation.trigger.kind === "file-arrival" &&
+          !event.fileSource.baselineReady &&
+          event.fileSource.observationRevision === 1 &&
+          event.fileSource.armGeneration === 1)),
+  ),
+);
 export type AutomationDefinitionCreated = typeof AutomationDefinitionCreated.Type;
 
 export const AutomationDefinitionUpdated = Schema.Struct({
@@ -1703,19 +1680,17 @@ export const AutomationDefinitionUpdated = Schema.Struct({
   automation: AutomationPersistedDefinition,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
   previousDefinitionRevision: AutomationDefinitionRevision,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (event) =>
-        (event.fileSource === undefined || event.automation.trigger.kind === "file-arrival") &&
-        (event.eventSource === undefined ||
-          (event.automation.trigger.kind === "integration-event" &&
-            event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
-            !event.eventSource.baselineReady &&
-            event.eventSource.automaticStarts === 0)),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (event) =>
+      (event.fileSource === undefined || event.automation.trigger.kind === "file-arrival") &&
+      (event.eventSource === undefined ||
+        (event.automation.trigger.kind === "integration-event" &&
+          event.eventSource.sourceIdentity === event.automation.trigger.sourceIdentity &&
+          !event.eventSource.baselineReady &&
+          event.eventSource.automaticStarts === 0)),
+  ),
+);
 export type AutomationDefinitionUpdated = typeof AutomationDefinitionUpdated.Type;
 
 export const AutomationDefinitionLifecycleChanged = Schema.Struct({
@@ -1723,26 +1698,24 @@ export const AutomationDefinitionLifecycleChanged = Schema.Struct({
   previousLifecycle: AutomationLifecycle,
   fileSource: Schema.optional(AutomationFileSourceCheckpoint),
   fileSourceReview: Schema.optional(AutomationFileSourceReview),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (event) =>
-        (event.fileSource === undefined) === (event.fileSourceReview === undefined) &&
-        (event.fileSource === undefined ||
-          (event.fileSourceReview !== undefined &&
-            event.automation.trigger.kind === "file-arrival" &&
-            event.automation.lifecycle === "enabled" &&
-            fileSourceReviewMatchesAuthor(event.fileSourceReview, event.automation.updatedBy) &&
-            event.automation.version === event.fileSourceReview.expectedDefinitionVersion + 1 &&
-            event.fileSource.sourceIdentity === event.fileSourceReview.previousSourceIdentity &&
-            event.fileSource.observationRevision ===
-              event.fileSourceReview.previousObservationRevision + 1 &&
-            event.fileSource.baselineReady &&
-            event.fileSource.automaticStarts ===
-              (event.fileSourceReview.disposition === "run-once" ? 1 : 0))),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (event) =>
+      (event.fileSource === undefined) === (event.fileSourceReview === undefined) &&
+      (event.fileSource === undefined ||
+        (event.fileSourceReview !== undefined &&
+          event.automation.trigger.kind === "file-arrival" &&
+          event.automation.lifecycle === "enabled" &&
+          fileSourceReviewMatchesAuthor(event.fileSourceReview, event.automation.updatedBy) &&
+          event.automation.version === event.fileSourceReview.expectedDefinitionVersion + 1 &&
+          event.fileSource.sourceIdentity === event.fileSourceReview.previousSourceIdentity &&
+          event.fileSource.observationRevision ===
+            event.fileSourceReview.previousObservationRevision + 1 &&
+          event.fileSource.baselineReady &&
+          event.fileSource.automaticStarts ===
+            (event.fileSourceReview.disposition === "run-once" ? 1 : 0))),
+  ),
+);
 export type AutomationDefinitionLifecycleChanged = typeof AutomationDefinitionLifecycleChanged.Type;
 
 export const AutomationFileSourceObserved = Schema.Struct({
@@ -1750,7 +1723,7 @@ export const AutomationFileSourceObserved = Schema.Struct({
   definitionRevision: AutomationDefinitionRevision,
   checkpoint: AutomationFileSourceCheckpoint,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationFileSourceObserved = typeof AutomationFileSourceObserved.Type;
 
 /**
@@ -1761,16 +1734,14 @@ export type AutomationFileSourceObserved = typeof AutomationFileSourceObserved.T
 export const AutomationFileSourceWindowChanged = Schema.Struct({
   automationId: AutomationId,
   definitionRevision: AutomationDefinitionRevision,
-  change: Schema.Literal("raised", "cleared"),
+  change: Schema.Literals(["raised", "cleared"]),
   checkpoint: AutomationFileSourceCheckpoint,
   recordedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (event) => event.change === "raised" || event.checkpoint.activityWindow.length === 0,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (event) => event.change === "raised" || event.checkpoint.activityWindow.length === 0,
+  ),
+);
 export type AutomationFileSourceWindowChanged = typeof AutomationFileSourceWindowChanged.Type;
 
 export const AutomationEventSourceObserved = Schema.Struct({
@@ -1778,7 +1749,7 @@ export const AutomationEventSourceObserved = Schema.Struct({
   definitionRevision: AutomationDefinitionRevision,
   checkpoint: AutomationEventSourceCheckpoint,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationEventSourceObserved = typeof AutomationEventSourceObserved.Type;
 
 export const AutomationDefinitionExhausted = Schema.Struct({
@@ -1786,7 +1757,7 @@ export const AutomationDefinitionExhausted = Schema.Struct({
   definitionRevision: AutomationDefinitionRevision,
   consumedScheduledAt: UtcTimestamp,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type AutomationDefinitionExhausted = typeof AutomationDefinitionExhausted.Type;
 
 export const AutomationOccurrenceClaimed = Schema.Struct({
@@ -1795,9 +1766,7 @@ export const AutomationOccurrenceClaimed = Schema.Struct({
   occurrence: AutomationOccurrence,
   occurrenceKey: AutomationOccurrenceKeyText,
   claimedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter(occurrenceEventMatches));
+}).check(Schema.makeFilter(occurrenceEventMatches));
 export type AutomationOccurrenceClaimed = typeof AutomationOccurrenceClaimed.Type;
 
 export const AutomationOccurrenceSkipped = Schema.Struct({
@@ -1805,15 +1774,13 @@ export const AutomationOccurrenceSkipped = Schema.Struct({
   occurrence: AutomationScheduledOccurrence,
   occurrenceKey: AutomationOccurrenceKeyText,
   skippedAt: UtcTimestamp,
-  reason: Schema.Literal("missed-run-policy", "missed-run-cap-recovery"),
-})
-  .annotations(strict)
-  .pipe(Schema.filter(occurrenceEventMatches));
+  reason: Schema.Literals(["missed-run-policy", "missed-run-cap-recovery"]),
+}).check(Schema.makeFilter(occurrenceEventMatches));
 export type AutomationOccurrenceSkipped = typeof AutomationOccurrenceSkipped.Type;
 
 export const AutomationRunCreated = Schema.Struct({
   run: AutomationRun,
-}).annotations(strict);
+});
 export type AutomationRunCreated = typeof AutomationRunCreated.Type;
 
 export const AutomationRunStatusChanged = Schema.Struct({
@@ -1824,9 +1791,9 @@ export const AutomationRunStatusChanged = Schema.Struct({
   version: AggregateVersion,
   failure: Schema.optional(AutomationRunFailure),
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(Schema.filter((event) => (event.lifecycle === "failed") === (event.failure !== undefined)));
+}).check(
+  Schema.makeFilter((event) => (event.lifecycle === "failed") === (event.failure !== undefined)),
+);
 export type AutomationRunStatusChanged = typeof AutomationRunStatusChanged.Type;
 
 export const AutomationBlocked = Schema.Struct({
@@ -1837,47 +1804,45 @@ export const AutomationBlocked = Schema.Struct({
   examinedThrough: Schema.optional(UtcTimestamp),
   nextFutureOccurrence: Schema.optional(UtcTimestamp),
   recordedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (blocked) =>
-        blocked.reason !== "missed-run-cap-exceeded" ||
-        (blocked.examinedFrom !== undefined &&
-          blocked.examinedThrough !== undefined &&
-          blocked.nextFutureOccurrence !== undefined &&
-          blocked.examinedFrom <= blocked.examinedThrough &&
-          blocked.examinedThrough < blocked.nextFutureOccurrence),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (blocked) =>
+      blocked.reason !== "missed-run-cap-exceeded" ||
+      (blocked.examinedFrom !== undefined &&
+        blocked.examinedThrough !== undefined &&
+        blocked.nextFutureOccurrence !== undefined &&
+        blocked.examinedFrom <= blocked.examinedThrough &&
+        blocked.examinedThrough < blocked.nextFutureOccurrence),
+  ),
+);
 export type AutomationBlocked = typeof AutomationBlocked.Type;
 
 export const AutomationDispatchIntentRecorded = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
   intent: AutomationDispatchIntent,
-}).annotations(strict);
+});
 export type AutomationDispatchIntentRecorded = typeof AutomationDispatchIntentRecorded.Type;
 
 export const AutomationFirstTurnRuntimeClaimed = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
   claim: AutomationRuntimeLaunchClaim,
-}).annotations(strict);
+});
 export type AutomationFirstTurnRuntimeClaimed = typeof AutomationFirstTurnRuntimeClaimed.Type;
 
 export const AutomationFirstTurnDispatchCancelled = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
   tombstone: AutomationCancellationTombstone,
-}).annotations(strict);
+});
 export type AutomationFirstTurnDispatchCancelled = typeof AutomationFirstTurnDispatchCancelled.Type;
 
 export const AutomationFirstTurnAccepted = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
   receipt: AutomationFirstTurnAcceptanceReceipt,
-}).annotations(strict);
+});
 export type AutomationFirstTurnAccepted = typeof AutomationFirstTurnAccepted.Type;
 
 /** Appends an opaque notification delivery reference onto a run. */
@@ -1887,7 +1852,7 @@ export const AutomationNotificationRefRecorded = Schema.Struct({
   notificationRef: AutomationOpaqueReference,
   version: AggregateVersion,
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AutomationNotificationRefRecorded = typeof AutomationNotificationRefRecorded.Type;
 
 /**
@@ -1898,7 +1863,7 @@ export const AutomationRunResultReported = Schema.Struct({
   automationId: AutomationId,
   runId: AutomationRunId,
   result: AutomationRunReportedResult,
-}).annotations(strict);
+});
 export type AutomationRunResultReported = typeof AutomationRunResultReported.Type;
 
 export const AUTOMATION_EVENT_NAMES = [
@@ -1923,125 +1888,195 @@ export const AUTOMATION_EVENT_NAMES = [
 ] as const;
 export type AutomationEventName = (typeof AUTOMATION_EVENT_NAMES)[number];
 
-export const AutomationEvent = Schema.Union(
+export const AutomationEvent = Schema.Union([
   Schema.Struct({
     eventName: Schema.Literal("automation-event-source-observed@1"),
     payload: AutomationEventSourceObserved,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-observed@1"),
     payload: AutomationFileSourceObserved,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-file-source-window-changed@1"),
     payload: AutomationFileSourceWindowChanged,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-created@1"),
     payload: AutomationDefinitionCreated,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-updated@1"),
     payload: AutomationDefinitionUpdated,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-lifecycle-changed@1"),
     payload: AutomationDefinitionLifecycleChanged,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-definition-exhausted@1"),
     payload: AutomationDefinitionExhausted,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-occurrence-claimed@1"),
     payload: AutomationOccurrenceClaimed,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-occurrence-skipped@1"),
     payload: AutomationOccurrenceSkipped,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-run-created@1"),
     payload: AutomationRunCreated,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-run-status-changed@1"),
     payload: AutomationRunStatusChanged,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-blocked@1"),
     payload: AutomationBlocked,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-dispatch-intent-recorded@1"),
     payload: AutomationDispatchIntentRecorded,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-first-turn-runtime-claimed@1"),
     payload: AutomationFirstTurnRuntimeClaimed,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-first-turn-dispatch-cancelled@1"),
     payload: AutomationFirstTurnDispatchCancelled,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-first-turn-accepted@1"),
     payload: AutomationFirstTurnAccepted,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-notification-ref-recorded@1"),
     payload: AutomationNotificationRefRecorded,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     eventName: Schema.Literal("automation-run-result-reported@1"),
     payload: AutomationRunResultReported,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AutomationEvent = typeof AutomationEvent.Type;
 
 // ── Decoders ────────────────────────────────────────────────────────────────
 
-export const decodeAutomationId = Schema.decodeUnknownSync(AutomationId);
-export const decodeAutomationRunId = Schema.decodeUnknownSync(AutomationRunId);
-export const decodeAutomationRunNowRequestId = Schema.decodeUnknownSync(AutomationRunNowRequestId);
+export const decodeAutomationId = Schema.decodeUnknownSync(AutomationId, STRICT_DECODE_OPTIONS);
+export const decodeAutomationRunId = Schema.decodeUnknownSync(
+  AutomationRunId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationRunNowRequestId = Schema.decodeUnknownSync(
+  AutomationRunNowRequestId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAutomationCancelRunRequestId = Schema.decodeUnknownSync(
   AutomationCancelRunRequestId,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationFirstTurnRequestId = Schema.decodeUnknownSync(
   AutomationFirstTurnRequestId,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAutomationDefinitionRevision = Schema.decodeUnknownSync(
   AutomationDefinitionRevision,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAutomationTrigger = Schema.decodeUnknownSync(AutomationTrigger);
+export const decodeAutomationTrigger = Schema.decodeUnknownSync(
+  AutomationTrigger,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAutomationScheduledTrigger = Schema.decodeUnknownSync(
   AutomationScheduledTrigger,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAutomationAuthority = Schema.decodeUnknownSync(AutomationAuthority);
-export const decodeAutomationMissedRunCap = Schema.decodeUnknownSync(AutomationMissedRunCap);
-export const decodeAutomationDefinitionDraft = Schema.decodeUnknownSync(AutomationDefinitionDraft);
-export const decodeAutomationDefinition = Schema.decodeUnknownSync(AutomationDefinition);
-export const decodeAutomationOccurrence = Schema.decodeUnknownSync(AutomationOccurrence);
-export const decodeAutomationOccurrenceKey = Schema.decodeUnknownSync(AutomationOccurrenceKey);
-export const decodeAutomationRun = Schema.decodeUnknownSync(AutomationRun);
-export const decodeAutomationCommand = Schema.decodeUnknownSync(AutomationCommand);
-export const decodeAutomationCommandResult = Schema.decodeUnknownSync(AutomationCommandResult);
-export const decodeAutomationQuery = Schema.decodeUnknownSync(AutomationQuery);
-export const decodeAutomationQueryResponse = Schema.decodeUnknownSync(AutomationQueryResponse);
-export const decodeAutomationEvent = Schema.decodeUnknownSync(AutomationEvent);
-export const decodeAutomationThreadId = Schema.decodeUnknownSync(AutomationThreadId);
-export const decodeRoutineProposalId = Schema.decodeUnknownSync(RoutineProposalId);
-export const decodeRoutineProposal = Schema.decodeUnknownSync(RoutineProposal);
-export const decodeRoutineChangeRequest = Schema.decodeUnknownSync(RoutineChangeRequest);
+export const decodeAutomationAuthority = Schema.decodeUnknownSync(
+  AutomationAuthority,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationMissedRunCap = Schema.decodeUnknownSync(
+  AutomationMissedRunCap,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationDefinitionDraft = Schema.decodeUnknownSync(
+  AutomationDefinitionDraft,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationDefinition = Schema.decodeUnknownSync(
+  AutomationDefinition,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationOccurrence = Schema.decodeUnknownSync(
+  AutomationOccurrence,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationOccurrenceKey = Schema.decodeUnknownSync(
+  AutomationOccurrenceKey,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationRun = Schema.decodeUnknownSync(AutomationRun, STRICT_DECODE_OPTIONS);
+export const decodeAutomationCommand = Schema.decodeUnknownSync(
+  AutomationCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationCommandResult = Schema.decodeUnknownSync(
+  AutomationCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationQuery = Schema.decodeUnknownSync(
+  AutomationQuery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationQueryResponse = Schema.decodeUnknownSync(
+  AutomationQueryResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationEvent = Schema.decodeUnknownSync(
+  AutomationEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAutomationThreadId = Schema.decodeUnknownSync(
+  AutomationThreadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRoutineProposalId = Schema.decodeUnknownSync(
+  RoutineProposalId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRoutineProposal = Schema.decodeUnknownSync(
+  RoutineProposal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRoutineChangeRequest = Schema.decodeUnknownSync(
+  RoutineChangeRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAutomationRunReportedResult = Schema.decodeUnknownSync(
   AutomationRunReportedResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeRoutineProposalList = Schema.decodeUnknownSync(RoutineProposalList);
-export const decodeRoutineProposalDecision = Schema.decodeUnknownSync(RoutineProposalDecision);
+export const decodeRoutineProposalList = Schema.decodeUnknownSync(
+  RoutineProposalList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRoutineProposalDecision = Schema.decodeUnknownSync(
+  RoutineProposalDecision,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRoutineProposalDecisionResult = Schema.decodeUnknownSync(
   RoutineProposalDecisionResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAutomationFollowUpRequest = Schema.decodeUnknownSync(AutomationFollowUpRequest);
+export const decodeAutomationFollowUpRequest = Schema.decodeUnknownSync(
+  AutomationFollowUpRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAutomationThreadRoutineRequest = Schema.decodeUnknownSync(
   AutomationThreadRoutineRequest,
+  STRICT_DECODE_OPTIONS,
 );

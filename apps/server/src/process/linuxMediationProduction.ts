@@ -174,7 +174,9 @@ export function prepareLinuxMediatedLaunch(
       ...entry,
     })),
   };
-  const config: SupervisorConfig = Schema.decodeUnknownSync(LinuxMediationSupervisorConfig)(
+  const config: SupervisorConfig = Schema.decodeUnknownSync(LinuxMediationSupervisorConfig, {
+    onExcessProperty: "error",
+  })(
     {
       ownerId: randomUUID(),
       maximumMs: LINUX_MEDIATION_PRODUCTION_MAXIMUM_MS,

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { EventActor, UtcTimestamp } from "./events";
 import { DesktopPreviewRequest, DesktopPreviewAnswer } from "./desktopPreview";
 
@@ -8,28 +9,36 @@ import { DesktopPreviewRequest, DesktopPreviewAnswer } from "./desktopPreview";
  * The rules these schemas carry live in docs/design/disposable-desktops.md.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const text = (max: number) => Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(max));
+const text = (max: number) => Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(max));
 
-export const DesktopLeaseId = Schema.UUID.pipe(Schema.brand("DesktopLeaseId"));
+export const DesktopLeaseId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("DesktopLeaseId"),
+);
 export type DesktopLeaseId = typeof DesktopLeaseId.Type;
 
 /**
  * The host identity a driver tags each desktop with, so restart reconciliation
  * reaps only this host's desktops when two hosts share one provider account.
  */
-export const DesktopHostTag = Schema.UUID.pipe(Schema.brand("DesktopHostTag"));
+export const DesktopHostTag = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("DesktopHostTag"),
+);
 export type DesktopHostTag = typeof DesktopHostTag.Type;
 
 /** A desktop provider contribution's stable identity, such as `host-local`. */
 export const DesktopProviderId = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9][a-z0-9.-]{0,127}$/),
+  Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9.-]{0,127}$/)),
   Schema.brand("DesktopProviderId"),
 );
 export type DesktopProviderId = typeof DesktopProviderId.Type;
 
 /** A reference into the host credential store. The material never appears here. */
-export const DesktopCredentialRef = Schema.UUID.pipe(Schema.brand("DesktopCredentialRef"));
+export const DesktopCredentialRef = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("DesktopCredentialRef"),
+);
 export type DesktopCredentialRef = typeof DesktopCredentialRef.Type;
 
 /** The credential broker's own bound on one stored value; a larger key is refused before it is sent. */
@@ -41,19 +50,20 @@ export const DESKTOP_RECIPE_KEY_MAXIMUM_BYTES = 12 * 1024;
  * key in the credential broker under a fresh reference and journals the
  * recipe with that reference alone. Nothing echoes the key back.
  */
-export const DesktopRecipeKeyChange = Schema.Union(
+export const DesktopRecipeKeyChange = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("enter"),
-    key: Schema.NonEmptyTrimmedString.pipe(
-      Schema.filter(
+    key: Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.makeFilter(
         (key) =>
           new TextEncoder().encode(key).byteLength <= DESKTOP_RECIPE_KEY_MAXIMUM_BYTES ||
           "The key is larger than the credential store accepts.",
       ),
     ),
-  }).annotations(strict),
-  Schema.Struct({ action: Schema.Literal("remove") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ action: Schema.Literal("remove") }),
+]);
 export type DesktopRecipeKeyChange = typeof DesktopRecipeKeyChange.Type;
 
 /**
@@ -61,7 +71,7 @@ export type DesktopRecipeKeyChange = typeof DesktopRecipeKeyChange.Type;
  * host credential store, named but no longer there, or refused by the
  * provider when a desktop last started with it.
  */
-export const DesktopRecipeKeyState = Schema.Literal("none", "saved", "missing", "rejected");
+export const DesktopRecipeKeyState = Schema.Literals(["none", "saved", "missing", "rejected"]);
 export type DesktopRecipeKeyState = typeof DesktopRecipeKeyState.Type;
 
 /**
@@ -70,7 +80,7 @@ export type DesktopRecipeKeyState = typeof DesktopRecipeKeyState.Type;
  * placements in code; a recipe names one, and the lease records it.
  */
 export const DesktopPlacementId = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9][a-z0-9.-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[a-z0-9][a-z0-9.-]{0,63}$/)),
   Schema.brand("DesktopPlacementId"),
 );
 export type DesktopPlacementId = typeof DesktopPlacementId.Type;
@@ -81,7 +91,7 @@ export type DesktopPlacementId = typeof DesktopPlacementId.Type;
  * person sees which computer a desktop uses before it starts.
  */
 export const DesktopMachineId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,127}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9 ._:@-]{0,127}$/)),
   Schema.brand("DesktopMachineId"),
 );
 export type DesktopMachineId = typeof DesktopMachineId.Type;
@@ -90,45 +100,49 @@ export type DesktopMachineId = typeof DesktopMachineId.Type;
 export const DesktopMachine = Schema.Struct({
   machineId: DesktopMachineId,
   displayName: text(128),
-}).annotations(strict);
+});
 export type DesktopMachine = typeof DesktopMachine.Type;
 
 /** Chat never leases: a Chat Project has no root to send an artifact from. */
-export const DesktopLeaseMode = Schema.Literal("work", "code");
+export const DesktopLeaseMode = Schema.Literals(["work", "code"]);
 export type DesktopLeaseMode = typeof DesktopLeaseMode.Type;
 
 export const DesktopLeaseOwner = Schema.Struct({
   mode: DesktopLeaseMode,
-  threadId: Schema.UUID,
-}).annotations(strict);
+  threadId: GuidString,
+});
 export type DesktopLeaseOwner = typeof DesktopLeaseOwner.Type;
 
 /** Where a desktop runs. The host-wide cap counts only host-local leases. */
-export const DesktopProviderLocality = Schema.Literal("host-local", "cloud");
+export const DesktopProviderLocality = Schema.Literals(["host-local", "cloud"]);
 export type DesktopProviderLocality = typeof DesktopProviderLocality.Type;
 
-export const DesktopNetworkPosture = Schema.Literal("none", "allow");
+export const DesktopNetworkPosture = Schema.Literals(["none", "allow"]);
 export type DesktopNetworkPosture = typeof DesktopNetworkPosture.Type;
 
 /** No lease, extended or not, outlives this many minutes from acquisition. */
 export const DESKTOP_LEASE_MAXIMUM_MINUTES = 240;
 
-const leaseMinutes = Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_MAXIMUM_MINUTES));
+const leaseMinutes = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: DESKTOP_LEASE_MAXIMUM_MINUTES }),
+);
 
 /** Whole US cents, the unit every desktop spend figure uses. */
 export const DESKTOP_SPEND_MAXIMUM_USD_CENTS = 100_000_000;
-const usdCents = Schema.Int.pipe(Schema.between(0, DESKTOP_SPEND_MAXIMUM_USD_CENTS));
+const usdCents = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: DESKTOP_SPEND_MAXIMUM_USD_CENTS }),
+);
 /** A person's figure for one hour of a billed desktop: at least a cent, at most $10,000. */
-const hourlyUsdCents = Schema.Int.pipe(Schema.between(1, 1_000_000));
+const hourlyUsdCents = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_000_000 }));
 /**
  * How long, at most, a billed placement's provider keeps a desktop running
  * and billing once this host can no longer end it, by the provider's own
  * documented default: a day at most.
  */
-const billedIfHostStopsMinutes = Schema.Int.pipe(Schema.between(1, 1_440));
+const billedIfHostStopsMinutes = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_440 }));
 
 /** The calendar month, in UTC, a desktop's spend counts toward: `2026-10`. */
-export const DesktopSpendMonth = Schema.String.pipe(Schema.pattern(/^\d{4}-(0[1-9]|1[0-2])$/));
+export const DesktopSpendMonth = Schema.String.check(Schema.isPattern(/^\d{4}-(0[1-9]|1[0-2])$/));
 export type DesktopSpendMonth = typeof DesktopSpendMonth.Type;
 
 /**
@@ -139,7 +153,7 @@ export type DesktopSpendMonth = typeof DesktopSpendMonth.Type;
 export const DesktopLeaseSpend = Schema.Struct({
   hourlyCostUsdCents: hourlyUsdCents,
   estimateUsdCents: usdCents,
-}).annotations(strict);
+});
 export type DesktopLeaseSpend = typeof DesktopLeaseSpend.Type;
 
 /**
@@ -151,9 +165,9 @@ export const DesktopRecipe = Schema.Struct({
   /** The cloud provider's image or template; a host-local provider ignores it. */
   image: Schema.optional(text(256)),
   screen: Schema.Struct({
-    width: Schema.Int.pipe(Schema.between(320, 7_680)),
-    height: Schema.Int.pipe(Schema.between(240, 4_320)),
-  }).annotations(strict),
+    width: Schema.Int.check(Schema.isBetween({ minimum: 320, maximum: 7_680 })),
+    height: Schema.Int.check(Schema.isBetween({ minimum: 240, maximum: 4_320 })),
+  }),
   credentialRef: Schema.optional(DesktopCredentialRef),
   /**
    * The provider's placement this recipe runs in: required for a provider
@@ -176,15 +190,13 @@ export const DesktopRecipe = Schema.Struct({
    * provider's price; the host estimates each billed lease from this.
    */
   hourlyCostUsdCents: Schema.optional(hourlyUsdCents),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (recipe) =>
-        recipe.leaseMinutes <= recipe.maximumLeaseMinutes ||
-        "A lease cannot start longer than the recipe maximum.",
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (recipe) =>
+      recipe.leaseMinutes <= recipe.maximumLeaseMinutes ||
+      "A lease cannot start longer than the recipe maximum.",
+  ),
+);
 export type DesktopRecipe = typeof DesktopRecipe.Type;
 
 /**
@@ -203,7 +215,7 @@ export const LeasableDesktopPlacement = Schema.Struct({
    * when this host stops: how long, at most, by the provider's own default.
    */
   billedIfHostStopsMinutes: Schema.optional(billedIfHostStopsMinutes),
-}).annotations(strict);
+});
 export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
 
 /**
@@ -211,10 +223,10 @@ export type LeasableDesktopPlacement = typeof LeasableDesktopPlacement.Type;
  * person can act on: the host has no credential store to keep the key a cloud
  * account needs, or the provider's local daemon is not running here.
  */
-export const DesktopProviderSetupReason = Schema.Literal(
+export const DesktopProviderSetupReason = Schema.Literals([
   "no-credential-store",
   "daemon-not-connected",
-);
+]);
 export type DesktopProviderSetupReason = typeof DesktopProviderSetupReason.Type;
 
 /**
@@ -229,7 +241,7 @@ export const LeasableDesktopProvider = Schema.Struct({
   displayName: text(128),
   locality: DesktopProviderLocality,
   billed: Schema.Boolean,
-  placements: Schema.optional(Schema.Array(LeasableDesktopPlacement).pipe(Schema.maxItems(16))),
+  placements: Schema.optional(Schema.Array(LeasableDesktopPlacement).check(Schema.isMaxLength(16))),
   daemon: Schema.optional(Schema.Literal(true)),
   /**
    * Present while the provider is listed but cannot start a desktop until the
@@ -237,7 +249,7 @@ export const LeasableDesktopProvider = Schema.Struct({
    * refuses `needs-setup`.
    */
   needsSetup: Schema.optional(DesktopProviderSetupReason),
-}).annotations(strict);
+});
 export type LeasableDesktopProvider = typeof LeasableDesktopProvider.Type;
 
 /**
@@ -247,24 +259,24 @@ export type LeasableDesktopProvider = typeof LeasableDesktopProvider.Type;
  * only from this same daemon.
  */
 export const DesktopLeaseDaemon = Schema.Struct({
-  socketPath: Schema.String.pipe(
-    Schema.maxLength(255),
-    Schema.pattern(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/),
-    Schema.filter(
+  socketPath: Schema.String.check(
+    Schema.isMaxLength(255),
+    Schema.isPattern(/^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/),
+    Schema.makeFilter(
       (path) =>
         path.split("/").every((segment) => segment !== "." && segment !== "..") ||
         "A daemon socket path never leaves the home directory.",
     ),
   ),
-  userId: Schema.Int.pipe(Schema.between(0, 4_294_967_295)),
-}).annotations(strict);
+  userId: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 4_294_967_295 })),
+});
 export type DesktopLeaseDaemon = typeof DesktopLeaseDaemon.Type;
 
 /**
  * `released` is written only after the provider confirms the desktop is gone.
  * `release-failed` means it may still be running or billing; the host retries.
  */
-export const DesktopLeaseState = Schema.Literal(
+export const DesktopLeaseState = Schema.Literals([
   "requested",
   "provisioning",
   "ready",
@@ -273,10 +285,10 @@ export const DesktopLeaseState = Schema.Literal(
   "release-failed",
   "refused",
   "failed",
-);
+]);
 export type DesktopLeaseState = typeof DesktopLeaseState.Type;
 
-export const DesktopLeaseEndReason = Schema.Literal(
+export const DesktopLeaseEndReason = Schema.Literals([
   "released",
   "expired",
   "idle",
@@ -285,14 +297,13 @@ export const DesktopLeaseEndReason = Schema.Literal(
   "provider-disabled",
   "computer-use-off",
   "host-restart",
-);
+]);
 export type DesktopLeaseEndReason = typeof DesktopLeaseEndReason.Type;
 
-export const DesktopLeaseRefusalReason = Schema.Literal(
+export const DesktopLeaseRefusalReason = Schema.Literals([
   "no-provider-configured",
   "provider-disabled",
   "provider-unavailable",
-  /** The provider is loaded but the person has not set up what it needs on this host. */
   "needs-setup",
   "not-leasable-mode",
   "thread-not-active",
@@ -307,21 +318,17 @@ export const DesktopLeaseRefusalReason = Schema.Literal(
   "agent-cannot-extend",
   "beyond-maximum",
   "extension-unconfirmed",
-  /** A billed desktop's recipe names no hourly cost, so the host cannot estimate it. */
   "spend-unestimated",
-  /** No monthly cap is set, so no billed desktop starts. */
   "spend-cap-unset",
-  /** This lease's estimate would take this month's billed desktop spend past the cap. */
   "spend-cap-reached",
-  /** Only a person at a local window reads or changes the spend cap. */
   "spend-cap-local-only",
-);
+]);
 export type DesktopLeaseRefusalReason = typeof DesktopLeaseRefusalReason.Type;
 
 export const DesktopLeaseRefusal = Schema.Struct({
   status: Schema.Literal("refused"),
   reason: DesktopLeaseRefusalReason,
-}).annotations(strict);
+});
 export type DesktopLeaseRefusal = typeof DesktopLeaseRefusal.Type;
 
 /** The current state of one lease, rebuilt from its journal events. */
@@ -356,7 +363,7 @@ export const DesktopLease = Schema.Struct({
    */
   leftoverUnverified: Schema.optional(Schema.Literal(true)),
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DesktopLease = typeof DesktopLease.Type;
 
 export const DESKTOP_LEASE_AGGREGATE_TYPE = "desktop-lease";
@@ -395,7 +402,7 @@ export const DesktopLeaseRequested = Schema.Struct({
   expiresAt: UtcTimestamp,
   maximumExpiresAt: UtcTimestamp,
   idleMinutes: leaseMinutes,
-}).annotations(strict);
+});
 export type DesktopLeaseRequested = typeof DesktopLeaseRequested.Type;
 
 /**
@@ -425,7 +432,7 @@ export const DesktopLeaseTransitioned = Schema.Struct({
    * transition, before the first destroy, so a crash cannot lose it.
    */
   leftoverUnverified: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type DesktopLeaseTransitioned = typeof DesktopLeaseTransitioned.Type;
 
 /** A destroy verified the lease's leftover desktop gone. */
@@ -433,7 +440,7 @@ export const DesktopLeaseLeftoverCleared = Schema.Struct({
   leaseId: DesktopLeaseId,
   owner: DesktopLeaseOwner,
   providerId: DesktopProviderId,
-}).annotations(strict);
+});
 export type DesktopLeaseLeftoverCleared = typeof DesktopLeaseLeftoverCleared.Type;
 
 /** Written only after the driver confirmed the provider-side expiry moved. */
@@ -443,7 +450,7 @@ export const DesktopLeaseExtended = Schema.Struct({
   providerId: DesktopProviderId,
   previousExpiresAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DesktopLeaseExtended = typeof DesktopLeaseExtended.Type;
 
 /**
@@ -454,7 +461,7 @@ export type DesktopLeaseExtended = typeof DesktopLeaseExtended.Type;
 export const DESKTOP_ARTIFACT_MAXIMUM_BYTES = 128 * 1024 * 1024;
 
 /** Why the host would not read a file for a transfer. Authority refusals stay the lease's own. */
-export const DesktopArtifactRefusalReason = Schema.Literal(
+export const DesktopArtifactRefusalReason = Schema.Literals([
   "no-root",
   "path-invalid",
   "path-absolute",
@@ -467,20 +474,20 @@ export const DesktopArtifactRefusalReason = Schema.Literal(
   "changed-while-read",
   "path-unverifiable",
   "transfer-in-progress",
-);
+]);
 export type DesktopArtifactRefusalReason = typeof DesktopArtifactRefusalReason.Type;
 
 export const DesktopArtifactRefusal = Schema.Struct({
   status: Schema.Literal("refused"),
   reason: DesktopArtifactRefusalReason,
-}).annotations(strict);
+});
 export type DesktopArtifactRefusal = typeof DesktopArtifactRefusal.Type;
 
 /** One file name: no separator, no NUL, not `.` or `..`. */
-export const DesktopArtifactName = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(255),
-  Schema.filter(
+export const DesktopArtifactName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(255),
+  Schema.makeFilter(
     (name) =>
       (!name.includes("/") && !name.includes("\0") && name !== "." && name !== "..") ||
       "An artifact name is one file name.",
@@ -496,16 +503,22 @@ export const DesktopArtifactSent = Schema.Struct({
   owner: DesktopLeaseOwner,
   providerId: DesktopProviderId,
   /** Relative to the thread's checkout (Work: its Project root), `/`-separated. */
-  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
   /** The base name the file lands under in the desktop's inbox. */
   name: DesktopArtifactName,
-  size: Schema.Int.pipe(Schema.between(0, DESKTOP_ARTIFACT_MAXIMUM_BYTES)),
-  sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-}).annotations(strict);
+  size: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: DESKTOP_ARTIFACT_MAXIMUM_BYTES })),
+  sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+});
 export type DesktopArtifactSent = typeof DesktopArtifactSent.Type;
 
 /** An input that changes what a desktop shows. Reading its screen is not one. */
-export const DesktopLeaseOperation = Schema.Literal("launch", "click", "type", "press", "scroll");
+export const DesktopLeaseOperation = Schema.Literals([
+  "launch",
+  "click",
+  "type",
+  "press",
+  "scroll",
+]);
 export type DesktopLeaseOperation = typeof DesktopLeaseOperation.Type;
 
 /**
@@ -520,7 +533,7 @@ export const DesktopLeaseOperated = Schema.Struct({
   providerId: DesktopProviderId,
   operation: DesktopLeaseOperation,
   appId: Schema.optional(text(256)),
-}).annotations(strict);
+});
 export type DesktopLeaseOperated = typeof DesktopLeaseOperated.Type;
 
 /**
@@ -539,7 +552,9 @@ export const DESKTOP_SPEND_EVENT_NAMES = {
 
 /** The most leases a person may let one thread, or the host's own desktops, hold at once. */
 export const DESKTOP_LEASE_COUNT_MAXIMUM = 8;
-const leaseCount = Schema.Int.pipe(Schema.between(1, DESKTOP_LEASE_COUNT_MAXIMUM));
+const leaseCount = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: DESKTOP_LEASE_COUNT_MAXIMUM }),
+);
 
 /**
  * The host-wide lease settings a person at a local window sets: whether a
@@ -551,14 +566,14 @@ export const DesktopLeaseSettings = Schema.Struct({
   confirmBilledDesktops: Schema.Boolean,
   leasesPerThread: leaseCount,
   hostLocalLeasesPerHost: leaseCount,
-}).annotations(strict);
+});
 export type DesktopLeaseSettings = typeof DesktopLeaseSettings.Type;
 
 /** A person at a local window changed the lease settings. The actor on the event is that person. */
 export const DesktopLeaseSettingsChanged = Schema.Struct({
   previous: DesktopLeaseSettings,
   settings: DesktopLeaseSettings,
-}).annotations(strict);
+});
 export type DesktopLeaseSettingsChanged = typeof DesktopLeaseSettingsChanged.Type;
 
 /**
@@ -568,7 +583,7 @@ export type DesktopLeaseSettingsChanged = typeof DesktopLeaseSettingsChanged.Typ
 export const DesktopSpendCapChanged = Schema.Struct({
   previousMonthlyCapUsdCents: Schema.optional(usdCents),
   monthlyCapUsdCents: Schema.optional(usdCents),
-}).annotations(strict);
+});
 export type DesktopSpendCapChanged = typeof DesktopSpendCapChanged.Type;
 
 /**
@@ -579,12 +594,12 @@ export const DesktopBilledLeaseRefused = Schema.Struct({
   owner: DesktopLeaseOwner,
   providerId: DesktopProviderId,
   placementId: Schema.optional(DesktopPlacementId),
-  reason: Schema.Literal("spend-cap-unset", "spend-cap-reached"),
+  reason: Schema.Literals(["spend-cap-unset", "spend-cap-reached"]),
   month: DesktopSpendMonth,
   estimateUsdCents: usdCents,
   spentUsdCents: usdCents,
   monthlyCapUsdCents: Schema.optional(usdCents),
-}).annotations(strict);
+});
 export type DesktopBilledLeaseRefused = typeof DesktopBilledLeaseRefused.Type;
 
 /** This month's billed desktop spend against the cap, as the host counts it. */
@@ -593,7 +608,7 @@ export const DesktopSpendSummary = Schema.Struct({
   /** Ended leases at their running time; leases that may still bill at their whole estimate. */
   spentUsdCents: usdCents,
   monthlyCapUsdCents: Schema.optional(usdCents),
-}).annotations(strict);
+});
 export type DesktopSpendSummary = typeof DesktopSpendSummary.Type;
 
 /**
@@ -604,37 +619,37 @@ export type DesktopSpendSummary = typeof DesktopSpendSummary.Type;
 export const ComputerUseDestinationSelection = Schema.Struct({
   kind: Schema.Literal("desktop-lease"),
   leaseId: DesktopLeaseId,
-}).annotations(strict);
+});
 export type ComputerUseDestinationSelection = typeof ComputerUseDestinationSelection.Type;
 
-const screenCoordinate = Schema.Number.pipe(Schema.finite(), Schema.nonNegative());
+const screenCoordinate = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0));
 
 /** Input for a desktop's screen, from a person in a Desktop tab or the host. */
-export const DesktopInputEvent = Schema.Union(
+export const DesktopInputEvent = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("pointer"),
-    action: Schema.Literal("move", "down", "up"),
-    button: Schema.optional(Schema.Literal("left", "middle", "right")),
+    action: Schema.Literals(["move", "down", "up"]),
+    button: Schema.optional(Schema.Literals(["left", "middle", "right"])),
     x: screenCoordinate,
     y: screenCoordinate,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("key"),
-    action: Schema.Literal("down", "up"),
+    action: Schema.Literals(["down", "up"]),
     key: text(64),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("text"),
-    text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
-  }).annotations(strict),
+    text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_096)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("scroll"),
     x: screenCoordinate,
     y: screenCoordinate,
-    deltaX: Schema.Int.pipe(Schema.between(-10_000, 10_000)),
-    deltaY: Schema.Int.pipe(Schema.between(-10_000, 10_000)),
-  }).annotations(strict),
-);
+    deltaX: Schema.Int.check(Schema.isBetween({ minimum: -10_000, maximum: 10_000 })),
+    deltaY: Schema.Int.check(Schema.isBetween({ minimum: -10_000, maximum: 10_000 })),
+  }),
+]);
 export type DesktopInputEvent = typeof DesktopInputEvent.Type;
 
 /**
@@ -643,7 +658,10 @@ export type DesktopInputEvent = typeof DesktopInputEvent.Type;
  * host holds none and a restored tab cannot stream or send input until a
  * person opens a view again.
  */
-export const DesktopViewId = Schema.UUID.pipe(Schema.brand("DesktopViewId"));
+export const DesktopViewId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("DesktopViewId"),
+);
 export type DesktopViewId = typeof DesktopViewId.Type;
 
 /**
@@ -654,33 +672,36 @@ export type DesktopViewId = typeof DesktopViewId.Type;
  * desktop right now would let a third party read its screen and input, so
  * nothing is shown or sent until the route changes.
  */
-export const DesktopViewRefusalReason = Schema.Literal(
+export const DesktopViewRefusalReason = Schema.Literals([
   "view-ended",
   "view-limit",
   "session-readable",
-);
+]);
 export type DesktopViewRefusalReason = typeof DesktopViewRefusalReason.Type;
 
 export const DesktopPaneRefusal = Schema.Struct({
   status: Schema.Literal("refused"),
-  reason: Schema.Union(DesktopLeaseRefusalReason, DesktopViewRefusalReason),
-}).annotations(strict);
+  reason: Schema.Union([DesktopLeaseRefusalReason, DesktopViewRefusalReason]),
+});
 export type DesktopPaneRefusal = typeof DesktopPaneRefusal.Type;
 
-const paneThread = { threadId: Schema.UUID };
+const paneThread = { threadId: GuidString };
 const paneLease = { ...paneThread, leaseId: DesktopLeaseId };
 const paneView = { ...paneLease, viewId: DesktopViewId };
 
-const unitPoint = Schema.Number.pipe(Schema.finite(), Schema.between(0, 1));
+const unitPoint = Schema.Number.check(
+  Schema.isFinite(),
+  Schema.isBetween({ minimum: 0, maximum: 1 }),
+);
 const point = { x: unitPoint, y: unitPoint };
-export const HostDisplayInput = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("click", "double-click", "right-click"), ...point }),
+export const HostDisplayInput = Schema.Union([
+  Schema.Struct({ kind: Schema.Literals(["click", "double-click", "right-click"]), ...point }),
   Schema.Struct({ kind: Schema.Literal("drag"), ...point, endX: unitPoint, endY: unitPoint }),
   Schema.Struct({
     kind: Schema.Literal("scroll"),
     ...point,
-    deltaX: Schema.Int.pipe(Schema.between(-10000, 10000)),
-    deltaY: Schema.Int.pipe(Schema.between(-10000, 10000)),
+    deltaX: Schema.Int.check(Schema.isBetween({ minimum: -10000, maximum: 10000 })),
+    deltaY: Schema.Int.check(Schema.isBetween({ minimum: -10000, maximum: 10000 })),
   }),
   Schema.Struct({
     kind: Schema.Literal("key"),
@@ -692,60 +713,69 @@ export const HostDisplayInput = Schema.Union(
   }),
   Schema.Struct({
     kind: Schema.Literal("text"),
-    text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4096)),
+    text: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
   }),
-);
+]);
 const hostView = { kind: Schema.Literal("host-display"), ...paneThread, viewId: DesktopViewId };
 export const HostDisplayScope = Schema.Struct({
-  deviceId: Schema.UUID,
-  sessionId: Schema.UUID,
-  generation: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  deviceId: GuidString,
+  sessionId: GuidString,
+  generation: NonNegativeInt,
+});
 export type HostDisplayScope = typeof HostDisplayScope.Type;
-export const decodeHostDisplayScope = Schema.decodeUnknownSync(HostDisplayScope);
-export const HostDisplayRequest = Schema.Union(
+export const decodeHostDisplayScope = Schema.decodeUnknownSync(
+  HostDisplayScope,
+  STRICT_DECODE_OPTIONS,
+);
+export const HostDisplayRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("host-display"),
     ...paneThread,
     action: Schema.Literal("open"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...hostView,
-    action: Schema.Literal("frame", "take-control", "hand-back", "close"),
-  }).annotations(strict),
+    action: Schema.Literals(["frame", "take-control", "hand-back", "close"]),
+  }),
   Schema.Struct({
     ...hostView,
     action: Schema.Literal("input"),
     geometry: text(128),
     event: HostDisplayInput,
-  }).annotations(strict),
-);
+  }),
+]);
 export type HostDisplayRequest = typeof HostDisplayRequest.Type;
-export const decodeHostDisplayRequest = Schema.decodeUnknownSync(HostDisplayRequest);
-export const HostDisplayAnswer = Schema.Union(
+export const decodeHostDisplayRequest = Schema.decodeUnknownSync(
+  HostDisplayRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const HostDisplayAnswer = Schema.Union([
   DesktopPaneRefusal,
   Schema.Struct({ status: Schema.Literal("viewing"), viewId: DesktopViewId }),
   Schema.Struct({
     status: Schema.Literal("host-frame"),
-    jpeg: Schema.String.pipe(Schema.minLength(4), Schema.maxLength(2097152)),
+    jpeg: Schema.String.check(Schema.isMinLength(4), Schema.isMaxLength(2097152)),
     geometry: text(128),
   }),
   Schema.Struct({
-    status: Schema.Literal("delivered", "view-closed", "not-delivered", "no-frame"),
+    status: Schema.Literals(["delivered", "view-closed", "not-delivered", "no-frame"]),
   }),
-);
+]);
 export type HostDisplayAnswer = typeof HostDisplayAnswer.Type;
-export const decodeHostDisplayAnswer = Schema.decodeUnknownSync(HostDisplayAnswer);
+export const decodeHostDisplayAnswer = Schema.decodeUnknownSync(
+  HostDisplayAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * What a person's Desktop tab asks the host for one Code thread. The host
  * derives the person from the authenticated window or paired device that
  * sent it, never from the body.
  */
-export const DesktopPaneRequest = Schema.Union(
+export const DesktopPaneRequest = Schema.Union([
   HostDisplayRequest,
   DesktopPreviewRequest,
-  Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("overview"), ...paneThread }),
   Schema.Struct({
     kind: Schema.Literal("acquire"),
     ...paneThread,
@@ -760,69 +790,49 @@ export const DesktopPaneRequest = Schema.Union(
     confirmedMachine: Schema.optional(DesktopMachineId),
     /** For a billed desktop: the estimate the person saw, which must still be the host's. */
     confirmedEstimateUsdCents: Schema.optional(usdCents),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("release"), ...paneLease }),
+  Schema.Struct({ kind: Schema.Literal("retry-release"), ...paneLease }),
   Schema.Struct({
     kind: Schema.Literal("extend"),
     ...paneLease,
     byMinutes: leaseMinutes,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("open-view"), ...paneLease }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("close-view"), ...paneView }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("open-view"), ...paneLease }),
+  Schema.Struct({ kind: Schema.Literal("close-view"), ...paneView }),
   Schema.Struct({
     kind: Schema.Literal("input"),
     ...paneView,
     event: DesktopInputEvent,
-  }).annotations(strict),
-  /** The providers a Project's recipe may name on this host now, for the recipe editor. */
-  Schema.Struct({ kind: Schema.Literal("recipe-providers") }).annotations(strict),
-  /**
-   * The person's machines an offered placement that chooses one can run a
-   * desktop on, for the recipe editor in a local window.
-   */
+  }),
+  Schema.Struct({ kind: Schema.Literal("recipe-providers") }),
   Schema.Struct({
     kind: Schema.Literal("recipe-machines"),
     providerId: DesktopProviderId,
     placementId: DesktopPlacementId,
-  }).annotations(strict),
-  /**
-   * Whether a Code Project's recipe has its key, for the recipe editor. The
-   * Project id is a plain UUID here because the Project contract imports
-   * this one.
-   */
-  Schema.Struct({ kind: Schema.Literal("recipe-key"), projectId: Schema.UUID }).annotations(strict),
-  /** This month's billed desktop spend and the cap, for Settings in a local window. */
-  Schema.Struct({ kind: Schema.Literal("spend") }).annotations(strict),
-  /**
-   * A person at a local window setting the monthly cap; no cap turns billed
-   * desktops off. No agent, paired device, or turn reaches this.
-   */
+  }),
+  Schema.Struct({ kind: Schema.Literal("recipe-key"), projectId: GuidString }),
+  Schema.Struct({ kind: Schema.Literal("spend") }),
   Schema.Struct({
     kind: Schema.Literal("set-spend-cap"),
     monthlyCapUsdCents: Schema.optional(usdCents),
-  }).annotations(strict),
-  /** The host-wide lease settings, for Settings in a local window. */
-  Schema.Struct({ kind: Schema.Literal("lease-settings") }).annotations(strict),
-  /**
-   * A person at a local window changing the lease settings; a field left out
-   * stays as it is. No agent, paired device, or turn reaches this.
-   */
+  }),
+  Schema.Struct({ kind: Schema.Literal("lease-settings") }),
   Schema.Struct({
     kind: Schema.Literal("set-lease-settings"),
     confirmBilledDesktops: Schema.optional(Schema.Boolean),
     leasesPerThread: Schema.optional(leaseCount),
     hostLocalLeasesPerHost: Schema.optional(leaseCount),
-  }).annotations(strict),
-);
+  }),
+]);
 export type DesktopPaneRequest = typeof DesktopPaneRequest.Type;
 
 /** One frame of a view. The answer is the image itself, never stored by the host. */
-export const DesktopFrameRequest = Schema.Struct(paneView).annotations(strict);
+export const DesktopFrameRequest = Schema.Struct(paneView);
 export type DesktopFrameRequest = typeof DesktopFrameRequest.Type;
 
 /** Whether the thread could start a desktop now, or the refusal that stands in the way. */
-export const DesktopPaneStart = Schema.Union(
+export const DesktopPaneStart = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
     provider: LeasableDesktopProvider,
@@ -835,26 +845,26 @@ export const DesktopPaneStart = Schema.Union(
      * desktop that bills or runs off this machine, while the person keeps
      * "Confirm each billed desktop" on.
      */
-    asks: Schema.optional(Schema.Literal("billed", "off-machine")),
+    asks: Schema.optional(Schema.Literals(["billed", "off-machine"])),
     /** For a billed desktop: what it is estimated at, and this month's spend against the cap. */
     spend: Schema.optional(
       Schema.Struct({
         estimateUsdCents: usdCents,
         summary: DesktopSpendSummary,
-      }).annotations(strict),
+      }),
     ),
-  }).annotations(strict),
+  }),
   DesktopLeaseRefusal,
-);
+]);
 export type DesktopPaneStart = typeof DesktopPaneStart.Type;
 
 const leaseAnswer = <S extends string>(status: S) =>
-  Schema.Struct({ status: Schema.Literal(status), lease: DesktopLease }).annotations(strict);
+  Schema.Struct({ status: Schema.Literal(status), lease: DesktopLease });
 
-export const DesktopPaneAnswer = Schema.Union(
+export const DesktopPaneAnswer = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("host-frame"),
-    jpeg: Schema.String.pipe(Schema.minLength(4), Schema.maxLength(2097152)),
+    jpeg: Schema.String.check(Schema.isMinLength(4), Schema.isMaxLength(2097152)),
     geometry: text(128),
   }),
   DesktopPreviewAnswer,
@@ -866,25 +876,23 @@ export const DesktopPaneAnswer = Schema.Union(
     /** Every provider the host has loaded, so a lease names its provider even once it is not leasable. */
     providers: Schema.Array(LeasableDesktopProvider),
     start: DesktopPaneStart,
-  }).annotations(strict),
+  }),
   leaseAnswer("acquired"),
   leaseAnswer("not-acquired"),
   leaseAnswer("released"),
   leaseAnswer("releasing"),
   leaseAnswer("release-failed"),
   leaseAnswer("extended"),
-  Schema.Struct({ status: Schema.Literal("viewing"), viewId: DesktopViewId }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("view-closed") }).annotations(strict),
-  /** A frame the desktop could not give, or the host would not pass on; the view stays open. */
-  Schema.Struct({ status: Schema.Literal("no-frame") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("delivered") }).annotations(strict),
-  /** The host journaled the input, but the desktop did not take it. */
-  Schema.Struct({ status: Schema.Literal("not-delivered") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("viewing"), viewId: DesktopViewId }),
+  Schema.Struct({ status: Schema.Literal("view-closed") }),
+  Schema.Struct({ status: Schema.Literal("no-frame") }),
+  Schema.Struct({ status: Schema.Literal("delivered") }),
+  Schema.Struct({ status: Schema.Literal("not-delivered") }),
   Schema.Struct({
     status: Schema.Literal("recipe-providers"),
     /** Providers ready for leasing on this host; a recipe naming any other is refused. */
     providers: Schema.Array(LeasableDesktopProvider),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("recipe-machines"),
     /** The machines the provider reports for the placement now, and whether each answers. */
@@ -893,58 +901,116 @@ export const DesktopPaneAnswer = Schema.Union(
         machineId: DesktopMachineId,
         displayName: text(128),
         online: Schema.Boolean,
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(64)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(64)),
+  }),
   Schema.Struct({
     status: Schema.Literal("recipe-key"),
     key: DesktopRecipeKeyState,
     /** Whether this host has a credential store a key can be saved in. */
-    store: Schema.Literal("available", "unavailable"),
+    store: Schema.Literals(["available", "unavailable"]),
     /** A key the Project's recipe stopped naming stays until its desktops are gone. */
     releasing: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("spend"), summary: DesktopSpendSummary }).annotations(
-    strict,
-  ),
+  }),
+  Schema.Struct({ status: Schema.Literal("spend"), summary: DesktopSpendSummary }),
   Schema.Struct({
     status: Schema.Literal("lease-settings"),
     settings: DesktopLeaseSettings,
-  }).annotations(strict),
+  }),
   DesktopPaneRefusal,
-);
+]);
 export type DesktopPaneAnswer = typeof DesktopPaneAnswer.Type;
 
-export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId);
-export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag);
-export const decodeDesktopProviderId = Schema.decodeUnknownSync(DesktopProviderId);
-export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(DesktopCredentialRef);
-export const decodeDesktopPlacementId = Schema.decodeUnknownSync(DesktopPlacementId);
-export const decodeDesktopMachineId = Schema.decodeUnknownSync(DesktopMachineId);
-export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe);
-export const decodeDesktopRecipeKeyChange = Schema.decodeUnknownSync(DesktopRecipeKeyChange);
-export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(LeasableDesktopProvider);
-export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(DesktopLeaseDaemon);
-export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
-export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
-export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);
+export const decodeDesktopLeaseId = Schema.decodeUnknownSync(DesktopLeaseId, STRICT_DECODE_OPTIONS);
+export const decodeDesktopHostTag = Schema.decodeUnknownSync(DesktopHostTag, STRICT_DECODE_OPTIONS);
+export const decodeDesktopProviderId = Schema.decodeUnknownSync(
+  DesktopProviderId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopCredentialRef = Schema.decodeUnknownSync(
+  DesktopCredentialRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopPlacementId = Schema.decodeUnknownSync(
+  DesktopPlacementId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopMachineId = Schema.decodeUnknownSync(
+  DesktopMachineId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopRecipe = Schema.decodeUnknownSync(DesktopRecipe, STRICT_DECODE_OPTIONS);
+export const decodeDesktopRecipeKeyChange = Schema.decodeUnknownSync(
+  DesktopRecipeKeyChange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLeasableDesktopProvider = Schema.decodeUnknownSync(
+  LeasableDesktopProvider,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopLeaseDaemon = Schema.decodeUnknownSync(
+  DesktopLeaseDaemon,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease, STRICT_DECODE_OPTIONS);
+export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(
+  DesktopLeaseRequested,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(
+  DesktopLeaseTransitioned,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDesktopLeaseLeftoverCleared = Schema.decodeUnknownSync(
   DesktopLeaseLeftoverCleared,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(DesktopLeaseExtended);
-export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifactSent);
-export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);
-export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(DesktopLeaseOperated);
-export const decodeDesktopSpendCapChanged = Schema.decodeUnknownSync(DesktopSpendCapChanged);
+export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(
+  DesktopLeaseExtended,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(
+  DesktopArtifactSent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopInputEvent = Schema.decodeUnknownSync(
+  DesktopInputEvent,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(
+  DesktopLeaseOperated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopSpendCapChanged = Schema.decodeUnknownSync(
+  DesktopSpendCapChanged,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDesktopLeaseSettingsChanged = Schema.decodeUnknownSync(
   DesktopLeaseSettingsChanged,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDesktopBilledLeaseRefused = Schema.decodeUnknownSync(DesktopBilledLeaseRefused);
-export const decodeDesktopSpendSummary = Schema.decodeUnknownSync(DesktopSpendSummary);
+export const decodeDesktopBilledLeaseRefused = Schema.decodeUnknownSync(
+  DesktopBilledLeaseRefused,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopSpendSummary = Schema.decodeUnknownSync(
+  DesktopSpendSummary,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeComputerUseDestinationSelection = Schema.decodeUnknownSync(
   ComputerUseDestinationSelection,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDesktopViewId = Schema.decodeUnknownSync(DesktopViewId);
-export const decodeDesktopPaneRequest = Schema.decodeUnknownSync(DesktopPaneRequest);
-export const decodeDesktopFrameRequest = Schema.decodeUnknownSync(DesktopFrameRequest);
-export const decodeDesktopPaneAnswer = Schema.decodeUnknownSync(DesktopPaneAnswer);
+export const decodeDesktopViewId = Schema.decodeUnknownSync(DesktopViewId, STRICT_DECODE_OPTIONS);
+export const decodeDesktopPaneRequest = Schema.decodeUnknownSync(
+  DesktopPaneRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopFrameRequest = Schema.decodeUnknownSync(
+  DesktopFrameRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDesktopPaneAnswer = Schema.decodeUnknownSync(
+  DesktopPaneAnswer,
+  STRICT_DECODE_OPTIONS,
+);

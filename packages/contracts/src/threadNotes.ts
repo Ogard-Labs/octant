@@ -1,11 +1,13 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { MentionableThreadId } from "./threadMentionIdentity";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-export const ThreadNoteId = Schema.UUID.pipe(Schema.brand("ThreadNoteId"));
+export const ThreadNoteId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ThreadNoteId"),
+);
 export type ThreadNoteId = typeof ThreadNoteId.Type;
 
 /** A note is the person's own text: long enough for a paragraph or a list, not a document. */
@@ -13,7 +15,10 @@ export const MAX_THREAD_NOTE_LENGTH = 4_000;
 /** Notes a thread keeps; past it the person deletes one before adding another. */
 export const MAX_THREAD_NOTES = 100;
 
-const ThreadNoteText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_THREAD_NOTE_LENGTH));
+const ThreadNoteText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_THREAD_NOTE_LENGTH),
+);
 
 /** One note the person keeps on a thread. It is never sent to the agent by itself. */
 export const ThreadNote = Schema.Struct({
@@ -21,7 +26,7 @@ export const ThreadNote = Schema.Struct({
   text: ThreadNoteText,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadNote = typeof ThreadNote.Type;
 
 /**
@@ -41,7 +46,7 @@ export const ThreadNoteAdded = Schema.Struct({
   noteId: ThreadNoteId,
   text: ThreadNoteText,
   at: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadNoteAdded = typeof ThreadNoteAdded.Type;
 
 export const ThreadNoteEdited = Schema.Struct({
@@ -49,19 +54,19 @@ export const ThreadNoteEdited = Schema.Struct({
   noteId: ThreadNoteId,
   text: ThreadNoteText,
   at: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadNoteEdited = typeof ThreadNoteEdited.Type;
 
 export const ThreadNoteDeleted = Schema.Struct({
   threadId: MentionableThreadId,
   noteId: ThreadNoteId,
   at: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadNoteDeleted = typeof ThreadNoteDeleted.Type;
 
 /** The longest excerpt of one message a recap quotes. */
 export const MAX_THREAD_RECAP_EXCERPT_LENGTH = 280;
-const RecapExcerpt = Schema.String.pipe(Schema.maxLength(MAX_THREAD_RECAP_EXCERPT_LENGTH));
+const RecapExcerpt = Schema.String.check(Schema.isMaxLength(MAX_THREAD_RECAP_EXCERPT_LENGTH));
 
 /**
  * What a thread asked, did and left open, read on request from the thread's
@@ -73,11 +78,11 @@ const RecapExcerpt = Schema.String.pipe(Schema.maxLength(MAX_THREAD_RECAP_EXCERP
 export const ThreadRecap = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
   /** The person's messages in the window read. */
-  asks: Schema.Int.pipe(Schema.nonNegative()),
+  asks: NonNegativeInt,
   /** The agent's replies in the window read. */
-  replies: Schema.Int.pipe(Schema.nonNegative()),
+  replies: NonNegativeInt,
   /** The earliest ask in the window: the thread's first when nothing was cut. */
   firstAsk: Schema.optional(RecapExcerpt),
   latestAsk: Schema.optional(RecapExcerpt),
@@ -86,79 +91,92 @@ export const ThreadRecap = Schema.Struct({
   awaitingReply: Schema.Boolean,
   throughAt: Schema.optional(UtcTimestamp),
   truncated: Schema.Boolean,
-  notes: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  notes: NonNegativeInt,
+});
 export type ThreadRecap = typeof ThreadRecap.Type;
 
 export const ReadThreadNotesCommand = Schema.Struct({
   kind: Schema.Literal("read-thread-notes"),
   threadId: MentionableThreadId,
-}).annotations(strict);
+});
 
 export const AddThreadNoteCommand = Schema.Struct({
   kind: Schema.Literal("add-thread-note"),
   threadId: MentionableThreadId,
   text: ThreadNoteText,
-}).annotations(strict);
+});
 
 export const EditThreadNoteCommand = Schema.Struct({
   kind: Schema.Literal("edit-thread-note"),
   threadId: MentionableThreadId,
   noteId: ThreadNoteId,
   text: ThreadNoteText,
-}).annotations(strict);
+});
 
 export const DeleteThreadNoteCommand = Schema.Struct({
   kind: Schema.Literal("delete-thread-note"),
   threadId: MentionableThreadId,
   noteId: ThreadNoteId,
-}).annotations(strict);
+});
 
 export const ReadThreadRecapCommand = Schema.Struct({
   kind: Schema.Literal("read-thread-recap"),
   threadId: MentionableThreadId,
-}).annotations(strict);
+});
 
-export const ThreadNotesCommand = Schema.Union(
+export const ThreadNotesCommand = Schema.Union([
   ReadThreadNotesCommand,
   AddThreadNoteCommand,
   EditThreadNoteCommand,
   DeleteThreadNoteCommand,
   ReadThreadRecapCommand,
-);
+]);
 export type ThreadNotesCommand = typeof ThreadNotesCommand.Type;
 
-export const ThreadNotesRefusalReason = Schema.Literal(
-  /** The window cannot open the thread now, or it no longer exists. */
+export const ThreadNotesRefusalReason = Schema.Literals([
   "thread-unavailable",
-  /** Only the person writes notes; an agent or the host itself is refused. */
   "not-the-person",
   "note-not-found",
   "too-many-notes",
-);
+]);
 export type ThreadNotesRefusalReason = typeof ThreadNotesRefusalReason.Type;
 
-export const ThreadNotesResult = Schema.Union(
+export const ThreadNotesResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("thread-notes"),
     threadId: MentionableThreadId,
-    notes: Schema.Array(ThreadNote).pipe(Schema.maxItems(MAX_THREAD_NOTES)),
-  }).annotations(strict),
+    notes: Schema.Array(ThreadNote).check(Schema.isMaxLength(MAX_THREAD_NOTES)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("thread-recap"),
     recap: ThreadRecap,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("thread-notes-refused"),
     reason: ThreadNotesRefusalReason,
     message: Schema.String,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadNotesResult = typeof ThreadNotesResult.Type;
 
-export const decodeThreadNotesCommand = Schema.decodeUnknownSync(ThreadNotesCommand);
-export const decodeThreadNotesResult = Schema.decodeUnknownSync(ThreadNotesResult);
-export const decodeThreadNoteAdded = Schema.decodeUnknownSync(ThreadNoteAdded);
-export const decodeThreadNoteEdited = Schema.decodeUnknownSync(ThreadNoteEdited);
-export const decodeThreadNoteDeleted = Schema.decodeUnknownSync(ThreadNoteDeleted);
-export const decodeThreadRecap = Schema.decodeUnknownSync(ThreadRecap);
+export const decodeThreadNotesCommand = Schema.decodeUnknownSync(
+  ThreadNotesCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadNotesResult = Schema.decodeUnknownSync(
+  ThreadNotesResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadNoteAdded = Schema.decodeUnknownSync(
+  ThreadNoteAdded,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadNoteEdited = Schema.decodeUnknownSync(
+  ThreadNoteEdited,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadNoteDeleted = Schema.decodeUnknownSync(
+  ThreadNoteDeleted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadRecap = Schema.decodeUnknownSync(ThreadRecap, STRICT_DECODE_OPTIONS);

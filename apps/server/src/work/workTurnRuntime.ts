@@ -429,7 +429,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       );
       const execution = Effect.scoped(
         this.#execute(input, idle, meter, { strict, idleLimitMs, stallAction }).pipe(
-          Effect.catchAll((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),
+          Effect.catch((error) => Effect.succeed<WorkTurnRuntimeOutcome>(failureOutcome(error))),
         ),
       ).pipe(Effect.map((outcome): LifecycleResult => ({ kind: "outcome", outcome })));
       const abortBoundary = abortEffect(input.signal).pipe(
@@ -437,7 +437,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           const owned = this.#forceStops.get(String(input.command.requestId));
           return owned === undefined
             ? Effect.void
-            : owned.interrupt().pipe(Effect.catchAll(() => Effect.void));
+            : owned.interrupt().pipe(Effect.catch(() => Effect.void));
         }),
         Effect.as<LifecycleResult>({ kind: "cancelled" }),
       );
@@ -485,7 +485,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
           await input.appManagedTools?.close?.();
-        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+        }).pipe(Effect.catchCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       const clock = input.clock ?? (() => new Date().toISOString());
       let reachedTerminalEvent = false;
@@ -505,7 +505,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 });
               }),
             ),
-            Effect.catchAll(() => Effect.void),
+            Effect.catch(() => Effect.void),
           ),
         );
       }
@@ -701,7 +701,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Effect.runPromise(
               kill(input.providerSessionId).pipe(
                 Effect.as(true),
-                Effect.catchAll(() => Effect.succeed(false)),
+                Effect.catch(() => Effect.succeed(false)),
               ),
             ),
           interrupt: () => connection.interrupt(input.providerSessionId),
@@ -717,9 +717,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       }
 
       if (input.signal.aborted) {
-        yield* connection
-          .interrupt(input.providerSessionId)
-          .pipe(Effect.catchAll(() => Effect.void));
+        yield* connection.interrupt(input.providerSessionId).pipe(Effect.catch(() => Effect.void));
         return { kind: "cancelled" };
       }
       let handledEvents = 0;
@@ -851,7 +849,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       input.onLoopStopped?.(notice);
                       yield* connection
                         .interrupt(input.providerSessionId)
-                        .pipe(Effect.catchAll(() => Effect.void));
+                        .pipe(Effect.catch(() => Effect.void));
                       yield* Deferred.succeed(loopStopped, undefined);
                       return;
                     }
@@ -867,7 +865,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   // The receipt is accounting; failing to write it never
                   // fails the turn whose session it describes.
                   yield* Effect.try(() => record(sighting)).pipe(
-                    Effect.catchAll(() =>
+                    Effect.catch(() =>
                       Effect.logWarning("An automatic compaction could not be journaled."),
                     ),
                   );
@@ -935,7 +933,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       input.onLoopStopped?.(notice);
                       yield* connection
                         .interrupt(input.providerSessionId)
-                        .pipe(Effect.catchAll(() => Effect.void));
+                        .pipe(Effect.catch(() => Effect.void));
                       yield* Deferred.succeed(loopStopped, undefined);
                       return;
                     }
@@ -957,7 +955,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                         resultJson: JSON.stringify({ error: "tool-unavailable" }),
                         isError: true,
                       })
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return;
                   }
                   const requestSignal = connection.toolRequestSignal?.({
@@ -1079,7 +1077,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       ...(execution.images === undefined ? {} : { images: execution.images }),
                       isError: execution.isError === true,
                     })
-                    .pipe(Effect.catchAll(() => Effect.void));
+                    .pipe(Effect.catch(() => Effect.void));
                   return;
                 }
                 if (event.kind === "approval-request" || event.kind === "user-input-request") {
@@ -1245,7 +1243,7 @@ type LifecycleResult =
 function abortEffect(signal: AbortSignal): Effect.Effect<"cancelled"> {
   return Effect.suspend(() => {
     if (signal.aborted) return Effect.succeed("cancelled" as const);
-    return Effect.async<"cancelled">((resume) => {
+    return Effect.callback<"cancelled">((resume) => {
       const onAbort = () => resume(Effect.succeed("cancelled"));
       signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => signal.removeEventListener("abort", onAbort));
@@ -1261,7 +1259,7 @@ function boundedCleanup<E, R>(
   // a completed cleanup cancels its timer instead of waiting out the budget.
   return Effect.raceFirst(
     effect.pipe(
-      Effect.catchAll(() => Effect.void),
+      Effect.catch(() => Effect.void),
       Effect.interruptible,
     ),
     Effect.sleep(timeoutMs).pipe(Effect.interruptible),

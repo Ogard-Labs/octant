@@ -14,8 +14,6 @@ import {
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** One aggregate per Canvas; a Canvas purge erases it with the Canvas. */
 export const CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE = "canvas-outside-content";
 export const CANVAS_OUTSIDE_CONTENT_CARRIED = "canvas.outside-content-carried@1";
@@ -33,12 +31,13 @@ export const CANVAS_READER_SOURCE_LABEL = "canvas";
 export const CanvasOutsideContentCarried = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  writerId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-}).annotations(strict);
+  writerId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(128))),
+});
 export type CanvasOutsideContentCarried = typeof CanvasOutsideContentCarried.Type;
 
 export const decodeCanvasOutsideContentCarried = Schema.decodeUnknownSync(
   CanvasOutsideContentCarried,
+  { onExcessProperty: "error" },
 );
 
 export function registerCanvasOutsideContentEvents(registry: EventRegistry): EventRegistry {

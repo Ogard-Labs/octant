@@ -1,13 +1,15 @@
 import { Schema } from "effect";
 import { isCanvasShareSafeText } from "./canvasExportText";
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(96),
-    Schema.pattern(/^[a-z][a-z0-9-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(96),
+      Schema.isPattern(/^[a-z][a-z0-9-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 export const CANVAS_EXPORT_SCHEMA_VERSION = 1 as const;
 export const CanvasExportSchemaVersion = Schema.Literal(CANVAS_EXPORT_SCHEMA_VERSION);
@@ -16,22 +18,22 @@ export type CanvasExportSchemaVersion = typeof CanvasExportSchemaVersion.Type;
 export const CANVAS_EXPORT_LABEL_MAX_CHARS = 128;
 export const CANVAS_EXPORT_MESSAGE_MAX_CHARS = 1_024;
 
-export const CanvasExportFormat = Schema.Literal(
+export const CanvasExportFormat = Schema.Literals([
   "markdown",
   "html",
   "share-document",
   "pdf",
   "png",
-);
+]);
 export type CanvasExportFormat = typeof CanvasExportFormat.Type;
 
 export const CanvasExportTargetId = boundedToken("CanvasExportTargetId");
 export type CanvasExportTargetId = typeof CanvasExportTargetId.Type;
 
 export const canvasExportSafeBounded = (maximum: number) =>
-  boundedText(maximum).pipe(
-    Schema.filter((value) => isCanvasShareSafeText(value), {
-      message: () => "Canvas export text must not contain a secret or a file path.",
+  boundedText(maximum).check(
+    Schema.makeFilter((value) => isCanvasShareSafeText(value), {
+      message: "Canvas export text must not contain a secret or a file path.",
     }),
   );
 
@@ -43,11 +45,11 @@ export const CanvasExportContribution = Schema.Struct({
   kind: Schema.Literal("canvas-export-contribution"),
   targetId: CanvasExportTargetId,
   label: canvasExportSafeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
-  formats: Schema.NonEmptyArray(CanvasExportFormat).pipe(
-    Schema.maxItems(5),
-    Schema.filter(canvasExportUniqueFormats, {
-      message: () => "Canvas export formats must be unique.",
+  formats: Schema.NonEmptyArray(CanvasExportFormat).check(
+    Schema.isMaxLength(5),
+    Schema.makeFilter(canvasExportUniqueFormats, {
+      message: "Canvas export formats must be unique.",
     }),
   ),
-}).annotations(strict);
+});
 export type CanvasExportContribution = typeof CanvasExportContribution.Type;

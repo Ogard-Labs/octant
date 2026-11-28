@@ -25,8 +25,6 @@ import { ProviderDriverKind } from "@octant/contracts/providers";
  * and any field this schema does not name is refused rather than ignored.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** The driver-kind family every outside harness endpoint belongs to. */
 export const OUTSIDE_PROVIDER_DRIVER_KIND = "outside-harness-endpoint" as const;
 
@@ -63,7 +61,7 @@ export { OutsideProviderDriverProtocolVersion };
  * The first group is decided by this schema alone; the second by the host
  * when it inspects the package's files.
  */
-export const OutsideProviderDriverRefusalReason = Schema.Literal(
+export const OutsideProviderDriverRefusalReason = Schema.Literals([
   "entry-invalid",
   "bundled-source",
   "bundled-kind-claim",
@@ -83,17 +81,17 @@ export const OutsideProviderDriverRefusalReason = Schema.Literal(
   "signature-missing",
   "signature-invalid",
   "media-declaration-mismatch",
-);
+]);
 export type OutsideProviderDriverRefusalReason = typeof OutsideProviderDriverRefusalReason.Type;
 
 const OutsideProviderDriverEntryShape = Schema.Struct({
   driverKind: ProviderDriverKind,
   protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(8),
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(8)),
   ),
   manifest: ExtensionPackageManifest,
-}).annotations(strict);
+});
 type OutsideProviderDriverEntryShape = typeof OutsideProviderDriverEntryShape.Type;
 
 const bundledDriverKinds: ReadonlySet<string> = new Set(ProviderDriverKind.literals);
@@ -163,30 +161,37 @@ function entryRefusal(
 }
 
 export const OutsideProviderDriverEntry = OutsideProviderDriverEntryShape.pipe(
-  Schema.filter((entry) => {
-    const reason = entryRefusal(entry);
-    return reason === undefined ? true : `An outside provider driver entry is refused: ${reason}.`;
-  }),
+  Schema.check(
+    Schema.makeFilter((entry) => {
+      const reason = entryRefusal(entry);
+      return reason === undefined
+        ? true
+        : `An outside provider driver entry is refused: ${reason}.`;
+    }),
+  ),
 );
 export type OutsideProviderDriverEntry = typeof OutsideProviderDriverEntry.Type;
 
 export const decodeOutsideProviderDriverEntry = Schema.decodeUnknownSync(
   OutsideProviderDriverEntry,
+  { onExcessProperty: "error" },
 );
 
 export type OutsideProviderDriverEntryReading =
   | { readonly status: "accepted"; readonly entry: OutsideProviderDriverEntry }
   | { readonly status: "refused"; readonly reason: OutsideProviderDriverRefusalReason };
 
-const decodeShape = Schema.decodeUnknownEither(OutsideProviderDriverEntryShape);
+const decodeShape = Schema.decodeUnknownResult(OutsideProviderDriverEntryShape, {
+  onExcessProperty: "error",
+});
 
 /** Reads an outside entry, naming the closed reason when it is refused. */
 export function readOutsideProviderDriverEntry(value: unknown): OutsideProviderDriverEntryReading {
   const decoded = decodeShape(value);
-  if (decoded._tag === "Left") return { status: "refused", reason: "entry-invalid" };
-  const reason = entryRefusal(decoded.right);
+  if (decoded._tag === "Failure") return { status: "refused", reason: "entry-invalid" };
+  const reason = entryRefusal(decoded.success);
   return reason === undefined
-    ? { status: "accepted", entry: decoded.right }
+    ? { status: "accepted", entry: decoded.success }
     : { status: "refused", reason };
 }
 
@@ -200,7 +205,7 @@ export const OUTSIDE_PROVIDER_DRIVER_SIGNATURE_PATH = "octant-signature.json";
 /** The signature format this version of Octant reads. */
 export const OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT = "octant-signature/1";
 
-const sha256Hex = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const sha256Hex = Schema.String.pipe(Schema.check(Schema.isPattern(/^[a-f0-9]{64}$/)));
 
 /**
  * A package-relative file path as the signature names it: `/`-separated,
@@ -208,14 +213,16 @@ const sha256Hex = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
  * signed message holds one path per line.
  */
 const signedPath = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(1024),
-  Schema.filter(
-    (path) =>
-      // oxlint-disable-next-line no-control-regex -- control characters are what this refuses
-      !/[\u0000-\u001f\u007f\\]/.test(path) &&
-      !path.startsWith("/") &&
-      path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  Schema.check(Schema.isMinLength(1)),
+  Schema.check(Schema.isMaxLength(1024)),
+  Schema.check(
+    Schema.makeFilter(
+      (path) =>
+        // oxlint-disable-next-line no-control-regex -- control characters are what this refuses
+        !/[\u0000-\u001f\u007f\\]/.test(path) &&
+        !path.startsWith("/") &&
+        path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+    ),
   ),
 );
 
@@ -228,27 +235,36 @@ const signedPath = Schema.String.pipe(
  */
 export const OutsideProviderDriverSignatureDocument = Schema.Struct({
   format: Schema.Literal(OUTSIDE_PROVIDER_DRIVER_SIGNATURE_FORMAT),
-  name: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(214)),
-  version: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64)),
+  name: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(214)),
+  ),
+  version: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(64)),
+  ),
   /**
    * Empty for a package that is not a provider driver and so speaks no
    * driver protocol. The host compares the list with the package it read, so
    * a driver's signature that left its versions out does not verify.
    */
-  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(Schema.maxItems(8)),
-  files: Schema.Array(
-    Schema.Struct({ path: signedPath, sha256: sha256Hex }).annotations(strict),
-  ).pipe(Schema.maxItems(4096)),
+  protocolVersions: Schema.Array(OutsideProviderDriverProtocolVersion).pipe(
+    Schema.check(Schema.isMaxLength(8)),
+  ),
+  files: Schema.Array(Schema.Struct({ path: signedPath, sha256: sha256Hex })).pipe(
+    Schema.check(Schema.isMaxLength(4096)),
+  ),
   /** The 32 raw bytes of the Ed25519 public key, in standard base64. */
-  publicKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{43}=$/)),
+  publicKey: Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z0-9+/]{43}=$/))),
   /** The 64-byte Ed25519 signature over the signed message, in standard base64. */
-  signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{86}==$/)),
-}).annotations(strict);
+  signature: Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z0-9+/]{86}==$/))),
+});
 export type OutsideProviderDriverSignatureDocument =
   typeof OutsideProviderDriverSignatureDocument.Type;
 
-export const decodeOutsideProviderDriverSignatureDocument = Schema.decodeUnknownEither(
+export const decodeOutsideProviderDriverSignatureDocument = Schema.decodeUnknownResult(
   OutsideProviderDriverSignatureDocument,
+  { onExcessProperty: "error" },
 );
 
 /** What a signature covers; the signed message is built from these alone. */

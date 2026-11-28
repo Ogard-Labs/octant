@@ -125,10 +125,10 @@ export async function languageEditPreview(input: {
         "annotationId" in edit
       )
         return invalid;
-      const parsed = Schema.decodeUnknownEither(CodeLanguageRange)(edit.range);
-      if (parsed._tag === "Left") return invalid;
-      const start = offset(parsed.right.start.line, parsed.right.start.character);
-      const end = offset(parsed.right.end.line, parsed.right.end.character);
+      const parsed = Schema.decodeUnknownResult(CodeLanguageRange)(edit.range);
+      if (parsed._tag === "Failure") return invalid;
+      const start = offset(parsed.success.start.line, parsed.success.start.character);
+      const end = offset(parsed.success.end.line, parsed.success.end.character);
       if (start === undefined || end === undefined) return invalid;
       edits.push({ start, end, text: edit.newText });
     }

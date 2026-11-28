@@ -2782,4 +2782,4 @@ export function wireWork(deps: WorkDependencies) {
   });
 }
 
-export type WorkWiring = Effect.Effect.Success<ReturnType<typeof wireWork>>;
+export type WorkWiring = Effect.Success<ReturnType<typeof wireWork>>;

@@ -1,28 +1,28 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { HubMemberId } from "./hubAndSpokes";
 
 // The hub's public entrance: visitor links, webhook deliveries, and the device
 // relay. A spoke owns every link and endpoint; the hub holds only what these
 // shapes carry, which never names a thread, a Project, or a routine.
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const base64Url = (min: number, max: number) =>
-  Schema.String.pipe(Schema.pattern(new RegExp(`^[A-Za-z0-9_-]{${min},${max}}$`)));
-const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
-const millis = Schema.Int.pipe(Schema.nonNegative());
+  Schema.String.check(Schema.isPattern(new RegExp(`^[A-Za-z0-9_-]{${min},${max}}$`)));
+const digest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+const millis = NonNegativeInt;
 
 /** Sixteen random bytes as base64url: the public half of a visitor link. */
 export const VisitorLinkId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{22}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/)),
   Schema.brand("VisitorLinkId"),
 );
 export type VisitorLinkId = typeof VisitorLinkId.Type;
 
 /** Thirty-two random bytes as base64url. It travels only in a link's URL fragment. */
-export const VisitorLinkSecret = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/));
+export const VisitorLinkSecret = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/));
 export type VisitorLinkSecret = typeof VisitorLinkSecret.Type;
 
-export const VisitorLinkScope = Schema.Literal("read", "comment");
+export const VisitorLinkScope = Schema.Literals(["read", "comment"]);
 export type VisitorLinkScope = typeof VisitorLinkScope.Type;
 
 export const VISITOR_LINK_DEFAULT_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -55,9 +55,9 @@ export const VisitorLinkGrant = Schema.Struct({
   scope: VisitorLinkScope,
   issuedAt: millis,
   expiresAt: millis,
-  revision: Schema.Int.pipe(Schema.positive()),
+  revision: PositiveInt,
   secretHash: base64Url(43, 43),
-}).annotations(strict);
+});
 export type VisitorLinkGrant = typeof VisitorLinkGrant.Type;
 
 /** A grant with the spoke's host identity key and its P-256 IEEE-P1363 signature. */
@@ -65,9 +65,12 @@ export const SignedVisitorLinkGrant = Schema.Struct({
   grant: VisitorLinkGrant,
   signerPublicKey: base64Url(80, 512),
   signature: base64Url(86, 86),
-}).annotations(strict);
+});
 export type SignedVisitorLinkGrant = typeof SignedVisitorLinkGrant.Type;
-export const decodeSignedVisitorLinkGrant = Schema.decodeUnknownSync(SignedVisitorLinkGrant);
+export const decodeSignedVisitorLinkGrant = Schema.decodeUnknownSync(
+  SignedVisitorLinkGrant,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const VISITOR_LINK_REFUSAL_KINDS = [
   "unknown-signer",
@@ -78,12 +81,12 @@ export const VISITOR_LINK_REFUSAL_KINDS = [
   "revoked",
   "bound-elsewhere",
 ] as const;
-export const VisitorLinkRefusalKind = Schema.Literal(...VISITOR_LINK_REFUSAL_KINDS);
+export const VisitorLinkRefusalKind = Schema.Literals(VISITOR_LINK_REFUSAL_KINDS);
 export type VisitorLinkRefusalKind = typeof VisitorLinkRefusalKind.Type;
 
 /** Sixteen random bytes as base64url: the path segment of a webhook URL. */
 export const WebhookEndpointId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9_-]{22}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/)),
   Schema.brand("WebhookEndpointId"),
 );
 export type WebhookEndpointId = typeof WebhookEndpointId.Type;
@@ -94,7 +97,7 @@ export type WebhookEndpointId = typeof WebhookEndpointId.Type;
  * and puts the event id inside it. Stripe mints its own secret, so a Stripe
  * endpoint's secret is pasted in rather than minted.
  */
-export const WebhookSignatureScheme = Schema.Literal("standard-webhooks", "github", "stripe");
+export const WebhookSignatureScheme = Schema.Literals(["standard-webhooks", "github", "stripe"]);
 export type WebhookSignatureScheme = typeof WebhookSignatureScheme.Type;
 
 export const WEBHOOK_TIMESTAMP_WINDOW_MS = 5 * 60 * 1000;
@@ -123,7 +126,7 @@ export const SealedWebhookSecret = Schema.Struct({
   nonce: base64Url(16, 16),
   // A full 16-byte GCM tag plus at least one byte of secret.
   ciphertext: base64Url(23, 512),
-}).annotations(strict);
+});
 export type SealedWebhookSecret = typeof SealedWebhookSecret.Type;
 
 /** What the hub and standbys hold of one endpoint: never the routine it starts. */
@@ -138,10 +141,16 @@ export const HubWebhookEndpoint = Schema.Struct({
    * own end time inside the seal; a holder that opens only the first copy for
    * its member id keeps working unchanged.
    */
-  sealedSecrets: Schema.Array(SealedWebhookSecret).pipe(Schema.minItems(1), Schema.maxItems(16)),
-}).annotations(strict);
+  sealedSecrets: Schema.Array(SealedWebhookSecret).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(16),
+  ),
+});
 export type HubWebhookEndpoint = typeof HubWebhookEndpoint.Type;
-export const decodeHubWebhookEndpoint = Schema.decodeUnknownSync(HubWebhookEndpoint);
+export const decodeHubWebhookEndpoint = Schema.decodeUnknownSync(
+  HubWebhookEndpoint,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The headers a delivery keeps on its way to the spoke: the ones its scheme signs or names. */
 export const WEBHOOK_FORWARDED_HEADERS = [
@@ -162,22 +171,27 @@ export const WEBHOOK_FORWARDED_HEADERS = [
  */
 export const WebhookDeliveryEnvelope = Schema.Struct({
   endpointId: WebhookEndpointId,
-  deliveryId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+  deliveryId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
   receivedAt: millis,
-  headers: Schema.Record({
-    key: Schema.String.pipe(
-      Schema.filter((name) => (WEBHOOK_FORWARDED_HEADERS as ReadonlyArray<string>).includes(name)),
+  headers: Schema.Record(
+    Schema.String.check(
+      Schema.makeFilter((name) =>
+        (WEBHOOK_FORWARDED_HEADERS as ReadonlyArray<string>).includes(name),
+      ),
     ),
-    value: Schema.String.pipe(Schema.maxLength(4096)),
-  }),
-  /** The original body as base64; a 256 KiB body is at most this long. */
-  body: Schema.String.pipe(
-    Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
-    Schema.maxLength(Math.ceil(WEBHOOK_BODY_MAX_BYTES / 3) * 4),
+    Schema.String.check(Schema.isMaxLength(4096)),
   ),
-}).annotations(strict);
+  /** The original body as base64; a 256 KiB body is at most this long. */
+  body: Schema.String.check(
+    Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    Schema.isMaxLength(Math.ceil(WEBHOOK_BODY_MAX_BYTES / 3) * 4),
+  ),
+});
 export type WebhookDeliveryEnvelope = typeof WebhookDeliveryEnvelope.Type;
-export const decodeWebhookDeliveryEnvelope = Schema.decodeUnknownSync(WebhookDeliveryEnvelope);
+export const decodeWebhookDeliveryEnvelope = Schema.decodeUnknownSync(
+  WebhookDeliveryEnvelope,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const WEBHOOK_REFUSAL_KINDS = [
   "endpoint-off",
@@ -188,7 +202,7 @@ export const WEBHOOK_REFUSAL_KINDS = [
   "rate-limited",
   "queue-full",
 ] as const;
-export const WebhookRefusalKind = Schema.Literal(...WEBHOOK_REFUSAL_KINDS);
+export const WebhookRefusalKind = Schema.Literals(WEBHOOK_REFUSAL_KINDS);
 export type WebhookRefusalKind = typeof WebhookRefusalKind.Type;
 
 /** A body digest as the spoke remembers it beside a delivery id. */
@@ -196,23 +210,27 @@ export const WebhookBodyDigest = digest;
 
 /** The public ports Tailscale Funnel listens on; nothing else can be asked for. */
 export const PUBLIC_FUNNEL_PORTS = [443, 8443, 10000] as const;
-export const PublicFunnelPort = Schema.Literal(...PUBLIC_FUNNEL_PORTS);
+export const PublicFunnelPort = Schema.Literals(PUBLIC_FUNNEL_PORTS);
 export type PublicFunnelPort = typeof PublicFunnelPort.Type;
 
 /** A window turns this host's public entrance on or off. */
 export const HubPublicEntranceSwitchRequest = Schema.Struct({
   enabled: Schema.Boolean,
-}).annotations(strict);
+});
 export const decodeHubPublicEntranceSwitchRequest = Schema.decodeUnknownSync(
   HubPublicEntranceSwitchRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** A window turns the built-in Funnel front on (on one public port) or off. */
 export const HubPublicFunnelRequest = Schema.Struct({
   enabled: Schema.Boolean,
   port: Schema.optional(PublicFunnelPort),
-}).annotations(strict);
-export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFunnelRequest);
+});
+export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(
+  HubPublicFunnelRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The Tailscale addresses of the person's own proxy on another machine. While
@@ -221,20 +239,22 @@ export const decodeHubPublicFunnelRequest = Schema.decodeUnknownSync(HubPublicFu
  * loopback. The host refuses any address that is not a Tailscale one.
  */
 export const HubPublicFrontsRequest = Schema.Struct({
-  addresses: Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
-}).annotations(strict);
-export const decodeHubPublicFrontsRequest = Schema.decodeUnknownSync(HubPublicFrontsRequest);
+  addresses: Schema.Array(Schema.String.check(Schema.isMaxLength(64))).check(Schema.isMaxLength(8)),
+});
+export const decodeHubPublicFrontsRequest = Schema.decodeUnknownSync(
+  HubPublicFrontsRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A standby's own choice to serve the public entrance while it stands in for
  * the hub (decision H30). Off by default; without it a standing-in standby's
  * entrance keeps forwarding and serves nothing itself.
  */
-export const HubPublicStandbyServeRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
-  strict,
-);
+export const HubPublicStandbyServeRequest = Schema.Struct({ enabled: Schema.Boolean });
 export const decodeHubPublicStandbyServeRequest = Schema.decodeUnknownSync(
   HubPublicStandbyServeRequest,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -244,15 +264,18 @@ export const decodeHubPublicStandbyServeRequest = Schema.decodeUnknownSync(
  */
 export const HubWebhookHandback = Schema.Struct({
   spokeMemberId: HubMemberId,
-  keys: Schema.Array(Schema.String.pipe(Schema.maxLength(320))).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(2),
+  keys: Schema.Array(Schema.String.check(Schema.isMaxLength(320))).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2),
   ),
-  bytes: Schema.Int.pipe(Schema.nonNegative()),
+  bytes: NonNegativeInt,
   envelope: WebhookDeliveryEnvelope,
-}).annotations(strict);
+});
 export type HubWebhookHandback = typeof HubWebhookHandback.Type;
-export const decodeHubWebhookHandback = Schema.decodeUnknownSync(HubWebhookHandback);
+export const decodeHubWebhookHandback = Schema.decodeUnknownSync(
+  HubWebhookHandback,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The most raw bytes a forwarded request or its answer carries, before base64. */
 export const PUBLIC_FORWARD_MAX_BODY_BYTES = 512 * 1024;
@@ -271,23 +294,29 @@ export const PUBLIC_FORWARD_MAX_WIRE_BYTES = 768 * 1024;
  * never passes on (cookies, credentials, and forwarding claims).
  */
 export const PublicForwardEnvelope = Schema.Struct({
-  method: Schema.Literal("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"),
-  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(2048)),
-  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
+  method: Schema.Literals(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
+  path: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2048)),
+  headers: Schema.Record(Schema.String, Schema.String),
   body: Schema.String,
-}).annotations(strict);
+});
 export type PublicForwardEnvelope = typeof PublicForwardEnvelope.Type;
-export const decodePublicForwardEnvelope = Schema.decodeUnknownSync(PublicForwardEnvelope);
+export const decodePublicForwardEnvelope = Schema.decodeUnknownSync(
+  PublicForwardEnvelope,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The acting hub's answer to a forwarded request, carried back unchanged. */
 export const PublicForwardAnswer = Schema.Struct({
   // An interim 1xx answer has no place in a forwarded reply.
-  status: Schema.Int.pipe(Schema.between(200, 599)),
-  headers: Schema.Record({ key: Schema.String, value: Schema.String }),
+  status: Schema.Int.check(Schema.isBetween({ minimum: 200, maximum: 599 })),
+  headers: Schema.Record(Schema.String, Schema.String),
   body: Schema.String,
-}).annotations(strict);
+});
 export type PublicForwardAnswer = typeof PublicForwardAnswer.Type;
-export const decodePublicForwardAnswer = Schema.decodeUnknownSync(PublicForwardAnswer);
+export const decodePublicForwardAnswer = Schema.decodeUnknownSync(
+  PublicForwardAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A hub's or standby's key for opening sealed webhook secrets, signed with its
@@ -300,80 +329,97 @@ export const HubSealingKey = Schema.Struct({
   sealingPublicKey: base64Url(80, 128),
   signerPublicKey: base64Url(80, 512),
   signature: base64Url(86, 86),
-}).annotations(strict);
+});
 export type HubSealingKey = typeof HubSealingKey.Type;
-export const decodeHubSealingKey = Schema.decodeUnknownSync(HubSealingKey);
+export const decodeHubSealingKey = Schema.decodeUnknownSync(HubSealingKey, STRICT_DECODE_OPTIONS);
 
 export const HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE = 64;
 
 /** Everything one spoke lets the hub hold for webhooks: it replaces what the hub held for it. */
 export const HubWebhookEndpointsUpdate = Schema.Struct({
-  endpoints: Schema.Array(HubWebhookEndpoint).pipe(
-    Schema.maxItems(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
+  endpoints: Schema.Array(HubWebhookEndpoint).check(
+    Schema.isMaxLength(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
   ),
-}).annotations(strict);
+});
 export type HubWebhookEndpointsUpdate = typeof HubWebhookEndpointsUpdate.Type;
-export const decodeHubWebhookEndpointsUpdate = Schema.decodeUnknownSync(HubWebhookEndpointsUpdate);
+export const decodeHubWebhookEndpointsUpdate = Schema.decodeUnknownSync(
+  HubWebhookEndpointsUpdate,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * What a spoke answers a forwarded delivery. Every answer takes it off the
  * hub's queue except `busy`, which leaves it for a later look within the hold.
  */
-export const WebhookDeliveryAnswer = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("accepted", "duplicate") }).annotations(strict),
+export const WebhookDeliveryAnswer = Schema.Union([
+  Schema.Struct({ status: Schema.Literals(["accepted", "duplicate"]) }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    kind: Schema.Literal(
+    kind: Schema.Literals([
       ...WEBHOOK_REFUSAL_KINDS,
       "public-not-granted",
       "unknown-endpoint",
       "busy",
-      // The spoke's person paused remote access; the hub keeps the delivery.
       "paused",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type WebhookDeliveryAnswer = typeof WebhookDeliveryAnswer.Type;
-export const decodeWebhookDeliveryAnswer = Schema.decodeUnknownSync(WebhookDeliveryAnswer);
+export const decodeWebhookDeliveryAnswer = Schema.decodeUnknownSync(
+  WebhookDeliveryAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke mints a webhook endpoint for its routines. */
 export const HubWebhookCreateRequest = Schema.Struct({
   scheme: WebhookSignatureScheme,
-  label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-}).annotations(strict);
-export const decodeHubWebhookCreateRequest = Schema.decodeUnknownSync(HubWebhookCreateRequest);
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+});
+export const decodeHubWebhookCreateRequest = Schema.decodeUnknownSync(
+  HubWebhookCreateRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke pastes the secret Stripe minted for one of its Stripe endpoints. */
 export const HubWebhookSecretRequest = Schema.Struct({
   endpointId: WebhookEndpointId,
-  secret: Schema.String.pipe(Schema.maxLength(256)),
-}).annotations(strict);
-export const decodeHubWebhookSecretRequest = Schema.decodeUnknownSync(HubWebhookSecretRequest);
+  secret: Schema.String.check(Schema.isMaxLength(256)),
+});
+export const decodeHubWebhookSecretRequest = Schema.decodeUnknownSync(
+  HubWebhookSecretRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke rotates or removes one of its endpoints. */
 export const HubWebhookEndpointRequest = Schema.Struct({
   endpointId: WebhookEndpointId,
-}).annotations(strict);
-export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(HubWebhookEndpointRequest);
+});
+export const decodeHubWebhookEndpointRequest = Schema.decodeUnknownSync(
+  HubWebhookEndpointRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A thread a visitor link shares, as only the spoke that owns it knows it. */
-export const VisitorThreadMode = Schema.Literal("chat", "code", "work");
+export const VisitorThreadMode = Schema.Literals(["chat", "code", "work"]);
 export type VisitorThreadMode = typeof VisitorThreadMode.Type;
 
 /** Everything one spoke lets the hub hold for visitor links: it replaces what the hub held for it. */
 export const HubVisitorGrantsUpdate = Schema.Struct({
-  grants: Schema.Array(SignedVisitorLinkGrant).pipe(Schema.maxItems(256)),
-}).annotations(strict);
+  grants: Schema.Array(SignedVisitorLinkGrant).check(Schema.isMaxLength(256)),
+});
 export type HubVisitorGrantsUpdate = typeof HubVisitorGrantsUpdate.Type;
-export const decodeHubVisitorGrantsUpdate = Schema.decodeUnknownSync(HubVisitorGrantsUpdate);
+export const decodeHubVisitorGrantsUpdate = Schema.decodeUnknownSync(
+  HubVisitorGrantsUpdate,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The hub's own public address as an `https` origin: no path, credentials or
  * query. A spoke puts a visitor link's path behind it.
  */
-export const HubPublicOrigin = Schema.String.pipe(
-  Schema.maxLength(300),
-  Schema.pattern(/^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/),
+export const HubPublicOrigin = Schema.String.check(
+  Schema.isMaxLength(300),
+  Schema.isPattern(/^https:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/),
 );
 export type HubPublicOrigin = typeof HubPublicOrigin.Type;
 
@@ -385,11 +431,14 @@ export type HubPublicOrigin = typeof HubPublicOrigin.Type;
  */
 export const HubVisitorGrantsReceipt = Schema.Struct({
   status: Schema.Literal("recorded"),
-  count: Schema.Int.pipe(Schema.nonNegative()),
+  count: NonNegativeInt,
   publicOrigin: Schema.optional(HubPublicOrigin),
 });
 export type HubVisitorGrantsReceipt = typeof HubVisitorGrantsReceipt.Type;
-export const decodeHubVisitorGrantsReceipt = Schema.decodeUnknownSync(HubVisitorGrantsReceipt);
+export const decodeHubVisitorGrantsReceipt = Schema.decodeUnknownSync(
+  HubVisitorGrantsReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * What a visitor sees of a thread: its title, whether the owner is deciding
@@ -397,15 +446,15 @@ export const decodeHubVisitorGrantsReceipt = Schema.decodeUnknownSync(HubVisitor
  * an attachment, a path, or what an approval asks.
  */
 export const VisitorProjection = Schema.Struct({
-  title: Schema.String.pipe(Schema.maxLength(256)),
-  state: Schema.Literal("working", "idle", "owner-deciding"),
+  title: Schema.String.check(Schema.isMaxLength(256)),
+  state: Schema.Literals(["working", "idle", "owner-deciding"]),
   messages: Schema.Array(
     Schema.Struct({
-      role: Schema.Literal("person", "agent", "visitor"),
-      text: Schema.String.pipe(Schema.maxLength(32_000)),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(200)),
-}).annotations(strict);
+      role: Schema.Literals(["person", "agent", "visitor"]),
+      text: Schema.String.check(Schema.isMaxLength(32_000)),
+    }),
+  ).check(Schema.isMaxLength(200)),
+});
 export type VisitorProjection = typeof VisitorProjection.Type;
 
 /**
@@ -415,15 +464,18 @@ export type VisitorProjection = typeof VisitorProjection.Type;
  */
 export const VisitorFetchRequest = Schema.Struct({
   linkId: VisitorLinkId,
-  revision: Schema.Int.pipe(Schema.positive()),
+  revision: PositiveInt,
   binding: digest,
-  kind: Schema.Literal("open", "read", "comment"),
-  comment: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_000))),
+  kind: Schema.Literals(["open", "read", "comment"]),
+  comment: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4_000))),
   /** On `open` only: the secret from the link's fragment, so the spoke itself checks it before it binds. */
   secret: Schema.optional(base64Url(43, 43)),
-}).annotations(strict);
+});
 export type VisitorFetchRequest = typeof VisitorFetchRequest.Type;
-export const decodeVisitorFetchRequest = Schema.decodeUnknownSync(VisitorFetchRequest);
+export const decodeVisitorFetchRequest = Schema.decodeUnknownSync(
+  VisitorFetchRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const VISITOR_FETCH_REFUSAL_KINDS = [
   "public-not-granted",
@@ -438,53 +490,64 @@ export const VISITOR_FETCH_REFUSAL_KINDS = [
   // The spoke's person paused remote access.
   "paused",
 ] as const;
-export const VisitorFetchRefusalKind = Schema.Literal(...VISITOR_FETCH_REFUSAL_KINDS);
+export const VisitorFetchRefusalKind = Schema.Literals(VISITOR_FETCH_REFUSAL_KINDS);
 export type VisitorFetchRefusalKind = typeof VisitorFetchRefusalKind.Type;
 
-export const VisitorFetchAnswer = Schema.Union(
+export const VisitorFetchAnswer = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("ok"),
     scope: VisitorLinkScope,
     expiresAt: millis,
     projection: Schema.optional(VisitorProjection),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("refused"), kind: VisitorFetchRefusalKind }).annotations(
-    strict,
-  ),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("refused"), kind: VisitorFetchRefusalKind }),
+]);
 export type VisitorFetchAnswer = typeof VisitorFetchAnswer.Type;
-export const decodeVisitorFetchAnswer = Schema.decodeUnknownSync(VisitorFetchAnswer);
+export const decodeVisitorFetchAnswer = Schema.decodeUnknownSync(
+  VisitorFetchAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke shares one thread with a visitor. */
 export const HubVisitorShareRequest = Schema.Struct({
   mode: VisitorThreadMode,
-  threadId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  threadId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   scope: VisitorLinkScope,
   /** Absent means a day; never more than seven. */
   lifetimeMs: Schema.optional(
-    Schema.Int.pipe(Schema.between(60_000, VISITOR_LINK_MAX_LIFETIME_MS)),
+    Schema.Int.check(Schema.isBetween({ minimum: 60_000, maximum: VISITOR_LINK_MAX_LIFETIME_MS })),
   ),
-}).annotations(strict);
+});
 export type HubVisitorShareRequest = typeof HubVisitorShareRequest.Type;
-export const decodeHubVisitorShareRequest = Schema.decodeUnknownSync(HubVisitorShareRequest);
+export const decodeHubVisitorShareRequest = Schema.decodeUnknownSync(
+  HubVisitorShareRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke stops sharing a link. */
-export const HubVisitorLinkRequest = Schema.Struct({ linkId: VisitorLinkId }).annotations(strict);
-export const decodeHubVisitorLinkRequest = Schema.decodeUnknownSync(HubVisitorLinkRequest);
+export const HubVisitorLinkRequest = Schema.Struct({ linkId: VisitorLinkId });
+export const decodeHubVisitorLinkRequest = Schema.decodeUnknownSync(
+  HubVisitorLinkRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a spoke sends or dismisses a visitor's comment. */
 export const HubVisitorCommentRequest = Schema.Struct({
-  commentId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22}$/)),
-  action: Schema.Literal("send", "dismiss"),
-}).annotations(strict);
+  commentId: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/)),
+  action: Schema.Literals(["send", "dismiss"]),
+});
 export type HubVisitorCommentRequest = typeof HubVisitorCommentRequest.Type;
-export const decodeHubVisitorCommentRequest = Schema.decodeUnknownSync(HubVisitorCommentRequest);
+export const decodeHubVisitorCommentRequest = Schema.decodeUnknownSync(
+  HubVisitorCommentRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on the hub turns visitor links on or off; off, their routes answer 404. */
-export const HubVisitorSwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(
-  strict,
+export const HubVisitorSwitchRequest = Schema.Struct({ enabled: Schema.Boolean });
+export const decodeHubVisitorSwitchRequest = Schema.decodeUnknownSync(
+  HubVisitorSwitchRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeHubVisitorSwitchRequest = Schema.decodeUnknownSync(HubVisitorSwitchRequest);
 
 /** The header a viewer signs each request with, and the one that names its key. */
 export const VISITOR_PROOF_HEADER = "octant-visitor-proof";
@@ -499,18 +562,18 @@ export const VISITOR_PROOF_SKEW_MS = 60_000;
 export const RelayChallenge = Schema.Struct({
   challenge: base64Url(43, 43),
   hubMemberId: HubMemberId,
-}).annotations(strict);
+});
 export type RelayChallenge = typeof RelayChallenge.Type;
-export const decodeRelayChallenge = Schema.decodeUnknownSync(RelayChallenge);
+export const decodeRelayChallenge = Schema.decodeUnknownSync(RelayChallenge, STRICT_DECODE_OPTIONS);
 
 /** The device's answer: the host it wants and its device key's signature over the challenge. */
 export const RelayAdmission = Schema.Struct({
   targetMemberId: HubMemberId,
   deviceSpki: base64Url(80, 512),
   signature: base64Url(86, 86),
-}).annotations(strict);
+});
 export type RelayAdmission = typeof RelayAdmission.Type;
-export const decodeRelayAdmission = Schema.decodeUnknownSync(RelayAdmission);
+export const decodeRelayAdmission = Schema.decodeUnknownSync(RelayAdmission, STRICT_DECODE_OPTIONS);
 
 /** The text a device key signs to open a relay to one host through one hub. */
 export const relayAdmissionPayload = (input: {
@@ -531,22 +594,31 @@ export const RELAY_UNAVAILABLE_CLOSE_CODE = 4503;
  * keys may open a relay to it, by fingerprint. An empty list withdraws them all.
  */
 export const HubRelayDevicesUpdate = Schema.Struct({
-  fingerprints: Schema.Array(digest).pipe(Schema.maxItems(256)),
-}).annotations(strict);
+  fingerprints: Schema.Array(digest).check(Schema.isMaxLength(256)),
+});
 export type HubRelayDevicesUpdate = typeof HubRelayDevicesUpdate.Type;
-export const decodeHubRelayDevicesUpdate = Schema.decodeUnknownSync(HubRelayDevicesUpdate);
+export const decodeHubRelayDevicesUpdate = Schema.decodeUnknownSync(
+  HubRelayDevicesUpdate,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on the hub turns the device relay on or off; off, `/relay/v1` answers 404. */
-export const HubRelaySwitchRequest = Schema.Struct({ enabled: Schema.Boolean }).annotations(strict);
-export const decodeHubRelaySwitchRequest = Schema.decodeUnknownSync(HubRelaySwitchRequest);
+export const HubRelaySwitchRequest = Schema.Struct({ enabled: Schema.Boolean });
+export const decodeHubRelaySwitchRequest = Schema.decodeUnknownSync(
+  HubRelaySwitchRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A window on a host lets one of its paired devices through the hub, or stops letting it. */
 export const HubRelayDeviceRequest = Schema.Struct({
-  deviceId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  deviceId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   allowed: Schema.Boolean,
-}).annotations(strict);
+});
 export type HubRelayDeviceRequest = typeof HubRelayDeviceRequest.Type;
-export const decodeHubRelayDeviceRequest = Schema.decodeUnknownSync(HubRelayDeviceRequest);
+export const decodeHubRelayDeviceRequest = Schema.decodeUnknownSync(
+  HubRelayDeviceRequest,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A relayed connection asked for a route only a connection on the private network may use. */
 export const RELAYED_ADMIN_REFUSED = "relayed-admin-refused";
@@ -555,9 +627,9 @@ export const RELAYED_ADMIN_REFUSED = "relayed-admin-refused";
  * The relay route a device opens: `wss://<the hub's public address>/relay/v1`.
  * Devices and spokes refuse any other address, an unencrypted one included.
  */
-export const RelayUrl = Schema.String.pipe(
-  Schema.maxLength(300),
-  Schema.pattern(/^wss:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/relay\/v1$/),
+export const RelayUrl = Schema.String.check(
+  Schema.isMaxLength(300),
+  Schema.isPattern(/^wss:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?\/relay\/v1$/),
 );
 export type RelayUrl = typeof RelayUrl.Type;
 export const isRelayUrl = Schema.is(RelayUrl);
@@ -566,9 +638,9 @@ export const isRelayUrl = Schema.is(RelayUrl);
 export const RelayAddress = Schema.Struct({
   hubMemberId: HubMemberId,
   relayUrl: RelayUrl,
-}).annotations(strict);
+});
 export type RelayAddress = typeof RelayAddress.Type;
-export const decodeRelayAddress = Schema.decodeUnknownSync(RelayAddress);
+export const decodeRelayAddress = Schema.decodeUnknownSync(RelayAddress, STRICT_DECODE_OPTIONS);
 
 /**
  * The hub's answer to a host's device list. The hub names its relay address
@@ -578,11 +650,14 @@ export const decodeRelayAddress = Schema.decodeUnknownSync(RelayAddress);
  */
 export const HubRelayDevicesReceipt = Schema.Struct({
   status: Schema.Literal("recorded"),
-  count: Schema.Int.pipe(Schema.nonNegative()),
+  count: NonNegativeInt,
   relay: Schema.optional(RelayAddress),
 });
 export type HubRelayDevicesReceipt = typeof HubRelayDevicesReceipt.Type;
-export const decodeHubRelayDevicesReceipt = Schema.decodeUnknownSync(HubRelayDevicesReceipt);
+export const decodeHubRelayDevicesReceipt = Schema.decodeUnknownSync(
+  HubRelayDevicesReceipt,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The device route that tells a paired device its host's relay address. It
@@ -591,21 +666,26 @@ export const decodeHubRelayDevicesReceipt = Schema.decodeUnknownSync(HubRelayDev
  */
 export const REMOTE_RELAY_ADDRESS_PATH = "/api/remote/relay-address";
 
-export const RemoteRelayAddressAnswer = Schema.Union(
+export const RemoteRelayAddressAnswer = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
     hubMemberId: HubMemberId,
     relayUrl: RelayUrl,
   }),
-  /** This host lets no relay through for this device now: no hub, Relay unticked, or not listed. */
   Schema.Struct({ status: Schema.Literal("unavailable") }),
-);
+]);
 export type RemoteRelayAddressAnswer = typeof RemoteRelayAddressAnswer.Type;
-export const decodeRemoteRelayAddressAnswer = Schema.decodeUnknownSync(RemoteRelayAddressAnswer);
+export const decodeRemoteRelayAddressAnswer = Schema.decodeUnknownSync(
+  RemoteRelayAddressAnswer,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The address the person's own front answers on, typed on the hub; absent clears it. */
 export const HubPublicAddressRequest = Schema.Struct({
-  url: Schema.optional(Schema.String.pipe(Schema.maxLength(300))),
-}).annotations(strict);
+  url: Schema.optional(Schema.String.check(Schema.isMaxLength(300))),
+});
 export type HubPublicAddressRequest = typeof HubPublicAddressRequest.Type;
-export const decodeHubPublicAddressRequest = Schema.decodeUnknownSync(HubPublicAddressRequest);
+export const decodeHubPublicAddressRequest = Schema.decodeUnknownSync(
+  HubPublicAddressRequest,
+  STRICT_DECODE_OPTIONS,
+);

@@ -32,24 +32,42 @@ import {
   MIN_ZEN_RESEARCH_DOCK_WIDTH,
 } from "./zen";
 
-const decodeSpace = Schema.decodeUnknownSync(ZenSpace);
-const decodeLegacySnapshot = Schema.decodeUnknownSync(zenContracts.ZenSpaceSnapshotRecordedV1);
-const decodeElement = Schema.decodeUnknownSync(ZenElementPayload);
-const decodeGeometry = Schema.decodeUnknownSync(ZenGeometry);
-const decodeViewport = Schema.decodeUnknownSync(ZenViewport);
-const decodeAppearance = Schema.decodeUnknownSync(ZenAppearance);
-const decodeBackground = Schema.decodeUnknownSync(ZenBackground);
-const decodeCommand = Schema.decodeUnknownSync(ZenCommand);
-const decodeRecipe = Schema.decodeUnknownSync(ZenWidgetRecipe);
-const decodeBootstrap = Schema.decodeUnknownSync(ZenBootstrapResponse);
-const decodeSourceContext = Schema.decodeUnknownSync(ZenSourceContext);
-const decodeAssistantSearch = Schema.decodeUnknownSync(ZenAssistantSearchThreadsInput);
-const decodeAssistantAttach = Schema.decodeUnknownSync(ZenAssistantPinThreadInput);
-const decodeAssistantPlacement = Schema.decodeUnknownSync(ZenAssistantPlacementInput);
-const decodeAssistantAppearance = Schema.decodeUnknownSync(ZenAssistantAppearanceInput);
-const decodeAssistantCreateWidget = Schema.decodeUnknownSync(ZenAssistantCreateWidgetInput);
-const decodeAssistantToolResult = Schema.decodeUnknownSync(ZenAssistantToolResult);
-const decodeResearchDock = Schema.decodeUnknownSync(ZenResearchDock);
+const decodeSpace = Schema.decodeUnknownSync(ZenSpace, { onExcessProperty: "error" });
+const decodeLegacySnapshot = Schema.decodeUnknownSync(zenContracts.ZenSpaceSnapshotRecordedV1, {
+  onExcessProperty: "error",
+});
+const decodeElement = Schema.decodeUnknownSync(ZenElementPayload, { onExcessProperty: "error" });
+const decodeGeometry = Schema.decodeUnknownSync(ZenGeometry, { onExcessProperty: "error" });
+const decodeViewport = Schema.decodeUnknownSync(ZenViewport, { onExcessProperty: "error" });
+const decodeAppearance = Schema.decodeUnknownSync(ZenAppearance, { onExcessProperty: "error" });
+const decodeBackground = Schema.decodeUnknownSync(ZenBackground, { onExcessProperty: "error" });
+const decodeCommand = Schema.decodeUnknownSync(ZenCommand, { onExcessProperty: "error" });
+const decodeRecipe = Schema.decodeUnknownSync(ZenWidgetRecipe, { onExcessProperty: "error" });
+const decodeBootstrap = Schema.decodeUnknownSync(ZenBootstrapResponse, {
+  onExcessProperty: "error",
+});
+const decodeSourceContext = Schema.decodeUnknownSync(ZenSourceContext, {
+  onExcessProperty: "error",
+});
+const decodeAssistantSearch = Schema.decodeUnknownSync(ZenAssistantSearchThreadsInput, {
+  onExcessProperty: "error",
+});
+const decodeAssistantAttach = Schema.decodeUnknownSync(ZenAssistantPinThreadInput, {
+  onExcessProperty: "error",
+});
+const decodeAssistantPlacement = Schema.decodeUnknownSync(ZenAssistantPlacementInput, {
+  onExcessProperty: "error",
+});
+const decodeAssistantAppearance = Schema.decodeUnknownSync(ZenAssistantAppearanceInput, {
+  onExcessProperty: "error",
+});
+const decodeAssistantCreateWidget = Schema.decodeUnknownSync(ZenAssistantCreateWidgetInput, {
+  onExcessProperty: "error",
+});
+const decodeAssistantToolResult = Schema.decodeUnknownSync(ZenAssistantToolResult, {
+  onExcessProperty: "error",
+});
+const decodeResearchDock = Schema.decodeUnknownSync(ZenResearchDock, { onExcessProperty: "error" });
 
 function makeId(prefix: string): string {
   return `${prefix}-0000-4000-8000-000000000000`;
@@ -290,7 +308,7 @@ describe("ZEN_BUILTIN_BACKGROUNDS", () => {
       expect(preset.src.startsWith("zen-backgrounds/")).toBe(true);
       expect(preset.src.includes("://")).toBe(false);
       expect(["still", "animated"]).toContain(preset.motion);
-      Schema.decodeUnknownSync(ZenBuiltinBackgroundId)(preset.id);
+      Schema.decodeUnknownSync(ZenBuiltinBackgroundId, { onExcessProperty: "error" })(preset.id);
       if (preset.motion === "animated") {
         expect(preset.src.endsWith(".webp")).toBe(true);
         expect(preset.stillSrc).toBeDefined();
@@ -1553,7 +1571,9 @@ describe("Zen Assistant typed actions", () => {
   });
 });
 
-const decodeResult = Schema.decodeUnknownSync(zenContracts.ZenResult);
+const decodeResult = Schema.decodeUnknownSync(zenContracts.ZenResult, {
+  onExcessProperty: "error",
+});
 
 describe("ZenResult", () => {
   it("decodes the success, refused, failed, and truncated presentation mutation results", () => {

@@ -374,15 +374,14 @@ describe("work turn contracts", () => {
 });
 
 describe("a Work turn's Shield rows on an older client", () => {
-  const strict = { parseOptions: { onExcessProperty: "error" as const } };
   // A client built before tool steps carried Shield's decision or the
   // Watcher's mark: its step has only these fields, and refuses any other.
   const OlderToolStep = Schema.Struct({
     toolCallId: Schema.String,
     toolName: Schema.String,
-    state: Schema.Literal("started", "running", "completed", "failed"),
+    state: Schema.Literals(["started", "running", "completed", "failed"]),
     summary: Schema.optional(Schema.String),
-  }).annotations(strict);
+  });
   const OlderTurnToolsFrame = Schema.Struct({
     kind: Schema.Literal("turn-tools"),
     sequence: Schema.Int,
@@ -390,7 +389,7 @@ describe("a Work turn's Shield rows on an older client", () => {
     requestId: Schema.String,
     toolSteps: Schema.Array(OlderToolStep),
     toolStepsTruncated: Schema.Boolean,
-  }).annotations(strict);
+  });
 
   it("keeps the row and drops the decision it cannot show instead of refusing the turn", () => {
     const frame = Schema.encodeSync(WorkTurnStreamFrame)(
@@ -421,7 +420,9 @@ describe("a Work turn's Shield rows on an older client", () => {
       }),
     );
 
-    expect(() => Schema.decodeUnknownSync(OlderTurnToolsFrame)(frame)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(OlderTurnToolsFrame, { onExcessProperty: "error" })(frame),
+    ).toThrow();
     expect(decodeHostAnswer(OlderTurnToolsFrame)(frame).toolSteps).toEqual([
       { toolCallId: "shield:call-1", toolName: "bash", state: "completed", summary: "git status" },
     ]);

@@ -1,13 +1,14 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { GithubCapability, GithubCapabilityKind } from "./githubOnboarding";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
   /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+|token=|authorization)/i;
 const safeText = (limit: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(limit),
-    Schema.filter((value) => !SECRETISH.test(value) && !value.includes("\0")),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(limit),
+    Schema.makeFilter((value) => !SECRETISH.test(value) && !value.includes("\0")),
   );
 
 const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -16,82 +17,84 @@ const COMMENT_BODY_MAX_BYTES = 2 * 1024;
 
 /** Empty bodies are valid; bound UTF-8 bytes rather than characters. */
 const boundedBody = (maxBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) =>
         !SECRETISH.test(value) && !value.includes("\0") && utf8ByteLength(value) <= maxBytes,
     ),
   );
 
 /** GitHub login: 1–39 alphanumerics with single interior hyphens. */
-export const GithubRepositoryOwner = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(value)),
+export const GithubRepositoryOwner = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(value)),
 );
 export type GithubRepositoryOwner = typeof GithubRepositoryOwner.Type;
 
-export const GithubRepositoryName = Schema.String.pipe(
-  Schema.filter((value) => /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/.test(value)),
+export const GithubRepositoryName = Schema.String.check(
+  Schema.makeFilter((value) => /^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/.test(value)),
 );
 export type GithubRepositoryName = typeof GithubRepositoryName.Type;
 
 /** Strict GitHub node identity; names and paths alone are never identity. */
-export const GithubRepositoryNodeId = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9+/=_-]{1,128}$/.test(value)),
+export const GithubRepositoryNodeId = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9+/=_-]{1,128}$/.test(value)),
 );
 export type GithubRepositoryNodeId = typeof GithubRepositoryNodeId.Type;
 
 /** Server-issued opaque cursor; clients replay it without interpreting it. */
-export const GithubCatalogueCursor = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9_-]{1,600}$/.test(value)),
+export const GithubCatalogueCursor = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9_-]{1,600}$/.test(value)),
 );
 export type GithubCatalogueCursor = typeof GithubCatalogueCursor.Type;
 
-export const GithubCataloguePageSize = Schema.Int.pipe(Schema.between(1, 100));
+export const GithubCataloguePageSize = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 100 }),
+);
 export type GithubCataloguePageSize = typeof GithubCataloguePageSize.Type;
 
-export const GithubRepositoryVisibility = Schema.Literal("public", "private", "internal");
+export const GithubRepositoryVisibility = Schema.Literals(["public", "private", "internal"]);
 export type GithubRepositoryVisibility = typeof GithubRepositoryVisibility.Type;
 
-export const GithubViewerPermission = Schema.Literal(
+export const GithubViewerPermission = Schema.Literals([
   "admin",
   "maintain",
   "write",
   "triage",
   "read",
   "none",
-);
+]);
 export type GithubViewerPermission = typeof GithubViewerPermission.Type;
 
-const isoTimestamp = Schema.String.pipe(
-  Schema.filter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
+const isoTimestamp = Schema.String.check(
+  Schema.makeFilter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
 );
 
 // Row URLs are display-only conveniences; pin them to github.com and reject
 // userinfo so a crafted URL can never smuggle credential material.
-const githubUrl = Schema.String.pipe(
-  Schema.maxLength(512),
-  Schema.filter(
+const githubUrl = Schema.String.check(
+  Schema.isMaxLength(512),
+  Schema.makeFilter(
     (value) =>
       /^https:\/\/github\.com\/[A-Za-z0-9_.\-/#?=&%]*$/.test(value) && !SECRETISH.test(value),
   ),
 );
 
-const branchName = safeText(255).pipe(
-  Schema.filter((value) => !/\s/.test(value) && !value.includes("..")),
+const branchName = safeText(255).check(
+  Schema.makeFilter((value) => !/\s/.test(value) && !value.includes("..")),
 );
 
-export const GithubCatalogueStaleReason = Schema.Literal(
+export const GithubCatalogueStaleReason = Schema.Literals([
   "rate-limited",
   "refresh-failed",
   "authentication-changed",
   "disconnected",
-);
+]);
 export type GithubCatalogueStaleReason = typeof GithubCatalogueStaleReason.Type;
 
 export const GithubCatalogueFreshness = Schema.Struct({
-  status: Schema.Literal("fresh", "stale"),
+  status: Schema.Literals(["fresh", "stale"]),
   staleReason: Schema.optional(GithubCatalogueStaleReason),
-}).annotations(strict);
+});
 export type GithubCatalogueFreshness = typeof GithubCatalogueFreshness.Type;
 
 export const GithubRepositoryRow = Schema.Struct({
@@ -101,8 +104,8 @@ export const GithubRepositoryRow = Schema.Struct({
   visibility: GithubRepositoryVisibility,
   defaultBranch: Schema.optional(branchName),
   viewerPermission: GithubViewerPermission,
-  capabilities: Schema.Array(GithubCapability).pipe(Schema.maxItems(4)),
-}).annotations(strict);
+  capabilities: Schema.Array(GithubCapability).check(Schema.isMaxLength(4)),
+});
 export type GithubRepositoryRow = typeof GithubRepositoryRow.Type;
 
 /**
@@ -110,18 +113,18 @@ export type GithubRepositoryRow = typeof GithubRepositoryRow.Type;
  * GitHub gives no reason for, on a reason this build does not know, and from an
  * older host, so a reader shows plain Closed.
  */
-export const GithubIssueClosedReason = Schema.Literal("completed", "not-planned", "duplicate");
+export const GithubIssueClosedReason = Schema.Literals(["completed", "not-planned", "duplicate"]);
 export type GithubIssueClosedReason = typeof GithubIssueClosedReason.Type;
 
 export const GithubIssueRow = Schema.Struct({
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: safeText(256),
-  state: Schema.Literal("open", "closed"),
+  state: Schema.Literals(["open", "closed"]),
   stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
-}).annotations(strict);
+});
 export type GithubIssueRow = typeof GithubIssueRow.Type;
 
 export const GithubIssueComment = Schema.Struct({
@@ -129,62 +132,62 @@ export const GithubIssueComment = Schema.Struct({
   createdAt: isoTimestamp,
   body: boundedBody(COMMENT_BODY_MAX_BYTES),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type GithubIssueComment = typeof GithubIssueComment.Type;
 
 export const GithubIssueDetail = Schema.Struct({
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: safeText(256),
-  state: Schema.Literal("open", "closed"),
+  state: Schema.Literals(["open", "closed"]),
   stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   createdAt: isoTimestamp,
   updatedAt: isoTimestamp,
   url: githubUrl,
-  labels: Schema.Array(safeText(50)).pipe(Schema.maxItems(20)),
+  labels: Schema.Array(safeText(50)).check(Schema.isMaxLength(20)),
   body: boundedBody(ISSUE_BODY_MAX_BYTES),
   bodyTruncated: Schema.Boolean,
-  comments: Schema.Array(GithubIssueComment).pipe(Schema.maxItems(10)),
+  comments: Schema.Array(GithubIssueComment).check(Schema.isMaxLength(10)),
   /** How many older comments `comments`, the newest ten, leaves out. */
-  commentsOmitted: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  commentsOmitted: Schema.optional(NonNegativeInt),
   /** Present when the number is a pull request, read only when the request allowed one. */
   pullRequest: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type GithubIssueDetail = typeof GithubIssueDetail.Type;
 
 export const GithubPullRequestRow = Schema.Struct({
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: safeText(256),
-  state: Schema.Literal("open", "draft", "merged", "closed"),
+  state: Schema.Literals(["open", "draft", "merged", "closed"]),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
   baseBranch: Schema.optional(branchName),
   headBranch: Schema.optional(branchName),
-}).annotations(strict);
+});
 export type GithubPullRequestRow = typeof GithubPullRequestRow.Type;
 
 /** One issue or pull request a repository search found. */
 export const GithubSearchRow = Schema.Struct({
-  kind: Schema.Literal("issue", "pull-request"),
-  number: Schema.Int.pipe(Schema.positive()),
+  kind: Schema.Literals(["issue", "pull-request"]),
+  number: PositiveInt,
   title: safeText(256),
-  state: Schema.Literal("open", "draft", "merged", "closed"),
+  state: Schema.Literals(["open", "draft", "merged", "closed"]),
   /** Only on a closed issue; a pull request has none. */
   stateReason: Schema.optional(GithubIssueClosedReason),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
-}).annotations(strict);
+});
 export type GithubSearchRow = typeof GithubSearchRow.Type;
 
 export const GithubProjectRow = Schema.Struct({
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: safeText(256),
   closed: Schema.Boolean,
   updatedAt: isoTimestamp,
   url: githubUrl,
-}).annotations(strict);
+});
 export type GithubProjectRow = typeof GithubProjectRow.Type;
 
 const pageFields = {
@@ -194,48 +197,52 @@ const pageFields = {
 };
 
 export const GithubRepositoryPage = Schema.Struct({
-  rows: Schema.Array(GithubRepositoryRow).pipe(Schema.maxItems(100)),
+  rows: Schema.Array(GithubRepositoryRow).check(Schema.isMaxLength(100)),
   sort: Schema.Literal("pushed-desc"),
   ...pageFields,
-}).annotations(strict);
+});
 export type GithubRepositoryPage = typeof GithubRepositoryPage.Type;
 
 export const GithubIssuePage = Schema.Struct({
-  rows: Schema.Array(GithubIssueRow).pipe(Schema.maxItems(100)),
+  rows: Schema.Array(GithubIssueRow).check(Schema.isMaxLength(100)),
   sort: Schema.Literal("updated-desc"),
   ...pageFields,
-}).annotations(strict);
+});
 export type GithubIssuePage = typeof GithubIssuePage.Type;
 
 export const GithubPullRequestPage = Schema.Struct({
-  rows: Schema.Array(GithubPullRequestRow).pipe(Schema.maxItems(100)),
+  rows: Schema.Array(GithubPullRequestRow).check(Schema.isMaxLength(100)),
   sort: Schema.Literal("updated-desc"),
   ...pageFields,
-}).annotations(strict);
+});
 export type GithubPullRequestPage = typeof GithubPullRequestPage.Type;
 
 export const GithubSearchPage = Schema.Struct({
-  rows: Schema.Array(GithubSearchRow).pipe(Schema.maxItems(100)),
+  rows: Schema.Array(GithubSearchRow).check(Schema.isMaxLength(100)),
   sort: Schema.Literal("updated-desc"),
   ...pageFields,
-}).annotations(strict);
+});
 export type GithubSearchPage = typeof GithubSearchPage.Type;
 
 export const GithubProjectPage = Schema.Struct({
-  rows: Schema.Array(GithubProjectRow).pipe(Schema.maxItems(100)),
+  rows: Schema.Array(GithubProjectRow).check(Schema.isMaxLength(100)),
   sort: Schema.Literal("updated-desc"),
   ...pageFields,
-}).annotations(strict);
+});
 export type GithubProjectPage = typeof GithubProjectPage.Type;
 
-export const GithubIssueStateFilter = Schema.Literal("open", "closed", "all");
+export const GithubIssueStateFilter = Schema.Literals(["open", "closed", "all"]);
 export type GithubIssueStateFilter = typeof GithubIssueStateFilter.Type;
 
 /** The closed reasons a read can be narrowed to; GitHub's search names both. */
-export const GithubIssueClosedReasonFilter = Schema.Literal("completed", "not-planned");
+export const GithubIssueClosedReasonFilter = Schema.Literals(["completed", "not-planned"]);
 export type GithubIssueClosedReasonFilter = typeof GithubIssueClosedReasonFilter.Type;
 
-export const GithubAssignedWorkCategory = Schema.Literal("issue", "pull-request", "review-request");
+export const GithubAssignedWorkCategory = Schema.Literals([
+  "issue",
+  "pull-request",
+  "review-request",
+]);
 export type GithubAssignedWorkCategory = typeof GithubAssignedWorkCategory.Type;
 
 /**
@@ -248,14 +255,14 @@ export const GithubAssignedWorkItem = Schema.Struct({
   category: GithubAssignedWorkCategory,
   owner: GithubRepositoryOwner,
   name: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   title: safeText(256),
   author: safeText(128),
   updatedAt: isoTimestamp,
   url: githubUrl,
   /** Set only on a draft pull request; absent from an older host's items. */
   draft: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type GithubAssignedWorkItem = typeof GithubAssignedWorkItem.Type;
 
 /**
@@ -264,36 +271,31 @@ export type GithubAssignedWorkItem = typeof GithubAssignedWorkItem.Type;
  * repository catalogues, which do page.
  */
 export const GithubAssignedWorkPage = Schema.Struct({
-  items: Schema.Array(GithubAssignedWorkItem).pipe(Schema.maxItems(90)),
+  items: Schema.Array(GithubAssignedWorkItem).check(Schema.isMaxLength(90)),
   freshness: GithubCatalogueFreshness,
-}).annotations(strict);
+});
 export type GithubAssignedWorkPage = typeof GithubAssignedWorkPage.Type;
 
 /**
  * The only reads a client may request. There is no field, header, endpoint,
  * GraphQL, CLI-flag, host, or mutation selection surface.
  */
-export const GithubCatalogueReadRequest = Schema.Union(
+export const GithubCatalogueReadRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("repositories"),
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
     search: Schema.optional(safeText(160)),
     refresh: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("recent-repositories"),
-  }).annotations(strict),
-  /**
-   * Resolves one repository the person named or pasted. The server reads a
-   * fresh live observation; this is how a public repository that is not in
-   * the viewer's own catalogue can still become a Project.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("repository"),
     owner: GithubRepositoryOwner,
     name: GithubRepositoryName,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("issues"),
     owner: GithubRepositoryOwner,
@@ -306,27 +308,22 @@ export const GithubCatalogueReadRequest = Schema.Union(
     assignee: Schema.optional(Schema.Literal("none")),
     /** Narrows a read of closed issues to one reason; refused with any other state. */
     closedReason: Schema.optional(GithubIssueClosedReasonFilter),
-  })
-    .annotations(strict)
-    .pipe(
-      Schema.filter((request) => request.closedReason === undefined || request.state === "closed"),
+  }).check(
+    Schema.makeFilter(
+      (request) => request.closedReason === undefined || request.state === "closed",
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("issue"),
     owner: GithubRepositoryOwner,
     name: GithubRepositoryName,
-    number: Schema.Int.pipe(Schema.positive()),
+    number: PositiveInt,
     /**
      * Reads the number even when it is a pull request. Absent, a pull request
      * is unavailable, as an issue reference always was.
      */
     includePullRequest: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
-  /**
-   * Searches one repository's issues and pull requests together. The server
-   * composes the query: `repo:` is always its own, and qualifiers in `query`
-   * other than `author:` and `#number` are dropped.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("search"),
     owner: GithubRepositoryOwner,
@@ -337,14 +334,13 @@ export const GithubCatalogueReadRequest = Schema.Union(
     state: Schema.optional(GithubIssueStateFilter),
     /** Matches the terms against titles only; absent searches titles and bodies. */
     match: Schema.optional(Schema.Literal("title")),
-  }).annotations(strict),
-  /** One issue or pull request by its number, as a search row: no body, no comments. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("item"),
     owner: GithubRepositoryOwner,
     name: GithubRepositoryName,
-    number: Schema.Int.pipe(Schema.positive()),
-  }).annotations(strict),
+    number: PositiveInt,
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
     owner: GithubRepositoryOwner,
@@ -352,23 +348,21 @@ export const GithubCatalogueReadRequest = Schema.Union(
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
     state: Schema.optional(GithubIssueStateFilter),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("projects"),
     owner: GithubRepositoryOwner,
     name: GithubRepositoryName,
     pageSize: GithubCataloguePageSize,
     cursor: Schema.optional(GithubCatalogueCursor),
-  }).annotations(strict),
-  // The viewer is implied by the server's own gh authentication; a client
-  // cannot ask for anyone else's assigned work.
+  }),
   Schema.Struct({
     kind: Schema.Literal("assigned-work"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type GithubCatalogueReadRequest = typeof GithubCatalogueReadRequest.Type;
 
-export const GithubCatalogueUnavailableReason = Schema.Literal(
+export const GithubCatalogueUnavailableReason = Schema.Literals([
   "unauthorized",
   "scope-limited",
   "rate-limited",
@@ -376,7 +370,7 @@ export const GithubCatalogueUnavailableReason = Schema.Literal(
   "external-token",
   "invalid-cursor",
   "unavailable",
-);
+]);
 export type GithubCatalogueUnavailableReason = typeof GithubCatalogueUnavailableReason.Type;
 
 export const GithubCatalogueUnavailable = Schema.Struct({
@@ -384,56 +378,58 @@ export const GithubCatalogueUnavailable = Schema.Struct({
   capability: GithubCapabilityKind,
   reason: GithubCatalogueUnavailableReason,
   remediation: Schema.optional(safeText(256)),
-  retryAfterSeconds: Schema.optional(Schema.Int.pipe(Schema.between(0, 86_400))),
-}).annotations(strict);
+  retryAfterSeconds: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 86_400 })),
+  ),
+});
 export type GithubCatalogueUnavailable = typeof GithubCatalogueUnavailable.Type;
 
-export const GithubCatalogueReadResponse = Schema.Union(
+export const GithubCatalogueReadResponse = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("repositories"),
     page: GithubRepositoryPage,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("recent-repositories"),
-    rows: Schema.Array(GithubRepositoryRow).pipe(Schema.maxItems(20)),
-  }).annotations(strict),
+    rows: Schema.Array(GithubRepositoryRow).check(Schema.isMaxLength(20)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("repository"),
     row: GithubRepositoryRow,
     freshness: GithubCatalogueFreshness,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("issues"),
     page: GithubIssuePage,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("issue"),
     issue: GithubIssueDetail,
     freshness: GithubCatalogueFreshness,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pull-requests"),
     page: GithubPullRequestPage,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("search"),
     page: GithubSearchPage,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("item"),
     row: GithubSearchRow,
     freshness: GithubCatalogueFreshness,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("projects"),
     page: GithubProjectPage,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("assigned-work"),
     page: GithubAssignedWorkPage,
-  }).annotations(strict),
+  }),
   GithubCatalogueUnavailable,
-);
+]);
 export type GithubCatalogueReadResponse = typeof GithubCatalogueReadResponse.Type;
 
 /**
@@ -444,15 +440,18 @@ export type GithubCatalogueReadResponse = typeof GithubCatalogueReadResponse.Typ
 export const GithubRecentRepositoryCommand = Schema.Struct({
   kind: Schema.Literal("record-recent-repository"),
   nodeId: GithubRepositoryNodeId,
-}).annotations(strict);
+});
 export type GithubRecentRepositoryCommand = typeof GithubRecentRepositoryCommand.Type;
 
 export const decodeGithubCatalogueReadRequest = Schema.decodeUnknownSync(
   GithubCatalogueReadRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeGithubCatalogueReadResponse = Schema.decodeUnknownSync(
   GithubCatalogueReadResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeGithubRecentRepositoryCommand = Schema.decodeUnknownSync(
   GithubRecentRepositoryCommand,
+  STRICT_DECODE_OPTIONS,
 );

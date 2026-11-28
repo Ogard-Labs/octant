@@ -289,10 +289,10 @@ describe("antigravity status-line usage", () => {
     });
     expect(apiKeyFacts.limitsCapture).toBeUndefined();
     const apiKeyResult = await Effect.runPromise(
-      Effect.scoped(Effect.either(apiKeyFacts.observeServiceLimits({ instanceId }))),
+      Effect.scoped(Effect.result(apiKeyFacts.observeServiceLimits({ instanceId }))),
     );
-    expect(apiKeyResult._tag).toBe("Left");
-    if (apiKeyResult._tag === "Left") expect(apiKeyResult.left.category).toBe("unsupported");
+    expect(apiKeyResult._tag).toBe("Failure");
+    if (apiKeyResult._tag === "Failure") expect(apiKeyResult.failure.category).toBe("unsupported");
 
     const personalFacts = makeAntigravityStatusLineUsageFacts({
       instanceId,
@@ -301,10 +301,11 @@ describe("antigravity status-line usage", () => {
     });
     expect(personalFacts.limitsCapture?.status().connected).toBe(false);
     const beforeReading = await Effect.runPromise(
-      Effect.scoped(Effect.either(personalFacts.observeServiceLimits({ instanceId }))),
+      Effect.scoped(Effect.result(personalFacts.observeServiceLimits({ instanceId }))),
     );
-    expect(beforeReading._tag).toBe("Left");
-    if (beforeReading._tag === "Left") expect(beforeReading.left.category).toBe("unavailable");
+    expect(beforeReading._tag).toBe("Failure");
+    if (beforeReading._tag === "Failure")
+      expect(beforeReading.failure.category).toBe("unavailable");
 
     // Write a sanitized reading as the bridge script would.
     mkdirSync(join(root, "data"), { recursive: true });
@@ -323,12 +324,12 @@ describe("antigravity status-line usage", () => {
       }),
     );
     const afterReading = await Effect.runPromise(
-      Effect.scoped(Effect.either(personalFacts.observeServiceLimits({ instanceId }))),
+      Effect.scoped(Effect.result(personalFacts.observeServiceLimits({ instanceId }))),
     );
-    expect(afterReading._tag).toBe("Right");
-    if (afterReading._tag === "Right") {
-      expect(afterReading.right.rateLimitWindows?.[0]?.window).toBe("gemini:five_hour");
-      expect(afterReading.right.rateLimitWindows?.[0]?.utilization).toBeCloseTo(0.05, 6);
+    expect(afterReading._tag).toBe("Success");
+    if (afterReading._tag === "Success") {
+      expect(afterReading.success.rateLimitWindows?.[0]?.window).toBe("gemini:five_hour");
+      expect(afterReading.success.rateLimitWindows?.[0]?.utilization).toBeCloseTo(0.05, 6);
     }
   });
 

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema, SchemaAST } from "effect";
 
 /** The longest a screen recording runs; one that long still fits the artifact store. */
 export const DEVICE_RECORDING_LIMIT_SECONDS = 60;
@@ -15,10 +15,10 @@ export const DEVICE_OPEN_URL_MAX_LENGTH = 2_048;
  * show exactly what the device receives, and a parsed-and-rewritten form is
  * the only one where the shown text and the sent text cannot differ.
  */
-export const DeviceOpenUrl = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(DEVICE_OPEN_URL_MAX_LENGTH),
-  Schema.filter(
+export const DeviceOpenUrl = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(DEVICE_OPEN_URL_MAX_LENGTH),
+  Schema.makeFilter(
     (value) => {
       let parsed: URL;
       try {
@@ -34,7 +34,7 @@ export const DeviceOpenUrl = Schema.String.pipe(
         parsed.href === value
       );
     },
-    { message: () => "Open URL takes a credential-free http or https address." },
+    { message: "Open URL takes a credential-free http or https address." },
   ),
 );
 export type DeviceOpenUrl = typeof DeviceOpenUrl.Type;
@@ -46,7 +46,7 @@ export const decodeDeviceOpenUrl = Schema.decodeUnknownSync(DeviceOpenUrl);
  * The orientation Rotate sets. The pane names the one it is not showing, so
  * the same request means the same thing on a Simulator and an emulator.
  */
-export const DeviceOrientation = Schema.Literal("portrait", "landscape");
+export const DeviceOrientation = Schema.Literals(["portrait", "landscape"]);
 export type DeviceOrientation = typeof DeviceOrientation.Type;
 
 /**
@@ -56,11 +56,29 @@ export type DeviceOrientation = typeof DeviceOrientation.Type;
  * rather than refused, so a newer host can add the next one without breaking
  * an older pane.
  */
-export const DeviceHostCapabilities = Schema.Struct({
+const DeviceHostCapabilitiesStruct = Schema.Struct({
   openUrl: Schema.optional(Schema.Boolean),
   recordScreen: Schema.optional(Schema.Boolean),
   /** Volume up and down, sent as the `volume-up` and `volume-down` hardware keys. */
   volume: Schema.optional(Schema.Boolean),
   rotate: Schema.optional(Schema.Boolean),
-}).annotations({ parseOptions: { onExcessProperty: "ignore" } });
+});
+
+const parseDeviceHostCapabilities = Schema.decodeUnknownEffect(DeviceHostCapabilitiesStruct);
+
+export const DeviceHostCapabilities = Schema.make<
+  Schema.Codec<
+    typeof DeviceHostCapabilitiesStruct.Type,
+    typeof DeviceHostCapabilitiesStruct.Encoded
+  >
+>(
+  new SchemaAST.Declaration(
+    [],
+    () => (input, _self, options) =>
+      parseDeviceHostCapabilities(input, { ...options, onExcessProperty: "ignore" }).pipe(
+        Effect.mapError((error) => error.issue),
+      ),
+    DeviceHostCapabilitiesStruct.ast.annotations,
+  ),
+);
 export type DeviceHostCapabilities = typeof DeviceHostCapabilities.Type;

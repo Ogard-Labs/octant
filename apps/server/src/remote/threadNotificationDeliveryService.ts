@@ -142,7 +142,7 @@ interface CommittedFact {
 // Only the fields a fact needs are read. The journal has already decoded each
 // payload against its registered schema; these narrow it without depending on
 // the rest of it.
-const Id = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+const Id = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64)));
 const ChatAttemptUpdated = Schema.Struct({
   attempt: Schema.Struct({
     id: Id,
@@ -150,7 +150,11 @@ const ChatAttemptUpdated = Schema.Struct({
     threadId: Id,
     outcome: Schema.String,
     pendingQuestion: Schema.optional(
-      Schema.Struct({ requestId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)) }),
+      Schema.Struct({
+        requestId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+          Schema.check(Schema.isMaxLength(128)),
+        ),
+      }),
     ),
   }),
 });
@@ -173,20 +177,22 @@ const CodeRuntimeWorkUpdated = Schema.Struct({
 });
 // A Code turn can ask several approvals and questions; each request is its
 // own run, so a second approval in one turn still reaches the phone.
-const RequestId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
+const RequestId = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+  Schema.check(Schema.isMaxLength(255)),
+);
 const CodeOperationEventRecorded = Schema.Struct({
   threadId: Id,
-  event: Schema.Union(
+  event: Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("approval-requested"),
       approvalId: Id,
     }),
     Schema.Struct({ kind: Schema.Literal("input-requested"), requestId: RequestId }),
-  ),
+  ]),
 });
 const HarnessAsked = Schema.Struct({ id: Id });
 
-function read<A, I>(schema: Schema.Schema<A, I>, value: unknown): A | undefined {
+function read<A, I>(schema: Schema.Codec<A, I>, value: unknown): A | undefined {
   return Option.getOrUndefined(Schema.decodeUnknownOption(schema)(value));
 }
 

@@ -1,4 +1,4 @@
-import { ParseResult } from "effect";
+import { Schema, SchemaIssue } from "effect";
 import {
   decodeBenchmarkSuite,
   decodeBenchmarkSuiteSaveRequest,
@@ -739,9 +739,19 @@ function invalid(message: string): DraftResult {
 /** The first thing a failed decode says, as a plain clause with its path. */
 export function decodeFailure(error: unknown): string {
   let first: { readonly path: ReadonlyArray<PropertyKey>; readonly message: string } | undefined;
-  if (ParseResult.isParseError(error)) {
+  if (Schema.isSchemaError(error)) {
     try {
-      first = ParseResult.ArrayFormatter.formatErrorSync(error)[0];
+      const issue = SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues[0];
+      if (issue !== undefined) {
+        first = {
+          path: (issue.path ?? []).map((segment) =>
+            typeof segment === "object" && segment !== null && "key" in segment
+              ? segment.key
+              : segment,
+          ),
+          message: issue.message,
+        };
+      }
     } catch {
       first = undefined;
     }

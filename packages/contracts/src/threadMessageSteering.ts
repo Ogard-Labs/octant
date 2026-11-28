@@ -1,9 +1,8 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { MentionableThreadId } from "./threadMentionIdentity";
 import { TrackerMentions } from "./trackerMention";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /** As long as a queued message's prompt may be, so a steered one is shown whole. */
 export const MAX_THREAD_MESSAGE_STEERED_BODY_CHARACTERS = 200_000;
@@ -18,19 +17,19 @@ export const MAX_THREAD_MESSAGES_STEERED_PER_TURN = 32;
  * `messageId` is the queue message it was sent as.
  */
 export const ThreadMessageSteeredIntoTurn = Schema.Struct({
-  messageId: Schema.UUID,
-  body: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_THREAD_MESSAGE_STEERED_BODY_CHARACTERS),
+  messageId: GuidString,
+  body: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_THREAD_MESSAGE_STEERED_BODY_CHARACTERS),
   ),
   steeredAt: UtcTimestamp,
   /** The pull requests and issues the message mentioned; absent when it mentioned none. */
   trackerMentions: Schema.optional(TrackerMentions),
-}).annotations(strict);
+});
 export type ThreadMessageSteeredIntoTurn = typeof ThreadMessageSteeredIntoTurn.Type;
 
-export const ThreadMessagesSteeredIntoTurn = Schema.Array(ThreadMessageSteeredIntoTurn).pipe(
-  Schema.maxItems(MAX_THREAD_MESSAGES_STEERED_PER_TURN),
+export const ThreadMessagesSteeredIntoTurn = Schema.Array(ThreadMessageSteeredIntoTurn).check(
+  Schema.isMaxLength(MAX_THREAD_MESSAGES_STEERED_PER_TURN),
 );
 
 /**
@@ -40,10 +39,13 @@ export const ThreadMessagesSteeredIntoTurn = Schema.Array(ThreadMessageSteeredIn
  */
 export const ThreadMessageSteered = Schema.Struct({
   kind: Schema.Literal("thread-message-steered"),
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   threadId: MentionableThreadId,
-  turnKey: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  turnKey: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   ...ThreadMessageSteeredIntoTurn.fields,
-}).annotations(strict);
+});
 export type ThreadMessageSteered = typeof ThreadMessageSteered.Type;
-export const decodeThreadMessageSteered = Schema.decodeUnknownSync(ThreadMessageSteered);
+export const decodeThreadMessageSteered = Schema.decodeUnknownSync(
+  ThreadMessageSteered,
+  STRICT_DECODE_OPTIONS,
+);

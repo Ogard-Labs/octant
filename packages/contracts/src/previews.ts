@@ -1,12 +1,13 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
 
 export const PreviewTargetId = brandedUuid("PreviewTargetId");
 export type PreviewTargetId = typeof PreviewTargetId.Type;
@@ -22,8 +23,11 @@ export type PreviewChunkId = typeof PreviewChunkId.Type;
  * rejects path separators and `file:` URLs so a server bug cannot deliver a
  * renderer-facing path through this field.
  */
-export const PreviewOpaqueRef = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+export const PreviewOpaqueRef = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => !/[\\/]/.test(value) && !value.startsWith("file:")),
+  ),
   Schema.brand("PreviewOpaqueRef"),
 );
 export type PreviewOpaqueRef = typeof PreviewOpaqueRef.Type;
@@ -32,16 +36,17 @@ export type PreviewOpaqueRef = typeof PreviewOpaqueRef.Type;
  * Display name shown to the user. Constrained to a basename (no path
  * separators) so a directory path can never reach the renderer through it.
  */
-export const PreviewDisplayName = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value)),
+export const PreviewDisplayName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value)),
 );
 
-export const PreviewTargetKind = Schema.Literal(
+export const PreviewTargetKind = Schema.Literals([
   "file",
   "attachment",
   "artifact-version",
   "validation-evidence",
-);
+]);
 export type PreviewTargetKind = typeof PreviewTargetKind.Type;
 
 export const PreviewTarget = Schema.Struct({
@@ -55,7 +60,7 @@ export const PreviewTarget = Schema.Struct({
   // minted for. Lets the pure authority policy fail closed across worktrees
   // within the same Code Project; the host still enforces worktree containment.
   boundCodeThreadId: Schema.optional(CodeThreadId),
-}).annotations(strict);
+});
 export type PreviewTarget = typeof PreviewTarget.Type;
 
 /** Complete source text only; preview chunks may be truncated or normalized. */
@@ -64,33 +69,39 @@ export const PreviewTextRequest = Schema.Struct({
   target: PreviewTarget,
   change: Schema.optional(
     Schema.Struct({
-      revision: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-      text: Schema.String.pipe(Schema.maxLength(MAX_PREVIEW_EDITOR_BYTES)),
-    }).annotations(strict),
+      revision: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+      text: Schema.String.check(Schema.isMaxLength(MAX_PREVIEW_EDITOR_BYTES)),
+    }),
   ),
-}).annotations(strict);
+});
 export type PreviewTextRequest = typeof PreviewTextRequest.Type;
-export const PreviewTextReply = Schema.Union(
+export const PreviewTextReply = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("ready", "saved"),
-    fileKey: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-    text: Schema.String.pipe(Schema.maxLength(MAX_PREVIEW_EDITOR_BYTES)),
-    revision: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
-  }).annotations(strict),
+    kind: Schema.Literals(["ready", "saved"]),
+    fileKey: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+    text: Schema.String.check(Schema.isMaxLength(MAX_PREVIEW_EDITOR_BYTES)),
+    revision: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  }),
   Schema.Struct({
-    kind: Schema.Literal(
+    kind: Schema.Literals([
       "conflict",
       "unauthorized",
       "unavailable",
       "unsupported",
       "too-large",
       "failed",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type PreviewTextReply = typeof PreviewTextReply.Type;
-export const decodePreviewTextRequest = Schema.decodeUnknownSync(PreviewTextRequest);
-export const decodePreviewTextReply = Schema.decodeUnknownSync(PreviewTextReply);
+export const decodePreviewTextRequest = Schema.decodeUnknownSync(
+  PreviewTextRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewTextReply = Schema.decodeUnknownSync(
+  PreviewTextReply,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Source-version identity used for stale detection and source-versioned
@@ -98,7 +109,7 @@ export const decodePreviewTextReply = Schema.decodeUnknownSync(PreviewTextReply)
  * the user reviewed.
  */
 export const ContentSha256 = Schema.String.pipe(
-  Schema.pattern(/^[0-9a-f]{64}$/),
+  Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
   Schema.brand("ContentSha256"),
 );
 export type ContentSha256 = typeof ContentSha256.Type;
@@ -107,10 +118,10 @@ export const PreviewSourceVersion = Schema.Struct({
   contentSha256: ContentSha256,
   byteSize: NonNegativeInt,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PreviewSourceVersion = typeof PreviewSourceVersion.Type;
 
-export const PreviewKind = Schema.Literal(
+export const PreviewKind = Schema.Literals([
   "text",
   "markdown",
   "image",
@@ -120,10 +131,10 @@ export const PreviewKind = Schema.Literal(
   "document",
   "slides",
   "unsupported",
-);
+]);
 export type PreviewKind = typeof PreviewKind.Type;
 
-export const PreviewChunkKind = Schema.Literal(
+export const PreviewChunkKind = Schema.Literals([
   "text",
   "markdown",
   "image",
@@ -132,25 +143,23 @@ export const PreviewChunkKind = Schema.Literal(
   "workbook",
   "document",
   "slides",
-);
+]);
 export type PreviewChunkKind = typeof PreviewChunkKind.Type;
 
-export const PreviewDelimiter = Schema.Literal(",", "\t", ";", "|");
+export const PreviewDelimiter = Schema.Literals([",", "\t", ";", "|"]);
 export type PreviewDelimiter = typeof PreviewDelimiter.Type;
 
-export const PreviewFidelityLevel = Schema.Literal("full", "limited");
+export const PreviewFidelityLevel = Schema.Literals(["full", "limited"]);
 export type PreviewFidelityLevel = typeof PreviewFidelityLevel.Type;
 
 export const PreviewFidelity = Schema.Struct({
   level: PreviewFidelityLevel,
-  notice: Schema.optional(Schema.NonEmptyTrimmedString),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((fidelity) => fidelity.level === "full" || fidelity.notice !== undefined, {
-      jsonSchema: {},
-    }),
-  );
+  notice: Schema.optional(NonEmptyTrimmedString),
+}).check(
+  Schema.makeFilter((fidelity) => fidelity.level === "full" || fidelity.notice !== undefined, {
+    jsonSchema: {},
+  }),
+);
 export type PreviewFidelity = typeof PreviewFidelity.Type;
 
 /**
@@ -158,13 +167,13 @@ export type PreviewFidelity = typeof PreviewFidelity.Type;
  * never cross the wire through `reason`; an optional sanitized `message` may
  * accompany the code when a human-readable hint is safe to surface.
  */
-export const PreviewFailureCode = Schema.Literal(
+export const PreviewFailureCode = Schema.Literals([
   "decode-failed",
   "read-failed",
   "parse-failed",
   "cancelled",
   "unknown",
-);
+]);
 export type PreviewFailureCode = typeof PreviewFailureCode.Type;
 
 /**
@@ -172,8 +181,9 @@ export type PreviewFailureCode = typeof PreviewFailureCode.Type;
  * common URL schemes so absolute paths, source snippets, credentials, or
  * authority tokens cannot leak through failure messages.
  */
-const PreviewSafeDiagnostic = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
+const PreviewSafeDiagnostic = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((value) => !/[\\/]/.test(value) && !/^(file|https?):/i.test(value)),
 );
 
 export const PreviewCapabilityFlags = Schema.Struct({
@@ -184,7 +194,7 @@ export const PreviewCapabilityFlags = Schema.Struct({
   canOpenExternally: Schema.Boolean,
   canQuickLook: Schema.Boolean,
   canEditInMonaco: Schema.Boolean,
-}).annotations(strict);
+});
 export type PreviewCapabilityFlags = typeof PreviewCapabilityFlags.Type;
 
 export const PreviewContentBounds = Schema.Struct({
@@ -194,20 +204,20 @@ export const PreviewContentBounds = Schema.Struct({
   rows: Schema.optional(PositiveInt),
   columns: Schema.optional(PositiveInt),
   blocks: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 export type PreviewContentBounds = typeof PreviewContentBounds.Type;
 
 export const PreviewManifest = Schema.Struct({
   target: PreviewTarget,
   sourceVersion: PreviewSourceVersion,
   kind: PreviewKind,
-  sniffedMediaType: Schema.NonEmptyTrimmedString,
+  sniffedMediaType: NonEmptyTrimmedString,
   byteSize: NonNegativeInt,
   fidelity: PreviewFidelity,
   capabilities: PreviewCapabilityFlags,
   bounds: PreviewContentBounds,
   producedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PreviewManifest = typeof PreviewManifest.Type;
 
 export const PreviewChunkSequence = NonNegativeInt.pipe(Schema.brand("PreviewChunkSequence"));
@@ -228,24 +238,22 @@ const ColumnRangeFields = {
   endColumn: PositiveInt,
 } as const;
 
-export const PreviewChunkDescriptor = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("text"), ...LineRangeFields }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("markdown"), ...LineRangeFields }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("image") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("pdf"), page: PositiveInt }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("table"), ...RowRangeFields }).annotations(strict),
+export const PreviewChunkDescriptor = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("text"), ...LineRangeFields }),
+  Schema.Struct({ kind: Schema.Literal("markdown"), ...LineRangeFields }),
+  Schema.Struct({ kind: Schema.Literal("image") }),
+  Schema.Struct({ kind: Schema.Literal("pdf"), page: PositiveInt }),
+  Schema.Struct({ kind: Schema.Literal("table"), ...RowRangeFields }),
   Schema.Struct({
     kind: Schema.Literal("workbook"),
     worksheet: PositiveInt,
     ...RowRangeFields,
     ...ColumnRangeFields,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("document"), blockIndex: NonNegativeInt }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("slides"), slide: PositiveInt }).annotations(strict),
-).pipe(
-  Schema.filter((descriptor) => {
+  }),
+  Schema.Struct({ kind: Schema.Literal("document"), blockIndex: NonNegativeInt }),
+  Schema.Struct({ kind: Schema.Literal("slides"), slide: PositiveInt }),
+]).check(
+  Schema.makeFilter((descriptor) => {
     switch (descriptor.kind) {
       case "text":
       case "markdown":
@@ -266,59 +274,60 @@ export type PreviewChunkDescriptor = typeof PreviewChunkDescriptor.Type;
 const TextPayload = Schema.Struct({
   kind: Schema.Literal("text"),
   text: Schema.String,
-  encoding: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  encoding: NonEmptyTrimmedString,
+});
 
 const MarkdownPayload = Schema.Struct({
   kind: Schema.Literal("markdown"),
   text: Schema.String,
-  encoding: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  encoding: NonEmptyTrimmedString,
+});
 
 const ImagePayload = Schema.Struct({
   kind: Schema.Literal("image"),
-  mediaType: Schema.NonEmptyTrimmedString,
+  mediaType: NonEmptyTrimmedString,
   // Renderer-facing normalized preview data only: require a safe
   // `data:image/...;base64,...` URL so a malformed parser result cannot
   // trigger a renderer-side network or local-resource load.
-  dataUrl: Schema.NonEmptyTrimmedString.pipe(
-    Schema.pattern(/^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]*$/),
+  dataUrl: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isPattern(/^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]*$/),
   ),
-}).annotations(strict);
+});
 
 const PdfPayload = Schema.Struct({
   kind: Schema.Literal("pdf"),
   pageText: Schema.String,
-  renderedRef: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  renderedRef: Schema.optional(NonEmptyTrimmedString),
+});
 
 const TablePayload = Schema.Struct({
   kind: Schema.Literal("table"),
   rows: Schema.Array(Schema.Array(Schema.String)),
   delimiter: PreviewDelimiter,
-}).annotations(strict);
+});
 
-const WorkbookCellValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Null);
+const WorkbookCellValue = Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Null]);
 export type WorkbookCellValue = typeof WorkbookCellValue.Type;
 
 const WorkbookPayload = Schema.Struct({
   kind: Schema.Literal("workbook"),
-  worksheetName: Schema.NonEmptyTrimmedString,
+  worksheetName: NonEmptyTrimmedString,
   rows: Schema.Array(Schema.Array(WorkbookCellValue)),
-}).annotations(strict);
+});
 
 const DocumentPayload = Schema.Struct({
   kind: Schema.Literal("document"),
   text: Schema.String,
-}).annotations(strict);
+});
 
 const SlidesPayload = Schema.Struct({
   kind: Schema.Literal("slides"),
   slideText: Schema.String,
-  renderedRef: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  renderedRef: Schema.optional(NonEmptyTrimmedString),
+});
 
-export const PreviewChunkPayload = Schema.Union(
+export const PreviewChunkPayload = Schema.Union([
   TextPayload,
   MarkdownPayload,
   ImagePayload,
@@ -327,7 +336,7 @@ export const PreviewChunkPayload = Schema.Union(
   WorkbookPayload,
   DocumentPayload,
   SlidesPayload,
-);
+]);
 export type PreviewChunkPayload = typeof PreviewChunkPayload.Type;
 
 export const PreviewChunk = Schema.Struct({
@@ -339,13 +348,11 @@ export const PreviewChunk = Schema.Struct({
   descriptor: PreviewChunkDescriptor,
   payload: PreviewChunkPayload,
   isFinal: Schema.Boolean,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (chunk) => chunk.descriptor.kind === chunk.kind && chunk.payload.kind === chunk.kind,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (chunk) => chunk.descriptor.kind === chunk.kind && chunk.payload.kind === chunk.kind,
+  ),
+);
 export type PreviewChunk = typeof PreviewChunk.Type;
 
 const SelectionTargetFields = {
@@ -353,53 +360,53 @@ const SelectionTargetFields = {
   sourceVersion: PreviewSourceVersion,
 } as const;
 
-const OffsetRange = Schema.Struct({ startOffset: NonNegativeInt, endOffset: NonNegativeInt })
-  .annotations(strict)
-  .pipe(Schema.filter((range) => range.endOffset >= range.startOffset));
+const OffsetRange = Schema.Struct({ startOffset: NonNegativeInt, endOffset: NonNegativeInt }).check(
+  Schema.makeFilter((range) => range.endOffset >= range.startOffset),
+);
 
-export const PreviewSelection = Schema.Union(
+export const PreviewSelection = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("text"),
     ...SelectionTargetFields,
     ...LineRangeFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("markdown"),
     ...SelectionTargetFields,
     ...LineRangeFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pdf"),
     ...SelectionTargetFields,
     page: PositiveInt,
     textRange: Schema.optional(OffsetRange),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("table"),
     ...SelectionTargetFields,
     ...RowRangeFields,
     ...ColumnRangeFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("workbook"),
     ...SelectionTargetFields,
     worksheet: PositiveInt,
     ...RowRangeFields,
     ...ColumnRangeFields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("document"),
     ...SelectionTargetFields,
     blockIndex: NonNegativeInt,
     textRange: Schema.optional(OffsetRange),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("slides"),
     ...SelectionTargetFields,
     slide: PositiveInt,
-  }).annotations(strict),
-).pipe(
-  Schema.filter((selection) => {
+  }),
+]).check(
+  Schema.makeFilter((selection) => {
     switch (selection.kind) {
       case "text":
       case "markdown":
@@ -430,110 +437,136 @@ export const PreviewContextSelection = Schema.Struct({
   id: PreviewContextSelectionId,
   selection: PreviewSelection,
   displayName: PreviewDisplayName,
-}).annotations(strict);
+});
 export type PreviewContextSelection = typeof PreviewContextSelection.Type;
 
-export const decodePreviewContextSelectionId = Schema.decodeUnknownSync(PreviewContextSelectionId);
+export const decodePreviewContextSelectionId = Schema.decodeUnknownSync(
+  PreviewContextSelectionId,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const PreviewViewerMode = Schema.Literal("preview", "raw");
+export const PreviewViewerMode = Schema.Literals(["preview", "raw"]);
 export type PreviewViewerMode = typeof PreviewViewerMode.Type;
 
 export const PreviewViewerScroll = Schema.Struct({
   x: NonNegativeInt,
   y: NonNegativeInt,
-}).annotations(strict);
+});
 export type PreviewViewerScroll = typeof PreviewViewerScroll.Type;
 
 export const PreviewViewerState = Schema.Struct({
   targetId: PreviewTargetId,
   sourceVersion: PreviewSourceVersion,
   scroll: Schema.optional(PreviewViewerScroll),
-  zoom: Schema.optional(Schema.Number.pipe(Schema.positive())),
+  zoom: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   page: Schema.optional(PositiveInt),
   worksheet: Schema.optional(PositiveInt),
   slide: Schema.optional(PositiveInt),
   delimiter: Schema.optional(PreviewDelimiter),
   mode: Schema.optional(PreviewViewerMode),
-}).annotations(strict);
+});
 export type PreviewViewerState = typeof PreviewViewerState.Type;
 
-export const PreviewOutcome = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("ready"), manifest: PreviewManifest })
-    .annotations(strict)
-    .pipe(
-      Schema.filter(
-        (outcome) =>
-          outcome.manifest.fidelity.level === "full" && outcome.manifest.kind !== "unsupported",
-      ),
+export const PreviewOutcome = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("ready"), manifest: PreviewManifest }).check(
+    Schema.makeFilter(
+      (outcome) =>
+        outcome.manifest.fidelity.level === "full" && outcome.manifest.kind !== "unsupported",
     ),
+  ),
   Schema.Struct({
     kind: Schema.Literal("unsupported"),
     target: PreviewTarget,
-    mediaType: Schema.optional(Schema.NonEmptyTrimmedString),
+    mediaType: Schema.optional(NonEmptyTrimmedString),
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("limited-fidelity"),
     manifest: PreviewManifest,
-  })
-    .annotations(strict)
-    .pipe(Schema.filter((outcome) => outcome.manifest.fidelity.level === "limited")),
+  }).check(Schema.makeFilter((outcome) => outcome.manifest.fidelity.level === "limited")),
   Schema.Struct({
     kind: Schema.Literal("locked"),
     target: PreviewTarget,
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("too-large"),
     target: PreviewTarget,
     byteSize: NonNegativeInt,
     limit: PositiveInt,
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("stale"),
     target: PreviewTarget,
     knownVersion: PreviewSourceVersion,
-  }).annotations(strict),
-  // Unauthorized exposes only the opaque target id; never content-derived
-  // metadata, display name, or media type.
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }).annotations(
-    strict,
-  ),
-  // Unavailable: the source is missing or the authoritative host is offline.
-  // Distinct from stale (known version changed) and failed (error occurred).
-  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }),
+  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }),
   Schema.Struct({
     kind: Schema.Literal("interrupted"),
     target: PreviewTarget,
     canRetry: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     target: PreviewTarget,
     reason: PreviewFailureCode,
     message: Schema.optional(PreviewSafeDiagnostic),
-  }).annotations(strict),
-);
+  }),
+]);
 export type PreviewOutcome = typeof PreviewOutcome.Type;
 
-export const decodePreviewTargetId = Schema.decodeUnknownSync(PreviewTargetId);
-export const decodePreviewHostId = Schema.decodeUnknownSync(PreviewHostId);
-export const decodePreviewChunkId = Schema.decodeUnknownSync(PreviewChunkId);
-export const decodePreviewOpaqueRef = Schema.decodeUnknownSync(PreviewOpaqueRef);
-export const decodeContentSha256 = Schema.decodeUnknownSync(ContentSha256);
-export const decodePreviewTarget = Schema.decodeUnknownSync(PreviewTarget);
-export const decodePreviewSourceVersion = Schema.decodeUnknownSync(PreviewSourceVersion);
-export const decodePreviewFidelity = Schema.decodeUnknownSync(PreviewFidelity);
-export const decodePreviewCapabilityFlags = Schema.decodeUnknownSync(PreviewCapabilityFlags);
-export const decodePreviewContentBounds = Schema.decodeUnknownSync(PreviewContentBounds);
-export const decodePreviewManifest = Schema.decodeUnknownSync(PreviewManifest);
-export const decodePreviewChunkDescriptor = Schema.decodeUnknownSync(PreviewChunkDescriptor);
-export const decodePreviewChunkPayload = Schema.decodeUnknownSync(PreviewChunkPayload);
-export const decodePreviewChunk = Schema.decodeUnknownSync(PreviewChunk);
-export const decodePreviewSelection = Schema.decodeUnknownSync(PreviewSelection);
-export const decodePreviewViewerState = Schema.decodeUnknownSync(PreviewViewerState);
-export const decodePreviewOutcome = Schema.decodeUnknownSync(PreviewOutcome);
+export const decodePreviewTargetId = Schema.decodeUnknownSync(
+  PreviewTargetId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewHostId = Schema.decodeUnknownSync(PreviewHostId, STRICT_DECODE_OPTIONS);
+export const decodePreviewChunkId = Schema.decodeUnknownSync(PreviewChunkId, STRICT_DECODE_OPTIONS);
+export const decodePreviewOpaqueRef = Schema.decodeUnknownSync(
+  PreviewOpaqueRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContentSha256 = Schema.decodeUnknownSync(ContentSha256, STRICT_DECODE_OPTIONS);
+export const decodePreviewTarget = Schema.decodeUnknownSync(PreviewTarget, STRICT_DECODE_OPTIONS);
+export const decodePreviewSourceVersion = Schema.decodeUnknownSync(
+  PreviewSourceVersion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewFidelity = Schema.decodeUnknownSync(
+  PreviewFidelity,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewCapabilityFlags = Schema.decodeUnknownSync(
+  PreviewCapabilityFlags,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewContentBounds = Schema.decodeUnknownSync(
+  PreviewContentBounds,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewManifest = Schema.decodeUnknownSync(
+  PreviewManifest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewChunkDescriptor = Schema.decodeUnknownSync(
+  PreviewChunkDescriptor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewChunkPayload = Schema.decodeUnknownSync(
+  PreviewChunkPayload,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewChunk = Schema.decodeUnknownSync(PreviewChunk, STRICT_DECODE_OPTIONS);
+export const decodePreviewSelection = Schema.decodeUnknownSync(
+  PreviewSelection,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewViewerState = Schema.decodeUnknownSync(
+  PreviewViewerState,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewOutcome = Schema.decodeUnknownSync(PreviewOutcome, STRICT_DECODE_OPTIONS);
 
 /**
  * Renderer request to open a preview for an opaque target. The server
@@ -545,7 +578,7 @@ export const decodePreviewOutcome = Schema.decodeUnknownSync(PreviewOutcome);
 export const PreviewOpenRequest = Schema.Struct({
   target: PreviewTarget,
   knownVersion: Schema.optional(PreviewSourceVersion),
-}).annotations(strict);
+});
 export type PreviewOpenRequest = typeof PreviewOpenRequest.Type;
 
 /**
@@ -557,7 +590,7 @@ export type PreviewOpenRequest = typeof PreviewOpenRequest.Type;
 export const PreviewRefreshRequest = Schema.Struct({
   target: PreviewTarget,
   knownVersion: PreviewSourceVersion,
-}).annotations(strict);
+});
 export type PreviewRefreshRequest = typeof PreviewRefreshRequest.Type;
 
 /**
@@ -572,7 +605,7 @@ export const PreviewChunksRequest = Schema.Struct({
   sourceVersion: PreviewSourceVersion,
   afterSequence: PreviewChunkSequence,
   maxChunks: Schema.optional(PositiveInt),
-}).annotations(strict);
+});
 export type PreviewChunksRequest = typeof PreviewChunksRequest.Type;
 
 /**
@@ -582,7 +615,7 @@ export type PreviewChunksRequest = typeof PreviewChunksRequest.Type;
  */
 export const PreviewCancelRequest = Schema.Struct({
   target: PreviewTarget,
-}).annotations(strict);
+});
 export type PreviewCancelRequest = typeof PreviewCancelRequest.Type;
 
 /**
@@ -591,37 +624,33 @@ export type PreviewCancelRequest = typeof PreviewCancelRequest.Type;
  * `ready`/`limited-fidelity`/`locked`/`too-large` branches (those surface at
  * open time, not during streaming). Unauthorized discloses only the target id.
  */
-export const PreviewChunksReply = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("chunks"), chunks: Schema.Array(PreviewChunk) }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }).annotations(strict),
+export const PreviewChunksReply = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("chunks"), chunks: Schema.Array(PreviewChunk) }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }),
+  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }),
   Schema.Struct({
     kind: Schema.Literal("stale"),
     target: PreviewTarget,
     knownVersion: PreviewSourceVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("interrupted"),
     target: PreviewTarget,
     canRetry: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     target: PreviewTarget,
     reason: PreviewFailureCode,
     message: Schema.optional(PreviewSafeDiagnostic),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unsupported"),
     target: PreviewTarget,
-    mediaType: Schema.optional(Schema.NonEmptyTrimmedString),
+    mediaType: Schema.optional(NonEmptyTrimmedString),
     canOpenExternally: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type PreviewChunksReply = typeof PreviewChunksReply.Type;
 
 /**
@@ -629,21 +658,37 @@ export type PreviewChunksReply = typeof PreviewChunksReply.Type;
  * aborted; `not-found` means no stream was active for the target; unauthorized
  * discloses only the target id.
  */
-export const PreviewCancelReply = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("cancelled") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("not-found") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }).annotations(
-    strict,
-  ),
-);
+export const PreviewCancelReply = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("cancelled") }),
+  Schema.Struct({ kind: Schema.Literal("not-found") }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }),
+]);
 export type PreviewCancelReply = typeof PreviewCancelReply.Type;
 
-export const decodePreviewOpenRequest = Schema.decodeUnknownSync(PreviewOpenRequest);
-export const decodePreviewRefreshRequest = Schema.decodeUnknownSync(PreviewRefreshRequest);
-export const decodePreviewChunksRequest = Schema.decodeUnknownSync(PreviewChunksRequest);
-export const decodePreviewCancelRequest = Schema.decodeUnknownSync(PreviewCancelRequest);
-export const decodePreviewChunksReply = Schema.decodeUnknownSync(PreviewChunksReply);
-export const decodePreviewCancelReply = Schema.decodeUnknownSync(PreviewCancelReply);
+export const decodePreviewOpenRequest = Schema.decodeUnknownSync(
+  PreviewOpenRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewRefreshRequest = Schema.decodeUnknownSync(
+  PreviewRefreshRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewChunksRequest = Schema.decodeUnknownSync(
+  PreviewChunksRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewCancelRequest = Schema.decodeUnknownSync(
+  PreviewCancelRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewChunksReply = Schema.decodeUnknownSync(
+  PreviewChunksReply,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewCancelReply = Schema.decodeUnknownSync(
+  PreviewCancelReply,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * External-application preview handoff kinds. The renderer requests exactly
@@ -652,7 +697,11 @@ export const decodePreviewCancelReply = Schema.decodeUnknownSync(PreviewCancelRe
  * application. Every request carries only the opaque target ref; no host path
  * and no generic shell-open ever crosses the wire.
  */
-export const PreviewHandoffKind = Schema.Literal("reveal-in-finder", "quick-look", "open-external");
+export const PreviewHandoffKind = Schema.Literals([
+  "reveal-in-finder",
+  "quick-look",
+  "open-external",
+]);
 export type PreviewHandoffKind = typeof PreviewHandoffKind.Type;
 
 /**
@@ -666,7 +715,7 @@ export type PreviewHandoffKind = typeof PreviewHandoffKind.Type;
 export const PreviewHandoffRequest = Schema.Struct({
   target: PreviewTarget,
   kind: PreviewHandoffKind,
-}).annotations(strict);
+});
 export type PreviewHandoffRequest = typeof PreviewHandoffRequest.Type;
 
 /**
@@ -676,22 +725,26 @@ export type PreviewHandoffRequest = typeof PreviewHandoffRequest.Type;
  * `failed` carries a bounded reason and sanitized message (cancellation
  * reports reason `cancelled`).
  */
-export const PreviewHandoffReply = Schema.Union(
+export const PreviewHandoffReply = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("done"),
     handoffKind: PreviewHandoffKind,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), targetId: PreviewTargetId }),
+  Schema.Struct({ kind: Schema.Literal("unavailable"), target: PreviewTarget }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     reason: PreviewFailureCode,
     message: Schema.optional(PreviewSafeDiagnostic),
-  }).annotations(strict),
-);
+  }),
+]);
 export type PreviewHandoffReply = typeof PreviewHandoffReply.Type;
 
-export const decodePreviewHandoffRequest = Schema.decodeUnknownSync(PreviewHandoffRequest);
-export const decodePreviewHandoffReply = Schema.decodeUnknownSync(PreviewHandoffReply);
+export const decodePreviewHandoffRequest = Schema.decodeUnknownSync(
+  PreviewHandoffRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePreviewHandoffReply = Schema.decodeUnknownSync(
+  PreviewHandoffReply,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   GithubRepositoryName,
   GithubRepositoryNodeId,
@@ -7,23 +8,23 @@ import {
 } from "./githubCatalogue";
 import { BindingReceiptId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const SECRETISH =
   /(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|bearer\s+|token=|authorization)/i;
 const safeText = (limit: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(limit),
-    Schema.filter((value) => !SECRETISH.test(value) && !value.includes("\0")),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(limit),
+    Schema.makeFilter((value) => !SECRETISH.test(value) && !value.includes("\0")),
   );
-const isoTimestamp = Schema.String.pipe(
-  Schema.filter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
+const isoTimestamp = Schema.String.check(
+  Schema.makeFilter((value) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)),
 );
-const branchName = safeText(255).pipe(
-  Schema.filter((value) => !/\s/.test(value) && !value.includes("..")),
+const branchName = safeText(255).check(
+  Schema.makeFilter((value) => !/\s/.test(value) && !value.includes("..")),
 );
 
-export const GithubCloneRequestId = Schema.String.pipe(
-  Schema.filter((value) =>
+export const GithubCloneRequestId = Schema.String.check(
+  Schema.makeFilter((value) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value),
   ),
 );
@@ -34,7 +35,7 @@ export type GithubCloneRequestId = typeof GithubCloneRequestId.Type;
  * `awaiting-confirmation`: no filesystem or network side effect exists before
  * the user confirms, so the first journaled state is already confirmable.
  */
-export const GithubCloneState = Schema.Literal(
+export const GithubCloneState = Schema.Literals([
   "awaiting-confirmation",
   "reserved",
   "cloning",
@@ -44,10 +45,10 @@ export const GithubCloneState = Schema.Literal(
   "failed",
   "cancelled",
   "recovery-required",
-);
+]);
 export type GithubCloneState = typeof GithubCloneState.Type;
 
-export const GithubCloneFailureCode = Schema.Literal(
+export const GithubCloneFailureCode = Schema.Literals([
   "unauthorized",
   "capability-unavailable",
   "stale-read",
@@ -73,17 +74,17 @@ export const GithubCloneFailureCode = Schema.Literal(
   "binding-unavailable",
   "restart-interrupted",
   "unavailable",
-);
+]);
 export type GithubCloneFailureCode = typeof GithubCloneFailureCode.Type;
 
 /**
  * A server-derived absolute POSIX path inside the managed inventory. Paths
  * never carry traversal segments, NUL bytes, or credential-shaped material.
  */
-const managedPath = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(1024),
-  Schema.filter(
+const managedPath = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(1024),
+  Schema.makeFilter(
     (value) =>
       value.startsWith("/") &&
       !value.includes("\0") &&
@@ -92,15 +93,15 @@ const managedPath = Schema.String.pipe(
   ),
 );
 
-const destinationDigest = Schema.String.pipe(
-  Schema.filter((value) => /^[a-f0-9]{64}$/.test(value)),
+const destinationDigest = Schema.String.check(
+  Schema.makeFilter((value) => /^[a-f0-9]{64}$/.test(value)),
 );
 
 export const GithubCloneDestination = Schema.Struct({
   inventoryPath: managedPath,
   destinationPath: managedPath,
   digest: destinationDigest,
-}).annotations(strict);
+});
 export type GithubCloneDestination = typeof GithubCloneDestination.Type;
 
 export const GithubCloneRepositoryFacts = Schema.Struct({
@@ -111,23 +112,23 @@ export const GithubCloneRepositoryFacts = Schema.Struct({
   defaultBranch: Schema.optional(branchName),
   /** An explicitly verified empty repository; there is no object to check out. */
   empty: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type GithubCloneRepositoryFacts = typeof GithubCloneRepositoryFacts.Type;
 
 export const GithubCloneFailure = Schema.Struct({
   code: GithubCloneFailureCode,
   remediation: Schema.optional(safeText(256)),
-}).annotations(strict);
+});
 export type GithubCloneFailure = typeof GithubCloneFailure.Type;
 
 /** Bounded, redacted in-flight progress; never journaled and never raw CLI output. */
 export const GithubCloneProgress = Schema.Struct({
-  phase: Schema.Literal("cloning", "verifying", "attaching"),
+  phase: Schema.Literals(["cloning", "verifying", "attaching"]),
   message: Schema.optional(safeText(160)),
-}).annotations(strict);
+});
 export type GithubCloneProgress = typeof GithubCloneProgress.Type;
 
-export const GithubCloneMode = Schema.Literal("clone", "attach-existing");
+export const GithubCloneMode = Schema.Literals(["clone", "attach-existing"]);
 export type GithubCloneMode = typeof GithubCloneMode.Type;
 
 /**
@@ -143,27 +144,27 @@ export const GithubCloneOperation = Schema.Struct({
   destination: GithubCloneDestination,
   failure: Schema.optional(GithubCloneFailure),
   bindingIssued: Schema.optional(Schema.Boolean),
-  version: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+  version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   requestedAt: isoTimestamp,
   updatedAt: isoTimestamp,
-}).annotations(strict);
+});
 export type GithubCloneOperation = typeof GithubCloneOperation.Type;
 
 export const GithubCloneRequested = Schema.Struct({
   operation: GithubCloneOperation,
-}).annotations(strict);
+});
 export type GithubCloneRequested = typeof GithubCloneRequested.Type;
 
 export const GithubCloneTransitioned = Schema.Struct({
   requestId: GithubCloneRequestId,
   fromState: GithubCloneState,
   toState: GithubCloneState,
-  version: Schema.Int.pipe(Schema.greaterThanOrEqualTo(2)),
+  version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
   failure: Schema.optional(GithubCloneFailure),
   /** Updated verification facts (for example the observed default branch). */
   repository: Schema.optional(GithubCloneRepositoryFacts),
   bindingIssued: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type GithubCloneTransitioned = typeof GithubCloneTransitioned.Type;
 
 /**
@@ -175,10 +176,10 @@ export type GithubCloneTransitioned = typeof GithubCloneTransitioned.Type;
 export const GithubCloneDestinationSelection = Schema.Struct({
   parentReceiptId: BindingReceiptId,
   folderName: GithubRepositoryName,
-}).annotations(strict);
+});
 export type GithubCloneDestinationSelection = typeof GithubCloneDestinationSelection.Type;
 
-export const GithubCloneCommand = Schema.Union(
+export const GithubCloneCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("request-clone"),
     requestId: GithubCloneRequestId,
@@ -190,37 +191,37 @@ export const GithubCloneCommand = Schema.Union(
      * destination; present means the person chose the parent folder and name.
      */
     destination: Schema.optional(GithubCloneDestinationSelection),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-clone"),
     requestId: GithubCloneRequestId,
     nodeId: GithubRepositoryNodeId,
     confirmation: Schema.Literal("confirm-github-managed-clone"),
     destinationDigest,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-clone"),
     requestId: GithubCloneRequestId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("attach-existing"),
     requestId: GithubCloneRequestId,
     nodeId: GithubRepositoryNodeId,
     confirmation: Schema.Literal("confirm-github-attach-existing"),
     destinationDigest,
-  }).annotations(strict),
-);
+  }),
+]);
 export type GithubCloneCommand = typeof GithubCloneCommand.Type;
 
 /** One ordinary Code Project binding receipt reference, live-response only. */
 export const GithubCloneBindingReceipt = Schema.Struct({
-  receiptId: Schema.String.pipe(Schema.filter((value) => /^[A-Za-z0-9_-]{43}$/.test(value))),
+  receiptId: Schema.String.check(Schema.makeFilter((value) => /^[A-Za-z0-9_-]{43}$/.test(value))),
   projectType: Schema.Literal("code"),
-  expiresAt: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  expiresAt: PositiveInt,
+});
 export type GithubCloneBindingReceipt = typeof GithubCloneBindingReceipt.Type;
 
-export const GithubCloneRefusalReason = Schema.Literal(
+export const GithubCloneRefusalReason = Schema.Literals([
   "unauthorized",
   "capability-unavailable",
   "stale-read",
@@ -230,22 +231,22 @@ export const GithubCloneRefusalReason = Schema.Literal(
   "not-found",
   "collision",
   "unavailable",
-);
+]);
 export type GithubCloneRefusalReason = typeof GithubCloneRefusalReason.Type;
 
-export const GithubCloneCommandResponse = Schema.Union(
+export const GithubCloneCommandResponse = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("operation"),
     operation: GithubCloneOperation,
     progress: Schema.optional(GithubCloneProgress),
     binding: Schema.optional(GithubCloneBindingReceipt),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     reason: GithubCloneRefusalReason,
     remediation: Schema.optional(safeText(256)),
-  }).annotations(strict),
-);
+  }),
+]);
 export type GithubCloneCommandResponse = typeof GithubCloneCommandResponse.Type;
 
 export const GithubCloneOperationList = Schema.Struct({
@@ -253,16 +254,32 @@ export const GithubCloneOperationList = Schema.Struct({
     Schema.Struct({
       operation: GithubCloneOperation,
       progress: Schema.optional(GithubCloneProgress),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(100)),
-}).annotations(strict);
+    }),
+  ).check(Schema.isMaxLength(100)),
+});
 export type GithubCloneOperationList = typeof GithubCloneOperationList.Type;
 
-export const decodeGithubCloneCommand = Schema.decodeUnknownSync(GithubCloneCommand);
+export const decodeGithubCloneCommand = Schema.decodeUnknownSync(
+  GithubCloneCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeGithubCloneCommandResponse = Schema.decodeUnknownSync(
   GithubCloneCommandResponse,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeGithubCloneOperation = Schema.decodeUnknownSync(GithubCloneOperation);
-export const decodeGithubCloneOperationList = Schema.decodeUnknownSync(GithubCloneOperationList);
-export const decodeGithubCloneRequested = Schema.decodeUnknownSync(GithubCloneRequested);
-export const decodeGithubCloneTransitioned = Schema.decodeUnknownSync(GithubCloneTransitioned);
+export const decodeGithubCloneOperation = Schema.decodeUnknownSync(
+  GithubCloneOperation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeGithubCloneOperationList = Schema.decodeUnknownSync(
+  GithubCloneOperationList,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeGithubCloneRequested = Schema.decodeUnknownSync(
+  GithubCloneRequested,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeGithubCloneTransitioned = Schema.decodeUnknownSync(
+  GithubCloneTransitioned,
+  STRICT_DECODE_OPTIONS,
+);

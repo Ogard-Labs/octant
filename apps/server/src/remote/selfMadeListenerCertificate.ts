@@ -40,7 +40,7 @@ import {
 } from "node:fs";
 import { isIP } from "node:net";
 import { dirname, join } from "node:path";
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { ListenerKeyTransition, StableHostId } from "@octant/contracts";
 import { LISTENER_KEY_TRANSITION_WINDOW_MS, listenerKeyTransitionPayload } from "@octant/domain";
 import type { PrivateListenerTls } from "../privateListener";
@@ -118,7 +118,8 @@ export function createSelfMadeListenerCertificateStore(
     Schema.Struct({
       transition: ListenerKeyTransition,
       newKeyPem: Schema.NonEmptyString,
-    }).annotations({ parseOptions: { onExcessProperty: "error" } }),
+    }),
+    { onExcessProperty: "error" },
   );
   const keyPin = (pem: string): string =>
     `sha256-${createHash("sha256")
@@ -322,7 +323,9 @@ export function createSelfMadeListenerCertificateStore(
         const origin = new URL(input.origin);
         if (origin.protocol !== "https:" || origin.origin !== input.origin)
           throw new Error("Invalid origin.");
-        const hostId = Schema.decodeUnknownSync(StableHostId)(input.hostId);
+        const hostId = Schema.decodeUnknownSync(StableHostId, { onExcessProperty: "error" })(
+          input.hostId,
+        );
         const serving = store.ensure(origin.hostname);
         if (serving.status !== "ready") throw new Error("Listener key unavailable.");
         const previous = readStage();
@@ -338,7 +341,10 @@ export function createSelfMadeListenerCertificateStore(
           return { status: "prepared", transition: t };
         }
         const generated = generateKeyPairSync("ec", { namedCurve: "P-256" });
-        const unsigned = Schema.decodeUnknownSync(ListenerKeyTransition.omit("signature"))({
+        const unsigned = Schema.decodeUnknownSync(
+          ListenerKeyTransition.mapFields(Struct.omit(["signature"])),
+          { onExcessProperty: "error" },
+        )({
           version: 1 as const,
           hostId,
           origin: input.origin,
@@ -350,7 +356,9 @@ export function createSelfMadeListenerCertificateStore(
           preparedAt: at.toISOString(),
           expiresAt: new Date(at.getTime() + LISTENER_KEY_TRANSITION_WINDOW_MS).toISOString(),
         });
-        const transition = Schema.decodeUnknownSync(ListenerKeyTransition)({
+        const transition = Schema.decodeUnknownSync(ListenerKeyTransition, {
+          onExcessProperty: "error",
+        })({
           ...unsigned,
           signature: sign("sha256", Buffer.from(listenerKeyTransitionPayload(unsigned)), {
             key: String(serving.tls.key),

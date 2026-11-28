@@ -333,10 +333,9 @@ export interface PersistenceService {
   }>;
 }
 
-export class Persistence extends Context.Tag("@octant/server/Persistence")<
-  Persistence,
-  PersistenceService
->() {}
+export class Persistence extends Context.Service<Persistence, PersistenceService>()(
+  "@octant/server/Persistence",
+) {}
 
 export type PersistenceFailureCategory =
   | "migration-incompatible"
@@ -376,7 +375,7 @@ const defaultBuildIdentity = bundledBuildIdentity(import.meta.url);
 export function makePersistenceLive(
   options: PersistenceLiveOptions,
 ): Layer.Layer<Persistence, PersistenceStartupFailed> {
-  return Layer.scoped(
+  return Layer.effect(
     Persistence,
     Effect.acquireRelease(
       Effect.tryPromise({

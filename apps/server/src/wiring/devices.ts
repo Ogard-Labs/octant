@@ -545,4 +545,4 @@ export function wireDevices(deps: DevicesDependencies) {
   });
 }
 
-export type DevicesWiring = Effect.Effect.Success<ReturnType<typeof wireDevices>>;
+export type DevicesWiring = Effect.Success<ReturnType<typeof wireDevices>>;

@@ -6,7 +6,7 @@ import {
   type ThreadSecretRequestResult,
   type ThreadSecretRunResult,
 } from "@octant/contracts/thread-secrets";
-import { Either } from "effect";
+import { Result } from "effect";
 import type { PreparedThreadCommand } from "../harness/nativeHarnessComposition";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "../harness/nativeHarnessTools";
 import { STDERR_MARK } from "../harness/nativeHarnessShell";
@@ -68,20 +68,20 @@ export function threadSecretOperations(options: {
   return {
     requestSecret: async (input, signal) => {
       const decoded = decodeThreadSecretRequestInput(input);
-      if (Either.isLeft(decoded)) return invalid;
+      if (Result.isFailure(decoded)) return invalid;
       if (options.planning()) return replyRefused("plan", "Plan takes no secrets.");
       // Nobody is asked for what nothing could use.
-      if ((decoded.right.delivery ?? "handle") === "handle" && !service.hasConsumer())
+      if ((decoded.success.delivery ?? "handle") === "handle" && !service.hasConsumer())
         return replyRefused(
           "unavailable",
           "Nothing here can use a handle. Ask again with delivery file, and use run-with-secret.",
         );
-      const result = await service.request(caller, decoded.right, signalOf(signal));
+      const result = await service.request(caller, decoded.success, signalOf(signal));
       return requested(result);
     },
     runWithSecret: async (input, signal) => {
       const decoded = decodeThreadSecretRunInput(input);
-      if (Either.isLeft(decoded)) return invalid;
+      if (Result.isFailure(decoded)) return invalid;
       if (options.planning()) return replyRefused("plan", "Plan runs no commands with secrets.");
       if (options.onServer)
         return replyRefused(
@@ -92,7 +92,7 @@ export function threadSecretOperations(options: {
       if (commands?.shell === undefined)
         return replyRefused("no-shell", "Octant runs no commands for this thread here.");
       return run({
-        ...decoded.right,
+        ...decoded.success,
         service,
         caller,
         commands,

@@ -1,8 +1,6 @@
 import { SandboxRestrictionsScope } from "./sandboxPolicy";
 import { Schema } from "effect";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * Durable Settings information-architecture section identifiers.
  *
@@ -51,7 +49,7 @@ export const SETTINGS_SECTION_IDS = [
   "usage",
 ] as const;
 
-export const SettingsSectionId = Schema.Literal(...SETTINGS_SECTION_IDS);
+export const SettingsSectionId = Schema.Literals(SETTINGS_SECTION_IDS);
 export type SettingsSectionId = typeof SettingsSectionId.Type;
 
 /**
@@ -62,7 +60,7 @@ export type SettingsSectionId = typeof SettingsSectionId.Type;
  * values are validated through the contract schema before reaching the
  * registry.
  */
-export const SettingsSettingId = Schema.Trimmed.pipe(Schema.minLength(1));
+export const SettingsSettingId = Schema.Trimmed.check(Schema.isMinLength(1));
 export type SettingsSettingId = typeof SettingsSettingId.Type;
 
 /**
@@ -78,19 +76,19 @@ export type SettingsSettingId = typeof SettingsSettingId.Type;
  * them, and a link it sends must land on the control rather than fail to
  * decode. Encoding always writes the current identifier.
  */
-const RetiredSettingsSectionId = Schema.transformLiterals(
-  ["advanced", "host"],
-  ["agents", "harness"],
-  ["profiles", "providers"],
-  ["provider-catalog", "providers"],
-  ["navigator-assistant", "harness"],
-  ["image-generation", "voice"],
-  ["ssh-targets", "host"],
-);
+const RetiredSettingsSectionId = Schema.Literals([
+  "advanced",
+  "agents",
+  "profiles",
+  "provider-catalog",
+  "navigator-assistant",
+  "image-generation",
+  "ssh-targets",
+]).transform(["host", "harness", "providers", "providers", "harness", "voice", "host"]);
 
 export const SettingsDeepLink = Schema.Struct({
   sandboxScope: Schema.optional(SandboxRestrictionsScope),
-  section: Schema.Union(SettingsSectionId, RetiredSettingsSectionId),
+  section: Schema.Union([SettingsSectionId, RetiredSettingsSectionId]),
   setting: Schema.optional(SettingsSettingId),
-}).annotations(strict);
+});
 export type SettingsDeepLink = typeof SettingsDeepLink.Type;

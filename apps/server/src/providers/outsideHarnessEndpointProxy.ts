@@ -180,10 +180,10 @@ const notAnswered = () => failure("unavailable", "The provider driver did not an
 /** The failure a driver's JSON-RPC error becomes: its structure, Octant's words. */
 function failureFromDriver(data: unknown): ProviderFailure {
   const decoded = decodeOutsideDriverFailureData(data);
-  if (decoded._tag === "Left") {
+  if (decoded._tag === "Failure") {
     return failure("protocol", "The provider driver returned an invalid response.");
   }
-  const { category, retryAfterMs, contextOverflow } = decoded.right;
+  const { category, retryAfterMs, contextOverflow } = decoded.success;
   // The host learns a model's window from the overflow sentence it reads back,
   // so the driver's structured window becomes Octant's own sentence.
   if (contextOverflow !== undefined) {
@@ -421,8 +421,8 @@ class OutsideDriverLink {
       return this.#violate();
     }
     const decoded = decodeOutsideDriverToHostMessage(parsed);
-    if (decoded._tag === "Left") return this.#violate();
-    const message = decoded.right;
+    if (decoded._tag === "Failure") return this.#violate();
+    const message = decoded.success;
     if ("result" in message || "error" in message) {
       // An id the host never issued is not a late answer; it is a forgery.
       if (message.id >= this.#nextId) return this.#violate();
@@ -895,9 +895,9 @@ export function makeOutsideHarnessEndpointProxy(
 
   /** Reads a result the driver wrote; one that does not decode stops it. */
   const read = <A>(
-    decoded: { readonly _tag: "Left" } | { readonly _tag: "Right"; readonly right: A },
+    decoded: { readonly _tag: "Failure" } | { readonly _tag: "Success"; readonly success: A },
   ): A => {
-    if (decoded._tag === "Right") return decoded.right;
+    if (decoded._tag === "Success") return decoded.success;
     link.stop(driverStopped());
     throw link.stopped ?? driverStopped();
   };

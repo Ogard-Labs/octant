@@ -1787,7 +1787,7 @@ export function probeOpenCodeBinary(
     if (probe.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
     const { launch } = probe;
 
-    return Effect.async<OpenCodeBinaryProbe, ProviderFailure>((resume) => {
+    return Effect.callback<OpenCodeBinaryProbe, ProviderFailure>((resume) => {
       const child = spawn(launch.command, [...launch.args], {
         cwd: launch.workingDirectory,
         detached: process.platform !== "win32",
@@ -1921,7 +1921,7 @@ function acquireOpenCodeServer(
       try: options.reserveLoopbackPort,
       catch: () => failure("unavailable", "OpenCode loopback port could not be reserved."),
     });
-    return yield* Effect.async<ManagedOpenCodeServer, ProviderFailure>((resume) => {
+    return yield* Effect.callback<ManagedOpenCodeServer, ProviderFailure>((resume) => {
       const windowsChatDenyAll =
         options.platform === "win32" && input.mode === "chat" && input.purpose !== "probe";
       // Outside Strict the launch takes the host environment less every
@@ -2006,7 +2006,7 @@ function acquireOpenCodeServer(
         profile.cleanup();
         resume(
           Effect.fail(
-            Option.getOrElse(Cause.failureOption(prepared.cause), () =>
+            Option.getOrElse(Cause.findErrorOption(prepared.cause), () =>
               failure("incompatible", "OpenCode process confinement could not be prepared."),
             ),
           ),
@@ -2274,7 +2274,7 @@ function acquireOpenCodeServer(
     for (let attempt = 1; ; attempt += 1) {
       const result = yield* Effect.exit(launchOnReservedPort);
       if (Exit.isSuccess(result)) return result.value;
-      const providerFailure = Option.getOrElse(Cause.failureOption(result.cause), () =>
+      const providerFailure = Option.getOrElse(Cause.findErrorOption(result.cause), () =>
         failure("provider-failed", "OpenCode server could not be started."),
       );
       // The launch diagnostic names what happened; matching the message text
@@ -2389,7 +2389,7 @@ export function makeOpenCodeProcessLive(
           : undefined;
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
-        return yield* Effect.acquireReleaseInterruptible(
+        return yield* Effect.acquireRelease(
           acquireOpenCodeServer(
             {
               ...requested,
@@ -2411,6 +2411,7 @@ export function makeOpenCodeProcessLive(
             Effect.map((managed) => managed.connection),
           ),
           () => (terminate === undefined ? Effect.void : cleanupDefect(terminate)),
+          { interruptible: true },
         );
       }),
   };

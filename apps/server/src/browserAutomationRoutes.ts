@@ -1,4 +1,5 @@
 import type { EventActor } from "@octant/contracts";
+import { Schema } from "effect";
 import {
   isAgentGrantSession,
   principalActsAsHostPerson,
@@ -1377,7 +1378,7 @@ export function createBrowserAutomationRouteHandler(
           origin,
         );
       }
-      if (error instanceof Error && /ParseError/.test(error.name)) {
+      if (Schema.isSchemaError(error)) {
         return failure(
           { category: "invalid", message: "Browser request is invalid." },
           400,

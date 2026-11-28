@@ -462,7 +462,7 @@ export function createThreadMessageQueuePort(
           asking?.();
           const outcome = await Effect.runPromise(
             steerTurn({ sessionId: live.sessionId, message: text, source: "person" }).pipe(
-              Effect.catchAll(() => Effect.succeed("unsupported" as const)),
+              Effect.catch(() => Effect.succeed("unsupported" as const)),
             ),
           );
           if (outcome !== "steered") return "refused";

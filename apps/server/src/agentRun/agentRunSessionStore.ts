@@ -18,22 +18,26 @@ import type { AgentRunLiveConversationPersistence } from "./agentRunLiveConversa
 const MAX_SESSION_BYTES = 64 * 1024;
 const encoder = new TextEncoder();
 const SessionRecord = Schema.Struct({
-  binding: Schema.NonEmptyString.pipe(Schema.maxLength(16 * 1024)),
+  binding: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(16 * 1024))),
   sessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
-  workspaceIdentity: Schema.optional(Schema.NonEmptyString.pipe(Schema.maxLength(256))),
+  workspaceIdentity: Schema.optional(
+    Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(256))),
+  ),
   reviewBaseline: Schema.optional(
     Schema.Struct({
-      generation: Schema.Int.pipe(Schema.positive()),
-      tree: Schema.optional(Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/))),
-      workspaceIdentity: Schema.NonEmptyString.pipe(Schema.maxLength(256)),
+      generation: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+      tree: Schema.optional(
+        Schema.String.pipe(Schema.check(Schema.isPattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/))),
+      ),
+      workspaceIdentity: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(256))),
     }),
   ),
   pendingContinuation: Schema.optional(
     Schema.Struct({
-      generation: Schema.Int.pipe(Schema.positive()),
-      message: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
-      state: Schema.Literal("unsent", "delivery-unknown"),
+      generation: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+      message: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(4096))),
+      state: Schema.Literals(["unsent", "delivery-unknown"]),
     }),
   ),
 });
@@ -43,18 +47,18 @@ const ProviderIdentityRecord = Schema.Struct({
   sessionId: ProviderSessionId,
   providerInstanceId: ProviderInstanceId,
   driverKind: ProviderDriverKind,
-  value: Schema.NonEmptyString.pipe(Schema.maxLength(MAX_SESSION_BYTES)),
+  value: Schema.NonEmptyString.pipe(Schema.check(Schema.isMaxLength(MAX_SESSION_BYTES))),
 });
 const decodeProviderIdentity = Schema.decodeUnknownSync(ProviderIdentityRecord);
 export type AgentRunProviderIdentityRecord = typeof ProviderIdentityRecord.Type;
 
 const ConversationRecord = Schema.Struct({
-  status: Schema.Literal("live", "complete", "stale"),
+  status: Schema.Literals(["live", "complete", "stale"]),
   entries: Schema.Array(AgentRunConversationEntry).pipe(
-    Schema.maxItems(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
+    Schema.check(Schema.isMaxLength(MAX_AGENT_RUN_CONVERSATION_ENTRIES)),
   ),
   truncated: Schema.Boolean,
-  staleReason: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  staleReason: Schema.optional(Schema.String.pipe(Schema.check(Schema.isMaxLength(512)))),
 });
 const decodeConversationRecord = Schema.decodeUnknownSync(ConversationRecord);
 const decodeContentRow = Schema.decodeUnknownSync(Schema.Struct({ body_text: Schema.String }));

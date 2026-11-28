@@ -114,8 +114,8 @@ export interface NpmPackageSourceOptions {
   readonly readRegistryConfig: () => Promise<NpmRegistryConfigSources>;
 }
 
-const decodeNpmPackageName = Schema.decodeUnknownEither(ExtensionNpmPackageName);
-const decodeNpmSource = Schema.decodeUnknownEither(NpmSourceSchema);
+const decodeNpmPackageName = Schema.decodeUnknownResult(ExtensionNpmPackageName);
+const decodeNpmSource = Schema.decodeUnknownResult(NpmSourceSchema);
 const INTEGRITY_ALGORITHMS = ["sha512", "sha384", "sha256"] as const;
 const REGISTRY_ACCEPT = "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8";
 const PACKAGE_DOCUMENT_PATHS = [
@@ -148,7 +148,7 @@ export class NpmPackageSource implements NpmPackageSourcePort {
     signal?: AbortSignal,
   ): Promise<NpmPackageResolution> {
     const packageName = input.packageName.trim();
-    if (decodeNpmPackageName(packageName)._tag === "Left") return refuse("name-invalid");
+    if (decodeNpmPackageName(packageName)._tag === "Failure") return refuse("name-invalid");
     const choice = chooseNpmRegistry(
       packageName,
       input.registry === undefined
@@ -180,8 +180,8 @@ export class NpmPackageSource implements NpmPackageSourcePort {
         registry: choice.registry,
         integrity: integrity.token,
       });
-      if (npm._tag === "Left") return refuse("metadata-invalid");
-      return this.#read({ npm: npm.right, tarball: tarball.bytes });
+      if (npm._tag === "Failure") return refuse("metadata-invalid");
+      return this.#read({ npm: npm.success, tarball: tarball.bytes });
     });
   }
 
@@ -189,7 +189,7 @@ export class NpmPackageSource implements NpmPackageSourcePort {
     input: { readonly packageName: string; readonly registry: string },
     signal?: AbortSignal,
   ): Promise<NpmLatestVersion> {
-    if (decodeNpmPackageName(input.packageName)._tag === "Left") return refuse("name-invalid");
+    if (decodeNpmPackageName(input.packageName)._tag === "Failure") return refuse("name-invalid");
     const choice = chooseNpmRegistry(input.packageName, {
       env: { npm_config_registry: input.registry },
     });

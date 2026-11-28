@@ -291,7 +291,7 @@ export interface CreateNativeHarnessToolsOptions {
 }
 
 const MAX_TOOL_SUMMARY_LENGTH = 240;
-const isToolName = Schema.is(Schema.Literal(...NATIVE_HARNESS_TOOL_NAMES));
+const isToolName = Schema.is(Schema.Literals(NATIVE_HARNESS_TOOL_NAMES));
 
 /**
  * The native harness tool set: the nine working tools and three harness reads,

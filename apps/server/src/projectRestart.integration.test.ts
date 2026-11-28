@@ -7,7 +7,7 @@ import {
   decodeWindowId,
   type ProjectBootstrap,
 } from "@octant/contracts";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { BINDING_RECEIPT_TTL_MS, BindingReceiptStore } from "./bindingReceiptStore";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
@@ -369,7 +369,7 @@ describe("Project restart recovery", () => {
     seeded.close();
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -379,7 +379,7 @@ describe("Project restart recovery", () => {
       ),
     );
 
-    expect(Either.isRight(result)).toBe(true);
+    expect(Result.isSuccess(result)).toBe(true);
     const inspected = openSqlite(databasePath);
     expect(inspected.prepare("SELECT projection_name FROM event_quarantine").all()).toEqual([]);
     inspected.close();
@@ -415,7 +415,7 @@ describe("Project restart recovery", () => {
     seeded.close();
 
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         Effect.scoped(
           Effect.provide(
             Persistence,
@@ -425,11 +425,11 @@ describe("Project restart recovery", () => {
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(PersistenceStartupFailed);
-      expect(result.left).toMatchObject({ category: "recovery-required" });
-      expect(String(result.left)).not.toContain("privateFutureValue");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(PersistenceStartupFailed);
+      expect(result.failure).toMatchObject({ category: "recovery-required" });
+      expect(String(result.failure)).not.toContain("privateFutureValue");
     }
     const inspected = openSqlite(databasePath);
     expect(

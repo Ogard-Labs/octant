@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import {
   CanvasActor,
@@ -25,8 +26,6 @@ import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ImageArtifactId } from "./imageGeneration";
 import { BrowserCaptureId } from "./browserAutomation";
 import { CanvasChoiceQuestions } from "./questionnaire";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 // Canvas wire contracts are deliberately versioned independently from event
 // envelopes. A decoder must reject a future version until its renderer and
@@ -416,30 +415,33 @@ export const DEFAULT_CANVAS_BUDGETS = {
 } as const;
 export type CanvasBudgetLimits = typeof DEFAULT_CANVAS_BUDGETS;
 
-const boundedText = (maxLength: number) => Schema.String.pipe(Schema.maxLength(maxLength));
+const boundedText = (maxLength: number) => Schema.String.check(Schema.isMaxLength(maxLength));
 const boundedNonEmptyText = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
-const boundedToken = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(128),
-    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-    Schema.brand(brand),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
+const boundedToken = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(
+    Schema.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(128),
+      Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    ),
+    Schema.brand<B>(brand),
   );
 
-const FiniteNumber = Schema.Number.pipe(
-  Schema.filter(Number.isFinite, { message: () => "Canvas numbers must be finite." }),
+const FiniteNumber = Schema.Number.check(
+  Schema.makeFilter(Number.isFinite, { message: "Canvas numbers must be finite." }),
 );
 const CanvasText = boundedText(CANVAS_MAX_TEXT_LENGTH);
 const CanvasNonEmptyText = boundedNonEmptyText(CANVAS_MAX_TEXT_LENGTH);
 const CanvasLabel = boundedNonEmptyText(512);
-const CanvasDisplayName = boundedNonEmptyText(256).pipe(
-  Schema.filter((value) => !/[\\/]/.test(value), {
-    message: () => "Canvas display names must not contain path separators.",
+const CanvasDisplayName = boundedNonEmptyText(256).check(
+  Schema.makeFilter((value) => !/[\\/]/.test(value), {
+    message: "Canvas display names must not contain path separators.",
   }),
 );
-const CanvasUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(
+const CanvasUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
     (value) => {
       try {
         const parsed = new URL(value);
@@ -452,15 +454,18 @@ const CanvasUrl = Schema.String.pipe(
         return false;
       }
     },
-    { message: () => "Canvas links must be credential-free http(s) URLs." },
+    { message: "Canvas links must be credential-free http(s) URLs." },
   ),
 );
-const CanvasOpaqueRef = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(256),
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
-  Schema.filter((value) => !value.toLowerCase().startsWith("file:"), {
-    message: () => "Canvas source references must be opaque tokens, not file URLs.",
-  }),
+const CanvasOpaqueRef = Schema.Trimmed.pipe(
+  Schema.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(256),
+    Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+    Schema.makeFilter((value) => !value.toLowerCase().startsWith("file:"), {
+      message: "Canvas source references must be opaque tokens, not file URLs.",
+    }),
+  ),
   Schema.brand("CanvasOpaqueRef"),
 );
 export type CanvasOpaqueRef = typeof CanvasOpaqueRef.Type;
@@ -472,34 +477,31 @@ const CanvasProvenanceCommon = {
   projectId: ProjectId,
   actor: CanvasActor,
   providerInstanceId: ProviderInstanceId,
-  modelId: ProviderModelId.pipe(Schema.maxLength(200)),
+  modelId: ProviderModelId.check(Schema.isMaxLength(200)),
   createdAt: UtcTimestamp,
 } as const;
 
-export const CanvasProvenance = Schema.Union(
-  // A Chat Canvas belongs to its thread's Chat Project, or, when the thread
-  // is in none, to the thread alone (`projectId: null`, from
-  // `CANVAS_THREAD_OWNED_SCHEMA_VERSION`). Work and Code always have a Project.
+export const CanvasProvenance = Schema.Union([
   Schema.Struct({
     ...CanvasProvenanceCommon,
     mode: Schema.Literal("chat"),
     projectId: Schema.NullOr(ProjectId),
     threadId: ChatThreadId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...CanvasProvenanceCommon,
     mode: Schema.Literal("work"),
     threadId: WorkThreadId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     ...CanvasProvenanceCommon,
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasProvenance = typeof CanvasProvenance.Type;
 
-export const CanvasSourceKind = Schema.Literal(
+export const CanvasSourceKind = Schema.Literals([
   "attachment",
   "file",
   "artifact",
@@ -508,13 +510,13 @@ export const CanvasSourceKind = Schema.Literal(
   "evidence",
   "image",
   "thread",
-);
+]);
 export type CanvasSourceKind = typeof CanvasSourceKind.Type;
 
 export const CanvasSourceVersion = Schema.Struct({
-  contentSha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  contentSha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasSourceVersion = typeof CanvasSourceVersion.Type;
 
 export const CanvasSourceManifestEntry = Schema.Struct({
@@ -525,11 +527,11 @@ export const CanvasSourceManifestEntry = Schema.Struct({
   opaqueRef: CanvasOpaqueRef,
   displayName: CanvasDisplayName,
   sourceVersion: Schema.optional(CanvasSourceVersion),
-}).annotations(strict);
+});
 export type CanvasSourceManifestEntry = typeof CanvasSourceManifestEntry.Type;
 
-export const CanvasSourceManifest = Schema.Array(CanvasSourceManifestEntry).pipe(
-  Schema.maxItems(CANVAS_MAX_SOURCE_ENTRIES),
+export const CanvasSourceManifest = Schema.Array(CanvasSourceManifestEntry).check(
+  Schema.isMaxLength(CANVAS_MAX_SOURCE_ENTRIES),
 );
 export type CanvasSourceManifest = typeof CanvasSourceManifest.Type;
 
@@ -540,7 +542,7 @@ const CanvasBlockFields = {
   schemaVersion: CanvasSchemaVersion,
 } as const;
 
-export const CanvasBlockKind = Schema.Literal(
+export const CanvasBlockKind = Schema.Literals([
   "heading",
   "rich-text",
   "callout",
@@ -585,25 +587,25 @@ export const CanvasBlockKind = Schema.Literal(
   "flow",
   "deck",
   "choice",
-);
+]);
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
 export const CanvasHeadingBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("heading"),
-  level: Schema.Int.pipe(Schema.between(1, 6)),
+  level: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 6 })),
   text: CanvasNonEmptyText,
-}).annotations(strict);
+});
 export type CanvasHeadingBlock = typeof CanvasHeadingBlock.Type;
 
 export const CanvasRichTextBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("rich-text"),
   text: CanvasNonEmptyText,
-}).annotations(strict);
+});
 export type CanvasRichTextBlock = typeof CanvasRichTextBlock.Type;
 
-export const CanvasCalloutTone = Schema.Literal("info", "success", "warning", "danger");
+export const CanvasCalloutTone = Schema.Literals(["info", "success", "warning", "danger"]);
 export type CanvasCalloutTone = typeof CanvasCalloutTone.Type;
 
 export const CanvasCalloutBlock = Schema.Struct({
@@ -612,7 +614,7 @@ export const CanvasCalloutBlock = Schema.Struct({
   tone: CanvasCalloutTone,
   title: Schema.optional(CanvasLabel),
   text: CanvasNonEmptyText,
-}).annotations(strict);
+});
 export type CanvasCalloutBlock = typeof CanvasCalloutBlock.Type;
 
 export const CanvasLinkBlock = Schema.Struct({
@@ -620,13 +622,13 @@ export const CanvasLinkBlock = Schema.Struct({
   kind: Schema.Literal("link"),
   label: CanvasLabel,
   href: CanvasUrl,
-}).annotations(strict);
+});
 export type CanvasLinkBlock = typeof CanvasLinkBlock.Type;
 
 export const CanvasDividerBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("divider"),
-}).annotations(strict);
+});
 export type CanvasDividerBlock = typeof CanvasDividerBlock.Type;
 
 export const CanvasCitationBlock = Schema.Struct({
@@ -635,7 +637,7 @@ export const CanvasCitationBlock = Schema.Struct({
   sourceId: CanvasSourceId,
   label: CanvasLabel,
   quote: Schema.optional(CanvasText),
-}).annotations(strict);
+});
 export type CanvasCitationBlock = typeof CanvasCitationBlock.Type;
 
 /**
@@ -648,16 +650,16 @@ export type CanvasCitationBlock = typeof CanvasCitationBlock.Type;
  * shared by charts, metrics, and tables, so one word means the same reading
  * everywhere it appears.
  */
-export const CanvasNumberFormat = Schema.Literal(
+export const CanvasNumberFormat = Schema.Literals([
   "number",
   "compact",
   "percent",
   "bytes",
   "duration",
-);
+]);
 export type CanvasNumberFormat = typeof CanvasNumberFormat.Type;
 
-export const CanvasScalar = Schema.Union(CanvasText, FiniteNumber, Schema.Boolean, Schema.Null);
+export const CanvasScalar = Schema.Union([CanvasText, FiniteNumber, Schema.Boolean, Schema.Null]);
 export type CanvasScalar = typeof CanvasScalar.Type;
 
 /**
@@ -667,7 +669,7 @@ export type CanvasScalar = typeof CanvasScalar.Type;
  * (latency, failures), and `neutral` that the metric has no good side (a count
  * of open items that should simply be watched). Absent reads as neutral.
  */
-export const CanvasMetricDirection = Schema.Literal("up", "down", "neutral");
+export const CanvasMetricDirection = Schema.Literals(["up", "down", "neutral"]);
 export type CanvasMetricDirection = typeof CanvasMetricDirection.Type;
 
 export const CanvasMetricBlock = Schema.Struct({
@@ -684,25 +686,31 @@ export const CanvasMetricBlock = Schema.Struct({
    * array is bounded so a sparkline stays a glance rather than a chart.
    */
   sparkline: Schema.optional(
-    Schema.Array(FiniteNumber).pipe(Schema.maxItems(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
+    Schema.Array(FiniteNumber).check(Schema.isMaxLength(CANVAS_MAX_METRIC_SPARKLINE_POINTS)),
   ),
   /** How a delta reads; absent means the arrow gives direction without a tone. */
   goodDirection: Schema.optional(CanvasMetricDirection),
   /** A short note under the value, e.g. "since last release". */
   caption: Schema.optional(CanvasText),
-}).annotations(strict);
+});
 export type CanvasMetricBlock = typeof CanvasMetricBlock.Type;
 
 export const CanvasProgressBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("progress"),
   label: CanvasLabel,
-  value: FiniteNumber.pipe(Schema.between(0, 1)),
+  value: FiniteNumber.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   detail: Schema.optional(CanvasText),
-}).annotations(strict);
+});
 export type CanvasProgressBlock = typeof CanvasProgressBlock.Type;
 
-export const CanvasStatusTone = Schema.Literal("neutral", "info", "success", "warning", "danger");
+export const CanvasStatusTone = Schema.Literals([
+  "neutral",
+  "info",
+  "success",
+  "warning",
+  "danger",
+]);
 export type CanvasStatusTone = typeof CanvasStatusTone.Type;
 
 export const CanvasStatusBlock = Schema.Struct({
@@ -711,23 +719,29 @@ export const CanvasStatusBlock = Schema.Struct({
   label: CanvasLabel,
   value: CanvasLabel,
   tone: CanvasStatusTone,
-}).annotations(strict);
+});
 export type CanvasStatusBlock = typeof CanvasStatusBlock.Type;
 
 export const CanvasKeyValueEntry = Schema.Struct({
   key: CanvasLabel,
   value: CanvasScalar,
-}).annotations(strict);
+});
 export type CanvasKeyValueEntry = typeof CanvasKeyValueEntry.Type;
 
 export const CanvasKeyValueBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("key-value"),
-  entries: Schema.Array(CanvasKeyValueEntry).pipe(Schema.maxItems(CANVAS_MAX_SUMMARY_ITEMS)),
-}).annotations(strict);
+  entries: Schema.Array(CanvasKeyValueEntry).check(Schema.isMaxLength(CANVAS_MAX_SUMMARY_ITEMS)),
+});
 export type CanvasKeyValueBlock = typeof CanvasKeyValueBlock.Type;
 
-export const CanvasTableColumnType = Schema.Literal("text", "number", "boolean", "date", "status");
+export const CanvasTableColumnType = Schema.Literals([
+  "text",
+  "number",
+  "boolean",
+  "date",
+  "status",
+]);
 export type CanvasTableColumnType = typeof CanvasTableColumnType.Type;
 
 /**
@@ -740,7 +754,7 @@ export type CanvasTableColumnType = typeof CanvasTableColumnType.Type;
  * carries a reading on its own, and both fall back to the plain value under
  * forced colours.
  */
-export const CanvasTableColumnDisplay = Schema.Literal("text", "bar", "heat", "status");
+export const CanvasTableColumnDisplay = Schema.Literals(["text", "bar", "heat", "status"]);
 export type CanvasTableColumnDisplay = typeof CanvasTableColumnDisplay.Type;
 
 // `format` and `display` are additive optional presentation fields on the
@@ -756,13 +770,13 @@ export const CanvasTableColumn = Schema.Struct({
   type: CanvasTableColumnType,
   format: Schema.optional(CanvasNumberFormat),
   display: Schema.optional(CanvasTableColumnDisplay),
-}).annotations(strict);
+});
 export type CanvasTableColumn = typeof CanvasTableColumn.Type;
 
 export const CanvasTableCell = CanvasScalar;
 export type CanvasTableCell = typeof CanvasTableCell.Type;
-export const CanvasTableRowCells = Schema.Array(CanvasTableCell).pipe(
-  Schema.maxItems(CANVAS_MAX_TABLE_COLUMNS),
+export const CanvasTableRowCells = Schema.Array(CanvasTableCell).check(
+  Schema.isMaxLength(CANVAS_MAX_TABLE_COLUMNS),
 );
 export type CanvasTableRowCells = typeof CanvasTableRowCells.Type;
 
@@ -777,10 +791,10 @@ export type CanvasTableRowCells = typeof CanvasTableRowCells.Type;
 export const CanvasTableKeyedRow = Schema.Struct({
   id: CanvasTableRowId,
   cells: CanvasTableRowCells,
-}).annotations(strict);
+});
 export type CanvasTableKeyedRow = typeof CanvasTableKeyedRow.Type;
 
-export const CanvasTableRow = Schema.Union(CanvasTableRowCells, CanvasTableKeyedRow);
+export const CanvasTableRow = Schema.Union([CanvasTableRowCells, CanvasTableKeyedRow]);
 export type CanvasTableRow = typeof CanvasTableRow.Type;
 
 /** A table row's values in column order, whether or not the row names itself. */
@@ -810,12 +824,14 @@ export function canvasTableUsesRowIds(block: {
 export const CanvasTableBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("table"),
-  columns: Schema.NonEmptyArray(CanvasTableColumn).pipe(Schema.maxItems(CANVAS_MAX_TABLE_COLUMNS)),
-  rows: Schema.Array(CanvasTableRow).pipe(Schema.maxItems(CANVAS_MAX_TABLE_ROWS)),
-}).annotations(strict);
+  columns: Schema.NonEmptyArray(CanvasTableColumn).check(
+    Schema.isMaxLength(CANVAS_MAX_TABLE_COLUMNS),
+  ),
+  rows: Schema.Array(CanvasTableRow).check(Schema.isMaxLength(CANVAS_MAX_TABLE_ROWS)),
+});
 export type CanvasTableBlock = typeof CanvasTableBlock.Type;
 
-export const CanvasChartType = Schema.Literal(
+export const CanvasChartType = Schema.Literals([
   "line",
   "bar",
   "area",
@@ -829,7 +845,7 @@ export const CanvasChartType = Schema.Literal(
   "funnel",
   "radar",
   "sankey",
-);
+]);
 export type CanvasChartType = typeof CanvasChartType.Type;
 
 /** Whether a block is a chart of a type introduced at the flow-charts version. */
@@ -857,29 +873,29 @@ export const CanvasChartLink = Schema.Struct({
   source: CanvasChartCategoryLabel,
   target: CanvasChartCategoryLabel,
   value: FiniteNumber,
-}).annotations(strict);
+});
 export type CanvasChartLink = typeof CanvasChartLink.Type;
 
 export const CanvasChartPoint = Schema.Struct({
-  x: Schema.Union(FiniteNumber, CanvasText),
+  x: Schema.Union([FiniteNumber, CanvasText]),
   y: FiniteNumber,
   /** A short callout drawn beside the point, such as "+344". */
   note: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_NOTE_LENGTH)),
   /** Marks the reading the chart is about; the rest of its series recedes. */
   emphasis: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CanvasChartPoint = typeof CanvasChartPoint.Type;
 
 /** Which mark a series draws on a bar-and-line chart. Other chart types omit it. */
-export const CanvasChartMark = Schema.Literal("bar", "line");
+export const CanvasChartMark = Schema.Literals(["bar", "line"]);
 export type CanvasChartMark = typeof CanvasChartMark.Type;
 
 export const CanvasChartSeries = Schema.Struct({
   seriesId: boundedToken("CanvasSeriesId"),
   label: CanvasLabel,
-  points: Schema.NonEmptyArray(CanvasChartPoint).pipe(Schema.maxItems(CANVAS_MAX_CHART_POINTS)),
+  points: Schema.NonEmptyArray(CanvasChartPoint).check(Schema.isMaxLength(CANVAS_MAX_CHART_POINTS)),
   mark: Schema.optional(CanvasChartMark),
-}).annotations(strict);
+});
 export type CanvasChartSeries = typeof CanvasChartSeries.Type;
 
 /**
@@ -1095,20 +1111,18 @@ export const CanvasChartBlock = Schema.Struct({
   title: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_TITLE_LENGTH)),
   /** What is measured and over which span. */
   subtitle: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHART_TITLE_LENGTH)),
-  series: Schema.Array(CanvasChartSeries).pipe(Schema.maxItems(CANVAS_MAX_SERIES)),
+  series: Schema.Array(CanvasChartSeries).check(Schema.isMaxLength(CANVAS_MAX_SERIES)),
   /** A sankey's flows; every other chart type omits it. */
   links: Schema.optional(
-    Schema.Array(CanvasChartLink).pipe(Schema.maxItems(CANVAS_MAX_SANKEY_LINKS)),
+    Schema.Array(CanvasChartLink).check(Schema.isMaxLength(CANVAS_MAX_SANKEY_LINKS)),
   ),
   /** How numeric axis values and readings read; absent groups by locale. */
   format: Schema.optional(CanvasNumberFormat),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((block) => canvasChartSeriesIssue(block) === undefined, {
-      message: () => "Chart series do not match the chart type.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((block) => canvasChartSeriesIssue(block) === undefined, {
+    message: "Chart series do not match the chart type.",
+  }),
+);
 export type CanvasChartBlock = typeof CanvasChartBlock.Type;
 
 /**
@@ -1119,7 +1133,7 @@ export type CanvasChartBlock = typeof CanvasChartBlock.Type;
  * on the mid-point of the colour domain, so a reading above the middle takes
  * the positive family and one below it the negative family.
  */
-export const CanvasTreemapScale = Schema.Literal("sequential", "diverging", "categorical");
+export const CanvasTreemapScale = Schema.Literals(["sequential", "diverging", "categorical"]);
 export type CanvasTreemapScale = typeof CanvasTreemapScale.Type;
 
 export const CanvasTreemapMeasureId = boundedToken("CanvasTreemapMeasureId");
@@ -1129,7 +1143,7 @@ export const CanvasTreemapMeasure = Schema.Struct({
   measureId: CanvasTreemapMeasureId,
   label: CanvasLabel,
   format: Schema.optional(CanvasNumberFormat),
-}).annotations(strict);
+});
 export type CanvasTreemapMeasure = typeof CanvasTreemapMeasure.Type;
 
 /**
@@ -1147,16 +1161,16 @@ export const CanvasTreemapNode = Schema.Struct({
   /** A leaf may name a manifest source; the host reauthorizes opening it. */
   sourceId: Schema.optional(CanvasSourceId),
   /** The leaf's value for each declared measure. Groups carry none. */
-  values: Schema.optional(Schema.Record({ key: CanvasTreemapMeasureId, value: FiniteNumber })),
-}).annotations(strict);
+  values: Schema.optional(Schema.Record(CanvasTreemapMeasureId, FiniteNumber)),
+});
 export type CanvasTreemapNode = typeof CanvasTreemapNode.Type;
 
 export const CanvasTreemapBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("treemap"),
-  nodes: Schema.Array(CanvasTreemapNode).pipe(Schema.maxItems(CANVAS_MAX_TREEMAP_LEAVES)),
-  measures: Schema.NonEmptyArray(CanvasTreemapMeasure).pipe(
-    Schema.maxItems(CANVAS_MAX_TREEMAP_MEASURES),
+  nodes: Schema.Array(CanvasTreemapNode).check(Schema.isMaxLength(CANVAS_MAX_TREEMAP_LEAVES)),
+  measures: Schema.NonEmptyArray(CanvasTreemapMeasure).check(
+    Schema.isMaxLength(CANVAS_MAX_TREEMAP_MEASURES),
   ),
   /** The measure rectangles are sized by when the block first draws. */
   sizeBy: CanvasTreemapMeasureId,
@@ -1165,7 +1179,7 @@ export const CanvasTreemapBlock = Schema.Struct({
   colorScale: Schema.optional(CanvasTreemapScale),
   /** The node a static export starts from; absent draws the whole hierarchy. */
   startNodeId: Schema.optional(CanvasNodeId),
-}).annotations(strict);
+});
 export type CanvasTreemapBlock = typeof CanvasTreemapBlock.Type;
 
 /**
@@ -1177,10 +1191,10 @@ export type CanvasTreemapBlock = typeof CanvasTreemapBlock.Type;
  * a missing coordinate apart from a zero: an absent cell is not a reading of
  * nothing.
  */
-export const CanvasHeatmapScale = Schema.Literal("sequential", "diverging");
+export const CanvasHeatmapScale = Schema.Literals(["sequential", "diverging"]);
 export type CanvasHeatmapScale = typeof CanvasHeatmapScale.Type;
 
-export const CanvasHeatmapLayout = Schema.Literal("matrix", "calendar");
+export const CanvasHeatmapLayout = Schema.Literals(["matrix", "calendar"]);
 export type CanvasHeatmapLayout = typeof CanvasHeatmapLayout.Type;
 
 export const CanvasHeatmapRowId = boundedToken("CanvasHeatmapRowId");
@@ -1191,13 +1205,13 @@ export type CanvasHeatmapColumnId = typeof CanvasHeatmapColumnId.Type;
 export const CanvasHeatmapRow = Schema.Struct({
   rowId: CanvasHeatmapRowId,
   label: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasHeatmapRow = typeof CanvasHeatmapRow.Type;
 
 export const CanvasHeatmapColumn = Schema.Struct({
   columnId: CanvasHeatmapColumnId,
   label: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasHeatmapColumn = typeof CanvasHeatmapColumn.Type;
 
 const CanvasHeatmapNote = boundedText(CANVAS_MAX_HEATMAP_NOTE_LENGTH);
@@ -1214,18 +1228,18 @@ export const CanvasHeatmapCell = Schema.Struct({
   columnId: CanvasHeatmapColumnId,
   value: FiniteNumber,
   note: Schema.optional(CanvasHeatmapNote),
-}).annotations(strict);
+});
 export type CanvasHeatmapCell = typeof CanvasHeatmapCell.Type;
 
 /** A calendar date as `YYYY-MM-DD`; a rolled-over value such as 2026-02-30 fails. */
-export const CanvasHeatmapDate = Schema.String.pipe(
-  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
-  Schema.filter(
+export const CanvasHeatmapDate = Schema.String.check(
+  Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/),
+  Schema.makeFilter(
     (value) => {
       const parsed = new Date(`${value}T00:00:00.000Z`);
       return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
     },
-    { message: () => "A heatmap date must be a real calendar date." },
+    { message: "A heatmap date must be a real calendar date." },
   ),
 );
 export type CanvasHeatmapDate = typeof CanvasHeatmapDate.Type;
@@ -1234,7 +1248,7 @@ export const CanvasHeatmapDay = Schema.Struct({
   date: CanvasHeatmapDate,
   value: FiniteNumber,
   note: Schema.optional(CanvasHeatmapNote),
-}).annotations(strict);
+});
 export type CanvasHeatmapDay = typeof CanvasHeatmapDay.Type;
 
 const CanvasHeatmapFields = {
@@ -1250,25 +1264,25 @@ const CanvasHeatmapFields = {
 export const CanvasHeatmapMatrixBlock = Schema.Struct({
   ...CanvasHeatmapFields,
   layout: Schema.Literal("matrix"),
-  rows: Schema.NonEmptyArray(CanvasHeatmapRow).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_ROWS)),
-  columns: Schema.NonEmptyArray(CanvasHeatmapColumn).pipe(
-    Schema.maxItems(CANVAS_MAX_HEATMAP_COLUMNS),
+  rows: Schema.NonEmptyArray(CanvasHeatmapRow).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_ROWS)),
+  columns: Schema.NonEmptyArray(CanvasHeatmapColumn).check(
+    Schema.isMaxLength(CANVAS_MAX_HEATMAP_COLUMNS),
   ),
-  cells: Schema.Array(CanvasHeatmapCell).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_CELLS)),
-}).annotations(strict);
+  cells: Schema.Array(CanvasHeatmapCell).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_CELLS)),
+});
 export type CanvasHeatmapMatrixBlock = typeof CanvasHeatmapMatrixBlock.Type;
 
 export const CanvasHeatmapCalendarBlock = Schema.Struct({
   ...CanvasHeatmapFields,
   layout: Schema.Literal("calendar"),
-  days: Schema.NonEmptyArray(CanvasHeatmapDay).pipe(Schema.maxItems(CANVAS_MAX_HEATMAP_DAYS)),
-}).annotations(strict);
+  days: Schema.NonEmptyArray(CanvasHeatmapDay).check(Schema.isMaxLength(CANVAS_MAX_HEATMAP_DAYS)),
+});
 export type CanvasHeatmapCalendarBlock = typeof CanvasHeatmapCalendarBlock.Type;
 
-export const CanvasHeatmapBlock = Schema.Union(
+export const CanvasHeatmapBlock = Schema.Union([
   CanvasHeatmapMatrixBlock,
   CanvasHeatmapCalendarBlock,
-);
+]);
 export type CanvasHeatmapBlock = typeof CanvasHeatmapBlock.Type;
 
 /**
@@ -1278,7 +1292,7 @@ export type CanvasHeatmapBlock = typeof CanvasHeatmapBlock.Type;
  * itself is the point; `sequential` reads each bar's length through the shared
  * scale, which is right when the magnitude is. Absent reads as neutral.
  */
-export const CanvasBarListScale = Schema.Literal("neutral", "sequential");
+export const CanvasBarListScale = Schema.Literals(["neutral", "sequential"]);
 export type CanvasBarListScale = typeof CanvasBarListScale.Type;
 
 /**
@@ -1294,13 +1308,13 @@ export const CanvasBarListRow = Schema.Struct({
   value: FiniteNumber,
   secondaryValue: Schema.optional(FiniteNumber),
   sourceId: Schema.optional(CanvasSourceId),
-}).annotations(strict);
+});
 export type CanvasBarListRow = typeof CanvasBarListRow.Type;
 
 export const CanvasBarListBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("bar-list"),
-  rows: Schema.NonEmptyArray(CanvasBarListRow).pipe(Schema.maxItems(CANVAS_MAX_BAR_LIST_ROWS)),
+  rows: Schema.NonEmptyArray(CanvasBarListRow).check(Schema.isMaxLength(CANVAS_MAX_BAR_LIST_ROWS)),
   /** The reading's name, shown in the tooltip and the table header. */
   valueLabel: Schema.optional(CanvasLabel),
   /** The second reading's name, when rows carry one. */
@@ -1310,7 +1324,7 @@ export const CanvasBarListBlock = Schema.Struct({
   /** How the second reading reads; defaults to the primary format. */
   secondaryFormat: Schema.optional(CanvasNumberFormat),
   scale: Schema.optional(CanvasBarListScale),
-}).annotations(strict);
+});
 export type CanvasBarListBlock = typeof CanvasBarListBlock.Type;
 
 /**
@@ -1332,7 +1346,7 @@ export const CanvasMatrixOption = Schema.Struct({
   label: CanvasLabel,
   /** A short line under the option's name, e.g. "managed, EU region". */
   detail: Schema.optional(CanvasMatrixNote),
-}).annotations(strict);
+});
 export type CanvasMatrixOption = typeof CanvasMatrixOption.Type;
 
 /**
@@ -1340,20 +1354,22 @@ export type CanvasMatrixOption = typeof CanvasMatrixOption.Type;
  * counts toward a weighted score, so a low cost or a "no" on lock-in scores
  * well. Absent reads as higher.
  */
-export const CanvasMatrixPreference = Schema.Literal("higher", "lower");
+export const CanvasMatrixPreference = Schema.Literals(["higher", "lower"]);
 export type CanvasMatrixPreference = typeof CanvasMatrixPreference.Type;
 
 export const CanvasMatrixCriterion = Schema.Struct({
   criterionId: CanvasMatrixCriterionId,
   label: CanvasLabel,
   /** Relative importance; absent counts as 1, and 0 keeps the row out of the score. */
-  weight: Schema.optional(FiniteNumber.pipe(Schema.between(0, CANVAS_MAX_MATRIX_WEIGHT))),
+  weight: Schema.optional(
+    FiniteNumber.check(Schema.isBetween({ minimum: 0, maximum: CANVAS_MAX_MATRIX_WEIGHT })),
+  ),
   prefer: Schema.optional(CanvasMatrixPreference),
   detail: Schema.optional(CanvasMatrixNote),
-}).annotations(strict);
+});
 export type CanvasMatrixCriterion = typeof CanvasMatrixCriterion.Type;
 
-export const CanvasMatrixGlyph = Schema.Literal("yes", "partial", "no");
+export const CanvasMatrixGlyph = Schema.Literals(["yes", "partial", "no"]);
 export type CanvasMatrixGlyph = typeof CanvasMatrixGlyph.Type;
 
 const CanvasMatrixCellCoordinate = {
@@ -1369,51 +1385,49 @@ const CanvasMatrixCellCoordinate = {
 export const CanvasMatrixScoreCell = Schema.Struct({
   ...CanvasMatrixCellCoordinate,
   score: FiniteNumber,
-}).annotations(strict);
+});
 export const CanvasMatrixTextCell = Schema.Struct({
   ...CanvasMatrixCellCoordinate,
   text: boundedNonEmptyText(CANVAS_MAX_MATRIX_CELL_TEXT_LENGTH),
-}).annotations(strict);
+});
 export const CanvasMatrixGlyphCell = Schema.Struct({
   ...CanvasMatrixCellCoordinate,
   glyph: CanvasMatrixGlyph,
-}).annotations(strict);
-export const CanvasMatrixCell = Schema.Union(
+});
+export const CanvasMatrixCell = Schema.Union([
   CanvasMatrixScoreCell,
   CanvasMatrixTextCell,
   CanvasMatrixGlyphCell,
-);
+]);
 export type CanvasMatrixCell = typeof CanvasMatrixCell.Type;
 
 /** The scale scores are read on, e.g. 1 to 5. Absent spans zero to the largest score. */
 export const CanvasMatrixScoreRange = Schema.Struct({
   min: FiniteNumber,
   max: FiniteNumber,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((range) => range.min < range.max, {
-      message: () => "A comparison matrix score range must run from a lower to a higher score.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((range) => range.min < range.max, {
+    message: "A comparison matrix score range must run from a lower to a higher score.",
+  }),
+);
 export type CanvasMatrixScoreRange = typeof CanvasMatrixScoreRange.Type;
 
 export const CanvasComparisonMatrixBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("comparison-matrix"),
-  options: Schema.NonEmptyArray(CanvasMatrixOption).pipe(
-    Schema.maxItems(CANVAS_MAX_MATRIX_OPTIONS),
+  options: Schema.NonEmptyArray(CanvasMatrixOption).check(
+    Schema.isMaxLength(CANVAS_MAX_MATRIX_OPTIONS),
   ),
-  criteria: Schema.NonEmptyArray(CanvasMatrixCriterion).pipe(
-    Schema.maxItems(CANVAS_MAX_MATRIX_CRITERIA),
+  criteria: Schema.NonEmptyArray(CanvasMatrixCriterion).check(
+    Schema.isMaxLength(CANVAS_MAX_MATRIX_CRITERIA),
   ),
-  cells: Schema.Array(CanvasMatrixCell).pipe(Schema.maxItems(CANVAS_MAX_MATRIX_CELLS)),
+  cells: Schema.Array(CanvasMatrixCell).check(Schema.isMaxLength(CANVAS_MAX_MATRIX_CELLS)),
   scoreRange: Schema.optional(CanvasMatrixScoreRange),
   /** The option the author recommends; drawn apart, never inferred from the scores. */
   recommendedOptionId: Schema.optional(CanvasMatrixOptionId),
   /** Why the recommended option, in a sentence or two. */
   recommendation: Schema.optional(boundedText(CANVAS_MAX_MATRIX_NOTE_LENGTH * 2)),
-}).annotations(strict);
+});
 export type CanvasComparisonMatrixBlock = typeof CanvasComparisonMatrixBlock.Type;
 
 /**
@@ -1437,7 +1451,7 @@ export const CanvasMathDisplayBlock = Schema.Struct({
   source: CanvasMathSource,
   /** What the formula is, e.g. "Bayes' theorem"; drawn under it and read first. */
   caption: Schema.optional(boundedNonEmptyText(CANVAS_MAX_MATH_CAPTION_LENGTH)),
-}).annotations(strict);
+});
 export type CanvasMathDisplayBlock = typeof CanvasMathDisplayBlock.Type;
 
 // One run is either prose or a formula. Each shape is strict, so a run naming
@@ -1445,24 +1459,24 @@ export type CanvasMathDisplayBlock = typeof CanvasMathDisplayBlock.Type;
 // Prose keeps its edge spaces: they are what separate a word from the formula
 // beside it, so a prose run need only hold something other than whitespace.
 export const CanvasMathTextRun = Schema.Struct({
-  text: boundedText(CANVAS_MAX_MATH_PARAGRAPH_LENGTH).pipe(
-    Schema.filter((value) => value.trim().length > 0, {
-      message: () => "A math paragraph's prose run must not be blank.",
+  text: boundedText(CANVAS_MAX_MATH_PARAGRAPH_LENGTH).check(
+    Schema.makeFilter((value) => value.trim().length > 0, {
+      message: "A math paragraph's prose run must not be blank.",
     }),
   ),
-}).annotations(strict);
+});
 export const CanvasMathFormulaRun = Schema.Struct({
   math: CanvasMathSource,
-}).annotations(strict);
-export const CanvasMathRun = Schema.Union(CanvasMathTextRun, CanvasMathFormulaRun);
+});
+export const CanvasMathRun = Schema.Union([CanvasMathTextRun, CanvasMathFormulaRun]);
 export type CanvasMathRun = typeof CanvasMathRun.Type;
 
 export const CanvasMathInlineBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("math"),
   layout: Schema.Literal("inline"),
-  runs: Schema.NonEmptyArray(CanvasMathRun).pipe(Schema.maxItems(CANVAS_MAX_MATH_RUNS)),
-}).annotations(strict);
+  runs: Schema.NonEmptyArray(CanvasMathRun).check(Schema.isMaxLength(CANVAS_MAX_MATH_RUNS)),
+});
 export type CanvasMathInlineBlock = typeof CanvasMathInlineBlock.Type;
 
 export type CanvasMathBlock = CanvasMathDisplayBlock | CanvasMathInlineBlock;
@@ -1474,14 +1488,14 @@ export const CanvasTimelineItem = Schema.Struct({
   endAt: Schema.optional(UtcTimestamp),
   status: Schema.optional(CanvasStatusTone),
   detail: Schema.optional(CanvasText),
-}).annotations(strict);
+});
 export type CanvasTimelineItem = typeof CanvasTimelineItem.Type;
 
 export const CanvasTimelineBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("timeline"),
-  items: Schema.Array(CanvasTimelineItem).pipe(Schema.maxItems(CANVAS_MAX_TIMELINE_ITEMS)),
-}).annotations(strict);
+  items: Schema.Array(CanvasTimelineItem).check(Schema.isMaxLength(CANVAS_MAX_TIMELINE_ITEMS)),
+});
 export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
 
 // Diagram v2 fields: a node may carry an explicit user or agent placement, and
@@ -1497,11 +1511,11 @@ export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
  * draws every node as the plain box, even a role that names a shape.
  */
 export const CANVAS_DIAGRAM_NODE_ROLES = ["process", "decision", "terminator"] as const;
-export const CanvasDiagramNodeRole = Schema.Literal(...CANVAS_DIAGRAM_NODE_ROLES);
+export const CanvasDiagramNodeRole = Schema.Literals(CANVAS_DIAGRAM_NODE_ROLES);
 export type CanvasDiagramNodeRole = typeof CanvasDiagramNodeRole.Type;
 
 /** Whether a line ends in an arrowhead, or is dashed to read as optional or async. */
-export const CanvasDiagramEdgeStyle = Schema.Literal("line", "arrow", "dashed");
+export const CanvasDiagramEdgeStyle = Schema.Literals(["line", "arrow", "dashed"]);
 export type CanvasDiagramEdgeStyle = typeof CanvasDiagramEdgeStyle.Type;
 
 /**
@@ -1509,13 +1523,13 @@ export type CanvasDiagramEdgeStyle = typeof CanvasDiagramEdgeStyle.Type;
  * success, warning, and danger roles. A tone is emphasis beside the label and
  * the line style, never the only thing that carries a distinction.
  */
-export const CanvasDiagramTone = Schema.Literal(
+export const CanvasDiagramTone = Schema.Literals([
   "neutral",
   "accent",
   "success",
   "warning",
   "danger",
-);
+]);
 export type CanvasDiagramTone = typeof CanvasDiagramTone.Type;
 
 /**
@@ -1541,7 +1555,7 @@ export const CANVAS_DIAGRAM_NODE_ICONS = [
   "user",
   "analytics",
 ] as const;
-export const CanvasDiagramNodeIcon = Schema.Literal(...CANVAS_DIAGRAM_NODE_ICONS);
+export const CanvasDiagramNodeIcon = Schema.Literals(CANVAS_DIAGRAM_NODE_ICONS);
 export type CanvasDiagramNodeIcon = typeof CanvasDiagramNodeIcon.Type;
 
 export const CanvasDiagramNode = Schema.Struct({
@@ -1554,10 +1568,10 @@ export const CanvasDiagramNode = Schema.Struct({
   x: Schema.optional(FiniteNumber),
   y: Schema.optional(FiniteNumber),
   positioned: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CanvasDiagramNode = typeof CanvasDiagramNode.Type;
 
-export const CanvasDiagramLayoutKind = Schema.Literal("auto", "manual");
+export const CanvasDiagramLayoutKind = Schema.Literals(["auto", "manual"]);
 export type CanvasDiagramLayoutKind = typeof CanvasDiagramLayoutKind.Type;
 
 export const CanvasDiagramEdge = Schema.Struct({
@@ -1567,7 +1581,7 @@ export const CanvasDiagramEdge = Schema.Struct({
   label: Schema.optional(CanvasLabel),
   style: Schema.optional(CanvasDiagramEdgeStyle),
   tone: Schema.optional(CanvasDiagramTone),
-}).annotations(strict);
+});
 export type CanvasDiagramEdge = typeof CanvasDiagramEdge.Type;
 
 /**
@@ -1581,7 +1595,7 @@ export type CanvasDiagramEdge = typeof CanvasDiagramEdge.Type;
 export const CanvasDiagramGroup = Schema.Struct({
   groupId: boundedToken("CanvasGroupId"),
   label: CanvasLabel,
-  nodeIds: Schema.Array(CanvasNodeId).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  nodeIds: Schema.Array(CanvasNodeId).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
   /** A region's tone, so a zone map reads as areas rather than outlines. */
   tone: Schema.optional(CanvasDiagramTone),
   /**
@@ -1590,7 +1604,7 @@ export const CanvasDiagramGroup = Schema.Struct({
    * `CANVAS_MAX_DIAGRAM_GROUP_DEPTH`.
    */
   parentGroupId: Schema.optional(boundedToken("CanvasGroupId")),
-}).annotations(strict);
+});
 export type CanvasDiagramGroup = typeof CanvasDiagramGroup.Type;
 
 /**
@@ -1639,20 +1653,20 @@ export function isCanvasDiagramNodeRole(role: unknown): role is CanvasDiagramNod
 }
 
 /** Which way the diagram reads. Layout follows it; it is never inferred. */
-export const CanvasDiagramFlow = Schema.Literal("down", "right");
+export const CanvasDiagramFlow = Schema.Literals(["down", "right"]);
 export type CanvasDiagramFlow = typeof CanvasDiagramFlow.Type;
 
 export const CanvasDiagramBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("diagram"),
-  nodes: Schema.Array(CanvasDiagramNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
-  edges: Schema.Array(CanvasDiagramEdge).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+  nodes: Schema.Array(CanvasDiagramNode).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
+  edges: Schema.Array(CanvasDiagramEdge).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_EDGES)),
   groups: Schema.optional(
-    Schema.Array(CanvasDiagramGroup).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_GROUPS)),
+    Schema.Array(CanvasDiagramGroup).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_GROUPS)),
   ),
   flow: Schema.optional(CanvasDiagramFlow),
   layout: Schema.optional(CanvasDiagramLayoutKind),
-}).annotations(strict);
+});
 export type CanvasDiagramBlock = typeof CanvasDiagramBlock.Type;
 
 /**
@@ -1667,7 +1681,7 @@ export type CanvasDiagramBlock = typeof CanvasDiagramBlock.Type;
 export const CanvasSequenceParticipant = Schema.Struct({
   participantId: CanvasNodeId,
   label: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasSequenceParticipant = typeof CanvasSequenceParticipant.Type;
 
 export const CanvasSequenceMessage = Schema.Struct({
@@ -1675,7 +1689,7 @@ export const CanvasSequenceMessage = Schema.Struct({
   from: CanvasNodeId,
   to: CanvasNodeId,
   label: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasSequenceMessage = typeof CanvasSequenceMessage.Type;
 
 export const CanvasSequenceActivation = Schema.Struct({
@@ -1683,7 +1697,7 @@ export const CanvasSequenceActivation = Schema.Struct({
   participantId: CanvasNodeId,
   startMessageId: CanvasEdgeId,
   endMessageId: CanvasEdgeId,
-}).annotations(strict);
+});
 export type CanvasSequenceActivation = typeof CanvasSequenceActivation.Type;
 
 export const CanvasSequenceNote = Schema.Struct({
@@ -1691,23 +1705,23 @@ export const CanvasSequenceNote = Schema.Struct({
   text: CanvasLabel,
   participantId: Schema.optional(CanvasNodeId),
   afterMessageId: Schema.optional(CanvasEdgeId),
-}).annotations(strict);
+});
 export type CanvasSequenceNote = typeof CanvasSequenceNote.Type;
 
 export const CanvasSequenceBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("sequence"),
-  participants: Schema.Array(CanvasSequenceParticipant).pipe(
-    Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES),
+  participants: Schema.Array(CanvasSequenceParticipant).check(
+    Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES),
   ),
-  messages: Schema.Array(CanvasSequenceMessage).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+  messages: Schema.Array(CanvasSequenceMessage).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_EDGES)),
   activations: Schema.optional(
-    Schema.Array(CanvasSequenceActivation).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+    Schema.Array(CanvasSequenceActivation).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
   ),
   notes: Schema.optional(
-    Schema.Array(CanvasSequenceNote).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_GROUPS)),
+    Schema.Array(CanvasSequenceNote).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_GROUPS)),
   ),
-}).annotations(strict);
+});
 export type CanvasSequenceBlock = typeof CanvasSequenceBlock.Type;
 
 /**
@@ -1718,7 +1732,7 @@ export type CanvasSequenceBlock = typeof CanvasSequenceBlock.Type;
  * edges, under the same budgets as a board. A transition names itself; an
  * initial or final state is a role, not a second block.
  */
-export const CanvasStateRole = Schema.Literal("initial", "final");
+export const CanvasStateRole = Schema.Literals(["initial", "final"]);
 export type CanvasStateRole = typeof CanvasStateRole.Type;
 
 export const CanvasStateNode = Schema.Struct({
@@ -1726,7 +1740,7 @@ export const CanvasStateNode = Schema.Struct({
   label: CanvasLabel,
   role: Schema.optional(CanvasStateRole),
   parentId: Schema.optional(CanvasNodeId),
-}).annotations(strict);
+});
 export type CanvasStateNode = typeof CanvasStateNode.Type;
 
 export const CanvasStateTransition = Schema.Struct({
@@ -1734,15 +1748,17 @@ export const CanvasStateTransition = Schema.Struct({
   source: CanvasNodeId,
   target: CanvasNodeId,
   label: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasStateTransition = typeof CanvasStateTransition.Type;
 
 export const CanvasStateBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("state"),
-  states: Schema.Array(CanvasStateNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
-  transitions: Schema.Array(CanvasStateTransition).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
-}).annotations(strict);
+  states: Schema.Array(CanvasStateNode).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
+  transitions: Schema.Array(CanvasStateTransition).check(
+    Schema.isMaxLength(CANVAS_MAX_DIAGRAM_EDGES),
+  ),
+});
 export type CanvasStateBlock = typeof CanvasStateBlock.Type;
 
 /**
@@ -1753,7 +1769,7 @@ export type CanvasStateBlock = typeof CanvasStateBlock.Type;
  * picture and the export read the same word, and a rolled-back runtime that
  * never learned a new value still refuses it as a corrupt document.
  */
-export const CanvasErCardinality = Schema.Literal("one", "zero-or-one", "many", "one-or-many");
+export const CanvasErCardinality = Schema.Literals(["one", "zero-or-one", "many", "one-or-many"]);
 export type CanvasErCardinality = typeof CanvasErCardinality.Type;
 
 export const CanvasErAttribute = Schema.Struct({
@@ -1763,17 +1779,17 @@ export const CanvasErAttribute = Schema.Struct({
   type: CanvasLabel,
   /** Whether the attribute is (part of) the entity's key. Absent reads as false. */
   key: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CanvasErAttribute = typeof CanvasErAttribute.Type;
 
 /** An entity and its named attributes. Attributes nest one level, never deeper. */
 export const CanvasErEntity = Schema.Struct({
   entityId: CanvasNodeId,
   label: CanvasLabel,
-  attributes: Schema.Array(CanvasErAttribute).pipe(
-    Schema.maxItems(CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY),
+  attributes: Schema.Array(CanvasErAttribute).check(
+    Schema.isMaxLength(CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY),
   ),
-}).annotations(strict);
+});
 export type CanvasErEntity = typeof CanvasErEntity.Type;
 
 /**
@@ -1790,19 +1806,21 @@ export const CanvasErRelationship = Schema.Struct({
   sourceCardinality: CanvasErCardinality,
   targetCardinality: CanvasErCardinality,
   label: Schema.optional(CanvasLabel),
-}).annotations(strict);
+});
 export type CanvasErRelationship = typeof CanvasErRelationship.Type;
 
 export const CanvasErBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("er"),
-  entities: Schema.Array(CanvasErEntity).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
-  relationships: Schema.Array(CanvasErRelationship).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
-}).annotations(strict);
+  entities: Schema.Array(CanvasErEntity).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
+  relationships: Schema.Array(CanvasErRelationship).check(
+    Schema.isMaxLength(CANVAS_MAX_DIAGRAM_EDGES),
+  ),
+});
 export type CanvasErBlock = typeof CanvasErBlock.Type;
 
 /** Who owns a lane: a person or role (`actor`) or a group (`team`). */
-export const CanvasSwimlaneKind = Schema.Literal("actor", "team");
+export const CanvasSwimlaneKind = Schema.Literals(["actor", "team"]);
 export type CanvasSwimlaneKind = typeof CanvasSwimlaneKind.Type;
 
 /** A lane, ordered by its position in the block. Absent kind reads as `actor`. */
@@ -1810,7 +1828,7 @@ export const CanvasSwimlaneLane = Schema.Struct({
   laneId: boundedToken("CanvasSwimlaneLaneId"),
   label: CanvasLabel,
   kind: Schema.optional(CanvasSwimlaneKind),
-}).annotations(strict);
+});
 export type CanvasSwimlaneLane = typeof CanvasSwimlaneLane.Type;
 
 /**
@@ -1822,7 +1840,7 @@ export const CanvasSwimlaneStep = Schema.Struct({
   laneId: boundedToken("CanvasSwimlaneLaneId"),
   label: CanvasLabel,
   decision: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CanvasSwimlaneStep = typeof CanvasSwimlaneStep.Type;
 
 export const CanvasSwimlaneConnection = Schema.Struct({
@@ -1830,18 +1848,20 @@ export const CanvasSwimlaneConnection = Schema.Struct({
   source: CanvasNodeId,
   target: CanvasNodeId,
   label: Schema.optional(CanvasLabel),
-}).annotations(strict);
+});
 export type CanvasSwimlaneConnection = typeof CanvasSwimlaneConnection.Type;
 
 export const CanvasSwimlaneBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("swimlane"),
-  lanes: Schema.NonEmptyArray(CanvasSwimlaneLane).pipe(Schema.maxItems(CANVAS_MAX_SWIMLANE_LANES)),
-  steps: Schema.Array(CanvasSwimlaneStep).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
-  connections: Schema.Array(CanvasSwimlaneConnection).pipe(
-    Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES),
+  lanes: Schema.NonEmptyArray(CanvasSwimlaneLane).check(
+    Schema.isMaxLength(CANVAS_MAX_SWIMLANE_LANES),
   ),
-}).annotations(strict);
+  steps: Schema.Array(CanvasSwimlaneStep).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
+  connections: Schema.Array(CanvasSwimlaneConnection).check(
+    Schema.isMaxLength(CANVAS_MAX_DIAGRAM_EDGES),
+  ),
+});
 export type CanvasSwimlaneBlock = typeof CanvasSwimlaneBlock.Type;
 
 const CanvasMindmapNote = boundedText(CANVAS_MAX_MINDMAP_NOTE_LENGTH);
@@ -1858,17 +1878,17 @@ export const CanvasMindmapNode = Schema.Struct({
   label: CanvasLabel,
   parentId: Schema.optional(CanvasNodeId),
   note: Schema.optional(CanvasMindmapNote),
-}).annotations(strict);
+});
 export type CanvasMindmapNode = typeof CanvasMindmapNode.Type;
 
 export const CanvasMindmapBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("mindmap"),
-  nodes: Schema.Array(CanvasMindmapNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
-}).annotations(strict);
+  nodes: Schema.Array(CanvasMindmapNode).check(Schema.isMaxLength(CANVAS_MAX_DIAGRAM_NODES)),
+});
 export type CanvasMindmapBlock = typeof CanvasMindmapBlock.Type;
 
-const CanvasLineNumber = Schema.Int.pipe(Schema.positive());
+const CanvasLineNumber = PositiveInt;
 
 export const CanvasCodeExcerptBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1878,34 +1898,34 @@ export const CanvasCodeExcerptBlock = Schema.Struct({
   sourceId: Schema.optional(CanvasSourceId),
   startLine: Schema.optional(CanvasLineNumber),
   endLine: Schema.optional(CanvasLineNumber),
-}).annotations(strict);
+});
 export type CanvasCodeExcerptBlock = typeof CanvasCodeExcerptBlock.Type;
 
 export const CanvasPseudocodeBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("pseudocode"),
   code: CanvasNonEmptyText,
-}).annotations(strict);
+});
 export type CanvasPseudocodeBlock = typeof CanvasPseudocodeBlock.Type;
 
 export const CanvasDiffLine = Schema.Struct({
-  kind: Schema.Literal("add", "remove", "context"),
+  kind: Schema.Literals(["add", "remove", "context"]),
   text: CanvasText,
-}).annotations(strict);
+});
 export type CanvasDiffLine = typeof CanvasDiffLine.Type;
 
 export const CanvasDiffHunk = Schema.Struct({
   header: CanvasLabel,
-  lines: Schema.Array(CanvasDiffLine).pipe(Schema.maxItems(CANVAS_MAX_DIFF_LINES)),
-}).annotations(strict);
+  lines: Schema.Array(CanvasDiffLine).check(Schema.isMaxLength(CANVAS_MAX_DIFF_LINES)),
+});
 export type CanvasDiffHunk = typeof CanvasDiffHunk.Type;
 
 export const CanvasDiffBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("diff"),
   sourceId: Schema.optional(CanvasSourceId),
-  hunks: Schema.Array(CanvasDiffHunk).pipe(Schema.maxItems(CANVAS_MAX_DIFF_HUNKS)),
-}).annotations(strict);
+  hunks: Schema.Array(CanvasDiffHunk).check(Schema.isMaxLength(CANVAS_MAX_DIFF_HUNKS)),
+});
 export type CanvasDiffBlock = typeof CanvasDiffBlock.Type;
 
 export const CanvasSourceReferenceBlock = Schema.Struct({
@@ -1914,10 +1934,10 @@ export const CanvasSourceReferenceBlock = Schema.Struct({
   sourceId: CanvasSourceId,
   label: CanvasLabel,
   detail: Schema.optional(CanvasText),
-}).annotations(strict);
+});
 export type CanvasSourceReferenceBlock = typeof CanvasSourceReferenceBlock.Type;
 
-export const CanvasSummaryKind = Schema.Literal(
+export const CanvasSummaryKind = Schema.Literals([
   "task",
   "thread",
   "subagent",
@@ -1926,14 +1946,14 @@ export const CanvasSummaryKind = Schema.Literal(
   "usage",
   "test",
   "pull-request",
-);
+]);
 export type CanvasSummaryKind = typeof CanvasSummaryKind.Type;
 
 export const CanvasSummaryItem = Schema.Struct({
   label: CanvasLabel,
   value: Schema.optional(CanvasScalar),
   status: Schema.optional(CanvasStatusTone),
-}).annotations(strict);
+});
 export type CanvasSummaryItem = typeof CanvasSummaryItem.Type;
 
 export const CanvasSummaryBlock = Schema.Struct({
@@ -1941,8 +1961,8 @@ export const CanvasSummaryBlock = Schema.Struct({
   kind: Schema.Literal("summary"),
   summaryKind: CanvasSummaryKind,
   title: CanvasLabel,
-  items: Schema.Array(CanvasSummaryItem).pipe(Schema.maxItems(CANVAS_MAX_SUMMARY_ITEMS)),
-}).annotations(strict);
+  items: Schema.Array(CanvasSummaryItem).check(Schema.isMaxLength(CANVAS_MAX_SUMMARY_ITEMS)),
+});
 export type CanvasSummaryBlock = typeof CanvasSummaryBlock.Type;
 
 // A plan is phases of tasks that the person and the agent both work in. A
@@ -1954,16 +1974,16 @@ export type CanvasSummaryBlock = typeof CanvasSummaryBlock.Type;
 // Tasks sit in one list that names each task's phase rather than nesting
 // inside phases: nested, a task's dependency list lands past the Canvas depth
 // budget the policy enforces on every version envelope.
-export const CanvasPlanTaskStatus = Schema.Literal("todo", "doing", "blocked", "done");
+export const CanvasPlanTaskStatus = Schema.Literals(["todo", "doing", "blocked", "done"]);
 export type CanvasPlanTaskStatus = typeof CanvasPlanTaskStatus.Type;
 
-export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline", "gantt");
+export const CanvasPlanView = Schema.Literals(["checklist", "kanban", "timeline", "gantt"]);
 export type CanvasPlanView = typeof CanvasPlanView.Type;
 
 export const CanvasPlanOwner = Schema.Struct({
-  kind: Schema.Literal("person", "agent"),
+  kind: Schema.Literals(["person", "agent"]),
   label: Schema.optional(CanvasLabel),
-}).annotations(strict);
+});
 export type CanvasPlanOwner = typeof CanvasPlanOwner.Type;
 
 export const CanvasPlanTaskId = boundedToken("CanvasPlanTaskId");
@@ -1975,7 +1995,7 @@ export type CanvasPlanPhaseId = typeof CanvasPlanPhaseId.Type;
 export const CanvasPlanPhase = Schema.Struct({
   phaseId: CanvasPlanPhaseId,
   title: CanvasLabel,
-}).annotations(strict);
+});
 export type CanvasPlanPhase = typeof CanvasPlanPhase.Type;
 
 export const CanvasPlanTask = Schema.Struct({
@@ -1990,12 +2010,12 @@ export const CanvasPlanTask = Schema.Struct({
   startAt: Schema.optional(UtcTimestamp),
   dueAt: Schema.optional(UtcTimestamp),
   dependsOn: Schema.optional(
-    Schema.Array(CanvasPlanTaskId).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASK_DEPENDENCIES)),
+    Schema.Array(CanvasPlanTaskId).check(Schema.isMaxLength(CANVAS_MAX_PLAN_TASK_DEPENDENCIES)),
   ),
   sourceIds: Schema.optional(
-    Schema.Array(CanvasSourceId).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASK_SOURCES)),
+    Schema.Array(CanvasSourceId).check(Schema.isMaxLength(CANVAS_MAX_PLAN_TASK_SOURCES)),
   ),
-}).annotations(strict);
+});
 export type CanvasPlanTask = typeof CanvasPlanTask.Type;
 
 /**
@@ -2039,11 +2059,11 @@ export const CANVAS_MOCKUP_LIBRARY_COMPONENTS = [
   "chat-message",
   "instance",
 ] as const;
-export const CanvasMockupComponent = Schema.Literal(
+export const CanvasMockupComponent = Schema.Literals([
   ...CANVAS_MOCKUP_LEGACY_COMPONENTS,
   ...CANVAS_MOCKUP_CATALOG_COMPONENTS,
   ...CANVAS_MOCKUP_LIBRARY_COMPONENTS,
-);
+]);
 export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
 
 /**
@@ -2051,12 +2071,12 @@ export type CanvasMockupComponent = typeof CanvasMockupComponent.Type;
  * page with a blank address bar, `dock-panel` a narrow tool panel, and
  * `custom` a frame of the block's own `size`.
  */
-export const CanvasMockupDevice = Schema.Literal(
+export const CanvasMockupDevice = Schema.Literals([
   ...CANVAS_MOCKUP_LEGACY_DEVICES,
   "browser",
   "dock-panel",
   "custom",
-);
+]);
 export type CanvasMockupDevice = typeof CanvasMockupDevice.Type;
 
 /** The nominal frame each preset is drawn at, in CSS pixels. */
@@ -2079,18 +2099,24 @@ export const CANVAS_MOCKUP_DEVICE_SIZE: Readonly<
  * `wireframe` draws neutral ink and hairlines only. `styled` draws the same
  * tree with the active theme's tokens: accent, tones, and surfaces.
  */
-export const CanvasMockupFidelity = Schema.Literal("wireframe", "styled");
+export const CanvasMockupFidelity = Schema.Literals(["wireframe", "styled"]);
 export type CanvasMockupFidelity = typeof CanvasMockupFidelity.Type;
 
 /** A semantic tone for a button, badge, or toast; the theme decides the colour. */
-export const CanvasMockupTone = Schema.Literal("neutral", "accent", "success", "warning", "danger");
+export const CanvasMockupTone = Schema.Literals([
+  "neutral",
+  "accent",
+  "success",
+  "warning",
+  "danger",
+]);
 export type CanvasMockupTone = typeof CanvasMockupTone.Type;
 
 /**
  * The bundled icon set. Names are meanings, not a vendor's glyph names; each
  * surface maps them to its own drawing.
  */
-export const CanvasMockupIcon = Schema.Literal(
+export const CanvasMockupIcon = Schema.Literals([
   "search",
   "settings",
   "user",
@@ -2115,7 +2141,7 @@ export const CanvasMockupIcon = Schema.Literal(
   "filter",
   "info",
   "warning",
-);
+]);
 export type CanvasMockupIcon = typeof CanvasMockupIcon.Type;
 
 const CanvasMockupText = boundedNonEmptyText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
@@ -2123,9 +2149,9 @@ const CanvasMockupCell = boundedText(CANVAS_MAX_MOCKUP_TEXT_LENGTH);
 const CanvasMockupNodeId = boundedToken("CanvasMockupNodeId");
 export const CanvasMockupVariantId = boundedToken("CanvasMockupVariantId");
 export type CanvasMockupVariantId = typeof CanvasMockupVariantId.Type;
-const CanvasMockupFrameEdge = Schema.Int.pipe(
-  Schema.greaterThanOrEqualTo(CANVAS_MOCKUP_MIN_FRAME_EDGE),
-  Schema.lessThanOrEqualTo(CANVAS_MOCKUP_MAX_FRAME_EDGE),
+const CanvasMockupFrameEdge = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(CANVAS_MOCKUP_MIN_FRAME_EDGE),
+  Schema.isLessThanOrEqualTo(CANVAS_MOCKUP_MAX_FRAME_EDGE),
 );
 
 /**
@@ -2150,35 +2176,37 @@ export const CanvasMockupNode = Schema.Struct({
   icon: Schema.optional(CanvasMockupIcon),
   /** A table's column headings and its rows of cells. */
   columns: Schema.optional(
-    Schema.Array(CanvasMockupText).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_COLUMNS),
+    Schema.Array(CanvasMockupText).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(CANVAS_MAX_MOCKUP_TABLE_COLUMNS),
     ),
   ),
   rows: Schema.optional(
     Schema.Array(
-      Schema.Array(CanvasMockupCell).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_COLUMNS)),
-    ).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_TABLE_ROWS)),
+      Schema.Array(CanvasMockupCell).check(Schema.isMaxLength(CANVAS_MAX_MOCKUP_TABLE_COLUMNS)),
+    ).check(Schema.isMaxLength(CANVAS_MAX_MOCKUP_TABLE_ROWS)),
   ),
   /** How many columns a grid lays its children in. */
   gridColumns: Schema.optional(
-    Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(CANVAS_MAX_MOCKUP_GRID_COLUMNS),
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(CANVAS_MAX_MOCKUP_GRID_COLUMNS),
     ),
   ),
   /** A progress bar's or slider's reading, or a stepper's current step, 0 to 100. */
-  progress: Schema.optional(Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(100))),
+  progress: Schema.optional(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(100)),
+  ),
   /** The reusable definition an instance places. */
   defId: Schema.optional(boundedToken("CanvasMockupDefId")),
-}).annotations(strict);
+});
 export type CanvasMockupNode = typeof CanvasMockupNode.Type;
 
 /** One frame of a side-by-side set: a state (Empty, Error) or an alternative (A, B). */
 export const CanvasMockupVariant = Schema.Struct({
   variantId: CanvasMockupVariantId,
   label: CanvasMockupText,
-}).annotations(strict);
+});
 export type CanvasMockupVariant = typeof CanvasMockupVariant.Type;
 
 /**
@@ -2188,18 +2216,18 @@ export type CanvasMockupVariant = typeof CanvasMockupVariant.Type;
 export const CanvasMockupAnnotation = Schema.Struct({
   nodeId: CanvasMockupNodeId,
   note: boundedNonEmptyText(CANVAS_MAX_MOCKUP_NOTE_LENGTH),
-}).annotations(strict);
+});
 export type CanvasMockupAnnotation = typeof CanvasMockupAnnotation.Type;
 
 /** One reusable local component: a fixed subtree placed by instances. */
 export const CanvasMockupDefinition = Schema.Struct({
   defId: boundedToken("CanvasMockupDefId"),
   label: CanvasMockupText,
-  nodes: Schema.Array(CanvasMockupNode).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITION_NODES),
+  nodes: Schema.Array(CanvasMockupNode).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_MAX_MOCKUP_DEFINITION_NODES),
   ),
-}).annotations(strict);
+});
 export type CanvasMockupDefinition = typeof CanvasMockupDefinition.Type;
 
 export const CanvasMockupBlock = Schema.Struct({
@@ -2208,27 +2236,25 @@ export const CanvasMockupBlock = Schema.Struct({
   device: CanvasMockupDevice,
   /** The frame of a `custom` device. Presets carry their own size. */
   size: Schema.optional(
-    Schema.Struct({ width: CanvasMockupFrameEdge, height: CanvasMockupFrameEdge }).annotations(
-      strict,
-    ),
+    Schema.Struct({ width: CanvasMockupFrameEdge, height: CanvasMockupFrameEdge }),
   ),
   fidelity: Schema.optional(CanvasMockupFidelity),
   title: CanvasMockupText,
   variants: Schema.optional(
-    Schema.Array(CanvasMockupVariant).pipe(
-      Schema.minItems(2),
-      Schema.maxItems(CANVAS_MAX_MOCKUP_VARIANTS),
+    Schema.Array(CanvasMockupVariant).check(
+      Schema.isMinLength(2),
+      Schema.isMaxLength(CANVAS_MAX_MOCKUP_VARIANTS),
     ),
   ),
-  nodes: Schema.Array(CanvasMockupNode).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_NODES)),
+  nodes: Schema.Array(CanvasMockupNode).check(Schema.isMaxLength(CANVAS_MAX_MOCKUP_NODES)),
   annotations: Schema.optional(
-    Schema.Array(CanvasMockupAnnotation).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
+    Schema.Array(CanvasMockupAnnotation).check(Schema.isMaxLength(CANVAS_MAX_MOCKUP_ANNOTATIONS)),
   ),
   /** Local components this block's instances place. */
   definitions: Schema.optional(
-    Schema.Array(CanvasMockupDefinition).pipe(Schema.maxItems(CANVAS_MAX_MOCKUP_DEFINITIONS)),
+    Schema.Array(CanvasMockupDefinition).check(Schema.isMaxLength(CANVAS_MAX_MOCKUP_DEFINITIONS)),
   ),
-}).annotations(strict);
+});
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
 /**
@@ -2236,7 +2262,13 @@ export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
  * page, or a 16:9 slide, each at a fixed viewport, or a `document` as wide as
  * the Canvas column and as tall as its content, such as an article or a spec.
  */
-export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide", "document");
+export const CanvasDesignSize = Schema.Literals([
+  "phone",
+  "tablet",
+  "desktop",
+  "slide",
+  "document",
+]);
 export type CanvasDesignSize = typeof CanvasDesignSize.Type;
 /** The sizes drawn at a fixed viewport and scaled to fit. */
 export type CanvasDesignDeviceSize = Exclude<CanvasDesignSize, "document">;
@@ -2248,7 +2280,7 @@ export type CanvasDesignDeviceSize = Exclude<CanvasDesignSize, "document">;
  * `workspace`; a device size defaults to `none`, so a product screen keeps its
  * own brand. `brand` draws the page with the design's own `brand` tokens.
  */
-export const CanvasDesignTheme = Schema.Literal("workspace", "none", "brand");
+export const CanvasDesignTheme = Schema.Literals(["workspace", "none", "brand"]);
 export type CanvasDesignTheme = typeof CanvasDesignTheme.Type;
 
 /**
@@ -2340,7 +2372,7 @@ export const CanvasDesignFrame = Schema.Struct({
   html: CanvasDesignMarkup,
   /** Plain-text notes for the presenter or reviewer; shown as text, never as markup. */
   notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
-}).annotations(strict);
+});
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
 
 /**
@@ -2349,7 +2381,7 @@ export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
  * quote, parenthesis, or space around it wherever it is written.
  */
 export const CanvasDesignAssetId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)),
   Schema.brand("CanvasDesignAssetId"),
 );
 export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
@@ -2365,20 +2397,20 @@ export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
  * names a screenshot the Browser kept for the Canvas's own thread; the Browser
  * is a Work and Code tool, so a Chat Canvas refuses it.
  */
-export const CanvasDesignAssetSource = Schema.Union(
+export const CanvasDesignAssetSource = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("generated-image"),
     imageId: ImageArtifactId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-file"),
-    path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
+    path: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("browser-capture"),
     captureId: BrowserCaptureId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
 
 export const CanvasDesignAsset = Schema.Struct({
@@ -2386,7 +2418,7 @@ export const CanvasDesignAsset = Schema.Struct({
   source: CanvasDesignAssetSource,
   /** What the image shows, for the author's own reference and the warnings. */
   description: Schema.optional(CanvasMockupText),
-}).annotations(strict);
+});
 export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
 
 /**
@@ -2407,13 +2439,13 @@ export const CanvasDesignBlock = Schema.Struct({
   runsScript: Schema.optional(Schema.Literal(true)),
   styles: Schema.optional(CanvasDesignMarkup),
   assets: Schema.optional(
-    Schema.Array(CanvasDesignAsset).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
+    Schema.Array(CanvasDesignAsset).check(Schema.isMaxLength(CANVAS_MAX_DESIGN_ASSETS)),
   ),
-  frames: Schema.Array(CanvasDesignFrame).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
+  frames: Schema.Array(CanvasDesignFrame).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_MAX_DESIGN_FRAMES),
   ),
-}).annotations(strict);
+});
 export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
 
 /** Whether a plan names the Gantt view, which arrived at the diagram-styles version. */
@@ -2425,12 +2457,12 @@ export function canvasPlanUsesGantt(block: {
 }
 
 /** The image types a design asset may resolve to, read from the bytes. */
-export const CanvasDesignAssetMediaType = Schema.Literal(
+export const CanvasDesignAssetMediaType = Schema.Literals([
   "image/png",
   "image/jpeg",
   "image/gif",
   "image/webp",
-);
+]);
 export type CanvasDesignAssetMediaType = typeof CanvasDesignAssetMediaType.Type;
 
 /**
@@ -2442,55 +2474,55 @@ export type CanvasDesignAssetMediaType = typeof CanvasDesignAssetMediaType.Type;
  * spent its budget. `not-an-image`: the bytes are not a PNG, JPEG, GIF, or
  * WebP.
  */
-export const CanvasDesignAssetUnavailableReason = Schema.Literal(
+export const CanvasDesignAssetUnavailableReason = Schema.Literals([
   "missing",
   "refused",
   "too-large",
   "design-budget",
   "not-an-image",
-);
+]);
 export type CanvasDesignAssetUnavailableReason = typeof CanvasDesignAssetUnavailableReason.Type;
 
-export const CanvasDesignAssetResolution = Schema.Union(
+export const CanvasDesignAssetResolution = Schema.Union([
   Schema.Struct({
     assetId: CanvasDesignAssetId,
     status: Schema.Literal("resolved"),
     mediaType: CanvasDesignAssetMediaType,
     // Base64 of at most the per-image budget.
-    data: Schema.String.pipe(
-      Schema.maxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
-      Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    data: Schema.String.check(
+      Schema.isMaxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
+      Schema.isPattern(/^[A-Za-z0-9+/]*={0,2}$/),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     assetId: CanvasDesignAssetId,
     status: Schema.Literal("unavailable"),
     reason: CanvasDesignAssetUnavailableReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasDesignAssetResolution = typeof CanvasDesignAssetResolution.Type;
 
 /**
  * One design's declared images as the host resolved them for this reader,
  * now. Never stored: a reader asks again each time it draws the design.
  */
-export const CanvasDesignAssetsOutcome = Schema.Union(
+export const CanvasDesignAssetsOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     blockId: CanvasBlockId,
-    assets: Schema.Array(CanvasDesignAssetResolution).pipe(
-      Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS),
+    assets: Schema.Array(CanvasDesignAssetResolution).check(
+      Schema.isMaxLength(CANVAS_MAX_DESIGN_ASSETS),
     ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     canvasId: CanvasId,
     reason: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
 
 // ── Flow ──────────────────────────────────────────────────────────────────────
@@ -2548,7 +2580,7 @@ export const CANVAS_FLOW_HOTSPOT_COMPONENTS = [
   "slider",
 ] as const;
 export type CanvasFlowHotspotComponent = (typeof CANVAS_FLOW_HOTSPOT_COMPONENTS)[number];
-export const CanvasFlowHotspotComponent = Schema.Literal(...CANVAS_FLOW_HOTSPOT_COMPONENTS);
+export const CanvasFlowHotspotComponent = Schema.Literals(CANVAS_FLOW_HOTSPOT_COMPONENTS);
 
 /**
  * One screen on the board: a mockup block at one variant (absent is its
@@ -2566,7 +2598,7 @@ export const CanvasFlowScreen = Schema.Struct({
   x: Schema.optional(FiniteNumber),
   y: Schema.optional(FiniteNumber),
   positioned: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CanvasFlowScreen = typeof CanvasFlowScreen.Type;
 
 /**
@@ -2579,7 +2611,7 @@ export type CanvasFlowScreen = typeof CanvasFlowScreen.Type;
 export const CanvasFlowAnnotation = Schema.Struct({
   nodeId: CanvasNodeId,
   note: boundedNonEmptyText(CANVAS_MAX_FLOW_ANNOTATION_LENGTH),
-}).annotations(strict);
+});
 export type CanvasFlowAnnotation = typeof CanvasFlowAnnotation.Type;
 
 export const CanvasFlowEdge = Schema.Struct({
@@ -2589,7 +2621,7 @@ export const CanvasFlowEdge = Schema.Struct({
   fromNodeId: Schema.optional(CanvasNodeId),
   label: Schema.optional(boundedNonEmptyText(CANVAS_MAX_FLOW_LABEL_LENGTH)),
   tone: Schema.optional(CanvasDiagramTone),
-}).annotations(strict);
+});
 export type CanvasFlowEdge = typeof CanvasFlowEdge.Type;
 
 /**
@@ -2602,15 +2634,15 @@ export const CanvasFlowBlock = Schema.Struct({
   kind: Schema.Literal("flow"),
   title: CanvasLabel,
   layout: Schema.optional(CanvasDiagramLayoutKind),
-  screens: Schema.Array(CanvasFlowScreen).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(CANVAS_MAX_FLOW_SCREENS),
+  screens: Schema.Array(CanvasFlowScreen).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(CANVAS_MAX_FLOW_SCREENS),
   ),
-  edges: Schema.Array(CanvasFlowEdge).pipe(Schema.maxItems(CANVAS_MAX_FLOW_EDGES)),
+  edges: Schema.Array(CanvasFlowEdge).check(Schema.isMaxLength(CANVAS_MAX_FLOW_EDGES)),
   annotations: Schema.optional(
-    Schema.Array(CanvasFlowAnnotation).pipe(Schema.maxItems(CANVAS_MAX_FLOW_ANNOTATIONS)),
+    Schema.Array(CanvasFlowAnnotation).check(Schema.isMaxLength(CANVAS_MAX_FLOW_ANNOTATIONS)),
   ),
-}).annotations(strict);
+});
 export type CanvasFlowBlock = typeof CanvasFlowBlock.Type;
 
 /** Whether a flow carries callouts, which arrived at the annotations version. */
@@ -2654,18 +2686,18 @@ export const CanvasDeckSlide = Schema.Struct({
   /** A mockup slide names the variant it shows; required when the mockup declares variants. */
   variantId: Schema.optional(CanvasMockupVariantId),
   notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
-}).annotations(strict);
+});
 export type CanvasDeckSlide = typeof CanvasDeckSlide.Type;
 
 export const CanvasDeckBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("deck"),
   title: CanvasLabel,
-  slides: Schema.Array(CanvasDeckSlide).pipe(
-    Schema.minItems(2),
-    Schema.maxItems(CANVAS_MAX_DECK_SLIDES),
+  slides: Schema.Array(CanvasDeckSlide).check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(CANVAS_MAX_DECK_SLIDES),
   ),
-}).annotations(strict);
+});
 export type CanvasDeckBlock = typeof CanvasDeckBlock.Type;
 
 // ── Choice ────────────────────────────────────────────────────────────────────
@@ -2683,13 +2715,13 @@ export const CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH = 1_024;
 
 /** A titled group of a decision form's questions, in the order the form draws them. */
 export const CanvasChoiceSection = Schema.Struct({
-  id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  id: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
   title: boundedNonEmptyText(CANVAS_MAX_CHOICE_SECTION_TITLE_LENGTH),
   intro: Schema.optional(boundedNonEmptyText(CANVAS_MAX_CHOICE_SECTION_INTRO_LENGTH)),
-  questionIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))).pipe(
-    Schema.minItems(1),
-  ),
-}).annotations(strict);
+  questionIds: Schema.Array(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ).check(Schema.isMinLength(1)),
+});
 export type CanvasChoiceSection = typeof CanvasChoiceSection.Type;
 
 /**
@@ -2739,17 +2771,13 @@ export const CanvasChoiceBlock = Schema.Struct({
   kind: Schema.Literal("choice"),
   prompt: boundedNonEmptyText(CANVAS_MAX_CHOICE_PROMPT_LENGTH),
   questions: CanvasChoiceQuestions,
-  sections: Schema.optional(Schema.Array(CanvasChoiceSection).pipe(Schema.minItems(1))),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (block) => canvasChoiceSectionsPlaceEveryQuestion(block.questions, block.sections),
-      {
-        message: () => "A choice block's sections must place every question exactly once.",
-      },
-    ),
-  );
+  sections: Schema.optional(Schema.Array(CanvasChoiceSection).check(Schema.isMinLength(1))),
+}).check(
+  Schema.makeFilter(
+    (block) => canvasChoiceSectionsPlaceEveryQuestion(block.questions, block.sections),
+    { message: "A choice block's sections must place every question exactly once." },
+  ),
+);
 export type CanvasChoiceBlock = typeof CanvasChoiceBlock.Type;
 
 /**
@@ -2781,7 +2809,7 @@ export const CanvasDesignRunRequest = Schema.Struct({
   blockId: CanvasBlockId,
   /** The frame the page opens on; the design's first frame when omitted. */
   frameId: Schema.optional(CanvasDesignFrameId),
-}).annotations(strict);
+});
 export type CanvasDesignRunRequest = typeof CanvasDesignRunRequest.Type;
 
 /**
@@ -2789,23 +2817,23 @@ export type CanvasDesignRunRequest = typeof CanvasDesignRunRequest.Type;
  * the host holding a single-use ticket; the reader loads it in a frame
  * sandboxed to `allow-scripts` alone, so the page's origin is opaque.
  */
-export const CanvasDesignRunOutcome = Schema.Union(
+export const CanvasDesignRunOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
     blockId: CanvasBlockId,
-    page: Schema.String.pipe(
-      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    page: Schema.String.check(
+      Schema.isPattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
     ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     canvasId: CanvasId,
     reason: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
 
 /**
@@ -2815,25 +2843,25 @@ export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
  * carries becomes the page.
  */
 export const PublishedSnapshotRunRequest = Schema.Struct({
-  mode: Schema.Literal("work", "code"),
-  threadId: Schema.UUID,
+  mode: Schema.Literals(["work", "code"]),
+  threadId: GuidString,
   toolCallId: boundedNonEmptyText(255),
-}).annotations(strict);
+});
 export type PublishedSnapshotRunRequest = typeof PublishedSnapshotRunRequest.Type;
 
 /** A published snapshot's running page, offered once, under the design page's rules. */
-export const PublishedSnapshotRunOutcome = Schema.Union(
+export const PublishedSnapshotRunOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
-    page: Schema.String.pipe(
-      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    page: Schema.String.check(
+      Schema.isPattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     reason: boundedNonEmptyText(512),
-  }).annotations(strict),
-);
+  }),
+]);
 export type PublishedSnapshotRunOutcome = typeof PublishedSnapshotRunOutcome.Type;
 
 export const CanvasPlanBlock = Schema.Struct({
@@ -2841,9 +2869,9 @@ export const CanvasPlanBlock = Schema.Struct({
   kind: Schema.Literal("plan"),
   title: CanvasLabel,
   view: Schema.optional(CanvasPlanView),
-  phases: Schema.NonEmptyArray(CanvasPlanPhase).pipe(Schema.maxItems(CANVAS_MAX_PLAN_PHASES)),
-  tasks: Schema.Array(CanvasPlanTask).pipe(Schema.maxItems(CANVAS_MAX_PLAN_TASKS)),
-}).annotations(strict);
+  phases: Schema.NonEmptyArray(CanvasPlanPhase).check(Schema.isMaxLength(CANVAS_MAX_PLAN_PHASES)),
+  tasks: Schema.Array(CanvasPlanTask).check(Schema.isMaxLength(CANVAS_MAX_PLAN_TASKS)),
+});
 export type CanvasPlanBlock = typeof CanvasPlanBlock.Type;
 
 const CanvasReferenceFields = {
@@ -2856,31 +2884,31 @@ const CanvasReferenceFields = {
 export const CanvasArtifactReferenceBlock = Schema.Struct({
   ...CanvasReferenceFields,
   kind: Schema.Literal("artifact-reference"),
-}).annotations(strict);
+});
 export type CanvasArtifactReferenceBlock = typeof CanvasArtifactReferenceBlock.Type;
 
 export const CanvasFileReferenceBlock = Schema.Struct({
   ...CanvasReferenceFields,
   kind: Schema.Literal("file-reference"),
-}).annotations(strict);
+});
 export type CanvasFileReferenceBlock = typeof CanvasFileReferenceBlock.Type;
 
 export const CanvasPreviewReferenceBlock = Schema.Struct({
   ...CanvasReferenceFields,
   kind: Schema.Literal("preview-reference"),
-}).annotations(strict);
+});
 export type CanvasPreviewReferenceBlock = typeof CanvasPreviewReferenceBlock.Type;
 
 export const CanvasBrowserReferenceBlock = Schema.Struct({
   ...CanvasReferenceFields,
   kind: Schema.Literal("browser-reference"),
-}).annotations(strict);
+});
 export type CanvasBrowserReferenceBlock = typeof CanvasBrowserReferenceBlock.Type;
 
 export const CanvasEvidenceReferenceBlock = Schema.Struct({
   ...CanvasReferenceFields,
   kind: Schema.Literal("evidence-reference"),
-}).annotations(strict);
+});
 export type CanvasEvidenceReferenceBlock = typeof CanvasEvidenceReferenceBlock.Type;
 
 /**
@@ -2900,14 +2928,12 @@ export const CanvasImageBlock = Schema.Struct({
   generatedImageId: Schema.optional(ImageArtifactId),
   alt: CanvasNonEmptyText,
   caption: Schema.optional(CanvasText),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (block) => (block.sourceId === undefined) !== (block.generatedImageId === undefined),
-      { message: () => "An image block names exactly one of sourceId or generatedImageId." },
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (block) => (block.sourceId === undefined) !== (block.generatedImageId === undefined),
+    { message: "An image block names exactly one of sourceId or generatedImageId." },
+  ),
+);
 export type CanvasImageBlock = typeof CanvasImageBlock.Type;
 
 /**
@@ -2915,8 +2941,10 @@ export type CanvasImageBlock = typeof CanvasImageBlock.Type;
  * resolves it through the design asset read, so a reader and an export draw
  * it with the same authority, budget, and placeholders a design's images use.
  */
-export const CANVAS_IMAGE_BLOCK_ASSET_ID: CanvasDesignAssetId =
-  Schema.decodeSync(CanvasDesignAssetId)("image");
+export const CANVAS_IMAGE_BLOCK_ASSET_ID: CanvasDesignAssetId = Schema.decodeSync(
+  CanvasDesignAssetId,
+  STRICT_DECODE_OPTIONS,
+)("image");
 
 /** The one asset an image block declares: its generated image, or none. */
 export function canvasImageBlockAssets(
@@ -2953,8 +2981,10 @@ export type CanvasDashboardCellKind = (typeof CANVAS_DASHBOARD_CELL_KINDS)[numbe
  */
 export const CanvasDashboardCell = Schema.Struct({
   blockId: CanvasBlockId,
-  span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
-}).annotations(strict);
+  span: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: CANVAS_MAX_DASHBOARD_COLUMNS })),
+  ),
+});
 export type CanvasDashboardCell = typeof CanvasDashboardCell.Type;
 
 /**
@@ -2971,11 +3001,13 @@ export const CanvasDashboardBlock = Schema.Struct({
   /** Names the region a screen reader lands on. */
   title: CanvasLabel,
   /** Columns on a wide grid; absent means four. Narrow widths draw one. */
-  columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
-  cells: Schema.NonEmptyArray(CanvasDashboardCell).pipe(
-    Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS),
+  columns: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: CANVAS_MAX_DASHBOARD_COLUMNS })),
   ),
-}).annotations(strict);
+  cells: Schema.NonEmptyArray(CanvasDashboardCell).check(
+    Schema.isMaxLength(CANVAS_MAX_DASHBOARD_CELLS),
+  ),
+});
 export type CanvasDashboardBlock = typeof CanvasDashboardBlock.Type;
 
 /**
@@ -2990,33 +3022,33 @@ export type CanvasDashboardBlock = typeof CanvasDashboardBlock.Type;
  */
 export const CanvasTabsPane = Schema.Struct({
   label: boundedNonEmptyText(CANVAS_MAX_TABS_LABEL_LENGTH),
-  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
-}).annotations(strict);
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).check(Schema.isMaxLength(CANVAS_MAX_BLOCKS)),
+});
 export type CanvasTabsPane = typeof CanvasTabsPane.Type;
 
 export const CanvasTabsBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("tabs"),
-  panes: Schema.Array(CanvasTabsPane).pipe(
-    Schema.minItems(2),
-    Schema.maxItems(CANVAS_MAX_TABS_PANES),
+  panes: Schema.Array(CanvasTabsPane).check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(CANVAS_MAX_TABS_PANES),
   ),
-}).annotations(strict);
+});
 export type CanvasTabsBlock = typeof CanvasTabsBlock.Type;
 
 export const CanvasColumnTrack = Schema.Struct({
-  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
-}).annotations(strict);
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).check(Schema.isMaxLength(CANVAS_MAX_BLOCKS)),
+});
 export type CanvasColumnTrack = typeof CanvasColumnTrack.Type;
 
 export const CanvasColumnsBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("columns"),
-  tracks: Schema.Array(CanvasColumnTrack).pipe(
-    Schema.minItems(CANVAS_MIN_COLUMN_TRACKS),
-    Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS),
+  tracks: Schema.Array(CanvasColumnTrack).check(
+    Schema.isMinLength(CANVAS_MIN_COLUMN_TRACKS),
+    Schema.isMaxLength(CANVAS_MAX_COLUMN_TRACKS),
   ),
-}).annotations(strict);
+});
 export type CanvasColumnsBlock = typeof CanvasColumnsBlock.Type;
 
 export type CanvasLayoutGroupBlock = CanvasTabsBlock | CanvasColumnsBlock;
@@ -3035,7 +3067,7 @@ export function canvasLayoutGroupChildIds(
     : block.tracks.flatMap((track) => track.blockIds);
 }
 
-export const CanvasBlock = Schema.Union(
+export const CanvasBlock = Schema.Union([
   CanvasHeadingBlock,
   CanvasRichTextBlock,
   CanvasCalloutBlock,
@@ -3070,9 +3102,6 @@ export const CanvasBlock = Schema.Union(
   CanvasDesignBlock,
   CanvasPlanBlock,
   CanvasTreemapBlock,
-  // A heatmap has two layouts with different shapes, so both structs join the
-  // union directly rather than nesting a union: the block catalog derives one
-  // kind per member, and a nested union would hide its members from it.
   CanvasHeatmapMatrixBlock,
   CanvasHeatmapCalendarBlock,
   CanvasBarListBlock,
@@ -3080,16 +3109,13 @@ export const CanvasBlock = Schema.Union(
   CanvasMathDisplayBlock,
   CanvasMathInlineBlock,
   CanvasDashboardBlock,
-  // Typed actions (Canvas D). The block is a declarative reference to an
-  // allowlisted command; the server reauthorizes every action before any side
-  // effect, so union membership never makes a definition executable.
   CanvasActionBlock,
   CanvasTabsBlock,
   CanvasColumnsBlock,
   CanvasFlowBlock,
   CanvasDeckBlock,
   CanvasChoiceBlock,
-);
+]);
 export type CanvasBlock = typeof CanvasBlock.Type;
 
 // Where the author asked the originating thread to show a Canvas. `inline`
@@ -3100,7 +3126,7 @@ export type CanvasBlock = typeof CanvasBlock.Type;
 // effective value (the thread reference card's `presentation`), never by this
 // field alone. Either way the Canvas is one journaled object: the hint never
 // copies it.
-export const CanvasPresentation = Schema.Literal("inline", "sidebar");
+export const CanvasPresentation = Schema.Literals(["inline", "sidebar"]);
 export type CanvasPresentation = typeof CanvasPresentation.Type;
 
 /**
@@ -3339,7 +3365,7 @@ export const CanvasDesignSystem = Schema.Struct({
   name: boundedNonEmptyText(128),
   source: Schema.optional(boundedNonEmptyText(1024)),
   brand: CanvasDesignBrand,
-}).annotations(strict);
+});
 export type CanvasDesignSystem = typeof CanvasDesignSystem.Type;
 
 export const CanvasDefinition = Schema.Struct({
@@ -3350,70 +3376,117 @@ export const CanvasDefinition = Schema.Struct({
   presentation: Schema.optional(CanvasPresentation),
   designSystem: Schema.optional(CanvasDesignSystem),
   blocks: Schema.Array(CanvasBlock)
-    .pipe(Schema.maxItems(CANVAS_MAX_BLOCKS))
-    .pipe(
-      Schema.filter(
+    .check(Schema.isMaxLength(CANVAS_MAX_BLOCKS))
+    .check(
+      Schema.makeFilter(
         (blocks) => blocks.filter((block) => block.kind === "image").length <= CANVAS_MAX_IMAGES,
-        { message: () => `Canvas image blocks exceed ${CANVAS_MAX_IMAGES}.` },
+        { message: `Canvas image blocks exceed ${CANVAS_MAX_IMAGES}.` },
       ),
     ),
-})
-  .annotations(strict)
-  .pipe(
-    // Version-gated blocks and hints: a rolled-back runtime that never
-    // learned a kind or hint must see a document carrying it as a declared
-    // future version, not as a document that failed to decode. Each gate
-    // keeps its own floor so an earlier document stays valid. The gates are
-    // data, not a pipe of filters: the chain of `Schema.filter` steps once
-    // crossed Effect's inference-depth cliff (a definition's type degraded to
-    // unknown in downstream typechecks), and a table cannot — a new floor is
-    // a new row.
-    Schema.filter((definition) => canvasCarriesNoLaterFloor(definition), {
-      message: (issue) => canvasLaterFloorMessage(issue.actual),
-    }),
-  );
+}).pipe(
+  // Version-gated blocks and hints: a rolled-back runtime that never
+  // learned a kind or hint must see a document carrying it as a declared
+  // future version, not as a document that failed to decode. Each gate
+  // keeps its own floor so an earlier document stays valid. The gates are
+  // data, not a pipe of filters: the chain of `Schema.filter` steps once
+  // crossed Effect's inference-depth cliff (a definition's type degraded to
+  // unknown in downstream typechecks), and a table cannot — a new floor is
+  // a new row.
+  Schema.check(
+    Schema.makeFilter((definition) =>
+      canvasCarriesNoLaterFloor(definition) ? true : canvasLaterFloorMessage(definition),
+    ),
+  ),
+);
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
 export const CanvasVersion = Schema.Struct({
   schemaVersion: CanvasSchemaVersion,
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  sequence: Schema.Int.pipe(Schema.positive()),
+  sequence: PositiveInt,
   definition: CanvasDefinition,
   createdBy: CanvasActor,
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasVersion = typeof CanvasVersion.Type;
 
 // ── Decoders ────────────────────────────────────────────────────────────────
 
-export const decodeCanvasId = Schema.decodeUnknownSync(CanvasId);
-export const decodeCanvasVersionId = Schema.decodeUnknownSync(CanvasVersionId);
-export const decodeCanvasSourceId = Schema.decodeUnknownSync(CanvasSourceId);
-export const decodeCanvasBlockId = Schema.decodeUnknownSync(CanvasBlockId);
-export const decodeCanvasDesignAssetId = Schema.decodeUnknownSync(CanvasDesignAssetId);
-export const decodeCanvasSchemaVersion = Schema.decodeUnknownSync(CanvasSchemaVersion);
-export const decodeCanvasActor = Schema.decodeUnknownSync(CanvasActor);
-export const decodeCanvasProvenance = Schema.decodeUnknownSync(CanvasProvenance);
-export const decodeCanvasSourceVersion = Schema.decodeUnknownSync(CanvasSourceVersion);
-export const decodeCanvasSourceManifestEntry = Schema.decodeUnknownSync(CanvasSourceManifestEntry);
-export const decodeCanvasSourceManifest = Schema.decodeUnknownSync(CanvasSourceManifest);
-export const decodeCanvasBlockKind = Schema.decodeUnknownSync(CanvasBlockKind);
-export const decodeCanvasBlock = Schema.decodeUnknownSync(CanvasBlock);
-export const decodeCanvasDefinition = Schema.decodeUnknownSync(CanvasDefinition);
-export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion);
-export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentation);
-export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
-export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
-export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
-export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
-export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(CanvasDesignRunRequest);
-export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(CanvasDesignRunOutcome);
+export const decodeCanvasId = Schema.decodeUnknownSync(CanvasId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasVersionId = Schema.decodeUnknownSync(
+  CanvasVersionId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasSourceId = Schema.decodeUnknownSync(CanvasSourceId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasBlockId = Schema.decodeUnknownSync(CanvasBlockId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasDesignAssetId = Schema.decodeUnknownSync(
+  CanvasDesignAssetId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasSchemaVersion = Schema.decodeUnknownSync(
+  CanvasSchemaVersion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasActor = Schema.decodeUnknownSync(CanvasActor, STRICT_DECODE_OPTIONS);
+export const decodeCanvasProvenance = Schema.decodeUnknownSync(
+  CanvasProvenance,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasSourceVersion = Schema.decodeUnknownSync(
+  CanvasSourceVersion,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasSourceManifestEntry = Schema.decodeUnknownSync(
+  CanvasSourceManifestEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasSourceManifest = Schema.decodeUnknownSync(
+  CanvasSourceManifest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasBlockKind = Schema.decodeUnknownSync(
+  CanvasBlockKind,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasBlock = Schema.decodeUnknownSync(CanvasBlock, STRICT_DECODE_OPTIONS);
+export const decodeCanvasDefinition = Schema.decodeUnknownSync(
+  CanvasDefinition,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasVersion = Schema.decodeUnknownSync(CanvasVersion, STRICT_DECODE_OPTIONS);
+export const decodeCanvasPresentation = Schema.decodeUnknownSync(
+  CanvasPresentation,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(
+  CanvasDiagramLayoutKind,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(
+  CanvasPlanTaskId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId, STRICT_DECODE_OPTIONS);
+export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(
+  CanvasDesignAssetsOutcome,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(
+  CanvasDesignRunRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(
+  CanvasDesignRunOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePublishedSnapshotRunRequest = Schema.decodeUnknownSync(
   PublishedSnapshotRunRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePublishedSnapshotRunOutcome = Schema.decodeUnknownSync(
   PublishedSnapshotRunOutcome,
+  STRICT_DECODE_OPTIONS,
 );
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
@@ -3427,7 +3500,7 @@ export const decodePublishedSnapshotRunOutcome = Schema.decodeUnknownSync(
 export const CanvasCreated = Schema.Struct({
   canvasId: CanvasId,
   version: CanvasVersion,
-}).annotations(strict);
+});
 export type CanvasCreated = typeof CanvasCreated.Type;
 
 export const CanvasVersionAppended = Schema.Struct({
@@ -3436,7 +3509,7 @@ export const CanvasVersionAppended = Schema.Struct({
   // Optional refresh receipt is carried in the same journal event as the
   // version so successful refreshes are idempotent across crash boundaries.
   refreshReceipt: Schema.optional(Schema.Unknown),
-}).annotations(strict);
+});
 export type CanvasVersionAppended = typeof CanvasVersionAppended.Type;
 
 export const CANVAS_AGGREGATE_TYPE = "canvas";
@@ -3446,5 +3519,8 @@ export const CANVAS_VERSION_APPENDED = "canvas.version-appended@1";
 export const CANVAS_EVENT_NAMES = [CANVAS_CREATED, CANVAS_VERSION_APPENDED] as const;
 export type CanvasEventName = (typeof CANVAS_EVENT_NAMES)[number];
 
-export const decodeCanvasCreated = Schema.decodeUnknownSync(CanvasCreated);
-export const decodeCanvasVersionAppended = Schema.decodeUnknownSync(CanvasVersionAppended);
+export const decodeCanvasCreated = Schema.decodeUnknownSync(CanvasCreated, STRICT_DECODE_OPTIONS);
+export const decodeCanvasVersionAppended = Schema.decodeUnknownSync(
+  CanvasVersionAppended,
+  STRICT_DECODE_OPTIONS,
+);

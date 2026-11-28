@@ -1,9 +1,13 @@
 import { Schema } from "effect";
 import { createContext, useEffect, useMemo } from "react";
 
-const offset = Schema.Number.pipe(Schema.between(0, 100_000_000));
-const position = Schema.Int.pipe(Schema.between(1, 10_000_000));
-const ViewState = Schema.Union(
+const offset = Schema.Number.pipe(
+  Schema.check(Schema.isBetween({ minimum: 0, maximum: 100_000_000 })),
+);
+const position = Schema.Int.pipe(
+  Schema.check(Schema.isBetween({ minimum: 1, maximum: 10_000_000 })),
+);
+const ViewState = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("editor"),
     lineNumber: position,
@@ -13,17 +17,17 @@ const ViewState = Schema.Union(
   }),
   Schema.Struct({
     kind: Schema.Literal("review"),
-    path: Schema.optional(Schema.String.pipe(Schema.maxLength(4096))),
+    path: Schema.optional(Schema.String.pipe(Schema.check(Schema.isMaxLength(4096)))),
     scrollTop: offset,
   }),
   Schema.Struct({
     kind: Schema.Literal("transcript"),
     offset,
     following: Schema.Boolean,
-    firstKey: Schema.String.pipe(Schema.maxLength(1024)),
+    firstKey: Schema.String.pipe(Schema.check(Schema.isMaxLength(1024))),
     width: offset,
   }),
-);
+]);
 export type WorkspaceViewState = typeof ViewState.Type;
 export interface WorkspaceViewStore {
   readonly read: (key: string) => WorkspaceViewState | undefined;
@@ -31,8 +35,11 @@ export interface WorkspaceViewStore {
 }
 export const WorkspaceViewStateContext = createContext<WorkspaceViewStore | undefined>(undefined);
 const Saved = Schema.Array(
-  Schema.Struct({ key: Schema.String.pipe(Schema.maxLength(8192)), value: ViewState }),
-).pipe(Schema.maxItems(64));
+  Schema.Struct({
+    key: Schema.String.pipe(Schema.check(Schema.isMaxLength(8192))),
+    value: ViewState,
+  }),
+).pipe(Schema.check(Schema.isMaxLength(64)));
 const MAX_BYTES = 128 * 1024;
 const IDLE_FLUSH_MS = 300;
 

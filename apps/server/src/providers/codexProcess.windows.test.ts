@@ -17,7 +17,7 @@ import {
   WINDOWS_STRICT_REFUSAL,
   WINDOWS_STRICT_SHIM_REFUSAL,
 } from "@octant/domain/guardrail-policy";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolvePackagedWindowsConfineLauncher } from "../process/windowsConfinement";
 import { WindowsConfinementLeaseStore } from "../process/windowsConfinementRecovery";
@@ -63,9 +63,9 @@ async function startAndStop(
   binaryPath: string,
   authority: CodexLaunchAuthority,
   catalogUnconfined = false,
-): Promise<Either.Either<{ readonly version: string; readonly pid: number }, ProviderFailure>> {
+): Promise<Result.Result<{ readonly version: string; readonly pid: number }, ProviderFailure>> {
   return await Effect.runPromise(
-    Effect.either(
+    Effect.result(
       Effect.scoped(
         port(catalogUnconfined)
           .start({ binaryPath, authority })
@@ -87,9 +87,9 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         mode: "code",
         executionPolicy: "full-access",
       });
-      if (Either.isLeft(started)) throw new Error(started.left.message);
-      expect(started.right.version).toBe("0.144.4");
-      expect(running(started.right.pid)).toBe(false);
+      if (Result.isFailure(started)) throw new Error(started.failure.message);
+      expect(started.success.version).toBe("0.144.4");
+      expect(running(started.success.pid)).toBe(false);
     }, 60_000);
 
     it("starts a guarded level outside Strict with Codex's own approvals, and stops it", async () => {
@@ -102,8 +102,8 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         executionPolicy: "approval-gated",
         strict: false,
       });
-      if (Either.isLeft(started)) throw new Error(started.left.message);
-      expect(running(started.right.pid)).toBe(false);
+      if (Result.isFailure(started)) throw new Error(started.failure.message);
+      expect(running(started.success.pid)).toBe(false);
     }, 60_000);
 
     it("refuses lower levels under Strict and the retired legacy sandbox setting by name before Codex runs", async () => {
@@ -117,7 +117,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         fullAccessSandbox: true,
       });
       expect(legacyRefused).toEqual(
-        Either.left({ category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL }),
+        Result.fail({ category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL }),
       );
       const strictGuardedRefused = await startAndStop(fakeCodex ?? "", {
         kind: "thread",
@@ -127,7 +127,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         strict: true,
       });
       expect(strictGuardedRefused).toEqual(
-        Either.left({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL }),
+        Result.fail({ category: "incompatible", message: WINDOWS_STRICT_REFUSAL }),
       );
     }, 60_000);
 
@@ -190,7 +190,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         );
         const canonicalRoot = realpathSync.native(root);
         const started = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             Effect.scoped(
               confinedPort
                 .start({
@@ -231,11 +231,11 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
             ),
           ),
         );
-        if (Either.isLeft(started)) throw new Error(started.left.message);
-        expect(started.right.version).toBe("0.144.4");
-        expect(started.right.threadId).toBe("thread-1");
-        expect(started.right.cwd).toBe(canonicalRoot);
-        expect(running(started.right.pid)).toBe(false);
+        if (Result.isFailure(started)) throw new Error(started.failure.message);
+        expect(started.success.version).toBe("0.144.4");
+        expect(started.success.threadId).toBe("thread-1");
+        expect(started.success.cwd).toBe(canonicalRoot);
+        expect(running(started.success.pid)).toBe(false);
         expect(readdirSync(leaseDir)).toEqual([]);
         expect(readFileSync(join(codexHome, "config.toml"), "utf8")).toBe('model = "gpt-5.4"\n');
         expect(readFileSync(join(codexHome, "archived_sessions", "archived.jsonl"), "utf8")).toBe(
@@ -245,7 +245,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         // A fresh follow-up process resumes the saved rollout written by Turn 1
         // and appends its own follow-up record.
         const resumed = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             Effect.scoped(
               confinedPort
                 .start({
@@ -267,7 +267,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
                     Effect.promise(async () => {
                       const loaded = await connection.rpc.request(
                         "thread/resume",
-                        { threadId: started.right.threadId },
+                        { threadId: started.success.threadId },
                         (value) =>
                           value as {
                             readonly thread: { readonly id: string };
@@ -285,10 +285,10 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
             ),
           ),
         );
-        if (Either.isLeft(resumed)) throw new Error(resumed.left.message);
-        expect(resumed.right.threadId).toBe("thread-1");
-        expect(resumed.right.cwd).toBe(canonicalRoot);
-        expect(running(resumed.right.pid)).toBe(false);
+        if (Result.isFailure(resumed)) throw new Error(resumed.failure.message);
+        expect(resumed.success.threadId).toBe("thread-1");
+        expect(resumed.success.cwd).toBe(canonicalRoot);
+        expect(running(resumed.success.pid)).toBe(false);
         expect(readdirSync(leaseDir)).toEqual([]);
         const savedRollout = readFileSync(
           join(codexHome, "sessions", "rollout-thread-1.jsonl"),
@@ -300,7 +300,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         const shimPath = join(root, "codex.cmd");
         writeFileSync(shimPath, "@ECHO off\r\necho should-not-run\r\n");
         const shimRefused = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             Effect.scoped(
               confinedPort.start({
                 binaryPath: shimPath,
@@ -316,13 +316,13 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
           ),
         );
         expect(shimRefused).toEqual(
-          Either.left({ category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL }),
+          Result.fail({ category: "incompatible", message: WINDOWS_STRICT_SHIM_REFUSAL }),
         );
 
         // Confined catalog probe succeeds even when host defaults disallow unconfined catalog reads,
         // and answers `model/list` over stdio with model metadata and options.
         const catalogProbed = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             Effect.scoped(
               confinedPort
                 .start({
@@ -355,14 +355,14 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
             ),
           ),
         );
-        if (Either.isLeft(catalogProbed)) throw new Error(catalogProbed.left.message);
-        expect(catalogProbed.right.version).toBe("0.144.4");
-        expect(catalogProbed.right.models).toEqual(
+        if (Result.isFailure(catalogProbed)) throw new Error(catalogProbed.failure.message);
+        expect(catalogProbed.success.version).toBe("0.144.4");
+        expect(catalogProbed.success.models).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ id: "gpt-5.4", defaultReasoningEffort: "medium" }),
           ]),
         );
-        expect(running(catalogProbed.right.pid)).toBe(false);
+        expect(running(catalogProbed.success.pid)).toBe(false);
         expect(readdirSync(leaseDir)).toEqual([]);
       },
       60_000,
@@ -384,9 +384,9 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         mode: "code",
         executionPolicy: "full-access",
       });
-      if (Either.isLeft(started)) throw new Error(started.left.message);
-      expect(started.right.version).toBe("0.144.4");
-      expect(running(started.right.pid)).toBe(false);
+      if (Result.isFailure(started)) throw new Error(started.failure.message);
+      expect(started.success.version).toBe("0.144.4");
+      expect(running(started.success.pid)).toBe(false);
     }, 60_000);
 
     it("reads the catalog through the production driver with each process's ownership receipt, and removes the receipt once it ends", async () => {
@@ -402,10 +402,10 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         idleLeaseMs: 0,
       });
       const probed = await Effect.runPromise(
-        Effect.scoped(Effect.either(driver.probe({ instanceId }))),
+        Effect.scoped(Effect.result(driver.probe({ instanceId }))),
       );
-      if (Either.isLeft(probed)) throw new Error(probed.left.message);
-      expect(probed.right.models.length).toBeGreaterThan(0);
+      if (Result.isFailure(probed)) throw new Error(probed.failure.message);
+      expect(probed.success.models.length).toBeGreaterThan(0);
       await vi.waitFor(() => expect(readdirSync(receiptDirectory)).toEqual([]), {
         timeout: 20_000,
       });
@@ -413,12 +413,12 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
 
     it("reads the catalog only for a host whose new threads run with no Octant sandbox", async () => {
       const refused = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, false);
-      expect(Either.isLeft(refused)).toBe(true);
-      if (Either.isLeft(refused))
-        expect(refused.left.message).toMatch(/Octant's sandbox, which Windows does not/);
+      expect(Result.isFailure(refused)).toBe(true);
+      if (Result.isFailure(refused))
+        expect(refused.failure.message).toMatch(/Octant's sandbox, which Windows does not/);
       const read = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, true);
-      if (Either.isLeft(read)) throw new Error(read.left.message);
-      expect(read.right.version).toBe("0.144.4");
+      if (Result.isFailure(read)) throw new Error(read.failure.message);
+      expect(read.success.version).toBe("0.144.4");
     }, 60_000);
   },
 );

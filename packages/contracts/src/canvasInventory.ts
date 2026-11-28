@@ -1,12 +1,11 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId, CanvasVersion, CanvasVersionId } from "./canvas";
 import { CanvasWorkspaceScope } from "./canvasCards";
 import { CanvasRefreshSkillOptions } from "./canvasRefresh";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Opaque Canvas inventory row for Project-scoped listings. Carries identity and
@@ -16,30 +15,30 @@ export const CanvasInventoryEntry = Schema.Struct({
   canvasId: CanvasId,
   projectId: ProjectId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  versionCount: Schema.Int.pipe(Schema.positive()),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  versionCount: PositiveInt,
   currentVersionId: CanvasVersionId,
-  currentSequence: Schema.Int.pipe(Schema.positive()),
+  currentSequence: PositiveInt,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CanvasInventoryEntry = typeof CanvasInventoryEntry.Type;
 
 export const CanvasInventoryList = Schema.Struct({
   projectId: ProjectId,
   entries: Schema.Array(CanvasInventoryEntry),
-}).annotations(strict);
+});
 export type CanvasInventoryList = typeof CanvasInventoryList.Type;
 
 export const CanvasInventoryListRequest = Schema.Struct({
   projectId: ProjectId,
-  query: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
-}).annotations(strict);
+  query: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256))),
+});
 export type CanvasInventoryListRequest = typeof CanvasInventoryListRequest.Type;
 
 export const CanvasGetRequest = Schema.Struct({
   canvasId: CanvasId,
   versionId: Schema.optional(CanvasVersionId),
-}).annotations(strict);
+});
 export type CanvasGetRequest = typeof CanvasGetRequest.Type;
 
 /**
@@ -55,26 +54,39 @@ export type CanvasGetRequest = typeof CanvasGetRequest.Type;
  * mint a digest-pinned `qualifiedId`. An absent or empty list simply means a
  * refresh proceeds without a skill contribution.
  */
-export const CanvasGetOutcome = Schema.Union(
+export const CanvasGetOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("ready"),
     version: CanvasVersion,
     workspace: Schema.optional(CanvasWorkspaceScope),
     refreshSkills: Schema.optional(CanvasRefreshSkillOptions),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("unavailable"),
     canvasId: CanvasId,
-    reason: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
-);
+    reason: NonEmptyTrimmedString,
+  }),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }),
+]);
 export type CanvasGetOutcome = typeof CanvasGetOutcome.Type;
 
-export const decodeCanvasInventoryEntry = Schema.decodeUnknownSync(CanvasInventoryEntry);
-export const decodeCanvasInventoryList = Schema.decodeUnknownSync(CanvasInventoryList);
+export const decodeCanvasInventoryEntry = Schema.decodeUnknownSync(
+  CanvasInventoryEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasInventoryList = Schema.decodeUnknownSync(
+  CanvasInventoryList,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCanvasInventoryListRequest = Schema.decodeUnknownSync(
   CanvasInventoryListRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeCanvasGetRequest = Schema.decodeUnknownSync(CanvasGetRequest);
-export const decodeCanvasGetOutcome = Schema.decodeUnknownSync(CanvasGetOutcome);
+export const decodeCanvasGetRequest = Schema.decodeUnknownSync(
+  CanvasGetRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCanvasGetOutcome = Schema.decodeUnknownSync(
+  CanvasGetOutcome,
+  STRICT_DECODE_OPTIONS,
+);

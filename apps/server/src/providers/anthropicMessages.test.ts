@@ -438,7 +438,7 @@ describe("sendAnthropicMessagesTurn", () => {
     );
 
     const error = await Effect.runPromise(
-      Effect.catchAll(
+      Effect.catch(
         sendAnthropicMessagesTurn({
           endpoint: makeEndpoint(fetch),
           modelId: "fixture-model",
@@ -477,7 +477,7 @@ describe("sendAnthropicMessagesTurn", () => {
     );
 
     const error = await Effect.runPromise(
-      Effect.catchAll(
+      Effect.catch(
         sendAnthropicMessagesTurn({
           endpoint: makeEndpoint(fetch),
           modelId: "fixture-model",
@@ -912,7 +912,7 @@ describe("Anthropic's own web search in one response", () => {
         [];
       const controller = new AbortController();
       await Effect.runPromise(
-        Effect.either(
+        Effect.result(
           sendAnthropicMessagesTurn({
             endpoint: makeEndpoint(
               fixture(

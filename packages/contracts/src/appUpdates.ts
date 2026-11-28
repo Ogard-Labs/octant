@@ -16,9 +16,8 @@
  */
 
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * `MAJOR.MINOR.PATCH` with an optional prerelease tag. Deliberately narrower
@@ -27,8 +26,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * to go backwards.
  */
 export const AppVersion = Schema.String.pipe(
-  Schema.pattern(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]{1,64})?$/),
-  Schema.maxLength(64),
+  Schema.check(
+    Schema.isPattern(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]{1,64})?$/),
+    Schema.isMaxLength(64),
+  ),
   Schema.brand("AppVersion"),
 );
 export type AppVersion = typeof AppVersion.Type;
@@ -41,10 +42,10 @@ export type AppVersion = typeof AppVersion.Type;
  * `win32` is the x64 per-user installer, signed with Authenticode; a Windows
  * app reads its feed only once its installer hand-off is wired in.
  */
-export const AppUpdatePlatform = Schema.Literal("darwin", "linux", "win32");
+export const AppUpdatePlatform = Schema.Literals(["darwin", "linux", "win32"]);
 export type AppUpdatePlatform = typeof AppUpdatePlatform.Type;
 
-export const AppUpdateArchitecture = Schema.Literal("arm64", "x64");
+export const AppUpdateArchitecture = Schema.Literals(["arm64", "x64"]);
 export type AppUpdateArchitecture = typeof AppUpdateArchitecture.Type;
 
 /**
@@ -58,7 +59,7 @@ export type AppUpdateArchitecture = typeof AppUpdateArchitecture.Type;
  * chosen ref, published to its own feed so a test install can follow it and
  * exercise the real update path; its versions carry a `-candidate.…` tag.
  */
-export const AppReleaseRing = Schema.Literal("stable", "preview", "candidate");
+export const AppReleaseRing = Schema.Literals(["stable", "preview", "candidate"]);
 export type AppReleaseRing = typeof AppReleaseRing.Type;
 
 export const APP_RELEASE_RINGS: ReadonlyArray<AppReleaseRing> = ["stable", "preview", "candidate"];
@@ -93,7 +94,7 @@ export const CANDIDATE_PRERELEASE_TAG = "candidate";
  * portable image is. Naming the app inside the signature makes the refusal
  * the feed's own, on every platform.
  */
-export const AppUpdateProduct = Schema.Literal("octant", "octant-nightly");
+export const AppUpdateProduct = Schema.Literals(["octant", "octant-nightly"]);
 export type AppUpdateProduct = typeof AppUpdateProduct.Type;
 
 /**
@@ -130,9 +131,9 @@ export const AppUpdateRelease = Schema.Struct({
    * is not being trusted. HTTPS is required as transport hygiene, so what a
    * person is downloading is not readable on the wire.
    */
-  url: Schema.String.pipe(
-    Schema.maxLength(2048),
-    Schema.filter((value) => value.startsWith("https://")),
+  url: Schema.String.check(
+    Schema.isMaxLength(2048),
+    Schema.makeFilter((value) => value.startsWith("https://")),
   ),
   /**
    * Lowercase hex SHA-256 of the artifact. Signed, and checked against the
@@ -140,22 +141,22 @@ export const AppUpdateRelease = Schema.Struct({
    * what turns a signed notice into a verified artifact, and what stops
    * whoever serves the download from substituting something else.
    */
-  sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
   releasedAt: UtcTimestamp,
-  notes: Schema.optional(Schema.String.pipe(Schema.maxLength(4096))),
-}).annotations(strict);
+  notes: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
+});
 export type AppUpdateRelease = typeof AppUpdateRelease.Type;
 
 export const AppUpdateFeed = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   release: AppUpdateRelease,
   /** Base64 Ed25519 signature over the canonical encoding of `release`. */
-  signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{86}==$/)),
-}).annotations(strict);
+  signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9+/]{86}==$/)),
+});
 export type AppUpdateFeed = typeof AppUpdateFeed.Type;
 
 /** The systems a headless build is published for, as `octant-<version>-<target>.tar.gz` names them. */
-export const HeadlessBuildTarget = Schema.Literal("darwin-arm64", "linux-x64", "linux-arm64");
+export const HeadlessBuildTarget = Schema.Literals(["darwin-arm64", "linux-x64", "linux-arm64"]);
 export type HeadlessBuildTarget = typeof HeadlessBuildTarget.Type;
 
 /**
@@ -175,22 +176,22 @@ export const HeadlessBuildRelease = Schema.Struct({
   target: HeadlessBuildTarget,
   ring: AppReleaseRing,
   /** The build on the release, `octant-<version>-<target>.tar.gz`; any HTTPS location. */
-  url: Schema.String.pipe(
-    Schema.maxLength(2048),
-    Schema.filter((value) => value.startsWith("https://")),
+  url: Schema.String.check(
+    Schema.isMaxLength(2048),
+    Schema.makeFilter((value) => value.startsWith("https://")),
   ),
   /** Lowercase hex SHA-256 of the tarball, checked before anything else reads it. */
-  sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+  sha256: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
   releasedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HeadlessBuildRelease = typeof HeadlessBuildRelease.Type;
 
 export const HeadlessBuildFeed = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   release: HeadlessBuildRelease,
   /** Base64 Ed25519 signature over the canonical encoding of `release`. */
-  signature: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9+/]{86}==$/)),
-}).annotations(strict);
+  signature: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9+/]{86}==$/)),
+});
 export type HeadlessBuildFeed = typeof HeadlessBuildFeed.Type;
 
 /**
@@ -200,45 +201,21 @@ export type HeadlessBuildFeed = typeof HeadlessBuildFeed.Type;
  * is down" and "the signature is wrong", so the reasons stay distinct instead
  * of collapsing into one failure.
  */
-export const AppUpdateRefusal = Schema.Literal(
+export const AppUpdateRefusal = Schema.Literals([
   "unreachable",
   "malformed",
   "untrusted-signature",
-  /**
-   * The artifact downloaded, but its bytes did not hash to what the signed
-   * release said they would. Distinct from a bad signature: the notice was
-   * genuine and the delivery was not, which is a different thing to tell
-   * somebody and a different thing to investigate.
-   */
   "corrupt-artifact",
   "not-newer",
   "wrong-platform",
-  /**
-   * The release is genuine, but it was published to a ring this app did not
-   * ask for. Distinct from a bad signature: nothing was forged, the feed at
-   * that location is simply not the one it claims to be.
-   */
   "wrong-ring",
-  /**
-   * The release is genuine, but it is the other app: an Octant Nightly build
-   * offered to Octant, or the reverse.
-   */
   "wrong-app",
-  /**
-   * The running launch is not a portable image this app can replace. A
-   * package or an unpacked archive has to be replaced by hand.
-   */
   "unsupported-install",
-  /**
-   * The image could be replaced, but its directory is not writable. Distinct
-   * from a bad signature: the release may be genuine, and the location is
-   * what refused.
-   */
   "not-writable",
-);
+]);
 export type AppUpdateRefusal = typeof AppUpdateRefusal.Type;
 
-export const AppUpdateStatus = Schema.Literal(
+export const AppUpdateStatus = Schema.Literals([
   "idle",
   "checking",
   "up-to-date",
@@ -247,7 +224,7 @@ export const AppUpdateStatus = Schema.Literal(
   "ready",
   "refused",
   "failed",
-);
+]);
 export type AppUpdateStatus = typeof AppUpdateStatus.Type;
 
 /**
@@ -261,15 +238,15 @@ export const AppUpdateState = Schema.Struct({
   currentVersion: AppVersion,
   available: Schema.optional(AppUpdateRelease),
   refusal: Schema.optional(AppUpdateRefusal),
-  message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  message: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
   checkedAt: Schema.optional(UtcTimestamp),
   /** Whether Octant may check on its own. Off means it does not check at all. */
   automaticChecks: Schema.Boolean,
   /** The ring this app is following, which decides which feed it reads. */
   ring: AppReleaseRing,
   /** Choices belonging to this running application, not another installed app. */
-  allowedRings: Schema.optional(Schema.Array(AppReleaseRing).pipe(Schema.maxItems(3))),
-}).annotations(strict);
+  allowedRings: Schema.optional(Schema.Array(AppReleaseRing).check(Schema.isMaxLength(3))),
+});
 export type AppUpdateState = typeof AppUpdateState.Type;
 
 /**
@@ -278,46 +255,30 @@ export type AppUpdateState = typeof AppUpdateState.Type;
  * Each names the check that refused, so the row can say which one it was. The
  * feed and artifact reasons mean what they mean for Octant's own updates.
  */
-export const NightlyInstallRefusal = Schema.Literal(
+export const NightlyInstallRefusal = Schema.Literals([
   "unreachable",
   "malformed",
   "untrusted-signature",
   "wrong-platform",
   "wrong-ring",
-  /** The Nightly feed held a build of Octant rather than Octant Nightly. */
   "wrong-app",
   "corrupt-artifact",
-  /** The preview feed holds no published Nightly build. */
   "no-release",
-  /** The downloaded app is not Nightly signed by Octant's own Developer ID team. */
   "code-signature",
-  /** The installed Nightly is the same build or newer; installing would not move it forward. */
   "not-newer",
-  /** The installed Nightly's version could not be read, so no build can be shown to be newer. */
   "installed-version-unreadable",
-  /** The app at Nightly's location did not verify as Nightly, so Remove left it alone. */
   "remove-unverified",
-  /** Octant Nightly is running; replacing or removing it waits until it is quit. */
   "nightly-running",
-  /** macOS did not open the verified Nightly. */
   "launch-failed",
-  /** The download did not finish within its deadline; nothing was changed. */
   "timed-out",
-  /** The code-signature check could not run or ran out of time; nothing was changed. */
   "check-unavailable",
-  /** Something other than Octant Nightly already sits at the install location. */
   "occupied",
-  /** Octant cannot write beside itself. */
   "not-writable",
-  /** This copy of Octant is not where Nightly can be placed beside it. */
   "unsupported-install",
-  /** Only packaged macOS Octant places Nightly beside itself. */
   "unsupported-platform",
-  /** Installing is offered only while Octant follows Preview. */
   "not-on-preview",
-  /** Nightly is not installed, so there is nothing to open or remove. */
   "not-installed",
-);
+]);
 export type NightlyInstallRefusal = typeof NightlyInstallRefusal.Type;
 
 /**
@@ -329,10 +290,10 @@ export type NightlyInstallRefusal = typeof NightlyInstallRefusal.Type;
  * either ring.
  */
 export const NightlyInstallState = Schema.Struct({
-  status: Schema.Literal("unavailable", "not-installed", "installing", "installed", "removing"),
+  status: Schema.Literals(["unavailable", "not-installed", "installing", "installed", "removing"]),
   refusal: Schema.optional(NightlyInstallRefusal),
-  message: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  message: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+});
 export type NightlyInstallState = typeof NightlyInstallState.Type;
 
 /**
@@ -341,23 +302,23 @@ export type NightlyInstallState = typeof NightlyInstallState.Type;
  * started with; `chosen` applies on the next launch. `removal` reports the
  * last request to move the test data to the Trash.
  */
-export const NightlyDataChoice = Schema.Literal("octant", "test-data");
+export const NightlyDataChoice = Schema.Literals(["octant", "test-data"]);
 export type NightlyDataChoice = typeof NightlyDataChoice.Type;
 export const NightlyDataState = Schema.Struct({
   running: NightlyDataChoice,
   chosen: NightlyDataChoice,
   testDataPresent: Schema.Boolean,
   removal: Schema.optional(
-    Schema.Literal(
+    Schema.Literals([
       "removed",
       "absent",
       "test-host-running",
       "unsafe-folder",
       "not-nightly",
       "failed",
-    ),
+    ]),
   ),
-}).annotations(strict);
+});
 export type NightlyDataState = typeof NightlyDataState.Type;
 
 /**
@@ -369,11 +330,11 @@ export type NightlyDataState = typeof NightlyDataState.Type;
 export const NightlyOctantImportPreview = Schema.Struct({
   octantDataPresent: Schema.Boolean,
   /** An ISO 8601 UTC time. */
-  lastImportedAt: Schema.optional(Schema.String.pipe(Schema.maxLength(64))),
-}).annotations(strict);
+  lastImportedAt: Schema.optional(Schema.String.check(Schema.isMaxLength(64))),
+});
 export type NightlyOctantImportPreview = typeof NightlyOctantImportPreview.Type;
 
-const ImportCount = Schema.Int.pipe(Schema.nonNegative());
+const ImportCount = NonNegativeInt;
 
 /**
  * Saved keys do not pass through the import: the main process reads each
@@ -381,30 +342,35 @@ const ImportCount = Schema.Int.pipe(Schema.nonNegative());
  * never replacing one Nightly already has. `unavailable` says the keys could
  * not be listed or reached, so nothing was copied.
  */
-export const NightlyOctantImportKeys = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("not-requested") }).annotations(strict),
+export const NightlyOctantImportKeys = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("not-requested") }),
   Schema.Struct({
     status: Schema.Literal("copied"),
     copied: ImportCount,
     /** Items Nightly already had, left as they were. */
     existing: ImportCount,
     failed: ImportCount,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("cannot-list", "unsupported-platform"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["cannot-list", "unsupported-platform"]),
+  }),
+]);
 export type NightlyOctantImportKeys = typeof NightlyOctantImportKeys.Type;
 
 /** Window preferences come over from Octant's renderer storage, on a fixed allowlist. */
-export const NightlyOctantImportPreferences = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("copied"), copied: ImportCount }).annotations(strict),
+export const NightlyOctantImportPreferences = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("copied"), copied: ImportCount }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
-    reason: Schema.Literal("origin-differs", "octant-storage-missing", "relaunch-needed", "failed"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals([
+      "origin-differs",
+      "octant-storage-missing",
+      "relaunch-needed",
+      "failed",
+    ]),
+  }),
+]);
 export type NightlyOctantImportPreferences = typeof NightlyOctantImportPreferences.Type;
 
 export const NIGHTLY_OCTANT_IMPORT_REFUSALS = [
@@ -434,7 +400,7 @@ export const NIGHTLY_OCTANT_IMPORT_STAGES = [
   "start-host",
 ] as const;
 
-export const NightlyOctantImportOutcome = Schema.Union(
+export const NightlyOctantImportOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("imported"),
     counts: Schema.Struct({
@@ -442,23 +408,23 @@ export const NightlyOctantImportOutcome = Schema.Union(
       threads: ImportCount,
       contentRows: ImportCount,
       settled: ImportCount,
-    }).annotations(strict),
+    }),
     /** Threads both apps changed since the last import; Nightly's stayed as they were. */
     conflicts: ImportCount,
     /** Settings, Projects and other records both changed; Nightly's value stayed. */
     heldBack: ImportCount,
     keys: NightlyOctantImportKeys,
     preferences: NightlyOctantImportPreferences,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal(...NIGHTLY_OCTANT_IMPORT_REFUSALS),
-  }).annotations(strict),
+    reason: Schema.Literals(NIGHTLY_OCTANT_IMPORT_REFUSALS),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
-    stage: Schema.Literal(...NIGHTLY_OCTANT_IMPORT_STAGES),
-  }).annotations(strict),
-);
+    stage: Schema.Literals(NIGHTLY_OCTANT_IMPORT_STAGES),
+  }),
+]);
 export type NightlyOctantImportOutcome = typeof NightlyOctantImportOutcome.Type;
 
 /**
@@ -489,11 +455,23 @@ export const OCTANT_UPDATE_CHECK_INFERENCE = [
   "Nothing across endpoints: an update check is the only request this path makes.",
 ] as const;
 
-export const decodeAppVersion = Schema.decodeUnknownSync(AppVersion);
-export const decodeAppReleaseRing = Schema.decodeUnknownSync(AppReleaseRing);
-export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed);
-export const decodeAppUpdateRelease = Schema.decodeUnknownSync(AppUpdateRelease);
-export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState);
-export const decodeNightlyInstallState = Schema.decodeUnknownSync(NightlyInstallState);
-export const decodeHeadlessBuildFeed = Schema.decodeUnknownSync(HeadlessBuildFeed);
-export const decodeHeadlessBuildRelease = Schema.decodeUnknownSync(HeadlessBuildRelease);
+export const decodeAppVersion = Schema.decodeUnknownSync(AppVersion, STRICT_DECODE_OPTIONS);
+export const decodeAppReleaseRing = Schema.decodeUnknownSync(AppReleaseRing, STRICT_DECODE_OPTIONS);
+export const decodeAppUpdateFeed = Schema.decodeUnknownSync(AppUpdateFeed, STRICT_DECODE_OPTIONS);
+export const decodeAppUpdateRelease = Schema.decodeUnknownSync(
+  AppUpdateRelease,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppUpdateState = Schema.decodeUnknownSync(AppUpdateState, STRICT_DECODE_OPTIONS);
+export const decodeNightlyInstallState = Schema.decodeUnknownSync(
+  NightlyInstallState,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHeadlessBuildFeed = Schema.decodeUnknownSync(
+  HeadlessBuildFeed,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHeadlessBuildRelease = Schema.decodeUnknownSync(
+  HeadlessBuildRelease,
+  STRICT_DECODE_OPTIONS,
+);

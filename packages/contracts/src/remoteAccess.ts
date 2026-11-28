@@ -1,24 +1,25 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp, CorrelationId } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const uuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const uuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 const boundedString = (maxLength: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maxLength));
-const base64Url = Schema.NonEmptyTrimmedString.pipe(Schema.pattern(/^[A-Za-z0-9_-]+$/));
-const fingerprint = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
-const publicKey = boundedString(4_096).pipe(
-  Schema.filter((value) => !value.includes("PRIVATE KEY")),
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maxLength));
+const base64Url = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isPattern(/^[A-Za-z0-9_-]+$/));
+const fingerprint = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+const publicKey = boundedString(4_096).check(
+  Schema.makeFilter((value) => !value.includes("PRIVATE KEY")),
 );
-const redactedCode = Schema.String.pipe(
-  Schema.pattern(/^[a-z0-9][a-z0-9._-]*$/),
-  Schema.maxLength(128),
+const redactedCode = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/),
+  Schema.isMaxLength(128),
 );
-const deviceLabel = boundedString(128).pipe(
-  Schema.filter((value) => !value.includes("/") && !value.includes("\\")),
+const deviceLabel = boundedString(128).check(
+  Schema.makeFilter((value) => !value.includes("/") && !value.includes("\\")),
 );
-const origin = Schema.String.pipe(
-  Schema.filter((value) => {
+const origin = Schema.String.check(
+  Schema.makeFilter((value) => {
     try {
       const parsed = new URL(value);
       return parsed.protocol === "https:" && parsed.username === "" && parsed.password === "";
@@ -27,7 +28,7 @@ const origin = Schema.String.pipe(
     }
   }),
 );
-const positiveInteger = Schema.Int.pipe(Schema.positive());
+const positiveInteger = PositiveInt;
 
 export const StableHostId = uuid("StableHostId");
 export type StableHostId = typeof StableHostId.Type;
@@ -55,14 +56,14 @@ export const REMOTE_AUTHENTICATION_ONLY_CAPABILITY_VECTOR =
  */
 export const HOST_HELLO_CLIENT_NONCE_PARAMETER = "clientNonce" as const;
 /** Base64url of 16 to 96 random bytes; clients send 32. */
-export const HostHelloClientNonce = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22,128}$/));
+export const HostHelloClientNonce = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{22,128}$/),
+);
 
 export const ProtocolRange = Schema.Struct({
   min: positiveInteger,
   max: positiveInteger,
-})
-  .pipe(Schema.filter((value) => value.min <= value.max))
-  .annotations(strict);
+}).check(Schema.makeFilter((value) => value.min <= value.max));
 export type ProtocolRange = typeof ProtocolRange.Type;
 
 export const ClientHelloV1 = Schema.Struct({
@@ -70,7 +71,7 @@ export const ClientHelloV1 = Schema.Struct({
   supportedProtocolRange: ProtocolRange,
   browserCapabilities: Schema.Array(boundedString(64)),
   deviceId: Schema.optional(DeviceId),
-}).annotations(strict);
+});
 export type ClientHelloV1 = typeof ClientHelloV1.Type;
 
 export const HostHelloV1 = Schema.Struct({
@@ -82,7 +83,7 @@ export const HostHelloV1 = Schema.Struct({
   // `hostKeyFingerprint` is its SHA-256. A client checks `signature` against
   // it. Optional only because hosts built before clients verified the hello
   // sent none; a client refuses a hello without it.
-  hostPublicKey: Schema.optional(base64Url.pipe(Schema.maxLength(512))),
+  hostPublicKey: Schema.optional(base64Url.check(Schema.isMaxLength(512))),
   serverBuildVersion: boundedString(128),
   supportedProtocolRange: ProtocolRange,
   authenticationProtocolVersions: Schema.NonEmptyArray(positiveInteger),
@@ -95,7 +96,7 @@ export const HostHelloV1 = Schema.Struct({
   clientNonce: Schema.optional(HostHelloClientNonce),
   expiresAt: UtcTimestamp,
   signature: base64Url,
-}).annotations(strict);
+});
 export type HostHelloV1 = typeof HostHelloV1.Type;
 
 export const PairingRequestV1 = Schema.Struct({
@@ -107,7 +108,7 @@ export const PairingRequestV1 = Schema.Struct({
   deviceLabel,
   origin,
   clientHello: ClientHelloV1,
-}).annotations(strict);
+});
 export type PairingRequestV1 = typeof PairingRequestV1.Type;
 
 export const DeviceRegistrationV1 = Schema.Struct({
@@ -122,10 +123,10 @@ export const DeviceRegistrationV1 = Schema.Struct({
   createdAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
   lastSeenAt: UtcTimestamp,
-  state: Schema.Literal("active", "revoked", "expired"),
+  state: Schema.Literals(["active", "revoked", "expired"]),
   revokedAt: Schema.optional(UtcTimestamp),
   revokedReason: Schema.optional(boundedString(128)),
-}).annotations(strict);
+});
 export type DeviceRegistrationV1 = typeof DeviceRegistrationV1.Type;
 
 export const NegotiatedSessionV1 = Schema.Struct({
@@ -141,33 +142,33 @@ export const NegotiatedSessionV1 = Schema.Struct({
   idleExpiresAt: UtcTimestamp,
   absoluteExpiresAt: UtcTimestamp,
   hostSignature: base64Url,
-}).annotations(strict);
+});
 export type NegotiatedSessionV1 = typeof NegotiatedSessionV1.Type;
 
 export const PairingStatusRequestV1 = Schema.Struct({
   ticketId: PairingTicketId,
-  ticketProof: base64Url.pipe(Schema.maxLength(128)),
-}).annotations(strict);
+  ticketProof: base64Url.check(Schema.isMaxLength(128)),
+});
 export type PairingStatusRequestV1 = typeof PairingStatusRequestV1.Type;
 
-export const PairingStatusResultV1 = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("pending") }).annotations(strict),
+export const PairingStatusResultV1 = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("pending") }),
   Schema.Struct({
     status: Schema.Literal("approved"),
     deviceId: DeviceId,
     credentialGeneration: positiveInteger,
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("failed") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("failed") }),
+]);
 export type PairingStatusResultV1 = typeof PairingStatusResultV1.Type;
 
 export const NegotiationRequestV1 = Schema.Struct({
-  hostHelloNonce: base64Url.pipe(Schema.maxLength(128)),
+  hostHelloNonce: base64Url.check(Schema.isMaxLength(128)),
   challengeId: uuid("RemoteChallengeId"),
   deviceId: DeviceId,
   origin,
   clientHello: ClientHelloV1,
-}).annotations(strict);
+});
 export type NegotiationRequestV1 = typeof NegotiationRequestV1.Type;
 
 export const NegotiatedProtocolV1 = Schema.Struct({
@@ -182,7 +183,7 @@ export const NegotiatedProtocolV1 = Schema.Struct({
   issuedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
   hostSignature: base64Url,
-}).annotations(strict);
+});
 export type NegotiatedProtocolV1 = typeof NegotiatedProtocolV1.Type;
 
 /**
@@ -194,7 +195,7 @@ export type NegotiatedProtocolV1 = typeof NegotiatedProtocolV1.Type;
  * The host stores it and never takes it from the client.
  */
 export const DEVICE_ACCESS_LEVELS = ["full", "approve-and-steer", "read-only"] as const;
-export const DeviceAccessLevel = Schema.Literal(...DEVICE_ACCESS_LEVELS);
+export const DeviceAccessLevel = Schema.Literals(DEVICE_ACCESS_LEVELS);
 export type DeviceAccessLevel = typeof DeviceAccessLevel.Type;
 /** The level a pairing takes unless the person picks another, and the level of every older record. */
 export const DEFAULT_DEVICE_ACCESS_LEVEL: DeviceAccessLevel = "full";
@@ -221,7 +222,7 @@ export const SecurityAuditRecordV1 = Schema.Struct({
   deviceId: Schema.optional(DeviceId),
   protocolVersion: positiveInteger,
   credentialGeneration: positiveInteger,
-  sourceClass: Schema.Literal("loopback", "lan-private", "tailscale", "unknown"),
+  sourceClass: Schema.Literals(["loopback", "lan-private", "tailscale", "unknown"]),
   resultCategory: redactedCode,
   reasonCode: redactedCode,
   correlationId: CorrelationId,
@@ -232,7 +233,7 @@ export const SecurityAuditRecordV1 = Schema.Struct({
    * levels existed, which read as `full`.
    */
   accessLevel: Schema.optional(DeviceAccessLevel),
-}).annotations(strict);
+});
 export type SecurityAuditRecordV1 = typeof SecurityAuditRecordV1.Type;
 
 export const PairingTicketV1 = Schema.Struct({
@@ -240,19 +241,19 @@ export const PairingTicketV1 = Schema.Struct({
   hostId: StableHostId,
   createdAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
-  failedAttempts: Schema.Int.pipe(Schema.nonNegative()),
-  state: Schema.Literal("pending", "approved", "denied", "expired"),
-  sourceClass: Schema.Literal("loopback", "lan-private", "tailscale", "unknown"),
-}).annotations(strict);
+  failedAttempts: NonNegativeInt,
+  state: Schema.Literals(["pending", "approved", "denied", "expired"]),
+  sourceClass: Schema.Literals(["loopback", "lan-private", "tailscale", "unknown"]),
+});
 export type PairingTicketV1 = typeof PairingTicketV1.Type;
 
 export const PairingDecisionV1 = Schema.Struct({
   ticketId: PairingTicketId,
   hostId: StableHostId,
-  decision: Schema.Literal("approved", "denied"),
+  decision: Schema.Literals(["approved", "denied"]),
   decidedAt: UtcTimestamp,
   reasonCode: redactedCode,
-}).annotations(strict);
+});
 export type PairingDecisionV1 = typeof PairingDecisionV1.Type;
 
 export const CredentialGenerationV1 = Schema.Struct({
@@ -262,7 +263,7 @@ export const CredentialGenerationV1 = Schema.Struct({
   deviceKeyFingerprint: fingerprint,
   createdAt: UtcTimestamp,
   graceExpiresAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type CredentialGenerationV1 = typeof CredentialGenerationV1.Type;
 
 export const RemoteSessionStateV1 = Schema.Struct({
@@ -270,10 +271,10 @@ export const RemoteSessionStateV1 = Schema.Struct({
   deviceId: DeviceId,
   sessionId: RemoteSessionId,
   credentialGeneration: positiveInteger,
-  state: Schema.Literal("active", "expired", "revoked"),
+  state: Schema.Literals(["active", "expired", "revoked"]),
   idleExpiresAt: UtcTimestamp,
   absoluteExpiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemoteSessionStateV1 = typeof RemoteSessionStateV1.Type;
 
 export const HostIdentityInitializedV1 = Schema.Struct({
@@ -283,12 +284,12 @@ export const HostIdentityInitializedV1 = Schema.Struct({
   keyGeneration: positiveInteger,
   createdAt: UtcTimestamp,
   rotatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type HostIdentityInitializedV1 = typeof HostIdentityInitializedV1.Type;
 
 export const DeviceRegisteredV1 = Schema.Struct({
   device: DeviceRegistrationV1,
-}).annotations(strict);
+});
 export type DeviceRegisteredV1 = typeof DeviceRegisteredV1.Type;
 
 export const DeviceKeyRotatedV1 = Schema.Struct({
@@ -300,7 +301,7 @@ export const DeviceKeyRotatedV1 = Schema.Struct({
   devicePublicKey: publicKey,
   rotatedAt: UtcTimestamp,
   graceExpiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DeviceKeyRotatedV1 = typeof DeviceKeyRotatedV1.Type;
 
 export const DeviceRevokedV1 = Schema.Struct({
@@ -309,7 +310,7 @@ export const DeviceRevokedV1 = Schema.Struct({
   credentialGeneration: positiveInteger,
   revokedAt: UtcTimestamp,
   reasonCode: boundedString(128),
-}).annotations(strict);
+});
 export type DeviceRevokedV1 = typeof DeviceRevokedV1.Type;
 
 export const RemoteSessionInvalidatedV1 = Schema.Struct({
@@ -320,7 +321,7 @@ export const RemoteSessionInvalidatedV1 = Schema.Struct({
   invalidatedAt: UtcTimestamp,
   reasonCode: redactedCode,
   receiptId: RemoteCommandId,
-}).annotations(strict);
+});
 export type RemoteSessionInvalidatedV1 = typeof RemoteSessionInvalidatedV1.Type;
 
 export const DeviceCredentialExpiredV1 = Schema.Struct({
@@ -329,7 +330,7 @@ export const DeviceCredentialExpiredV1 = Schema.Struct({
   credentialGeneration: positiveInteger,
   expiredAt: UtcTimestamp,
   reasonCode: redactedCode,
-}).annotations(strict);
+});
 export type DeviceCredentialExpiredV1 = typeof DeviceCredentialExpiredV1.Type;
 
 /**
@@ -338,7 +339,7 @@ export type DeviceCredentialExpiredV1 = typeof DeviceCredentialExpiredV1.Type;
  * a pairing until it is revoked.
  */
 export const PAIRED_DEVICE_LIFETIMES = ["7-days", "30-days", "90-days", "1-year", "never"] as const;
-export const PairedDeviceLifetime = Schema.Literal(...PAIRED_DEVICE_LIFETIMES);
+export const PairedDeviceLifetime = Schema.Literals(PAIRED_DEVICE_LIFETIMES);
 export type PairedDeviceLifetime = typeof PairedDeviceLifetime.Type;
 /** The deadline every registration was given before the setting existed. */
 export const DEFAULT_PAIRED_DEVICE_LIFETIME: PairedDeviceLifetime = "30-days";
@@ -356,7 +357,7 @@ export const DeviceRegistrationDeadlineChangedV1 = Schema.Struct({
   expiresAt: UtcTimestamp,
   lifetime: PairedDeviceLifetime,
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DeviceRegistrationDeadlineChangedV1 = typeof DeviceRegistrationDeadlineChangedV1.Type;
 
 /**
@@ -366,11 +367,11 @@ export type DeviceRegistrationDeadlineChangedV1 = typeof DeviceRegistrationDeadl
  * 2026-11-19).
  */
 export const DeviceAlertChangedV1 = Schema.Struct({
-  change: Schema.Literal("raised", "dismissed"),
-  alertId: Schema.UUID,
+  change: Schema.Literals(["raised", "dismissed"]),
+  alertId: GuidString,
   deviceId: DeviceId,
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DeviceAlertChangedV1 = typeof DeviceAlertChangedV1.Type;
 
 /** A person changed a paired device's access level; the envelope's actor is who changed it. */
@@ -380,7 +381,7 @@ export const DeviceAccessLevelChangedV1 = Schema.Struct({
   previousLevel: DeviceAccessLevel,
   accessLevel: DeviceAccessLevel,
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DeviceAccessLevelChangedV1 = typeof DeviceAccessLevelChangedV1.Type;
 
 /**
@@ -392,7 +393,7 @@ export const RemoteAccessPauseChangedV1 = Schema.Struct({
   hostId: StableHostId,
   paused: Schema.Boolean,
   changedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemoteAccessPauseChangedV1 = typeof RemoteAccessPauseChangedV1.Type;
 
 export const HostKeyRotatedV1 = Schema.Struct({
@@ -401,7 +402,7 @@ export const HostKeyRotatedV1 = Schema.Struct({
   keyGeneration: positiveInteger,
   hostKeyFingerprint: fingerprint,
   rotatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type HostKeyRotatedV1 = typeof HostKeyRotatedV1.Type;
 
 export const RemoteCommandReceiptRecordedV1 = Schema.Struct({
@@ -413,18 +414,18 @@ export const RemoteCommandReceiptRecordedV1 = Schema.Struct({
   resultCategory: redactedCode,
   createdAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type RemoteCommandReceiptRecordedV1 = typeof RemoteCommandReceiptRecordedV1.Type;
 
 /** Wire response for a bounded remote command result lookup. */
-export const RemoteCommandResultV1 = Schema.Union(
+export const RemoteCommandResultV1 = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("applied"),
     commandId: RemoteCommandId,
     operationKind: redactedCode,
     occurredAt: UtcTimestamp,
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     commandId: RemoteCommandId,
@@ -432,32 +433,32 @@ export const RemoteCommandResultV1 = Schema.Union(
     reasonCode: redactedCode,
     occurredAt: UtcTimestamp,
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("pending"),
     commandId: RemoteCommandId,
     operationKind: redactedCode,
     createdAt: UtcTimestamp,
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("not-found"),
     commandId: RemoteCommandId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("ambiguous"),
     commandId: RemoteCommandId,
-    reason: Schema.Literal("in-flight", "unconfirmed", "stale-session"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["in-flight", "unconfirmed", "stale-session"]),
+  }),
+]);
 export type RemoteCommandResultV1 = typeof RemoteCommandResultV1.Type;
 
 export const SecurityAuditRecordedV1 = Schema.Struct({
   record: SecurityAuditRecordV1,
-}).annotations(strict);
+});
 export type SecurityAuditRecordedV1 = typeof SecurityAuditRecordedV1.Type;
 
-const nonNegativeInteger = Schema.Int.pipe(Schema.nonNegative());
+const nonNegativeInteger = NonNegativeInt;
 
 /**
  * Server-owned monotonic epoch guard. `highWaterMarkMs` is the greatest
@@ -470,8 +471,8 @@ export const RemoteClockGuardV1 = Schema.Struct({
   hostId: StableHostId,
   highWaterMarkMs: nonNegativeInteger,
   observedAt: UtcTimestamp,
-  posture: Schema.Literal("ok", "recovery-required"),
-}).annotations(strict);
+  posture: Schema.Literals(["ok", "recovery-required"]),
+});
 export type RemoteClockGuardV1 = typeof RemoteClockGuardV1.Type;
 
 /**
@@ -479,20 +480,20 @@ export type RemoteClockGuardV1 = typeof RemoteClockGuardV1.Type;
  * the host wall clock is unsafe for issuing new trust; it carries only a coarse
  * reason and correlation id, never raw times beyond the monotonic bound.
  */
-export const RemoteTimePostureV1 = Schema.Union(
+export const RemoteTimePostureV1 = Schema.Union([
   Schema.Struct({
     posture: Schema.Literal("ok"),
     highWaterMarkMs: nonNegativeInteger,
     effectiveNowMs: nonNegativeInteger,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     posture: Schema.Literal("recovery-required"),
-    reason: Schema.Literal("clock-rollback", "malformed-clock", "forward-jump"),
+    reason: Schema.Literals(["clock-rollback", "malformed-clock", "forward-jump"]),
     highWaterMarkMs: nonNegativeInteger,
     effectiveNowMs: nonNegativeInteger,
     correlationId: CorrelationId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type RemoteTimePostureV1 = typeof RemoteTimePostureV1.Type;
 
 export const REMOTE_ACCESS_EVENT_NAMES = {
@@ -511,48 +512,125 @@ export const REMOTE_ACCESS_EVENT_NAMES = {
   remoteAccessPauseChanged: "remote.access-pause-changed@1",
 } as const;
 
-export const decodeClientHelloV1 = Schema.decodeUnknownSync(ClientHelloV1);
-export const decodeDeviceAlertChangedV1 = Schema.decodeUnknownSync(DeviceAlertChangedV1);
-export const decodeHostHelloV1 = Schema.decodeUnknownSync(HostHelloV1);
-export const decodeStableHostId = Schema.decodeUnknownSync(StableHostId);
-export const decodePairingRequestV1 = Schema.decodeUnknownSync(PairingRequestV1);
-export const decodeDeviceRegistrationV1 = Schema.decodeUnknownSync(DeviceRegistrationV1);
-export const decodeNegotiatedSessionV1 = Schema.decodeUnknownSync(NegotiatedSessionV1);
-export const decodePairingStatusRequestV1 = Schema.decodeUnknownSync(PairingStatusRequestV1);
-export const decodePairingStatusResultV1 = Schema.decodeUnknownSync(PairingStatusResultV1);
-export const decodeNegotiationRequestV1 = Schema.decodeUnknownSync(NegotiationRequestV1);
-export const decodeNegotiatedProtocolV1 = Schema.decodeUnknownSync(NegotiatedProtocolV1);
-export const decodeSecurityAuditRecordV1 = Schema.decodeUnknownSync(SecurityAuditRecordV1);
-export const decodePairingTicketV1 = Schema.decodeUnknownSync(PairingTicketV1);
-export const decodePairingDecisionV1 = Schema.decodeUnknownSync(PairingDecisionV1);
-export const decodeCredentialGenerationV1 = Schema.decodeUnknownSync(CredentialGenerationV1);
-export const decodeRemoteSessionStateV1 = Schema.decodeUnknownSync(RemoteSessionStateV1);
-export const decodeHostIdentityInitializedV1 = Schema.decodeUnknownSync(HostIdentityInitializedV1);
-export const decodeDeviceRegisteredV1 = Schema.decodeUnknownSync(DeviceRegisteredV1);
-export const decodeDeviceKeyRotatedV1 = Schema.decodeUnknownSync(DeviceKeyRotatedV1);
-export const decodeDeviceRevokedV1 = Schema.decodeUnknownSync(DeviceRevokedV1);
+export const decodeClientHelloV1 = Schema.decodeUnknownSync(ClientHelloV1, STRICT_DECODE_OPTIONS);
+export const decodeDeviceAlertChangedV1 = Schema.decodeUnknownSync(
+  DeviceAlertChangedV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostHelloV1 = Schema.decodeUnknownSync(HostHelloV1, STRICT_DECODE_OPTIONS);
+export const decodeStableHostId = Schema.decodeUnknownSync(StableHostId, STRICT_DECODE_OPTIONS);
+export const decodePairingRequestV1 = Schema.decodeUnknownSync(
+  PairingRequestV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDeviceRegistrationV1 = Schema.decodeUnknownSync(
+  DeviceRegistrationV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNegotiatedSessionV1 = Schema.decodeUnknownSync(
+  NegotiatedSessionV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairingStatusRequestV1 = Schema.decodeUnknownSync(
+  PairingStatusRequestV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairingStatusResultV1 = Schema.decodeUnknownSync(
+  PairingStatusResultV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNegotiationRequestV1 = Schema.decodeUnknownSync(
+  NegotiationRequestV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeNegotiatedProtocolV1 = Schema.decodeUnknownSync(
+  NegotiatedProtocolV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSecurityAuditRecordV1 = Schema.decodeUnknownSync(
+  SecurityAuditRecordV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairingTicketV1 = Schema.decodeUnknownSync(
+  PairingTicketV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePairingDecisionV1 = Schema.decodeUnknownSync(
+  PairingDecisionV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeCredentialGenerationV1 = Schema.decodeUnknownSync(
+  CredentialGenerationV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteSessionStateV1 = Schema.decodeUnknownSync(
+  RemoteSessionStateV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeHostIdentityInitializedV1 = Schema.decodeUnknownSync(
+  HostIdentityInitializedV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDeviceRegisteredV1 = Schema.decodeUnknownSync(
+  DeviceRegisteredV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDeviceKeyRotatedV1 = Schema.decodeUnknownSync(
+  DeviceKeyRotatedV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDeviceRevokedV1 = Schema.decodeUnknownSync(
+  DeviceRevokedV1,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRemoteSessionInvalidatedV1 = Schema.decodeUnknownSync(
   RemoteSessionInvalidatedV1,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeDeviceCredentialExpiredV1 = Schema.decodeUnknownSync(DeviceCredentialExpiredV1);
+export const decodeDeviceCredentialExpiredV1 = Schema.decodeUnknownSync(
+  DeviceCredentialExpiredV1,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDeviceRegistrationDeadlineChangedV1 = Schema.decodeUnknownSync(
   DeviceRegistrationDeadlineChangedV1,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeHostKeyRotatedV1 = Schema.decodeUnknownSync(HostKeyRotatedV1);
+export const decodeHostKeyRotatedV1 = Schema.decodeUnknownSync(
+  HostKeyRotatedV1,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeDeviceAccessLevelChangedV1 = Schema.decodeUnknownSync(
   DeviceAccessLevelChangedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemoteAccessPauseChangedV1 = Schema.decodeUnknownSync(
   RemoteAccessPauseChangedV1,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemoteCommandReceiptRecordedV1 = Schema.decodeUnknownSync(
   RemoteCommandReceiptRecordedV1,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeRemoteCommandResultV1 = Schema.decodeUnknownSync(RemoteCommandResultV1);
-export const decodeSecurityAuditRecordedV1 = Schema.decodeUnknownSync(SecurityAuditRecordedV1);
-export const decodeRemoteClockGuardV1 = Schema.decodeUnknownSync(RemoteClockGuardV1);
-export const decodeRemoteTimePostureV1 = Schema.decodeUnknownSync(RemoteTimePostureV1);
-export const decodeRemoteCommandId = Schema.decodeUnknownSync(RemoteCommandId);
+export const decodeRemoteCommandResultV1 = Schema.decodeUnknownSync(
+  RemoteCommandResultV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSecurityAuditRecordedV1 = Schema.decodeUnknownSync(
+  SecurityAuditRecordedV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteClockGuardV1 = Schema.decodeUnknownSync(
+  RemoteClockGuardV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteTimePostureV1 = Schema.decodeUnknownSync(
+  RemoteTimePostureV1,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemoteCommandId = Schema.decodeUnknownSync(
+  RemoteCommandId,
+  STRICT_DECODE_OPTIONS,
+);
 
 export type RemoteClientPrincipal =
   | {

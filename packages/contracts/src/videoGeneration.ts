@@ -1,15 +1,16 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ImageGenerationOfferId, ImageGenerationScopeId } from "./imageGeneration";
 import { ProviderFailure, ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const ContentDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 /** A provider's own label for an option, such as "720p" or "16:9". */
-const OptionLabel = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32));
+const OptionLabel = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(32));
 
 /**
  * The video drivers. The bundled ones are provider plugins on the video seam
@@ -24,33 +25,33 @@ export const VIDEO_DRIVER_KINDS = [
   "fal-video",
   "outside-video",
 ] as const;
-export const VideoDriverKind = Schema.Literal(...VIDEO_DRIVER_KINDS);
+export const VideoDriverKind = Schema.Literals(VIDEO_DRIVER_KINDS);
 export type VideoDriverKind = typeof VideoDriverKind.Type;
 
 /** The whole seconds a model accepts: a range, or the exact values for models that take only some. */
-export const VideoDurations = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("range"), min: PositiveInt, max: PositiveInt })
-    .pipe(Schema.filter((range) => range.min <= range.max))
-    .annotations(strict),
+export const VideoDurations = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("range"), min: PositiveInt, max: PositiveInt }).check(
+    Schema.makeFilter((range) => range.min <= range.max),
+  ),
   Schema.Struct({
     kind: Schema.Literal("values"),
     values: Schema.NonEmptyArray(PositiveInt),
-  }).annotations(strict),
-);
+  }),
+]);
 export type VideoDurations = typeof VideoDurations.Type;
 
 export const VideoAspectRatio = Schema.Struct({
   ratio: OptionLabel,
   /** The model takes this ratio only from a first frame, so the card offers it once an image is chosen. */
   needsImage: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type VideoAspectRatio = typeof VideoAspectRatio.Type;
 
 /**
  * How a model is priced. Amounts are integer US micro-dollars, as every other
  * spend estimate in Octant.
  */
-export const VideoPrice = Schema.Union(
+export const VideoPrice = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("per-second"),
     rates: Schema.NonEmptyArray(
@@ -59,14 +60,14 @@ export const VideoPrice = Schema.Union(
         /** Absent means the rate applies whether audio is on or off. */
         audio: Schema.optional(Schema.Boolean),
         usdMicrosPerSecond: NonNegativeInt,
-      }).annotations(strict),
+      }),
     ),
     inputUsdMicrosPerImage: Schema.optional(NonNegativeInt),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("per-token"),
     outputTokensPerSecond: Schema.NonEmptyArray(
-      Schema.Struct({ resolution: OptionLabel, tokens: PositiveInt }).annotations(strict),
+      Schema.Struct({ resolution: OptionLabel, tokens: PositiveInt }),
     ),
     outputUsdMicrosPerMillionTokens: NonNegativeInt,
     inputUsdMicrosPerMillionTokens: Schema.optional(NonNegativeInt),
@@ -79,7 +80,7 @@ export const VideoPrice = Schema.Union(
      * approved under.
      */
     reservedOutputTokenAllowance: Schema.optional(NonNegativeInt),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("per-clip"),
     rates: Schema.NonEmptyArray(
@@ -88,24 +89,24 @@ export const VideoPrice = Schema.Union(
         resolution: OptionLabel,
         audio: Schema.optional(Schema.Boolean),
         usdMicros: NonNegativeInt,
-      }).annotations(strict),
+      }),
     ),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unpublished") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("unpublished") }),
+]);
 export type VideoPrice = typeof VideoPrice.Type;
 
 export const VideoJobControl = Schema.Struct({
   /** Whether a running job can be stopped at the provider, or only a queued one, or neither. */
-  cancel: Schema.Literal("running", "queued", "none"),
+  cancel: Schema.Literals(["running", "queued", "none"]),
   /** Whether the provider's stored copy can be removed, or else how long the provider keeps it. */
-  removal: Schema.Union(
-    Schema.Struct({ kind: Schema.Literal("delete") }).annotations(strict),
-    Schema.Struct({ kind: Schema.Literal("expires"), afterHours: PositiveInt }).annotations(strict),
-  ),
+  removal: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("delete") }),
+    Schema.Struct({ kind: Schema.Literal("expires"), afterHours: PositiveInt }),
+  ]),
   /** How long after starting a job its id can still be polled, for restart recovery. */
   resumeWindowHours: PositiveInt,
-}).annotations(strict);
+});
 export type VideoJobControl = typeof VideoJobControl.Type;
 
 /**
@@ -115,7 +116,7 @@ export type VideoJobControl = typeof VideoJobControl.Type;
  */
 export const VideoModelCapabilities = Schema.Struct({
   modelId: ProviderModelId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(120)),
   durations: VideoDurations,
   defaultDuration: Schema.optional(PositiveInt),
   /** Lowest first; "lowest" in the default ranking means the first entry. */
@@ -123,7 +124,7 @@ export const VideoModelCapabilities = Schema.Struct({
   defaultResolution: Schema.optional(OptionLabel),
   aspectRatios: Schema.NonEmptyArray(VideoAspectRatio),
   defaultAspectRatio: Schema.optional(OptionLabel),
-  audio: Schema.Literal("none", "always", "optional"),
+  audio: Schema.Literals(["none", "always", "optional"]),
   /** For `optional` audio, whether it is on by default; off when absent. */
   defaultAudio: Schema.optional(Schema.Boolean),
   inputs: Schema.Struct({
@@ -133,10 +134,10 @@ export const VideoModelCapabilities = Schema.Struct({
     maxDurationSecondsWithBothFrames: Schema.optional(PositiveInt),
     /** 0 when the model takes no reference images. */
     maxReferenceImages: NonNegativeInt,
-  }).annotations(strict),
+  }),
   price: VideoPrice,
   job: VideoJobControl,
-}).annotations(strict);
+});
 export type VideoModelCapabilities = typeof VideoModelCapabilities.Type;
 
 /** One clip's options as the person or the agent chose them. */
@@ -145,7 +146,7 @@ export const VideoClipOptions = Schema.Struct({
   resolution: OptionLabel,
   aspectRatio: OptionLabel,
   audio: Schema.Boolean,
-}).annotations(strict);
+});
 export type VideoClipOptions = typeof VideoClipOptions.Type;
 
 /** The largest clip the host keeps; a larger response is refused, never truncated. */
@@ -170,7 +171,7 @@ export const VIDEO_JOB_PROVIDER_COPY_CHANGED = "video.job-provider-copy-changed@
 export const VIDEO_JOB_HOST_CONCURRENCY = 2;
 export const MAX_VIDEO_PROMPT_CHARACTERS = 32_000;
 /** Bounds a provider job id before it reaches the journal; drivers check their own shape. */
-const RemoteJobId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+const RemoteJobId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
 
 export const VIDEO_JOB_STATUSES = [
   "queued",
@@ -179,10 +180,10 @@ export const VIDEO_JOB_STATUSES = [
   "failed",
   "cancelled",
 ] as const;
-export const VideoJobStatus = Schema.Literal(...VIDEO_JOB_STATUSES);
+export const VideoJobStatus = Schema.Literals(VIDEO_JOB_STATUSES);
 export type VideoJobStatus = typeof VideoJobStatus.Type;
 
-export const VideoJobThreadKind = Schema.Literal("chat-thread", "work-thread", "code-thread");
+export const VideoJobThreadKind = Schema.Literals(["chat-thread", "work-thread", "code-thread"]);
 export type VideoJobThreadKind = typeof VideoJobThreadKind.Type;
 
 /**
@@ -190,21 +191,21 @@ export type VideoJobThreadKind = typeof VideoJobThreadKind.Type;
  * and clip). `held` is a cleanup the host still owes; it survives a restart
  * and a thread delete, so the retry reaches the profile's key either way.
  */
-export const VideoProviderCopy = Schema.Literal("none", "held", "removed", "expires");
+export const VideoProviderCopy = Schema.Literals(["none", "held", "removed", "expires"]);
 export type VideoProviderCopy = typeof VideoProviderCopy.Type;
 
 export const VideoClipRecord = Schema.Struct({
   clipId: VideoClipId,
   hash: ContentDigest,
-  size: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(MAX_VIDEO_CLIP_BYTES)),
+  size: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(MAX_VIDEO_CLIP_BYTES)),
   durationSeconds: PositiveInt,
   resolution: OptionLabel,
   aspectRatio: OptionLabel,
-}).annotations(strict);
+});
 export type VideoClipRecord = typeof VideoClipRecord.Type;
 
 /** An estimate in micro-dollars, or `unknown` for a model that publishes no price. */
-export const VideoCostEstimateUsdMicros = Schema.Union(NonNegativeInt, Schema.Literal("unknown"));
+export const VideoCostEstimateUsdMicros = Schema.Union([NonNegativeInt, Schema.Literal("unknown")]);
 export type VideoCostEstimateUsdMicros = typeof VideoCostEstimateUsdMicros.Type;
 
 /**
@@ -227,7 +228,9 @@ export const VideoJob = Schema.Struct({
   remoteId: Schema.optional(RemoteJobId),
   startedAt: Schema.optional(UtcTimestamp),
   clip: Schema.optional(VideoClipRecord),
-  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  safetyRefusal: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
   failure: Schema.optional(ProviderFailure),
   providerCopy: VideoProviderCopy,
   /**
@@ -248,10 +251,10 @@ export const VideoJob = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type VideoJob = typeof VideoJob.Type;
 
-export const VideoJobQueued = Schema.Struct({ job: VideoJob }).annotations(strict);
+export const VideoJobQueued = Schema.Struct({ job: VideoJob });
 export type VideoJobQueued = typeof VideoJobQueued.Type;
 
 export const VideoJobStatusChanged = Schema.Struct({
@@ -263,12 +266,14 @@ export const VideoJobStatusChanged = Schema.Struct({
   remoteId: Schema.optional(RemoteJobId),
   startedAt: Schema.optional(UtcTimestamp),
   clip: Schema.optional(VideoClipRecord),
-  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  safetyRefusal: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
   failure: Schema.optional(ProviderFailure),
   providerCopy: Schema.optional(VideoProviderCopy),
   providerRemoval: Schema.optional(VideoJobControl.fields.removal),
   settledCostUsdMicros: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 export type VideoJobStatusChanged = typeof VideoJobStatusChanged.Type;
 
 export const VideoJobProviderCopyChanged = Schema.Struct({
@@ -276,7 +281,7 @@ export const VideoJobProviderCopyChanged = Schema.Struct({
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
   providerCopy: VideoProviderCopy,
-}).annotations(strict);
+});
 export type VideoJobProviderCopyChanged = typeof VideoJobProviderCopyChanged.Type;
 
 /**
@@ -287,36 +292,44 @@ export type VideoJobProviderCopyChanged = typeof VideoJobProviderCopyChanged.Typ
 export const MAX_VIDEO_REFERENCES = 8;
 
 /** The person's answer to a video offer. */
-export const VideoOfferDecision = Schema.Union(
+export const VideoOfferDecision = Schema.Union([
   Schema.Struct({
     offerId: ImageGenerationOfferId,
     decision: Schema.Literal("video-generate"),
     options: VideoClipOptions,
     /** Keep this profile and model without asking: on the Project, or the thread outside one. */
     rememberForThread: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     offerId: ImageGenerationOfferId,
     decision: Schema.Literal("video-save"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type VideoOfferDecision = typeof VideoOfferDecision.Type;
 
-export const decodeVideoModelCapabilities = Schema.decodeUnknownSync(VideoModelCapabilities);
-export const decodeVideoJobId = Schema.decodeUnknownSync(VideoJobId);
-export const decodeVideoClipId = Schema.decodeUnknownSync(VideoClipId);
-export const decodeVideoJob = Schema.decodeUnknownSync(VideoJob);
-export const decodeVideoJobQueued = Schema.decodeUnknownSync(VideoJobQueued);
-export const decodeVideoJobStatusChanged = Schema.decodeUnknownSync(VideoJobStatusChanged);
+export const decodeVideoModelCapabilities = Schema.decodeUnknownSync(
+  VideoModelCapabilities,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeVideoJobId = Schema.decodeUnknownSync(VideoJobId, STRICT_DECODE_OPTIONS);
+export const decodeVideoClipId = Schema.decodeUnknownSync(VideoClipId, STRICT_DECODE_OPTIONS);
+export const decodeVideoJob = Schema.decodeUnknownSync(VideoJob, STRICT_DECODE_OPTIONS);
+export const decodeVideoJobQueued = Schema.decodeUnknownSync(VideoJobQueued, STRICT_DECODE_OPTIONS);
+export const decodeVideoJobStatusChanged = Schema.decodeUnknownSync(
+  VideoJobStatusChanged,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeVideoJobProviderCopyChanged = Schema.decodeUnknownSync(
   VideoJobProviderCopyChanged,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeVideoClipOptions = Schema.decodeUnknownSync(VideoClipOptions);
+export const decodeVideoClipOptions = Schema.decodeUnknownSync(
+  VideoClipOptions,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** A thread's video jobs, newest last, as the viewer lists them. */
-export const VideoJobsResponse = Schema.Struct({ jobs: Schema.Array(VideoJob) }).annotations(
-  strict,
-);
+export const VideoJobsResponse = Schema.Struct({ jobs: Schema.Array(VideoJob) });
 export type VideoJobsResponse = typeof VideoJobsResponse.Type;
 
 /**
@@ -325,9 +338,9 @@ export type VideoJobsResponse = typeof VideoJobsResponse.Type;
  * checks the issuing window's authority over the thread again.
  */
 export const VideoClipTicketResponse = Schema.Struct({
-  url: Schema.String.pipe(Schema.pattern(/^\/api\/video\/clip\?ticket=[A-Za-z0-9_-]{43}$/)),
+  url: Schema.String.check(Schema.isPattern(/^\/api\/video\/clip\?ticket=[A-Za-z0-9_-]{43}$/)),
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type VideoClipTicketResponse = typeof VideoClipTicketResponse.Type;
 
 /**
@@ -338,9 +351,18 @@ export type VideoClipTicketResponse = typeof VideoClipTicketResponse.Type;
  */
 export const VideoGenerationSettings = Schema.Struct({
   defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
-}).annotations(strict);
+});
 export type VideoGenerationSettings = typeof VideoGenerationSettings.Type;
-export const decodeVideoGenerationSettings = Schema.decodeUnknownSync(VideoGenerationSettings);
+export const decodeVideoGenerationSettings = Schema.decodeUnknownSync(
+  VideoGenerationSettings,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeVideoJobsResponse = Schema.decodeUnknownSync(VideoJobsResponse);
-export const decodeVideoClipTicketResponse = Schema.decodeUnknownSync(VideoClipTicketResponse);
+export const decodeVideoJobsResponse = Schema.decodeUnknownSync(
+  VideoJobsResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeVideoClipTicketResponse = Schema.decodeUnknownSync(
+  VideoClipTicketResponse,
+  STRICT_DECODE_OPTIONS,
+);

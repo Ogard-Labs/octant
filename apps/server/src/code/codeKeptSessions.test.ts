@@ -98,7 +98,7 @@ async function keptSession() {
   });
   const scope = Effect.runSync(Scope.make());
   const held = await Effect.runPromise(
-    Scope.extend(keeper.acquire(key, "same-folder", Effect.succeed(connection), terms), scope),
+    Scope.provide(keeper.acquire(key, "same-folder", Effect.succeed(connection), terms), scope),
   );
   await Effect.runPromise(
     held.start({

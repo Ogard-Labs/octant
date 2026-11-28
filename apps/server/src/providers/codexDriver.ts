@@ -528,7 +528,7 @@ function codexProjectSkillsConfig(
     catch: (error) => error,
   }).pipe(
     Effect.map(projectSkillsOff),
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       error instanceof CodexRpcClientFailure &&
       error.kind === "remote" &&
       error.remoteCode === -32601
@@ -2511,7 +2511,7 @@ function acquireRuntime(
             .pipe(Effect.provideService(Scope.Scope, scope)),
         );
         if (Exit.isFailure(processExit)) {
-          const typed = Option.getOrUndefined(Cause.failureOption(processExit.cause));
+          const typed = Option.getOrUndefined(Cause.findErrorOption(processExit.cause));
           throw typed ?? failure("provider-failed", "Codex runtime failed to start.");
         }
         const connection = processExit.value;
@@ -2851,7 +2851,7 @@ function makeConnection(
     let leasedNetworkOpen = false;
     let leasedServerSignIns: CodexAppServerConnection["protectedSignIns"];
     let closed = false;
-    const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const queue = yield* Queue.unbounded<ProviderRuntimeEvent, Cause.Done>();
     const sessions = new Map<ProviderSessionId, SessionState>();
     const sessionsByThread = new Map<string, SessionState>();
     /**
@@ -3328,7 +3328,7 @@ function makeConnection(
         catch: (error) => error,
       }).pipe(
         Effect.as("added" as const),
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           error instanceof CodexRpcClientFailure &&
           error.kind === "remote" &&
           error.remoteCode === -32601
@@ -3628,7 +3628,7 @@ function makeConnection(
     ) =>
       Effect.runFork(
         request(() => client.respondApproval({ providerRequestId, result: result() })).pipe(
-          Effect.catchAll((providerFailure) =>
+          Effect.catch((providerFailure) =>
             Effect.sync(() => terminalEvent(state, { kind: "failed", failure: providerFailure })),
           ),
         ),
@@ -3886,7 +3886,7 @@ function makeConnection(
                 ),
               );
         }
-        return Scope.extend(leaseFor(posture), connectionScope).pipe(
+        return Scope.provide(leaseFor(posture), connectionScope).pipe(
           Effect.flatMap((runtime) => {
             if (leased !== undefined && !sameAuthority()) {
               return Effect.fail(
@@ -3925,7 +3925,7 @@ function makeConnection(
         sessions.clear();
         sessionsByThread.clear();
         pendingApprovalOwners.clear();
-        Effect.runFork(Queue.shutdown(queue));
+        Queue.endUnsafe(queue);
       }),
     );
 
@@ -4192,13 +4192,13 @@ function makeConnection(
               attempt: number,
             ): Effect.Effect<CodexThreadResult, CodexRpcClientFailure | ProviderFailure> =>
               resumeRequest().pipe(
-                Effect.catchAll((error) =>
+                Effect.catch((error) =>
                   isActiveWriterConflict(error) && attempt < CODEX_RESUME_WRITER_CONFLICT_ATTEMPTS
                     ? (attempt === 1
                         ? closeIdleOtherLeases(codexLeasePosture(input))
                         : Effect.void
                       ).pipe(
-                        Effect.zipRight(
+                        Effect.andThen(
                           Effect.tryPromise({
                             try: () =>
                               (options.sleep ?? defaultSleep)(
@@ -4399,7 +4399,7 @@ function makeConnection(
               return Effect.succeed({ kind: "refused", reason: "runtime-version-unsupported" });
             }
             ensureSubscribed();
-            return Effect.async<ProviderSessionCompaction>((resume) => {
+            return Effect.callback<ProviderSessionCompaction>((resume) => {
               const pending: CodexPendingCompaction = {
                 compacted: false,
                 settle: (outcome) => {
@@ -4526,13 +4526,13 @@ function makeConnection(
                 ),
               }),
             ).pipe(
-              Effect.catchAll((providerFailure) =>
+              Effect.catch((providerFailure) =>
                 Effect.sync(() =>
                   terminalEvent(state, {
                     kind: "waiting",
                     message: "Codex approval response failed; resume must be verified.",
                   }),
-                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+                ).pipe(Effect.andThen(Effect.fail(providerFailure))),
               ),
             );
           }),
@@ -4570,13 +4570,13 @@ function makeConnection(
                 result: { answers },
               }),
             ).pipe(
-              Effect.catchAll((providerFailure) =>
+              Effect.catch((providerFailure) =>
                 Effect.sync(() =>
                   terminalEvent(state, {
                     kind: "waiting",
                     message: "Codex question response failed; resume must be verified.",
                   }),
-                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+                ).pipe(Effect.andThen(Effect.fail(providerFailure))),
               ),
             );
           }),
@@ -4614,13 +4614,13 @@ function makeConnection(
                 },
               }),
             ).pipe(
-              Effect.catchAll((providerFailure) =>
+              Effect.catch((providerFailure) =>
                 Effect.sync(() =>
                   terminalEvent(state, {
                     kind: "waiting",
                     message: "Codex app-tool response failed; resume must be verified.",
                   }),
-                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+                ).pipe(Effect.andThen(Effect.fail(providerFailure))),
               ),
             );
           }),

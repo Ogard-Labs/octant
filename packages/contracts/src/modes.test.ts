@@ -5,7 +5,10 @@ import { DEFAULT_PRODUCT_SURFACE_SETTINGS, ProductSurfaceSettings } from "./mode
 describe("ProductSurfaceSettings", () => {
   it("decodes optional Chat and Work surfaces while Code remains implicit", () => {
     expect(
-      Schema.decodeUnknownSync(ProductSurfaceSettings)({ chatEnabled: false, workEnabled: true }),
+      Schema.decodeUnknownSync(ProductSurfaceSettings, { onExcessProperty: "error" })({
+        chatEnabled: false,
+        workEnabled: true,
+      }),
     ).toEqual({
       chatEnabled: false,
       workEnabled: true,
@@ -15,7 +18,7 @@ describe("ProductSurfaceSettings", () => {
 
   it("rejects an attempt to encode Code as disableable", () => {
     expect(() =>
-      Schema.decodeUnknownSync(ProductSurfaceSettings)({
+      Schema.decodeUnknownSync(ProductSurfaceSettings, { onExcessProperty: "error" })({
         chatEnabled: true,
         workEnabled: true,
         codeEnabled: false,

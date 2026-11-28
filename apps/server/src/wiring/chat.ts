@@ -1271,4 +1271,4 @@ export function wireChat(deps: ChatDependencies) {
   });
 }
 
-export type ChatWiring = Effect.Effect.Success<ReturnType<typeof wireChat>>;
+export type ChatWiring = Effect.Success<ReturnType<typeof wireChat>>;

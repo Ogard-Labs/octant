@@ -49,19 +49,19 @@ import type { ThreadMoveHolds } from "./threadMoveHolds";
 /** The format the Chat conversation part is written in; a destination refuses any other. */
 export const MOVED_CHAT_CONVERSATION_FORMAT = "octant.thread-move.chat/1" as const;
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** An attachment or admitted input, carried as its own part. */
 const MovedAttachment = Schema.Struct({
-  partId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  partId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64))),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(512)),
+  ),
   mediaType: ChatAttachmentMediaType,
-}).annotations(strict);
+});
 type MovedAttachment = typeof MovedAttachment.Type;
 
 const MovedChatConversation = Schema.Struct({
   format: Schema.Literal(MOVED_CHAT_CONVERSATION_FORMAT),
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
   externalContentIngested: Schema.Boolean,
   turns: Schema.Array(
     Schema.Struct({
@@ -77,20 +77,26 @@ const MovedChatConversation = Schema.Struct({
           responses: Schema.Array(Schema.String),
           createdAt: UtcTimestamp,
           updatedAt: UtcTimestamp,
-        }).annotations(strict),
+        }),
       ),
-    }).annotations(strict),
+    }),
   ),
   unsentAttachments: Schema.optional(Schema.Array(MovedAttachment)),
   parts: Schema.optional(MovedThreadParts),
-}).annotations(strict);
+});
 type MovedChatConversation = typeof MovedChatConversation.Type;
 
-const decodeConversation = Schema.decodeUnknownSync(MovedChatConversation);
-const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId);
-const decodeProjectId = Schema.decodeUnknownSync(ProjectId);
-const decodeChatAttachmentMediaType = Schema.decodeUnknownSync(ChatAttachmentMediaType);
-const decodeChatAttachmentId = Schema.decodeUnknownSync(ChatAttachmentId);
+const decodeConversation = Schema.decodeUnknownSync(MovedChatConversation, {
+  onExcessProperty: "error",
+});
+const decodeChatThreadId = Schema.decodeUnknownSync(ChatThreadId, { onExcessProperty: "error" });
+const decodeProjectId = Schema.decodeUnknownSync(ProjectId, { onExcessProperty: "error" });
+const decodeChatAttachmentMediaType = Schema.decodeUnknownSync(ChatAttachmentMediaType, {
+  onExcessProperty: "error",
+});
+const decodeChatAttachmentId = Schema.decodeUnknownSync(ChatAttachmentId, {
+  onExcessProperty: "error",
+});
 
 export interface ChatThreadMoveHostOptions {
   readonly readView: (threadId: ChatThreadId) => ChatThreadView | undefined;

@@ -483,8 +483,8 @@ it("the actual Claude adapter resumes its exact session after the driver and SQL
   const wrongRoot = await secondDriver.acquire("/tmp/another-child");
   try {
     expect(
-      await Effect.runPromise(Effect.either(wrongRoot.connection.resume(resume))),
-    ).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+      await Effect.runPromise(Effect.result(wrongRoot.connection.resume(resume))),
+    ).toMatchObject({ _tag: "Failure", failure: { category: "stale-resume" } });
     expect(secondDriver.openQuery).toHaveBeenCalledTimes(1);
   } finally {
     await wrongRoot.close();
@@ -494,8 +494,8 @@ it("the actual Claude adapter resumes its exact session after the driver and SQL
   const missingHistory = await secondDriver.acquire();
   try {
     expect(
-      await Effect.runPromise(Effect.either(missingHistory.connection.resume(resume))),
-    ).toMatchObject({ _tag: "Left", left: { category: "stale-resume" } });
+      await Effect.runPromise(Effect.result(missingHistory.connection.resume(resume))),
+    ).toMatchObject({ _tag: "Failure", failure: { category: "stale-resume" } });
     expect(secondDriver.openQuery).toHaveBeenCalledTimes(1);
     expect(await second.port.lookup(key, signal())).toBeUndefined();
   } finally {

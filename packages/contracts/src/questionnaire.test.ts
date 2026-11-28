@@ -15,7 +15,7 @@ const question = {
 describe("questionnaire contracts", () => {
   it("decodes bounded app-tool questionnaires and rejects unknown ask fields even in host answers", () => {
     expect(
-      Schema.decodeUnknownSync(NativeHarnessAskUserArguments)({
+      Schema.decodeUnknownSync(NativeHarnessAskUserArguments, { onExcessProperty: "error" })({
         prompt: "Exports",
         questionnaire: { questions: [question] },
       }).questionnaire?.questions,
@@ -31,6 +31,8 @@ describe("questionnaire contracts", () => {
     { questions: [{ ...question, selection: "single", maxSelections: 2 }] },
     { questions: Array.from({ length: 5 }, (_, index) => ({ ...question, id: String(index) })) },
   ])("refuses ambiguous identities and invalid questionnaire limits", (value) => {
-    expect(() => Schema.decodeUnknownSync(Questionnaire)(value)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(Questionnaire, { onExcessProperty: "error" })(value),
+    ).toThrow();
   });
 });

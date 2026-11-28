@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema, Struct } from "effect";
 import { describe, expect, it } from "vitest";
 import * as codeContracts from "./code";
 import { decodeHostAnswer } from "./hostAnswer";
@@ -199,9 +199,7 @@ describe("Code aggregate contracts", () => {
 
   it("is accepted by a client built before worktree settings existed, in every answer that carries the settings", () => {
     // What an older client decodes with: the same schemas, without the field.
-    const olderSettings = codeContracts.CodeSettings.omit("worktrees").annotations({
-      parseOptions: { onExcessProperty: "error" },
-    });
+    const olderSettings = codeContracts.CodeSettings.mapFields(Struct.omit(["worktrees"]));
     const olderBootstrap = Schema.Struct({
       settings: olderSettings,
       threads: Schema.Array(codeContracts.CodeThread),
@@ -227,7 +225,9 @@ describe("Code aggregate contracts", () => {
       kind: "settings-updated",
     });
     // The strict decoder is the host's own and for what a person sends it.
-    expect(() => Schema.decodeUnknownSync(olderSettings)(settings)).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(olderSettings, { onExcessProperty: "error" })(settings),
+    ).toThrow();
     expect(decodeCodeSettings(settings)).toMatchObject({ worktrees: settings.worktrees });
   });
 
@@ -250,9 +250,7 @@ describe("Code aggregate contracts", () => {
   });
 
   it("is accepted by a lenient reader built before the thread view named a cleaned-up worktree", () => {
-    const olderView = codeContracts.CodeThreadView.omit("worktreeCleanup").annotations({
-      parseOptions: { onExcessProperty: "error" },
-    });
+    const olderView = codeContracts.CodeThreadView.mapFields(Struct.omit(["worktreeCleanup"]));
     const view = {
       thread,
       checkout: {
@@ -268,8 +266,12 @@ describe("Code aggregate contracts", () => {
     };
     // The phone and the command line read host answers this way.
     expect(decodeHostAnswer(olderView)(view)).not.toHaveProperty("worktreeCleanup");
-    expect(() => Schema.decodeUnknownSync(olderView)(view)).toThrow();
-    expect(Schema.decodeUnknownSync(codeContracts.CodeThreadView)(view)).toMatchObject({
+    expect(() =>
+      Schema.decodeUnknownSync(olderView, { onExcessProperty: "error" })(view),
+    ).toThrow();
+    expect(
+      Schema.decodeUnknownSync(codeContracts.CodeThreadView, { onExcessProperty: "error" })(view),
+    ).toMatchObject({
       worktreeCleanup: "cleaned-up",
     });
   });

@@ -1,7 +1,6 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { MentionableThreadId } from "./threadMentionIdentity";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Chat's blocking ask: one instruction to a Chat thread the turn explicitly
@@ -14,32 +13,36 @@ export const THREAD_DIALOGUE_TOOL_NAME = "octant_ask_thread";
 /** The bounded message a Chat provider may deliver to an explicitly mentioned Chat thread. */
 export const ThreadDialogueMessageInput = Schema.Struct({
   targetThreadId: MentionableThreadId,
-  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8_000)),
-}).annotations(strict);
+  message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
+});
 export type ThreadDialogueMessageInput = typeof ThreadDialogueMessageInput.Type;
 
-export const ThreadDialogueResult = Schema.Union(
+export const ThreadDialogueResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("completed"),
     targetThreadId: MentionableThreadId,
-    targetTitle: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
-    response: Schema.String.pipe(Schema.maxLength(8_000)),
-  }).annotations(strict),
+    targetTitle: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
+    response: Schema.String.check(Schema.isMaxLength(8_000)),
+  }),
   Schema.Struct({
     status: Schema.Literal("waiting"),
     targetThreadId: MentionableThreadId,
-    targetTitle: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
+    targetTitle: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  }),
   Schema.Struct({
-    status: Schema.Literal("refused", "failed"),
+    status: Schema.Literals(["refused", "failed"]),
     targetThreadId: MentionableThreadId,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
-  }).annotations(strict),
-).annotations(strict);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  }),
+]);
 export type ThreadDialogueResult = typeof ThreadDialogueResult.Type;
 
 export const decodeThreadDialogueMessageInput = Schema.decodeUnknownSync(
   ThreadDialogueMessageInput,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadDialogueResult = Schema.decodeUnknownSync(ThreadDialogueResult);
+export const decodeThreadDialogueResult = Schema.decodeUnknownSync(
+  ThreadDialogueResult,
+  STRICT_DECODE_OPTIONS,
+);

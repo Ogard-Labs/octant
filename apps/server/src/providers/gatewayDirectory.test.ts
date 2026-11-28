@@ -13,7 +13,7 @@ import {
 } from "@octant/provider-sdk/directory-oauth-conformance";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
-import { Cause, Effect, Exit, Option, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
@@ -374,7 +374,7 @@ async function runTurn(
           modelId: GATEWAY_MODEL,
           executionPolicy: "approval-gated",
         });
-        const collector = yield* Effect.fork(
+        const collector = yield* Effect.forkChild(
           (yield* connection.subscribe).pipe(
             Stream.filter((event) => event.sessionId === session),
             Stream.takeUntil(
@@ -392,7 +392,7 @@ async function runTurn(
           attachments: [],
           tools: [],
         });
-        yield* collector.await;
+        yield* Fiber.await(collector);
       }),
     ),
   );
@@ -400,5 +400,7 @@ async function runTurn(
 }
 
 function failureOf(exit: Exit.Exit<unknown, ProviderFailure>): ProviderFailure | undefined {
-  return Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
+  return Exit.isFailure(exit)
+    ? Option.getOrUndefined(Cause.findErrorOption(exit.cause))
+    : undefined;
 }

@@ -13,7 +13,6 @@ import {
 } from "@octant/contracts/code-debug";
 import { ProjectId } from "@octant/contracts/projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const PREFIX = "octant.debug.breakpoints.v1:";
 const PURGED = "octant.debug.breakpoints.purged.v1:";
 const MAX_BYTES = 1024 * 1024;
@@ -23,32 +22,39 @@ const Binding = Schema.Struct({
   fileId: CodeFileId,
   metadata: CodeFileMetadata,
   unconfirmed: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type CodeBreakpointBinding = typeof Binding.Type;
 const SavedFile = Schema.Struct({
   path: CodeProjectFilePath,
   lines: Schema.Array(CodeDebugBreakpoint.fields.line).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE),
-    Schema.filter((lines) =>
-      lines.every((line, index) => index === 0 || line > (lines[index - 1] ?? 0)),
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(MAX_CODE_DEBUG_BREAKPOINTS_PER_FILE)),
+    Schema.check(
+      Schema.makeFilter((lines) =>
+        lines.every((line, index) => index === 0 || line > (lines[index - 1] ?? 0)),
+      ),
     ),
   ),
   binding: Schema.optional(Binding),
-}).annotations(strict);
+});
 export type SavedCodeBreakpointFile = typeof SavedFile.Type;
 const Configuration = Schema.Struct({
   version: Schema.Literal(1),
   files: Schema.Array(SavedFile).pipe(
-    Schema.maxItems(MAX_CODE_DEBUG_BREAKPOINT_FILES),
-    Schema.filter((files) => new Set(files.map((file) => file.path)).size === files.length),
+    Schema.check(Schema.isMaxLength(MAX_CODE_DEBUG_BREAKPOINT_FILES)),
+    Schema.check(
+      Schema.makeFilter((files) => new Set(files.map((file) => file.path)).size === files.length),
+    ),
   ),
-}).annotations(strict);
-const decode = Schema.decodeUnknownSync(Configuration);
+});
+const decode = Schema.decodeUnknownSync(Configuration, { onExcessProperty: "error" });
 export const isCodeBreakpointLine = Schema.is(CodeDebugBreakpoint.fields.line);
-const decodeThreadKey = Schema.decodeUnknownSync(Schema.Tuple(CodeThreadId, CodeCheckoutId));
+const decodeThreadKey = Schema.decodeUnknownSync(Schema.Tuple([CodeThreadId, CodeCheckoutId]), {
+  onExcessProperty: "error",
+});
 const decodeStorageKey = Schema.decodeUnknownSync(
-  Schema.Tuple(Schema.String, Schema.String, CodeThreadId, CodeCheckoutId),
+  Schema.Tuple([Schema.String, Schema.String, CodeThreadId, CodeCheckoutId]),
+  { onExcessProperty: "error" },
 );
 
 export interface CodeBreakpointScope {

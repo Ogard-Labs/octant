@@ -14,7 +14,7 @@ import {
 } from "@octant/contracts";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { deriveTurnMetrics, ledgerUsageCost } from "@octant/domain";
-import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
 import { appToolHostLines } from "../providers/appToolHostLines";
@@ -127,7 +127,7 @@ function sendAndCollect(
   offered: ReadonlyArray<ProviderToolDefinition> = tools,
 ) {
   return Effect.gen(function* () {
-    const events = yield* Effect.fork(
+    const events = yield* Effect.forkChild(
       Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(until))),
     );
     yield* connection.send({ sessionId, prompt, context, attachments: [], tools: offered });
@@ -272,12 +272,12 @@ describe("native harness loop", () => {
             new MemoryNativeHarnessTranscriptStore(),
           );
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools: offered });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           const requested = (requestId: string) =>
             Effect.gen(function* () {
-              yield* Effect.yieldNow();
+              yield* Effect.yieldNow;
               yield* connection.answerTool({
                 sessionId,
                 requestId,
@@ -344,11 +344,11 @@ describe("native harness loop", () => {
           const connection = yield* connect(scripted.transport, transcripts);
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
           yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
-          const note = yield* Effect.fork(
+          const note = yield* Effect.forkChild(
             connection.steer?.({ sessionId, message: "Check the parser" }) ??
               Effect.succeed("unsupported"),
           );
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           yield* connection.stop(sessionId);
           expect(yield* Fiber.join(note)).toBe("unsupported");
           expect(
@@ -384,15 +384,15 @@ describe("native harness loop", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({ sessionId, prompt: "Review", attachments: [], tools });
-          const note = yield* Effect.fork(
+          const note = yield* Effect.forkChild(
             connection.steer?.({ sessionId, message: "Recheck the parser" }) ??
               Effect.succeed("unsupported"),
           );
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           expect(finish).toBeDefined();
           finish?.({ text: "Initial review", toolCalls: [] });
           expect(yield* Fiber.join(note)).toBe("steered");
@@ -426,7 +426,7 @@ describe("native harness loop", () => {
           const connection = yield* connect(scripted.transport, transcripts);
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
           yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.answerTool({
@@ -473,7 +473,7 @@ describe("native harness loop", () => {
           const connection = yield* connect(scripted.transport, transcripts);
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
           yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.answerTool({
@@ -522,14 +522,14 @@ describe("native harness loop", () => {
             "Choose a database",
             (event) => event.kind === "tool-request",
           );
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
-          const note = yield* Effect.fork(
+          const note = yield* Effect.forkChild(
             connection.steer?.({ sessionId, message: "Use SQLite" }) ??
               Effect.succeed("unsupported"),
           );
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           yield* connection.answerTool({
             sessionId,
             requestId: "read-1",
@@ -581,17 +581,17 @@ describe("native harness loop", () => {
           const connection = yield* connect(scripted.transport, transcripts);
           yield* connection.start({ sessionId, modelId, executionPolicy: "plan", tools });
           yield* sendAndCollect(connection, "Review", (event) => event.kind === "tool-request");
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           const notes = [];
           for (const message of messages) {
             notes.push(
-              yield* Effect.fork(
+              yield* Effect.forkChild(
                 connection.steer?.({ sessionId, message }) ?? Effect.succeed("unsupported"),
               ),
             );
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
           }
           yield* connection.answerTool({
             sessionId,
@@ -736,7 +736,7 @@ describe("native harness loop", () => {
             "look",
             (event) => event.kind === "tool-request" && event.requestId === "second",
           );
-          const finished = yield* Effect.fork(
+          const finished = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           for (const requestId of ["second", "first"]) {
@@ -824,7 +824,7 @@ describe("native harness loop", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -854,7 +854,7 @@ describe("native harness loop", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -887,7 +887,7 @@ describe("native harness loop", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const events = yield* Effect.fork(
+          const events = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -1067,7 +1067,7 @@ describe("a lead whose model keeps failing", () => {
           );
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
           yield* sendAndCollect(connection, "Look at it", (event) => event.kind === "tool-request");
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.answerTool({
@@ -1375,7 +1375,7 @@ describe("fitting a request to the endpoint", () => {
               executionPolicy: "approval-gated",
             });
             yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
-            const finished = yield* Effect.fork(
+            const finished = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             yield* connection.answerTool({
@@ -1494,14 +1494,14 @@ describe("fitting a request to the endpoint", () => {
               "look",
               (event) => event.kind === "tool-request",
             );
-            const secondStep = yield* Effect.fork(
+            const secondStep = yield* Effect.forkChild(
               Stream.runCollect(
                 (yield* connection.subscribe).pipe(
                   Stream.takeUntil((event) => event.kind === "tool-request"),
                 ),
               ),
             );
-            const rest = yield* Effect.fork(
+            const rest = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             yield* connection.answerTool({
@@ -1762,7 +1762,7 @@ describe("fitting a request to the endpoint", () => {
               "look",
               (event) => event.kind === "tool-request",
             );
-            const finished = yield* Effect.fork(
+            const finished = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             elapsedMs = 15_000;
@@ -1845,7 +1845,7 @@ describe("an agent's text across the requests of one turn", () => {
   // with each tool the agent asks for answered at once.
   function turnText(connection: ProviderConnection, prompt: string) {
     return Effect.gen(function* () {
-      const collected = yield* Effect.fork(
+      const collected = yield* Effect.forkChild(
         Stream.runCollect(
           (yield* connection.subscribe).pipe(
             Stream.tap((event) =>
@@ -1989,7 +1989,7 @@ describe("recovering from a request the endpoint refuses as too large", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runForEach(
               (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
               (event) => Effect.sync(() => events.push(event)),
@@ -2089,7 +2089,7 @@ describe("recovering from a malformed tool call", () => {
             new MemoryNativeHarnessTranscriptStore(),
           );
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runForEach(
               (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
               (event) => Effect.sync(() => events.push(event)),
@@ -2224,20 +2224,20 @@ describe("recovering from a malformed tool call", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({ sessionId, prompt: "look", attachments: [], tools });
           for (let spin = 0; releaseFourth === undefined && spin < 50; spin += 1) {
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
           }
           const finish = releaseFourth;
           expect(finish).toBeTypeOf("function");
-          const note = yield* Effect.fork(
+          const note = yield* Effect.forkChild(
             connection.steer?.({ sessionId, message: "try a different tool" }) ??
               Effect.succeed("unsupported" as const),
           );
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           finish?.(malformed);
           const steered = yield* Effect.race(
             Fiber.join(note),
@@ -2286,7 +2286,7 @@ describe("cancelling a turn without rebuilding the session", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-          const first = yield* Effect.fork(
+          const first = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({ sessionId, prompt: "first", attachments: [], tools });
@@ -2382,7 +2382,7 @@ describe("compacting an Octant Harness session", () => {
           for (const prompt of ["first", "second", "third"]) {
             yield* sendAndCollect(connection, prompt, isTerminal);
           }
-          const seen = yield* Effect.fork(
+          const seen = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event) => event.kind === "context-compacted"),
@@ -2498,7 +2498,7 @@ describe("compacting an Octant Harness session", () => {
             compactionPoint: { tokens: 170_000, contextWindow: 200_000 },
           });
           yield* sendAndCollect(connection, "first", (event) => event.kind === "tool-request");
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.answerTool({
@@ -2816,7 +2816,7 @@ describe("compacting an Octant Harness session", () => {
             const answered = new Set<string>();
             for (const prompt of [input.firstPrompt ?? "first", "second", "third"]) {
               seen.length = 0;
-              const turn = yield* Effect.fork(
+              const turn = yield* Effect.forkChild(
                 Stream.runForEach(
                   (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
                   (event) => Effect.sync(() => seen.push(event)),
@@ -3295,7 +3295,7 @@ describe("durable Chat and Work sessions", () => {
   /** A Chat or Work send, which offers no harness tools of its own here. */
   const sendTurn = (connection: ProviderConnection, prompt: string) =>
     Effect.gen(function* () {
-      const events = yield* Effect.fork(
+      const events = yield* Effect.forkChild(
         Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
       );
       yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
@@ -3381,7 +3381,7 @@ describe("durable Chat and Work sessions", () => {
           Effect.gen(function* () {
             const connection = yield* connect(transport, transcripts, undefined, mode);
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
-            const first = yield* Effect.fork(
+            const first = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
@@ -3429,10 +3429,12 @@ describe("durable Chat and Work sessions", () => {
         }),
       ),
     );
-    expect(exit).toMatchObject({
-      _tag: "Failure",
-      cause: { error: { category: "stale-resume" } },
-    });
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        category: "stale-resume",
+      });
+    }
     expect(requests).toEqual([]);
   });
 });
@@ -3476,7 +3478,7 @@ describe("the provider's own web search in a harness turn", () => {
             executionPolicy: "approval-gated",
             tools: offered,
           });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3487,7 +3489,7 @@ describe("the provider's own web search in a harness turn", () => {
             providerWebSearch: { withdrawAfterFirstStep: true },
           });
           yield* Effect.promise(() => vi.waitFor(() => expect(requests.length).toBe(1)));
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           yield* connection.answerTool({
             sessionId,
             requestId: "read-1",
@@ -3548,7 +3550,7 @@ describe("the provider's own web search in a harness turn", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3606,7 +3608,7 @@ describe("the provider's own web search in a harness turn", () => {
         Effect.gen(function* () {
           const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3675,7 +3677,7 @@ describe("the provider's own web search in a harness turn", () => {
               executionPolicy: "full-access",
               tools: offered,
             });
-            const all = yield* Effect.fork(
+            const all = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             yield* connection.send({
@@ -3686,7 +3688,7 @@ describe("the provider's own web search in a harness turn", () => {
               providerWebSearch: { withdrawAfterFirstStep: false },
             });
             yield* Effect.promise(() => vi.waitFor(() => expect(backup.requests.length).toBe(1)));
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
             yield* connection.answerTool({
               sessionId,
               requestId: "read-1",
@@ -3749,7 +3751,7 @@ describe("the provider's own web search in a harness turn", () => {
             executionPolicy: "full-access",
             tools: offered,
           });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           // Sent without a grant: the lead's endpoint runs no search of its own.
@@ -3803,7 +3805,7 @@ describe("the provider's own web search in a harness turn", () => {
             tools: offered,
           });
           for (const prompt of ["First", "Second"]) {
-            const all = yield* Effect.fork(
+            const all = yield* Effect.forkChild(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
             );
             yield* connection.send({
@@ -3856,7 +3858,7 @@ describe("the provider's own web search in a harness turn", () => {
             executionPolicy: "full-access",
             tools: offered,
           });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3867,7 +3869,7 @@ describe("the provider's own web search in a harness turn", () => {
             providerWebSearch: { withdrawAfterFirstStep: false },
           });
           yield* Effect.promise(() => vi.waitFor(() => expect(scripted.requests.length).toBe(1)));
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           grant = { withdrawAfterFirstStep: true };
           yield* connection.answerTool({
             sessionId,
@@ -3932,7 +3934,7 @@ describe("the provider's own web search in a harness turn", () => {
             executionPolicy: "approval-gated",
             tools: offered,
           });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3942,11 +3944,11 @@ describe("the provider's own web search in a harness turn", () => {
             tools: offered,
             providerWebSearch: { withdrawAfterFirstStep: true },
           });
-          const note = yield* Effect.fork(
+          const note = yield* Effect.forkChild(
             connection.steer?.({ sessionId, message: "Recheck the parser" }) ??
               Effect.succeed("unsupported"),
           );
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           // Something outside this turn marks the thread before the note is sent.
           grant = undefined;
           finish?.({ text: "Initial review", toolCalls: [] });
@@ -3978,7 +3980,7 @@ describe("the provider's own web search in a harness turn", () => {
             executionPolicy: "full-access",
             tools: offered,
           });
-          const all = yield* Effect.fork(
+          const all = yield* Effect.forkChild(
             Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
           );
           yield* connection.send({
@@ -3989,7 +3991,7 @@ describe("the provider's own web search in a harness turn", () => {
             providerWebSearch: { withdrawAfterFirstStep: false },
           });
           yield* Effect.promise(() => vi.waitFor(() => expect(scripted.requests.length).toBe(1)));
-          yield* Effect.yieldNow();
+          yield* Effect.yieldNow;
           yield* connection.answerTool({
             sessionId,
             requestId: "read-1",

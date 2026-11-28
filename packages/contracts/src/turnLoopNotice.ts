@@ -1,13 +1,15 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" } } as const;
-
 /** Bounded tool name carried on a loop notice or stop record. */
-export const TurnLoopNoticeToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
+export const TurnLoopNoticeToolName = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+);
 
 /** How many identical consecutive tool calls triggered the notice or stop. */
-export const TurnLoopNoticeCount = Schema.Int.pipe(Schema.greaterThanOrEqualTo(2));
+export const TurnLoopNoticeCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(2));
 
 /**
  * A turn repeated the same tool call with the same canonical input in a row.
@@ -16,11 +18,11 @@ export const TurnLoopNoticeCount = Schema.Int.pipe(Schema.greaterThanOrEqualTo(2
  * (`turn-loop-stopped`).
  */
 export const TurnLoopNotice = Schema.Struct({
-  kind: Schema.Literal("turn-loop-noticed", "turn-loop-stopped"),
+  kind: Schema.Literals(["turn-loop-noticed", "turn-loop-stopped"]),
   toolName: TurnLoopNoticeToolName,
   count: TurnLoopNoticeCount,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type TurnLoopNotice = typeof TurnLoopNotice.Type;
 
 /**
@@ -29,10 +31,13 @@ export type TurnLoopNotice = typeof TurnLoopNotice.Type;
  */
 export const TurnStallNotice = Schema.Struct({
   kind: Schema.Literal("turn-stall-noticed"),
-  idleMs: Schema.Int.pipe(Schema.positive()),
+  idleMs: PositiveInt,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type TurnStallNotice = typeof TurnStallNotice.Type;
 
-export const decodeTurnLoopNotice = Schema.decodeUnknownSync(TurnLoopNotice);
-export const decodeTurnStallNotice = Schema.decodeUnknownSync(TurnStallNotice);
+export const decodeTurnLoopNotice = Schema.decodeUnknownSync(TurnLoopNotice, STRICT_DECODE_OPTIONS);
+export const decodeTurnStallNotice = Schema.decodeUnknownSync(
+  TurnStallNotice,
+  STRICT_DECODE_OPTIONS,
+);

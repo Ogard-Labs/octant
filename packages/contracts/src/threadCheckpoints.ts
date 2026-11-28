@@ -1,15 +1,17 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ChatThreadId, ChatTurnId } from "./chat";
 import { CodeThreadId } from "./code";
 import { CodeOperationId } from "./codeOperations";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
+const GitObjectId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
 
-const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
-
-export const ThreadCheckpointId = Schema.UUID.pipe(Schema.brand("ThreadCheckpointId"));
+export const ThreadCheckpointId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ThreadCheckpointId"),
+);
 export type ThreadCheckpointId = typeof ThreadCheckpointId.Type;
 
 /**
@@ -17,8 +19,9 @@ export type ThreadCheckpointId = typeof ThreadCheckpointId.Type;
  * name rather than a note. Longer text belongs in the conversation it marks.
  */
 export const MAX_THREAD_CHECKPOINT_LABEL_LENGTH = 120;
-const ThreadCheckpointLabel = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_THREAD_CHECKPOINT_LABEL_LENGTH),
+const ThreadCheckpointLabel = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_THREAD_CHECKPOINT_LABEL_LENGTH),
 );
 
 /**
@@ -30,18 +33,18 @@ const ThreadCheckpointLabel = Schema.NonEmptyTrimmedString.pipe(
  * revision the thread never ran on nor pin a checkpoint to another thread's
  * work.
  */
-export const ThreadCheckpointAnchorRequest = Schema.Union(
+export const ThreadCheckpointAnchorRequest = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("chat"),
     threadId: ChatThreadId,
     turnId: ChatTurnId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
     operationId: CodeOperationId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadCheckpointAnchorRequest = typeof ThreadCheckpointAnchorRequest.Type;
 
 /**
@@ -52,19 +55,19 @@ export type ThreadCheckpointAnchorRequest = typeof ThreadCheckpointAnchorRequest
  * from. A turn whose revision the host never caught cannot be checkpointed at
  * all rather than being marked as a point that would refuse to restore.
  */
-export const ThreadCheckpointAnchor = Schema.Union(
+export const ThreadCheckpointAnchor = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("chat"),
     threadId: ChatThreadId,
     turnId: ChatTurnId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
     operationId: CodeOperationId,
     revision: GitObjectId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadCheckpointAnchor = typeof ThreadCheckpointAnchor.Type;
 
 /**
@@ -83,19 +86,17 @@ export const ThreadCheckpoint = Schema.Struct({
   label: ThreadCheckpointLabel,
   /** The Project the marked thread was filed under, when it had one. */
   projectId: Schema.optional(ProjectId),
-  lifecycle: Schema.Literal("marked", "forgotten"),
-  restoreCount: Schema.Int.pipe(Schema.nonNegative()),
+  lifecycle: Schema.Literals(["marked", "forgotten"]),
+  restoreCount: NonNegativeInt,
   lastRestoredAt: Schema.optional(UtcTimestamp),
   markedAt: UtcTimestamp,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (checkpoint) => (checkpoint.restoreCount === 0) === (checkpoint.lastRestoredAt === undefined),
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (checkpoint) => (checkpoint.restoreCount === 0) === (checkpoint.lastRestoredAt === undefined),
+  ),
+);
 export type ThreadCheckpoint = typeof ThreadCheckpoint.Type;
 
 export const MarkThreadCheckpointCommand = Schema.Struct({
@@ -104,7 +105,7 @@ export const MarkThreadCheckpointCommand = Schema.Struct({
   checkpointId: Schema.optional(ThreadCheckpointId),
   anchor: ThreadCheckpointAnchorRequest,
   label: ThreadCheckpointLabel,
-}).annotations(strict);
+});
 export type MarkThreadCheckpointCommand = typeof MarkThreadCheckpointCommand.Type;
 
 /**
@@ -116,7 +117,7 @@ export const ForgetThreadCheckpointCommand = Schema.Struct({
   kind: Schema.Literal("forget-thread-checkpoint"),
   checkpointId: ThreadCheckpointId,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type ForgetThreadCheckpointCommand = typeof ForgetThreadCheckpointCommand.Type;
 
 /**
@@ -132,15 +133,15 @@ export const RestoreFromThreadCheckpointCommand = Schema.Struct({
   kind: Schema.Literal("restore-from-thread-checkpoint"),
   checkpointId: ThreadCheckpointId,
   expectedVersion: AggregateVersion,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200)),
-}).annotations(strict);
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+});
 export type RestoreFromThreadCheckpointCommand = typeof RestoreFromThreadCheckpointCommand.Type;
 
-export const ThreadCheckpointCommand = Schema.Union(
+export const ThreadCheckpointCommand = Schema.Union([
   MarkThreadCheckpointCommand,
   ForgetThreadCheckpointCommand,
   RestoreFromThreadCheckpointCommand,
-);
+]);
 export type ThreadCheckpointCommand = typeof ThreadCheckpointCommand.Type;
 
 /**
@@ -148,7 +149,7 @@ export type ThreadCheckpointCommand = typeof ThreadCheckpointCommand.Type;
  * the user can act on, and none of them discloses a path, a ref, or a provider
  * message.
  */
-export const ThreadCheckpointRefusalReason = Schema.Literal(
+export const ThreadCheckpointRefusalReason = Schema.Literals([
   "thread-unavailable",
   "anchor-unavailable",
   "revision-unavailable",
@@ -156,65 +157,65 @@ export const ThreadCheckpointRefusalReason = Schema.Literal(
   "project-unavailable",
   "restore-unavailable",
   "restore-refused",
-);
+]);
 export type ThreadCheckpointRefusalReason = typeof ThreadCheckpointRefusalReason.Type;
 
 /** The thread a restore produced, in the mode the checkpoint was marked in. */
-export const ThreadCheckpointRestore = Schema.Union(
+export const ThreadCheckpointRestore = Schema.Union([
   Schema.Struct({
     mode: Schema.Literal("chat"),
     threadId: ChatThreadId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     mode: Schema.Literal("code"),
     threadId: CodeThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadCheckpointRestore = typeof ThreadCheckpointRestore.Type;
 
-export const ThreadCheckpointCommandResult = Schema.Union(
+export const ThreadCheckpointCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("checkpoint-marked"),
     checkpoint: ThreadCheckpoint,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("checkpoint-forgotten"),
     checkpoint: ThreadCheckpoint,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("checkpoint-restored"),
     checkpoint: ThreadCheckpoint,
     restore: ThreadCheckpointRestore,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("checkpoint-refused"),
     reason: ThreadCheckpointRefusalReason,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadCheckpointCommandResult = typeof ThreadCheckpointCommandResult.Type;
 
 export const ThreadCheckpointList = Schema.Struct({
   checkpoints: Schema.Array(ThreadCheckpoint),
-}).annotations(strict);
+});
 export type ThreadCheckpointList = typeof ThreadCheckpointList.Type;
 
 export const ThreadCheckpointMarked = Schema.Struct({
   kind: Schema.Literal("checkpoint-marked"),
   checkpoint: ThreadCheckpoint,
-}).annotations(strict);
+});
 export type ThreadCheckpointMarked = typeof ThreadCheckpointMarked.Type;
 
 export const ThreadCheckpointForgotten = Schema.Struct({
   kind: Schema.Literal("checkpoint-forgotten"),
   checkpoint: ThreadCheckpoint,
-}).annotations(strict);
+});
 export type ThreadCheckpointForgotten = typeof ThreadCheckpointForgotten.Type;
 
 export const ThreadCheckpointRestored = Schema.Struct({
   kind: Schema.Literal("checkpoint-restored"),
   checkpoint: ThreadCheckpoint,
   restore: ThreadCheckpointRestore,
-}).annotations(strict);
+});
 export type ThreadCheckpointRestored = typeof ThreadCheckpointRestored.Type;
 
 export const THREAD_CHECKPOINT_EVENT_SCHEMAS = {
@@ -223,11 +224,27 @@ export const THREAD_CHECKPOINT_EVENT_SCHEMAS = {
   "checkpoint.restored@1": ThreadCheckpointRestored,
 } as const;
 
-export const decodeThreadCheckpointId = Schema.decodeUnknownSync(ThreadCheckpointId);
-export const decodeThreadCheckpointAnchor = Schema.decodeUnknownSync(ThreadCheckpointAnchor);
-export const decodeThreadCheckpoint = Schema.decodeUnknownSync(ThreadCheckpoint);
-export const decodeThreadCheckpointCommand = Schema.decodeUnknownSync(ThreadCheckpointCommand);
+export const decodeThreadCheckpointId = Schema.decodeUnknownSync(
+  ThreadCheckpointId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadCheckpointAnchor = Schema.decodeUnknownSync(
+  ThreadCheckpointAnchor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadCheckpoint = Schema.decodeUnknownSync(
+  ThreadCheckpoint,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadCheckpointCommand = Schema.decodeUnknownSync(
+  ThreadCheckpointCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadCheckpointCommandResult = Schema.decodeUnknownSync(
   ThreadCheckpointCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThreadCheckpointList = Schema.decodeUnknownSync(ThreadCheckpointList);
+export const decodeThreadCheckpointList = Schema.decodeUnknownSync(
+  ThreadCheckpointList,
+  STRICT_DECODE_OPTIONS,
+);

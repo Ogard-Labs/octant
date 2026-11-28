@@ -1540,4 +1540,4 @@ export function wireCode(deps: CodeDependencies) {
   });
 }
 
-export type CodeWiring = Effect.Effect.Success<ReturnType<typeof wireCode>>;
+export type CodeWiring = Effect.Success<ReturnType<typeof wireCode>>;

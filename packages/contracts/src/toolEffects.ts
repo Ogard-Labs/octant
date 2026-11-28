@@ -1,15 +1,15 @@
 import { Schema } from "effect";
+import { GuidString } from "./schemaPrimitives";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const BoundedToolCallId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
-const BoundedToolName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+const BoundedToolCallId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
+const BoundedToolName = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
 
 /**
  * Whether a tool call can change anything. `read-only` is declared per tool;
  * every tool without that declaration is `side-effecting`, so a tool nobody
  * classified is treated as one that may have taken effect.
  */
-export const ToolEffectClass = Schema.Literal("read-only", "side-effecting");
+export const ToolEffectClass = Schema.Literals(["read-only", "side-effecting"]);
 export type ToolEffectClass = typeof ToolEffectClass.Type;
 
 /**
@@ -18,7 +18,7 @@ export type ToolEffectClass = typeof ToolEffectClass.Type;
  * the host reads the runtime's report that it started, which is after the
  * fact.
  */
-export const ToolEffectOrigin = Schema.Literal("host", "runtime");
+export const ToolEffectOrigin = Schema.Literals(["host", "runtime"]);
 export type ToolEffectOrigin = typeof ToolEffectOrigin.Type;
 
 /**
@@ -28,13 +28,13 @@ export type ToolEffectOrigin = typeof ToolEffectOrigin.Type;
  * attempt, a Work turn request, or the id an agent run's calls are kept under.
  */
 export const ToolEffectIntended = Schema.Struct({
-  threadId: Schema.UUID,
-  turnId: Schema.UUID,
+  threadId: GuidString,
+  turnId: GuidString,
   toolCallId: BoundedToolCallId,
   toolName: BoundedToolName,
   effect: ToolEffectClass,
   origin: ToolEffectOrigin,
-}).annotations(strict);
+});
 export type ToolEffectIntended = typeof ToolEffectIntended.Type;
 
 /**
@@ -45,10 +45,10 @@ export type ToolEffectIntended = typeof ToolEffectIntended.Type;
  * always precedes the effect.
  */
 export const ToolEffectAwaitingApproval = Schema.Struct({
-  threadId: Schema.UUID,
-  turnId: Schema.UUID,
+  threadId: GuidString,
+  turnId: GuidString,
   toolCallId: BoundedToolCallId,
-}).annotations(strict);
+});
 export type ToolEffectAwaitingApproval = typeof ToolEffectAwaitingApproval.Type;
 
 /**
@@ -60,11 +60,11 @@ export type ToolEffectAwaitingApproval = typeof ToolEffectAwaitingApproval.Type;
  * the runtime then handed to the host, which the host records itself.
  */
 export const ToolEffectSettled = Schema.Struct({
-  threadId: Schema.UUID,
-  turnId: Schema.UUID,
+  threadId: GuidString,
+  turnId: GuidString,
   toolCallId: BoundedToolCallId,
-  outcome: Schema.Literal("succeeded", "failed", "superseded"),
-}).annotations(strict);
+  outcome: Schema.Literals(["succeeded", "failed", "superseded"]),
+});
 export type ToolEffectSettled = typeof ToolEffectSettled.Type;
 
 /**

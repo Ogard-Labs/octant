@@ -1,11 +1,10 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   ValidationEvidenceRecord,
   ValidationPlan,
   ValidationReport,
 } from "./validationComposition";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Event payload recorded when a validation plan is created for an authority
@@ -16,7 +15,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  */
 export const ValidationPlanCreated = Schema.Struct({
   plan: ValidationPlan,
-}).annotations(strict);
+});
 export type ValidationPlanCreated = typeof ValidationPlanCreated.Type;
 
 /**
@@ -31,7 +30,7 @@ export type ValidationPlanCreated = typeof ValidationPlanCreated.Type;
  */
 export const ValidationEvidenceRecorded = Schema.Struct({
   evidence: ValidationEvidenceRecord,
-}).annotations(strict);
+});
 export type ValidationEvidenceRecorded = typeof ValidationEvidenceRecorded.Type;
 
 /**
@@ -40,11 +39,18 @@ export type ValidationEvidenceRecorded = typeof ValidationEvidenceRecorded.Type;
  */
 export const ValidationReportCompleted = Schema.Struct({
   report: ValidationReport,
-}).annotations(strict);
+});
 export type ValidationReportCompleted = typeof ValidationReportCompleted.Type;
 
-export const decodeValidationPlanCreated = Schema.decodeUnknownSync(ValidationPlanCreated);
+export const decodeValidationPlanCreated = Schema.decodeUnknownSync(
+  ValidationPlanCreated,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeValidationEvidenceRecorded = Schema.decodeUnknownSync(
   ValidationEvidenceRecorded,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeValidationReportCompleted = Schema.decodeUnknownSync(ValidationReportCompleted);
+export const decodeValidationReportCompleted = Schema.decodeUnknownSync(
+  ValidationReportCompleted,
+  STRICT_DECODE_OPTIONS,
+);

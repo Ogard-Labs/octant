@@ -1,10 +1,12 @@
 import { Schema } from "effect";
+import { GuidString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ContentProvenance } from "./contentProvenance";
 import { AggregateVersion, UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-export const ProductFeedbackNoteId = Schema.UUID.pipe(Schema.brand("ProductFeedbackNoteId"));
+export const ProductFeedbackNoteId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("ProductFeedbackNoteId"),
+);
 export type ProductFeedbackNoteId = typeof ProductFeedbackNoteId.Type;
 
 /**
@@ -18,21 +20,21 @@ export const MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH = 2_000;
 export const MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS = 256 * 1024;
 
 const boundedLabel = (maximum: number) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(maximum));
+  Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(maximum));
 
 /** Fixed context about the selected element; never a page HTML export. */
 export const ProductFeedbackBrowserContext = Schema.Struct({
-  captureId: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  captureId: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   viewport: Schema.Struct({
-    width: Schema.Int.pipe(Schema.between(1, 16_384)),
-    height: Schema.Int.pipe(Schema.between(1, 16_384)),
-  }).annotations(strict),
+    width: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16_384 })),
+    height: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16_384 })),
+  }),
   tag: boundedLabel(64),
-  ancestors: Schema.Array(boundedLabel(64)).pipe(Schema.maxItems(4)),
-  children: Schema.Array(boundedLabel(128)).pipe(Schema.maxItems(8)),
+  ancestors: Schema.Array(boundedLabel(64)).check(Schema.isMaxLength(4)),
+  children: Schema.Array(boundedLabel(128)).check(Schema.isMaxLength(8)),
   styles: Schema.Array(
     Schema.Struct({
-      property: Schema.Literal(
+      property: Schema.Literals([
         "display",
         "position",
         "box-sizing",
@@ -51,27 +53,25 @@ export const ProductFeedbackBrowserContext = Schema.Struct({
         "border-color",
         "border-width",
         "border-radius",
-      ),
-      value: Schema.String.pipe(Schema.maxLength(128)),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(18)),
+      ]),
+      value: Schema.String.check(Schema.isMaxLength(128)),
+    }),
+  ).check(Schema.isMaxLength(18)),
   omissions: Schema.Array(
-    Schema.Literal(
+    Schema.Literals([
       "bounded-neighborhood",
       "form-values-excluded",
       "shadow-content-excluded",
       "crop-unavailable",
       "crop-withheld-for-editable-content",
       "crop-withheld-for-uninspected-region",
-    ),
-  ).pipe(Schema.maxItems(6)),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (context) => new TextEncoder().encode(JSON.stringify(context)).byteLength <= 8 * 1_024,
-    ),
-  );
+    ]),
+  ).check(Schema.isMaxLength(6)),
+}).check(
+  Schema.makeFilter(
+    (context) => new TextEncoder().encode(JSON.stringify(context)).byteLength <= 8 * 1_024,
+  ),
+);
 export type ProductFeedbackBrowserContext = typeof ProductFeedbackBrowserContext.Type;
 
 /**
@@ -79,22 +79,22 @@ export type ProductFeedbackBrowserContext = typeof ProductFeedbackBrowserContext
  * can draw the same box the host cropped without knowing its viewport.
  */
 export const ProductFeedbackBounds = Schema.Struct({
-  x: Schema.Number.pipe(Schema.between(0, 1)),
-  y: Schema.Number.pipe(Schema.between(0, 1)),
-  width: Schema.Number.pipe(Schema.between(0, 1)),
-  height: Schema.Number.pipe(Schema.between(0, 1)),
-}).annotations(strict);
+  x: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  y: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  width: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  height: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+});
 export type ProductFeedbackBounds = typeof ProductFeedbackBounds.Type;
 
 export const ProductFeedbackBrowserDescription = Schema.Struct({
   selector: boundedLabel(1_024),
   role: Schema.optional(boundedLabel(64)),
   accessibleName: Schema.optional(boundedLabel(512)),
-  text: Schema.optional(Schema.String.pipe(Schema.maxLength(2_048))),
+  text: Schema.optional(Schema.String.check(Schema.isMaxLength(2_048))),
   bounds: ProductFeedbackBounds,
   /** Legacy captures did not record a reviewable context. */
   context: Schema.optional(ProductFeedbackBrowserContext),
-}).annotations(strict);
+});
 
 /**
  * The element's own markup, as the fixed reader serialized it for the Browser
@@ -105,39 +105,39 @@ export const ProductFeedbackBrowserDescription = Schema.Struct({
 export const MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS = 4_096;
 
 export const BrowserElementMarkup = Schema.Struct({
-  html: Schema.String.pipe(Schema.maxLength(MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS)),
+  html: Schema.String.check(Schema.isMaxLength(MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type BrowserElementMarkup = typeof BrowserElementMarkup.Type;
 
-export const ProductFeedbackPointObservation = Schema.Union(
+export const ProductFeedbackPointObservation = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("described"),
     element: ProductFeedbackBrowserDescription,
     /** Read for the picker only; a note never keeps it. */
     markup: Schema.optional(BrowserElementMarkup),
     cropDataUrl: Schema.optional(
-      Schema.String.pipe(
-        Schema.maxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
-        Schema.pattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
+      Schema.String.check(
+        Schema.isMaxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
+        Schema.isPattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
       ),
     ),
     url: Schema.optional(boundedLabel(4_096)),
     title: Schema.optional(boundedLabel(1_024)),
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("no-element") }).annotations(strict),
+  }),
+  Schema.Struct({ status: Schema.Literal("no-element") }),
   Schema.Struct({
     status: Schema.Literal("unavailable"),
     reason: Schema.optional(
-      Schema.Literal(
+      Schema.Literals([
         "page-changed",
         "observation-paused",
         "frame-unavailable",
         "capture-unavailable",
-      ),
+      ]),
     ),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ProductFeedbackPointObservation = typeof ProductFeedbackPointObservation.Type;
 
 /**
@@ -149,21 +149,21 @@ export type ProductFeedbackPointObservation = typeof ProductFeedbackPointObserva
  * is supplied by the client — the host reads the running product itself, so a
  * caller can neither invent an element nor point at one it cannot see.
  */
-export const ProductFeedbackElement = Schema.Union(
+export const ProductFeedbackElement = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("browser-element"),
     ...ProductFeedbackBrowserDescription.fields,
     url: Schema.optional(boundedLabel(4_096)),
     title: Schema.optional(boundedLabel(1_024)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("accessibility-element"),
     identifier: boundedLabel(512),
     role: Schema.optional(boundedLabel(64)),
     label: Schema.optional(boundedLabel(512)),
     bounds: ProductFeedbackBounds,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ProductFeedbackElement = typeof ProductFeedbackElement.Type;
 
 /**
@@ -172,10 +172,12 @@ export type ProductFeedbackElement = typeof ProductFeedbackElement.Type;
  * evidence store beside it.
  */
 export const ProductFeedbackCrop = Schema.Struct({
-  contentId: Schema.UUID,
-  digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
-  byteLength: Schema.Int.pipe(Schema.between(0, MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS)),
-}).annotations(strict);
+  contentId: GuidString,
+  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  byteLength: Schema.Int.check(
+    Schema.isBetween({ minimum: 0, maximum: MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS }),
+  ),
+});
 export type ProductFeedbackCrop = typeof ProductFeedbackCrop.Type;
 
 /**
@@ -190,13 +192,13 @@ export type ProductFeedbackCrop = typeof ProductFeedbackCrop.Type;
 export const ProductFeedbackProvenance = Schema.Struct({
   comment: ContentProvenance,
   element: ContentProvenance,
-}).annotations(strict);
+});
 export type ProductFeedbackProvenance = typeof ProductFeedbackProvenance.Type;
 
 export const ProductFeedbackNote = Schema.Struct({
   id: ProductFeedbackNoteId,
-  threadId: Schema.UUID,
-  mode: Schema.Literal("chat", "work", "code"),
+  threadId: GuidString,
+  mode: Schema.Literals(["chat", "work", "code"]),
   comment: boundedLabel(MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH),
   element: ProductFeedbackElement,
   /** Absent when the host could not cut a picture of the element. */
@@ -206,18 +208,18 @@ export const ProductFeedbackNote = Schema.Struct({
    * `pending` until a turn carries it, then `delivered`. A note is never
    * carried twice: the turn that takes it says so in the journal.
    */
-  lifecycle: Schema.Literal("pending", "delivered", "discarded"),
+  lifecycle: Schema.Literals(["pending", "delivered", "discarded"]),
   /** Legacy pending notes were included with the next message. */
   included: Schema.optional(Schema.Boolean),
   capturedAt: UtcTimestamp,
   deliveredAt: Schema.optional(UtcTimestamp),
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((note) => (note.lifecycle === "delivered") === (note.deliveredAt !== undefined)),
-  );
+}).check(
+  Schema.makeFilter(
+    (note) => (note.lifecycle === "delivered") === (note.deliveredAt !== undefined),
+  ),
+);
 export type ProductFeedbackNote = typeof ProductFeedbackNote.Type;
 
 /**
@@ -231,79 +233,77 @@ export type ProductFeedbackNote = typeof ProductFeedbackNote.Type;
 export const CaptureProductFeedbackCommand = Schema.Struct({
   kind: Schema.Literal("capture-product-feedback"),
   noteId: Schema.optional(ProductFeedbackNoteId),
-  threadId: Schema.UUID,
-  mode: Schema.Literal("chat", "work", "code"),
-  contextId: Schema.UUID,
+  threadId: GuidString,
+  mode: Schema.Literals(["chat", "work", "code"]),
+  contextId: GuidString,
   point: Schema.Struct({
-    x: Schema.Number.pipe(Schema.between(0, 1)),
-    y: Schema.Number.pipe(Schema.between(0, 1)),
-  }).annotations(strict),
+    x: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+    y: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  }),
   comment: boundedLabel(MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH),
-}).annotations(strict);
+});
 export type CaptureProductFeedbackCommand = typeof CaptureProductFeedbackCommand.Type;
 
 export const DiscardProductFeedbackCommand = Schema.Struct({
   kind: Schema.Literal("discard-product-feedback"),
   noteId: ProductFeedbackNoteId,
   expectedVersion: AggregateVersion,
-}).annotations(strict);
+});
 export type DiscardProductFeedbackCommand = typeof DiscardProductFeedbackCommand.Type;
 
 export const ProductFeedbackPreview = Schema.Struct({
-  id: Schema.UUID,
-  threadId: Schema.UUID,
-  mode: Schema.Literal("work", "code"),
+  id: GuidString,
+  threadId: GuidString,
+  mode: Schema.Literals(["work", "code"]),
   element: ProductFeedbackElement,
   cropDataUrl: Schema.optional(
-    Schema.String.pipe(
-      Schema.maxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
-      Schema.pattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
+    Schema.String.check(
+      Schema.isMaxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
+      Schema.isPattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
     ),
   ),
   provenance: ProductFeedbackProvenance,
   capturedAt: UtcTimestamp,
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ProductFeedbackPreview = typeof ProductFeedbackPreview.Type;
 
 export const ProductFeedbackCropAnswer = Schema.Struct({
   dataUrl: Schema.optional(
-    Schema.String.pipe(
-      Schema.maxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
-      Schema.pattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
+    Schema.String.check(
+      Schema.isMaxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
+      Schema.isPattern(/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/),
     ),
   ),
-}).annotations(strict);
+});
 
 export const PrepareProductFeedbackCommand = Schema.Struct({
   kind: Schema.Literal("prepare-product-feedback"),
-  threadId: Schema.UUID,
-  contextId: Schema.UUID,
-  selectionId: Schema.optional(Schema.UUID),
-  expectedObservationRevision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  threadId: GuidString,
+  contextId: GuidString,
+  selectionId: Schema.optional(GuidString),
+  expectedObservationRevision: Schema.optional(NonNegativeInt),
   point: CaptureProductFeedbackCommand.fields.point,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        command.selectionId !== undefined || command.expectedObservationRevision !== undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (command) =>
+      command.selectionId !== undefined || command.expectedObservationRevision !== undefined,
+  ),
+);
 
 export const CommitProductFeedbackCommand = Schema.Struct({
   kind: Schema.Literal("commit-product-feedback"),
-  previewId: Schema.UUID,
-  threadId: Schema.UUID,
+  previewId: GuidString,
+  threadId: GuidString,
   noteId: Schema.optional(ProductFeedbackNoteId),
   comment: boundedLabel(MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH),
-}).annotations(strict);
+});
 
 export const CancelProductFeedbackPreviewCommand = Schema.Struct({
   kind: Schema.Literal("cancel-product-feedback-preview"),
-  previewId: Schema.UUID,
-  threadId: Schema.UUID,
-}).annotations(strict);
+  previewId: GuidString,
+  threadId: GuidString,
+});
 
 export const UpdateProductFeedbackCommand = Schema.Struct({
   kind: Schema.Literal("update-product-feedback"),
@@ -311,11 +311,9 @@ export const UpdateProductFeedbackCommand = Schema.Struct({
   expectedVersion: AggregateVersion,
   comment: Schema.optional(boundedLabel(MAX_PRODUCT_FEEDBACK_COMMENT_LENGTH)),
   included: Schema.optional(Schema.Boolean),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((command) => command.comment !== undefined || command.included !== undefined),
-  );
+}).check(
+  Schema.makeFilter((command) => command.comment !== undefined || command.included !== undefined),
+);
 
 /**
  * Pick one element of a Work or Code thread's Browser for the composer. The
@@ -324,19 +322,17 @@ export const UpdateProductFeedbackCommand = Schema.Struct({
  */
 export const PickBrowserElementCommand = Schema.Struct({
   kind: Schema.Literal("pick-browser-element"),
-  threadId: Schema.UUID,
-  contextId: Schema.UUID,
-  selectionId: Schema.optional(Schema.UUID),
-  expectedObservationRevision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  threadId: GuidString,
+  contextId: GuidString,
+  selectionId: Schema.optional(GuidString),
+  expectedObservationRevision: Schema.optional(NonNegativeInt),
   point: CaptureProductFeedbackCommand.fields.point,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        command.selectionId !== undefined || command.expectedObservationRevision !== undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (command) =>
+      command.selectionId !== undefined || command.expectedObservationRevision !== undefined,
+  ),
+);
 
 /** The computed styles a picked element reports: box size, colours, font, display and position. */
 export const BROWSER_ELEMENT_SNAPSHOT_STYLES = [
@@ -352,7 +348,7 @@ export const BROWSER_ELEMENT_SNAPSHOT_STYLES = [
 ] as const;
 
 export const BrowserElementSnapshot = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   selector: boundedLabel(1_024),
   tag: boundedLabel(64),
   url: Schema.optional(boundedLabel(4_096)),
@@ -361,17 +357,17 @@ export const BrowserElementSnapshot = Schema.Struct({
   markup: Schema.optional(BrowserElementMarkup),
   styles: Schema.Array(
     Schema.Struct({
-      property: Schema.Literal(...BROWSER_ELEMENT_SNAPSHOT_STYLES),
-      value: Schema.String.pipe(Schema.maxLength(128)),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(BROWSER_ELEMENT_SNAPSHOT_STYLES.length)),
+      property: Schema.Literals(BROWSER_ELEMENT_SNAPSHOT_STYLES),
+      value: Schema.String.check(Schema.isMaxLength(128)),
+    }),
+  ).check(Schema.isMaxLength(BROWSER_ELEMENT_SNAPSHOT_STYLES.length)),
   /** Always outside content: everything here came off the page. */
   provenance: ContentProvenance,
   capturedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BrowserElementSnapshot = typeof BrowserElementSnapshot.Type;
 
-export const ProductFeedbackCommand = Schema.Union(
+export const ProductFeedbackCommand = Schema.Union([
   PickBrowserElementCommand,
   CaptureProductFeedbackCommand,
   DiscardProductFeedbackCommand,
@@ -379,10 +375,10 @@ export const ProductFeedbackCommand = Schema.Union(
   CommitProductFeedbackCommand,
   CancelProductFeedbackPreviewCommand,
   UpdateProductFeedbackCommand,
-);
+]);
 export type ProductFeedbackCommand = typeof ProductFeedbackCommand.Type;
 
-export const ProductFeedbackRefusalReason = Schema.Literal(
+export const ProductFeedbackRefusalReason = Schema.Literals([
   "thread-unavailable",
   "surface-unavailable",
   "element-unavailable",
@@ -390,72 +386,72 @@ export const ProductFeedbackRefusalReason = Schema.Literal(
   "note-limit-reached",
   "preview-limit-reached",
   "preview-expired",
-);
+]);
 export type ProductFeedbackRefusalReason = typeof ProductFeedbackRefusalReason.Type;
 
 /** A thread keeps a short queue of notes; past it, the user sends what they have. */
 export const MAX_PENDING_PRODUCT_FEEDBACK_NOTES = 8;
 
-export const ProductFeedbackCommandResult = Schema.Union(
+export const ProductFeedbackCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("feedback-prepared"),
     preview: ProductFeedbackPreview,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("feedback-preview-cancelled"),
-    previewId: Schema.UUID,
-  }).annotations(strict),
+    previewId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("feedback-updated"),
     note: ProductFeedbackNote,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("feedback-captured"),
     note: ProductFeedbackNote,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("feedback-discarded"),
     note: ProductFeedbackNote,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("feedback-refused"),
     reason: ProductFeedbackRefusalReason,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("browser-element-picked"),
     snapshot: BrowserElementSnapshot,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ProductFeedbackCommandResult = typeof ProductFeedbackCommandResult.Type;
 
 export const ProductFeedbackList = Schema.Struct({
   notes: Schema.Array(ProductFeedbackNote),
-}).annotations(strict);
+});
 export type ProductFeedbackList = typeof ProductFeedbackList.Type;
 
 export const ProductFeedbackCaptured = Schema.Struct({
   kind: Schema.Literal("feedback-captured"),
   note: ProductFeedbackNote,
-}).annotations(strict);
+});
 export type ProductFeedbackCaptured = typeof ProductFeedbackCaptured.Type;
 
 export const ProductFeedbackDiscarded = Schema.Struct({
   kind: Schema.Literal("feedback-discarded"),
   note: ProductFeedbackNote,
-}).annotations(strict);
+});
 export type ProductFeedbackDiscarded = typeof ProductFeedbackDiscarded.Type;
 
 export const ProductFeedbackUpdated = Schema.Struct({
   kind: Schema.Literal("feedback-updated"),
   note: ProductFeedbackNote,
-}).annotations(strict);
+});
 
 export const ProductFeedbackDelivered = Schema.Struct({
   kind: Schema.Literal("feedback-delivered"),
   note: ProductFeedbackNote,
   /** The turn that carried it, so the journal says where a note went. */
-  operationId: Schema.UUID,
-}).annotations(strict);
+  operationId: GuidString,
+});
 export type ProductFeedbackDelivered = typeof ProductFeedbackDelivered.Type;
 
 export const PRODUCT_FEEDBACK_EVENT_SCHEMAS = {
@@ -465,20 +461,47 @@ export const PRODUCT_FEEDBACK_EVENT_SCHEMAS = {
   "feedback.note-updated@1": ProductFeedbackUpdated,
 } as const;
 
-export const decodeProductFeedbackNoteId = Schema.decodeUnknownSync(ProductFeedbackNoteId);
-export const decodeProductFeedbackElement = Schema.decodeUnknownSync(ProductFeedbackElement);
+export const decodeProductFeedbackNoteId = Schema.decodeUnknownSync(
+  ProductFeedbackNoteId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProductFeedbackElement = Schema.decodeUnknownSync(
+  ProductFeedbackElement,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeProductFeedbackPointObservation = Schema.decodeUnknownSync(
   ProductFeedbackPointObservation,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeProductFeedbackBrowserContext = Schema.decodeUnknownSync(
   ProductFeedbackBrowserContext,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeProductFeedbackNote = Schema.decodeUnknownSync(ProductFeedbackNote);
-export const decodeProductFeedbackPreview = Schema.decodeUnknownSync(ProductFeedbackPreview);
-export const decodeProductFeedbackCropAnswer = Schema.decodeUnknownSync(ProductFeedbackCropAnswer);
-export const decodeProductFeedbackCommand = Schema.decodeUnknownSync(ProductFeedbackCommand);
-export const decodeBrowserElementSnapshot = Schema.decodeUnknownSync(BrowserElementSnapshot);
+export const decodeProductFeedbackNote = Schema.decodeUnknownSync(
+  ProductFeedbackNote,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProductFeedbackPreview = Schema.decodeUnknownSync(
+  ProductFeedbackPreview,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProductFeedbackCropAnswer = Schema.decodeUnknownSync(
+  ProductFeedbackCropAnswer,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProductFeedbackCommand = Schema.decodeUnknownSync(
+  ProductFeedbackCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserElementSnapshot = Schema.decodeUnknownSync(
+  BrowserElementSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeProductFeedbackCommandResult = Schema.decodeUnknownSync(
   ProductFeedbackCommandResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeProductFeedbackList = Schema.decodeUnknownSync(ProductFeedbackList);
+export const decodeProductFeedbackList = Schema.decodeUnknownSync(
+  ProductFeedbackList,
+  STRICT_DECODE_OPTIONS,
+);

@@ -31,33 +31,33 @@ const MAX_SNAPSHOTS = 64;
 const RUN_IDENTITY = /^(code|chat|work|agent-run):/;
 
 const decodeDeliveryFactMetadata = Schema.decodeUnknownSync(
-  Schema.Union(
+  Schema.Union([
     Schema.Struct({
-      repositoryOwner: Schema.NonEmptyTrimmedString,
-      repositoryName: Schema.NonEmptyTrimmedString,
+      repositoryOwner: Schema.Trimmed.check(Schema.isNonEmpty()),
+      repositoryName: Schema.Trimmed.check(Schema.isNonEmpty()),
       number: Schema.Int,
       title: Schema.optional(Schema.String),
-      mergedBy: Schema.NonEmptyTrimmedString,
+      mergedBy: Schema.Trimmed.check(Schema.isNonEmpty()),
     }),
     Schema.Struct({
-      repositoryOwner: Schema.NonEmptyTrimmedString,
-      repositoryName: Schema.NonEmptyTrimmedString,
+      repositoryOwner: Schema.Trimmed.check(Schema.isNonEmpty()),
+      repositoryName: Schema.Trimmed.check(Schema.isNonEmpty()),
       number: Schema.Int,
       title: Schema.optional(Schema.String),
       closingPullRequest: Schema.Struct({
-        repositoryOwner: Schema.NonEmptyTrimmedString,
-        repositoryName: Schema.NonEmptyTrimmedString,
+        repositoryOwner: Schema.Trimmed.check(Schema.isNonEmpty()),
+        repositoryName: Schema.Trimmed.check(Schema.isNonEmpty()),
         number: Schema.Int,
       }),
     }),
-  ),
+  ]),
 );
 const decodeRunFactMetadata = Schema.decodeUnknownSync(
   Schema.Struct({
-    source: Schema.Literal("code", "chat", "work", "agent-run"),
-    runId: Schema.NonEmptyTrimmedString,
-    finish: Schema.Literal("successful", "failed", "canceled"),
-    mode: Schema.Literal("chat", "work", "code"),
+    source: Schema.Literals(["code", "chat", "work", "agent-run"]),
+    runId: Schema.Trimmed.check(Schema.isNonEmpty()),
+    finish: Schema.Literals(["successful", "failed", "canceled"]),
+    mode: Schema.Literals(["chat", "work", "code"]),
   }),
 );
 const decodeFactThreadId = Schema.decodeUnknownSync(CodeThreadId);

@@ -459,7 +459,7 @@ export async function runDriverReadOnlyTurn(input: {
       mode: "code",
     });
     yield* Effect.addFinalizer(() =>
-      connection.stop(sessionId).pipe(Effect.catchAll(() => Effect.void)),
+      connection.stop(sessionId).pipe(Effect.catch(() => Effect.void)),
     );
     // Plan's read-only gate is enforced regardless of the parent thread's level,
     // with zero tools and single-use isolation.
@@ -557,14 +557,14 @@ export async function runDriverReadOnlyTurn(input: {
   });
 
   const scopedEffect = Effect.scoped(program).pipe(
-    Effect.timeoutTo({
+    Effect.timeoutOrElse({
       duration: input.timeoutMs,
-      onTimeout: (): PullRequestReviewTurnExecutionResult => ({
-        status: "failed",
-        detail: "The pull request review turn timed out.",
-        ...(observedUsage === undefined ? {} : { usage: observedUsage }),
-      }),
-      onSuccess: (value: PullRequestReviewTurnExecutionResult) => value,
+      orElse: () =>
+        Effect.succeed<PullRequestReviewTurnExecutionResult>({
+          status: "failed",
+          detail: "The pull request review turn timed out.",
+          ...(observedUsage === undefined ? {} : { usage: observedUsage }),
+        }),
     }),
   );
 
@@ -589,7 +589,7 @@ export async function runDriverReadOnlyTurn(input: {
     if (Exit.isSuccess(exit)) {
       return exit.value;
     }
-    if (Cause.isInterruptedOnly(exit.cause) || input.signal.aborted) {
+    if (Cause.hasInterruptsOnly(exit.cause) || input.signal.aborted) {
       return {
         status: "cancelled",
         ...(observedUsage === undefined ? {} : { usage: observedUsage }),

@@ -3,7 +3,9 @@ import { ListenerKeyTransition } from "@octant/contracts";
 import { LISTENER_KEY_TRANSITION_WINDOW_MS, listenerKeyTransitionPayload } from "@octant/domain";
 import { listenerPinFromSha256, type ListenerOriginTrust } from "./remoteListenerTrust";
 
-const decodeTransition = Schema.decodeUnknownSync(ListenerKeyTransition);
+const decodeTransition = Schema.decodeUnknownSync(ListenerKeyTransition, {
+  onExcessProperty: "error",
+});
 
 /** Verifies the old pinned key's delegation; an unrecognized key never bootstraps trust. */
 export async function stageListenerKeyTransition(input: {

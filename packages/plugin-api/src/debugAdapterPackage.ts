@@ -22,8 +22,6 @@ import {
  * field this schema does not name is refused rather than ignored.
  */
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * The file at a debug adapter package's root that holds its manifest. A
  * folder that has it is read as a debug adapter package and as nothing else,
@@ -46,7 +44,7 @@ const ADAPTER_CAPABILITIES: ReadonlySet<string> = new Set(["filesystem", "shell"
  * The first group is decided by this schema alone; the second by the host
  * when it reads the package's files.
  */
-export const DebugAdapterPackageRefusalReason = Schema.Literal(
+export const DebugAdapterPackageRefusalReason = Schema.Literals([
   "entry-invalid",
   "host-assigned-field",
   "not-one-debug-adapter",
@@ -60,12 +58,12 @@ export const DebugAdapterPackageRefusalReason = Schema.Literal(
   "entry-point-missing",
   "ships-other-program",
   "signature-invalid",
-);
+]);
 export type DebugAdapterPackageRefusalReason = typeof DebugAdapterPackageRefusalReason.Type;
 
 const DebugAdapterPackageDocumentShape = Schema.Struct({
   manifest: AuthoredPackageManifest,
-}).annotations(strict);
+});
 type DebugAdapterPackageDocumentShape = typeof DebugAdapterPackageDocumentShape.Type;
 
 function entryRefusal(
@@ -108,10 +106,12 @@ function entryRefusal(
 
 /** The document at a debug adapter package's root, as its author writes it. */
 export const DebugAdapterPackageDocument = DebugAdapterPackageDocumentShape.pipe(
-  Schema.filter((entry) => {
-    const reason = entryRefusal(entry);
-    return reason === undefined ? true : `A debug adapter package is refused: ${reason}.`;
-  }),
+  Schema.check(
+    Schema.makeFilter((entry) => {
+      const reason = entryRefusal(entry);
+      return reason === undefined ? true : `A debug adapter package is refused: ${reason}.`;
+    }),
+  ),
 );
 export type DebugAdapterPackageDocument = typeof DebugAdapterPackageDocument.Type;
 
@@ -119,7 +119,9 @@ export type DebugAdapterPackageDocumentReading =
   | { readonly status: "accepted"; readonly document: DebugAdapterPackageDocument }
   | { readonly status: "refused"; readonly reason: DebugAdapterPackageRefusalReason };
 
-const decodeShape = Schema.decodeUnknownEither(DebugAdapterPackageDocumentShape);
+const decodeShape = Schema.decodeUnknownResult(DebugAdapterPackageDocumentShape, {
+  onExcessProperty: "error",
+});
 
 /** Reads a debug adapter package's document, naming the closed reason when it is refused. */
 export function readDebugAdapterPackageDocument(
@@ -127,9 +129,9 @@ export function readDebugAdapterPackageDocument(
 ): DebugAdapterPackageDocumentReading {
   if (writesHostAssignedField(value)) return { status: "refused", reason: "host-assigned-field" };
   const decoded = decodeShape(value);
-  if (decoded._tag === "Left") return { status: "refused", reason: "entry-invalid" };
-  const reason = entryRefusal(decoded.right);
+  if (decoded._tag === "Failure") return { status: "refused", reason: "entry-invalid" };
+  const reason = entryRefusal(decoded.success);
   return reason === undefined
-    ? { status: "accepted", document: decoded.right }
+    ? { status: "accepted", document: decoded.success }
     : { status: "refused", reason };
 }

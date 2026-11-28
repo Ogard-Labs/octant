@@ -16,7 +16,7 @@ import {
   type ChatThreadId,
   type ProviderProbeResult,
 } from "@octant/contracts";
-import { Effect, Queue, Stream } from "effect";
+import { Cause, Effect, Queue, Stream } from "effect";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it } from "vitest";
 import { ContextHarnessService } from "../context/contextHarnessService";
@@ -145,7 +145,7 @@ function makeDriver(input: {
     probe: () => Effect.succeed(input.probeSequence?.shift() ?? input.probe),
     acquire: () => {
       const behavior = input.behaviors.shift() ?? "complete";
-      const queue = Effect.runSync(Queue.unbounded<never>());
+      const queue = Effect.runSync(Queue.unbounded<never, Cause.Done>());
       return Effect.succeed({
         subscribe: Effect.succeed(Stream.fromQueue(queue)),
         start: (startInput: { readonly sessionId: string }) =>
@@ -180,7 +180,7 @@ function makeDriver(input: {
               return;
             }
             if (behavior === "checkpoint-disconnect") {
-              yield* Queue.shutdown(queue);
+              yield* Queue.end(queue);
               return;
             }
             yield* Queue.offer(queue, { kind: "completed", sessionId: turn.sessionId } as never);

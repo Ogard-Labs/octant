@@ -25,7 +25,7 @@ import {
   type ThreadToolStep,
 } from "@octant/contracts";
 import { WorkThreadCreated, WorkThreadUpdated } from "@octant/contracts/work-threads";
-import { ParseResult, Schema } from "effect";
+import { Schema } from "effect";
 import { THREAD_MESSAGE_STEERED } from "../messageQueue/threadMessageSteeredRecord";
 import { readActiveChatTurnIds, readChatContent } from "./chatProjection";
 import type { Projection } from "./projection";
@@ -132,7 +132,7 @@ export class ThreadSearchProjection implements Projection {
     } catch (error) {
       // An event this view cannot read leaves it unindexed, as the mode's own
       // read skips it, rather than holding back search for every thread.
-      if (ParseResult.isParseError(error)) return;
+      if (Schema.isSchemaError(error)) return;
       throw error;
     }
   }

@@ -1,37 +1,41 @@
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
-const opaqueLabel = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter((value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"), {
-    message: () => "Content provenance labels must be opaque and path-free.",
-  }),
+const opaqueLabel = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.makeFilter(
+    (value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"),
+    { message: "Content provenance labels must be opaque and path-free." },
+  ),
 );
 
-const opaqueReference = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.filter((value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0")),
+const opaqueReference = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.makeFilter(
+    (value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0"),
+  ),
 );
 
 /**
  * Provenance origin for journaled tool results and ingested content payloads.
  * See docs/security/security-architecture-threat-model.md § Untrusted-Content Policy.
  */
-export const ContentOrigin = Schema.Literal(
+export const ContentOrigin = Schema.Literals([
   "tool-result",
   "external-content",
   "user",
   "provider-text",
-);
+]);
 export type ContentOrigin = typeof ContentOrigin.Type;
 
 export const ContentProvenance = Schema.Struct({
   origin: ContentOrigin,
   sourceLabel: opaqueLabel,
-}).annotations(strict);
+});
 export type ContentProvenance = typeof ContentProvenance.Type;
 
 /**
@@ -56,15 +60,18 @@ export const ContentIngestedPayload = Schema.Struct({
   correlationId: CorrelationId,
   provenance: ContentProvenance,
   contentReference: opaqueReference,
-}).annotations(strict);
+});
 export type ContentIngestedPayload = typeof ContentIngestedPayload.Type;
 
 // The same brand as the shell's `WindowId`. It is spelled here because the
 // shell contract reaches this module through the tool catalog, and importing
 // it back would close that loop.
-const clearingWindowId = Schema.UUID.pipe(Schema.brand("WindowId"));
+const clearingWindowId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("WindowId"),
+);
 
-const ingestionCount = Schema.Int.pipe(Schema.positive());
+const ingestionCount = PositiveInt;
 
 /**
  * Journaled record that a person at a local window reviewed what a thread
@@ -75,10 +82,10 @@ const ingestionCount = Schema.Int.pipe(Schema.positive());
 export const ContentClearedPayload = Schema.Struct({
   threadId: AggregateId,
   windowId: clearingWindowId,
-  clearedSources: Schema.Array(opaqueLabel).pipe(Schema.maxItems(MAX_NAMED_INGESTED_SOURCES)),
+  clearedSources: Schema.Array(opaqueLabel).check(Schema.isMaxLength(MAX_NAMED_INGESTED_SOURCES)),
   // Zero is allowed so a mark whose ingestion rows are gone can still be cleared.
-  ingestionCount: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  ingestionCount: NonNegativeInt,
+});
 export type ContentClearedPayload = typeof ContentClearedPayload.Type;
 
 /**
@@ -86,7 +93,7 @@ export type ContentClearedPayload = typeof ContentClearedPayload.Type;
  * starting helper agents after the thread read outside content, and an
  * agent's file transfers into the thread's desktop on this machine.
  */
-export const ThreadStandingAnswerSubject = Schema.Literal("delegation", "desktop-file-transfer");
+export const ThreadStandingAnswerSubject = Schema.Literals(["delegation", "desktop-file-transfer"]);
 export type ThreadStandingAnswerSubject = typeof ThreadStandingAnswerSubject.Type;
 
 export const THREAD_STANDING_ANSWER_AGGREGATE = "thread-standing-answer";
@@ -103,10 +110,11 @@ export const ThreadStandingAnswerRecorded = Schema.Struct({
   threadId: AggregateId,
   subject: ThreadStandingAnswerSubject,
   threadMarked: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadStandingAnswerRecorded = typeof ThreadStandingAnswerRecorded.Type;
 export const decodeThreadStandingAnswerRecorded = Schema.decodeUnknownSync(
   ThreadStandingAnswerRecorded,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -116,8 +124,8 @@ export const decodeThreadStandingAnswerRecorded = Schema.decodeUnknownSync(
  */
 export const ThreadExternalContentTaint = Schema.Struct({
   externalContentIngested: Schema.Boolean,
-  ingestedSources: Schema.Array(opaqueLabel).pipe(Schema.maxItems(MAX_NAMED_INGESTED_SOURCES)),
-}).annotations(strict);
+  ingestedSources: Schema.Array(opaqueLabel).check(Schema.isMaxLength(MAX_NAMED_INGESTED_SOURCES)),
+});
 export type ThreadExternalContentTaint = typeof ThreadExternalContentTaint.Type;
 
 /** One source a thread took outside content from since it was last clear. */
@@ -127,7 +135,7 @@ export const ThreadExternalContentSource = Schema.Struct({
   // Absent for an ingestion projected before the host recorded its time.
   firstIngestedAt: Schema.optional(UtcTimestamp),
   lastIngestedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type ThreadExternalContentSource = typeof ThreadExternalContentSource.Type;
 
 /**
@@ -138,11 +146,11 @@ export const ThreadExternalContentState = Schema.Struct({
   threadId: AggregateId,
   externalContentIngested: Schema.Boolean,
   version: AggregateVersion,
-  ingestionCount: Schema.Int.pipe(Schema.nonNegative()),
-  sources: Schema.Array(ThreadExternalContentSource).pipe(
-    Schema.maxItems(MAX_NAMED_INGESTED_SOURCES),
+  ingestionCount: NonNegativeInt,
+  sources: Schema.Array(ThreadExternalContentSource).check(
+    Schema.isMaxLength(MAX_NAMED_INGESTED_SOURCES),
   ),
-}).annotations(strict);
+});
 export type ThreadExternalContentState = typeof ThreadExternalContentState.Type;
 
 /** At most this many sources ride on one approval; `sourceCount` says how many there are. */
@@ -156,17 +164,15 @@ export const MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES = 8;
  * could not be read and the host failed closed.
  */
 export const ApprovalOutsideContent = Schema.Struct({
-  sources: Schema.Array(ThreadExternalContentSource).pipe(
-    Schema.maxItems(MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES),
+  sources: Schema.Array(ThreadExternalContentSource).check(
+    Schema.isMaxLength(MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES),
   ),
-  sourceCount: Schema.Int.pipe(Schema.nonNegative()),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((reason) => reason.sourceCount >= reason.sources.length, {
-      message: () => "An approval's outside-content source count cannot be below its list.",
-    }),
-  );
+  sourceCount: NonNegativeInt,
+}).check(
+  Schema.makeFilter((reason) => reason.sourceCount >= reason.sources.length, {
+    message: "An approval's outside-content source count cannot be below its list.",
+  }),
+);
 export type ApprovalOutsideContent = typeof ApprovalOutsideContent.Type;
 
 const threadScope = { mode: OctantMode, threadId: AggregateId };
@@ -176,23 +182,23 @@ const threadScope = { mode: OctantMode, threadId: AggregateId };
  * names the version the person was shown, so an ingestion they have not seen
  * refuses it. Nothing here adds or edits a mark.
  */
-export const ThreadExternalContentRequest = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("read"), ...threadScope }).annotations(strict),
+export const ThreadExternalContentRequest = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("read"), ...threadScope }),
   Schema.Struct({
     kind: Schema.Literal("clear"),
     ...threadScope,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadExternalContentRequest = typeof ThreadExternalContentRequest.Type;
 
-export const ThreadExternalContentClearRefusal = Schema.Literal(
+export const ThreadExternalContentClearRefusal = Schema.Literals([
   "unauthorized",
   "thread-unavailable",
   "turn-active",
   "turn-unconfirmed",
   "stale",
-);
+]);
 export type ThreadExternalContentClearRefusal = typeof ThreadExternalContentClearRefusal.Type;
 
 /**
@@ -200,37 +206,53 @@ export type ThreadExternalContentClearRefusal = typeof ThreadExternalContentClea
  * A refusal for want of authority, or of a thread the window cannot reach,
  * carries none.
  */
-export const ThreadExternalContentClearOutcome = Schema.Union(
+export const ThreadExternalContentClearOutcome = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("cleared"),
     state: ThreadExternalContentState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("already-clear"),
     state: ThreadExternalContentState,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
     reason: ThreadExternalContentClearRefusal,
     state: Schema.optional(ThreadExternalContentState),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadExternalContentClearOutcome = typeof ThreadExternalContentClearOutcome.Type;
 
-export const decodeContentOrigin = Schema.decodeUnknownSync(ContentOrigin);
-export const decodeContentProvenance = Schema.decodeUnknownSync(ContentProvenance);
-export const decodeContentIngestedPayload = Schema.decodeUnknownSync(ContentIngestedPayload);
+export const decodeContentOrigin = Schema.decodeUnknownSync(ContentOrigin, STRICT_DECODE_OPTIONS);
+export const decodeContentProvenance = Schema.decodeUnknownSync(
+  ContentProvenance,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeContentIngestedPayload = Schema.decodeUnknownSync(
+  ContentIngestedPayload,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadExternalContentTaint = Schema.decodeUnknownSync(
   ThreadExternalContentTaint,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeContentClearedPayload = Schema.decodeUnknownSync(ContentClearedPayload);
+export const decodeContentClearedPayload = Schema.decodeUnknownSync(
+  ContentClearedPayload,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadExternalContentState = Schema.decodeUnknownSync(
   ThreadExternalContentState,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadExternalContentRequest = Schema.decodeUnknownSync(
   ThreadExternalContentRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadExternalContentClearOutcome = Schema.decodeUnknownSync(
   ThreadExternalContentClearOutcome,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeApprovalOutsideContent = Schema.decodeUnknownSync(ApprovalOutsideContent);
+export const decodeApprovalOutsideContent = Schema.decodeUnknownSync(
+  ApprovalOutsideContent,
+  STRICT_DECODE_OPTIONS,
+);

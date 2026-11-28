@@ -107,7 +107,9 @@ export function createServerPreviewTunnelRoutes(dependencies: {
         });
       let forward: typeof ServerPortForwardCommand.Type;
       try {
-        forward = Schema.decodeUnknownSync(ServerPortForwardCommand)(body);
+        forward = Schema.decodeUnknownSync(ServerPortForwardCommand, { onExcessProperty: "error" })(
+          body,
+        );
       } catch {
         return json({ error: "Invalid forward command." }, 400);
       }
@@ -142,7 +144,7 @@ export function createServerPreviewTunnelRoutes(dependencies: {
       });
     let command: typeof ServerPreviewCommand.Type;
     try {
-      command = Schema.decodeUnknownSync(ServerPreviewCommand)(body);
+      command = Schema.decodeUnknownSync(ServerPreviewCommand, { onExcessProperty: "error" })(body);
     } catch {
       return json({ error: "Invalid preview command." }, 400);
     }

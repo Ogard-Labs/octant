@@ -9,15 +9,18 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /** The most of one call's input a record keeps. */
@@ -37,19 +40,19 @@ export const MAX_TOOL_CALL_RECORD_THREAD_BYTES = 16 * 1024 * 1024;
 export const MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS = 65_536;
 
 /** The modes whose tool calls keep a record. Code replays its own tool activity. */
-export const ThreadToolCallRecordMode = Schema.Literal("chat", "work");
+export const ThreadToolCallRecordMode = Schema.Literals(["chat", "work"]);
 export type ThreadToolCallRecordMode = typeof ThreadToolCallRecordMode.Type;
 
 /** `truncated` says the call's text was longer than what is kept. */
 export const ThreadToolCallRecordInput = Schema.Struct({
   text: boundedText(MAX_TOOL_CALL_RECORD_INPUT_BYTES),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 
 export const ThreadToolCallRecordOutput = Schema.Struct({
   text: boundedText(MAX_TOOL_CALL_RECORD_OUTPUT_BYTES),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 
 export const ThreadToolCallRecord = Schema.Struct({
   toolCallId: boundedNonEmptyText(255),
@@ -63,7 +66,7 @@ export const ThreadToolCallRecord = Schema.Struct({
    */
   outputWithheld: Schema.optional(Schema.Literal("protected-path")),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadToolCallRecord = typeof ThreadToolCallRecord.Type;
 
 /** A Chat attempt id or a Work turn's request id. */
@@ -71,38 +74,43 @@ export const ThreadToolCallRecordTurnId = boundedNonEmptyText(255);
 
 export const ThreadToolCallRecordsRequest = Schema.Struct({
   mode: ThreadToolCallRecordMode,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   turnId: ThreadToolCallRecordTurnId,
-}).annotations(strict);
+});
 export type ThreadToolCallRecordsRequest = typeof ThreadToolCallRecordsRequest.Type;
 
 /**
  * A turn with no record answers an empty list: the setting was off, the
  * runtime reported nothing, or the records were dropped or purged.
  */
-export const ThreadToolCallRecordsResult = Schema.Union(
+export const ThreadToolCallRecordsResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("records"),
     records: Schema.Array(ThreadToolCallRecord),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("refused"),
-    reason: Schema.Literal("not-found", "unauthorized"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["not-found", "unauthorized"]),
+  }),
+]);
 export type ThreadToolCallRecordsResult = typeof ThreadToolCallRecordsResult.Type;
 
 /** A record as a thread export carries it: with the turn it belongs to. */
 export const ThreadExportToolCall = Schema.Struct({
   turnId: ThreadToolCallRecordTurnId,
   ...ThreadToolCallRecord.fields,
-}).annotations(strict);
+});
 export type ThreadExportToolCall = typeof ThreadExportToolCall.Type;
 
-export const decodeThreadToolCallRecord = Schema.decodeUnknownSync(ThreadToolCallRecord);
+export const decodeThreadToolCallRecord = Schema.decodeUnknownSync(
+  ThreadToolCallRecord,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadToolCallRecordsRequest = Schema.decodeUnknownSync(
   ThreadToolCallRecordsRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeThreadToolCallRecordsResult = Schema.decodeUnknownSync(
   ThreadToolCallRecordsResult,
+  STRICT_DECODE_OPTIONS,
 );

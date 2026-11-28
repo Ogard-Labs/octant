@@ -145,7 +145,7 @@ function toolCallDeadline(limitMs: number) {
     runningSince = undefined;
   };
   return {
-    expired: Effect.async<void>((resume) => {
+    expired: Effect.callback<void>((resume) => {
       expire = () => resume(Effect.void);
       run();
       return Effect.sync(() => {
@@ -519,7 +519,7 @@ export class ChatTurnRunner {
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
           await input.appManagedTools?.close?.();
-        }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
+        }).pipe(Effect.catchCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let currentAttempt = input.attempt;
       // New tasks a full plan turned away, kept until the restatement that
@@ -832,7 +832,7 @@ export class ChatTurnRunner {
               }),
             ),
           ),
-          Effect.catchAll(persistProviderFailure),
+          Effect.catch(persistProviderFailure),
         );
       input.liveTurn?.connect({
         connection,
@@ -847,7 +847,7 @@ export class ChatTurnRunner {
           Effect.runPromise(
             killSession(input.attempt.providerSessionId).pipe(
               Effect.as(true),
-              Effect.catchAll(() => Effect.succeed(false)),
+              Effect.catch(() => Effect.succeed(false)),
             ),
           ),
         );
@@ -858,7 +858,7 @@ export class ChatTurnRunner {
           if (terminalOutcome !== undefined) return;
           yield* connection
             .interrupt(input.attempt.providerSessionId)
-            .pipe(Effect.catchAll(() => Effect.void));
+            .pipe(Effect.catch(() => Effect.void));
           yield* persistOutcome("cancelled");
           terminalOutcome = "cancelled";
         });
@@ -951,15 +951,15 @@ export class ChatTurnRunner {
             answer: secret === true ? { secret } : answer,
             answeredAt: updatedAt(),
           });
-          const persisted = yield* Effect.either(input.persistAttempt(currentAttempt));
-          if (persisted._tag === "Left") {
+          const persisted = yield* Effect.result(input.persistAttempt(currentAttempt));
+          if (persisted._tag === "Failure") {
             // The journal did not take the answered state, so the answerer
             // must not be told it was accepted; the pending failure carries
             // what the turn now settles as.
             openAnswerAbandon?.("Chat turn ended before the answer was journalled.");
             openAnswerSettle = undefined;
             openAnswerAbandon = undefined;
-            return yield* Effect.fail(persisted.left);
+            return yield* Effect.fail(persisted.failure);
           }
           openAnswerSettle?.(currentAttempt);
           openAnswerSettle = undefined;
@@ -991,7 +991,7 @@ export class ChatTurnRunner {
           openAnswerAbandon?.("Chat turn ended before the answer was delivered.");
           const stopped = yield* connection.stop(input.attempt.providerSessionId).pipe(
             Effect.as(true),
-            Effect.catchAll(() => Effect.succeed(false)),
+            Effect.catch(() => Effect.succeed(false)),
           );
           // Telling the scheduler the turn ended frees its provider slot. That
           // is only true when the provider ended the turn or confirmed the
@@ -1072,7 +1072,7 @@ export class ChatTurnRunner {
               outcome: "interrupted",
             });
           }
-        }).pipe(Effect.catchAll(() => Effect.void)),
+        }).pipe(Effect.catch(() => Effect.void)),
       );
 
       // Option values belong to the thread's selected model; a pool candidate
@@ -1105,7 +1105,7 @@ export class ChatTurnRunner {
               ...nativeSetup,
               ...(input.strict === false ? { strict: false } : {}),
             })
-      ).pipe(Effect.catchAll(persistProviderFailure));
+      ).pipe(Effect.catch(persistProviderFailure));
 
       const resumeCursor = startHandle.resumeCursor ?? input.resumeCursor;
       if (
@@ -1152,7 +1152,7 @@ export class ChatTurnRunner {
                   yield* cancelOwnedSession();
                   return;
                 }
-                yield* Effect.async<void>((resume) => {
+                yield* Effect.callback<void>((resume) => {
                   const onAbort = () => resume(Effect.succeed(undefined));
                   input.signal!.addEventListener("abort", onAbort, { once: true });
                   return Effect.sync(() => input.signal!.removeEventListener("abort", onAbort));
@@ -1187,7 +1187,7 @@ export class ChatTurnRunner {
           if (loop.kind === "stop") {
             yield* connection
               .interrupt(input.attempt.providerSessionId)
-              .pipe(Effect.catchAll(() => Effect.void));
+              .pipe(Effect.catch(() => Effect.void));
             yield* persistOutcome("interrupted", {
               code: decodeDiagnosticFailureCode("interrupted"),
               message: `Stopped under Strict after ${toolName} ran ${loop.count} times in a row with the same input.`,
@@ -1223,13 +1223,13 @@ export class ChatTurnRunner {
               if (terminalOutcome !== undefined) return;
               if (stallAction === "notice") {
                 if (idleLimitMs !== null) {
-                  yield* recordStallNotice(idleLimitMs).pipe(Effect.catchAll(() => Effect.void));
+                  yield* recordStallNotice(idleLimitMs).pipe(Effect.catch(() => Effect.void));
                 }
                 return yield* Effect.never;
               }
               yield* connection
                 .interrupt(input.attempt.providerSessionId)
-                .pipe(Effect.catchAll(() => Effect.void));
+                .pipe(Effect.catch(() => Effect.void));
               yield* persistOutcome("interrupted", {
                 code: decodeDiagnosticFailureCode("timed-out"),
               });
@@ -1303,7 +1303,7 @@ export class ChatTurnRunner {
                       },
                     }),
                   ).pipe(
-                    Effect.catchAll(() =>
+                    Effect.catch(() =>
                       Effect.logWarning("An automatic compaction could not be journaled."),
                     ),
                   );
@@ -1338,7 +1338,7 @@ export class ChatTurnRunner {
                   if (watched.status === "refused") {
                     yield* connection
                       .interrupt(input.attempt.providerSessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return yield* unmarked();
                   }
                   yield* markToolRow(event.toolCallId, event.toolName, watched.labels);
@@ -1352,7 +1352,7 @@ export class ChatTurnRunner {
                   ) {
                     yield* connection
                       .interrupt(input.attempt.providerSessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return yield* unmarked();
                   }
                   yield* markToolRow(event.toolCallId, event.toolName, []);
@@ -1403,7 +1403,7 @@ export class ChatTurnRunner {
                   yield* input.persistAttempt(currentAttempt);
                   yield* connection
                     .interrupt(input.attempt.providerSessionId)
-                    .pipe(Effect.catchAll(() => Effect.void));
+                    .pipe(Effect.catch(() => Effect.void));
                   yield* persistOutcome("interrupted", {
                     code: decodeDiagnosticFailureCode(STREAMED_OUTPUT_BUDGET_CODE),
                   });
@@ -1517,7 +1517,7 @@ export class ChatTurnRunner {
                     if (parkedQuestionRequestId !== undefined) {
                       yield* connection
                         .interrupt(input.attempt.providerSessionId)
-                        .pipe(Effect.catchAll(() => Effect.void));
+                        .pipe(Effect.catch(() => Effect.void));
                       return;
                     }
                     let parsedInput: {
@@ -1651,7 +1651,7 @@ export class ChatTurnRunner {
                             message: "App-managed tool execution failed.",
                           }),
                       }).pipe(
-                        Effect.catchAll((error) =>
+                        Effect.catch((error) =>
                           Effect.gen(function* () {
                             if (executionSignal?.aborted) return;
                             if (toolAbort.signal.aborted) {
@@ -1842,7 +1842,7 @@ export class ChatTurnRunner {
                     // this interrupt is only for genuinely concurrent asks.
                     yield* connection
                       .interrupt(input.attempt.providerSessionId)
-                      .pipe(Effect.catchAll(() => Effect.void));
+                      .pipe(Effect.catch(() => Effect.void));
                     return;
                   }
                   const answer = yield* parkOnQuestion(
@@ -2012,7 +2012,7 @@ export class ChatTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...providerWebSearchAtSend(input.appManagedTools, input.attempt.providerSessionId),
             })
-            .pipe(Effect.catchAll(persistProviderFailure));
+            .pipe(Effect.catch(persistProviderFailure));
           input.onPromptSent?.();
         }),
       });
@@ -2037,7 +2037,7 @@ export class ChatTurnRunner {
         // with the same category, such as a journal write, from being
         // recorded as a provider incident. An outcome the runner already
         // chose is left alone.
-        const providerFailure = Option.getOrUndefined(Cause.failureOption(exit.cause));
+        const providerFailure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
         if (terminalOutcome === undefined && hasProviderFailureProvenance(providerFailure)) {
           return yield* persistProviderFailure(providerFailure);
         }

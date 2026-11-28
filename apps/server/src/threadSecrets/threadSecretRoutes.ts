@@ -2,7 +2,7 @@ import {
   decodePairedThreadSecretCommand,
   decodeThreadSecretCommand,
 } from "@octant/contracts/thread-secrets";
-import { Either } from "effect";
+import { Result } from "effect";
 import { isAgentGrantSession, principalActsAsHostPerson } from "../clientPrincipal";
 import { eventActorForPrincipal } from "../principalEventActor";
 import { readPrincipalRouteContext, resolvePrincipalRouteContext } from "../principalRouteContext";
@@ -84,24 +84,24 @@ export function createThreadSecretRoutes(
     } catch {
       return reply({ status: "invalid" }, 400);
     }
-    if (Either.isLeft(command)) return reply({ status: "invalid" }, 400);
+    if (Result.isFailure(command)) return reply({ status: "invalid" }, 400);
     // The body may have arrived slowly; the window may be gone.
     try {
       if (localWindow() !== windowId) return reply({ status: "refused" }, 403);
     } catch {
       return reply({ status: "refused" }, 401);
     }
-    const { right } = command;
-    switch (right.kind) {
+    const { success: value } = command;
+    switch (value.kind) {
       case "revoke":
-        return reply(service.revoke(right.threadId, right.secretId));
+        return reply(service.revoke(value.threadId, value.secretId));
       case "browse":
-        return reply(await service.browse(windowId, right.threadId, right.requestId, right.step));
+        return reply(await service.browse(windowId, value.threadId, value.requestId, value.step));
       case "forget":
-        return reply(await service.forget(right.id));
+        return reply(await service.forget(value.id));
       case "answer":
         return reply(
-          await service.answer(windowId, right.threadId, right.answer, { paired: false }),
+          await service.answer(windowId, value.threadId, value.answer, { paired: false }),
         );
     }
   };
@@ -173,18 +173,18 @@ export function createPairedThreadSecretRoutes(
     } catch {
       return reply({ status: "invalid" }, 400);
     }
-    if (Either.isLeft(command)) return reply({ status: "invalid" }, 400);
+    if (Result.isFailure(command)) return reply({ status: "invalid" }, 400);
     // The body may have arrived slowly; the device may have been signed out.
     const current = () =>
       context.abortSignal?.aborted !== true && deps.sessionCurrent(principal, context.sessionNow);
     if (!current()) return reply({ status: "refused" }, 401);
-    const { right } = command;
+    const { success } = command;
     const scopeId = String(context.scopeId);
     const reader = { paired: true, actor: eventActorForPrincipal(principal), current };
     return reply(
-      right.kind === "list"
-        ? { requests: service.view(scopeId, right.threadId, reader).requests, active: [] }
-        : await service.answer(scopeId, right.threadId, right.answer, reader),
+      success.kind === "list"
+        ? { requests: service.view(scopeId, success.threadId, reader).requests, active: [] }
+        : await service.answer(scopeId, success.threadId, success.answer, reader),
     );
   };
 }

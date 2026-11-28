@@ -1,11 +1,10 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { LocalServerPort, LocalServerRequestId } from "./localServers";
 import { ProjectId } from "./projects";
 import { DeviceId } from "./remoteAccess";
 import { RemoteServerGrantSource } from "./remoteServerGrants";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * One port on a paired computer's own loopback that a device may reach as raw
@@ -15,7 +14,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * thread's listed server instead, and the computer takes the port from it.
  */
 export const RemotePortForwardId = Schema.String.pipe(
-  Schema.pattern(/^rpf_[a-f0-9]{64}$/),
+  Schema.check(Schema.isPattern(/^rpf_[a-f0-9]{64}$/)),
   Schema.brand("RemotePortForwardId"),
 );
 export type RemotePortForwardId = typeof RemotePortForwardId.Type;
@@ -26,18 +25,18 @@ export type RemotePortForwardId = typeof RemotePortForwardId.Type;
  * naming a server carries no port: the computer re-observes the listing and
  * forwards the port its server holds, never one the client sent.
  */
-export const RemotePortForwardRequest = Schema.Union(
+export const RemotePortForwardRequest = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("open-remote-port-forward"),
     requestId: LocalServerRequestId,
     port: LocalServerPort,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("open-remote-port-forward"),
     requestId: LocalServerRequestId,
     source: RemoteServerGrantSource,
-  }).annotations(strict),
-);
+  }),
+]);
 export type RemotePortForwardRequest = typeof RemotePortForwardRequest.Type;
 
 /** How long a forward lasts; it also ends with its proxy session or device. */
@@ -52,7 +51,7 @@ export const RemotePortForward = Schema.Struct({
   forwardId: RemotePortForwardId,
   port: LocalServerPort,
   expiresAt: Schema.Number,
-}).annotations(strict);
+});
 export type RemotePortForward = typeof RemotePortForward.Type;
 
 /**
@@ -67,16 +66,16 @@ export type RemotePortForward = typeof RemotePortForward.Type;
  * - `unavailable`: the computer could not look at its servers; nothing was decided.
  * - `forward-limit`: the device or the host already holds as many as allowed.
  */
-export const RemotePortForwardResult = Schema.Union(
+export const RemotePortForwardResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("remote-port-forward-opened"),
     requestId: LocalServerRequestId,
     forward: RemotePortForward,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remote-port-forward-refused"),
     requestId: LocalServerRequestId,
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "not-the-person",
       "source-required",
       "outside-act",
@@ -88,10 +87,10 @@ export const RemotePortForwardResult = Schema.Union(
       "open-denied",
       "unavailable",
       "forward-limit",
-    ),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    ]),
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type RemotePortForwardResult = typeof RemotePortForwardResult.Type;
 
 export const REMOTE_PORT_FORWARD_OPENED = "remote-server.forward-opened@1" as const;
@@ -104,7 +103,7 @@ export const RemotePortForwardOpenedPayload = Schema.Struct({
   forwardId: RemotePortForwardId,
   deviceId: DeviceId,
   port: LocalServerPort,
-}).annotations(strict);
+});
 export type RemotePortForwardOpenedPayload = typeof RemotePortForwardOpenedPayload.Type;
 
 /** As version 1, plus the thread whose server holds the port and that thread's Project. */
@@ -114,7 +113,7 @@ export const RemotePortForwardOpenedPayloadV2 = Schema.Struct({
   port: LocalServerPort,
   threadId: CodeThreadId,
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type RemotePortForwardOpenedPayloadV2 = typeof RemotePortForwardOpenedPayloadV2.Type;
 
 /**
@@ -123,14 +122,14 @@ export type RemotePortForwardOpenedPayloadV2 = typeof RemotePortForwardOpenedPay
  * the device can no longer open servers in that thread. Both are found when the
  * device opens its next connection.
  */
-export const RemotePortForwardCloseReason = Schema.Literal(
+export const RemotePortForwardCloseReason = Schema.Literals([
   "expired",
   "proxy-session-ended",
   "device-revoked",
   "host-stopped",
   "outside-act",
   "server-gone",
-);
+]);
 export type RemotePortForwardCloseReason = typeof RemotePortForwardCloseReason.Type;
 
 export const RemotePortForwardClosedPayload = Schema.Struct({
@@ -138,16 +137,27 @@ export const RemotePortForwardClosedPayload = Schema.Struct({
   deviceId: DeviceId,
   port: LocalServerPort,
   reason: RemotePortForwardCloseReason,
-}).annotations(strict);
+});
 export type RemotePortForwardClosedPayload = typeof RemotePortForwardClosedPayload.Type;
 
-export const decodeRemotePortForwardRequest = Schema.decodeUnknownSync(RemotePortForwardRequest);
-export const decodeRemotePortForwardResult = Schema.decodeUnknownSync(RemotePortForwardResult);
+export const decodeRemotePortForwardRequest = Schema.decodeUnknownSync(
+  RemotePortForwardRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRemotePortForwardResult = Schema.decodeUnknownSync(
+  RemotePortForwardResult,
+  STRICT_DECODE_OPTIONS,
+);
 export const encodeRemotePortForwardResult = Schema.encodeSync(RemotePortForwardResult);
-export const decodeRemotePortForwardId = Schema.decodeUnknownSync(RemotePortForwardId);
+export const decodeRemotePortForwardId = Schema.decodeUnknownSync(
+  RemotePortForwardId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeRemotePortForwardOpenedPayload = Schema.decodeUnknownSync(
   RemotePortForwardOpenedPayload,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeRemotePortForwardOpenedPayloadV2 = Schema.decodeUnknownSync(
   RemotePortForwardOpenedPayloadV2,
+  STRICT_DECODE_OPTIONS,
 );

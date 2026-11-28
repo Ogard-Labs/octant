@@ -2,8 +2,6 @@ import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
 import { ProviderInstanceId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * What the host did the last time a turn on this thread stopped on its
  * account's usage limit while the opt-in was on. `handed-off` names both
@@ -16,14 +14,14 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * the thread a second time.
  */
 export const ThreadUsageLimitHandoffOutcome = Schema.Struct({
-  kind: Schema.Literal("handed-off", "stopped"),
-  stopId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  kind: Schema.Literals(["handed-off", "stopped"]),
+  stopId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   fromProviderInstanceId: ProviderInstanceId,
   toProviderInstanceId: ProviderInstanceId,
   at: UtcTimestamp,
   /** Why the handoff did not happen; present on `stopped` only. */
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
+});
 export type ThreadUsageLimitHandoffOutcome = typeof ThreadUsageLimitHandoffOutcome.Type;
 
 /**
@@ -35,5 +33,5 @@ export type ThreadUsageLimitHandoffOutcome = typeof ThreadUsageLimitHandoffOutco
 export const ThreadUsageLimitHandoff = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   last: Schema.optional(ThreadUsageLimitHandoffOutcome),
-}).annotations(strict);
+});
 export type ThreadUsageLimitHandoff = typeof ThreadUsageLimitHandoff.Type;

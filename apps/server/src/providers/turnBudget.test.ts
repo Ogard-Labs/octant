@@ -1,5 +1,6 @@
 import { decodeProviderRuntimeEvent, type ProviderRuntimeEvent } from "@octant/contracts";
-import { Effect, Fiber, TestClock, TestContext } from "effect";
+import { Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   AnsweredRequests,
@@ -72,17 +73,21 @@ describe("turn budget", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const idle = yield* makeIdleTimeout(1_000);
-        const watcher = yield* Effect.fork(idle.expired);
-        const action = yield* Effect.fork(idle.during(Effect.sleep(3_000)));
+        const watcher = yield* Effect.forkChild(idle.expired);
+        const action = yield* Effect.forkChild(idle.during(Effect.sleep(3_000)));
         yield* TestClock.adjust(2_000);
-        expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+        expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+          "None",
+        );
         yield* TestClock.adjust(1_000);
         yield* Fiber.join(action);
         yield* TestClock.adjust(999);
-        expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+        expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+          "None",
+        );
         yield* TestClock.adjust(1);
         yield* Fiber.join(watcher);
-      }).pipe(Effect.provide(TestContext.TestContext)),
+      }).pipe(Effect.provide(TestClock.layer())),
     );
   });
 
@@ -136,48 +141,52 @@ describe("turn budget", () => {
   it("only expires after a full idle window without activity", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* TestClock.adjust(800);
       yield* idle.touch;
       yield* TestClock.adjust(800);
       // 1.6s of wall time but only 800ms since the last touch — still alive.
-      const early = yield* Fiber.poll(watcher);
+      const early = yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe()));
       expect(early._tag).toBe("None");
 
       yield* TestClock.adjust(200);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("does not cut a turn off while a provider tool call is reported as running", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
       );
       // Five limits of silence: the provider's own long command is still running.
       yield* TestClock.adjust(5_000);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
       );
       yield* TestClock.adjust(999);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* TestClock.adjust(1);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("keeps the clock paused until every running provider tool call has finished", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
@@ -189,7 +198,9 @@ describe("turn budget", () => {
         runtimeEvent({ kind: "tool-failure", toolCallId: "call-1", message: "Tool failed." }),
       );
       yield* TestClock.adjust(5_000);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-success", toolCallId: "call-2", summary: "Tool completed." }),
@@ -197,49 +208,55 @@ describe("turn budget", () => {
       yield* TestClock.adjust(1_000);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("stops pausing the clock for a provider tool call that reports no finish once the longest pause has passed", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000, 5_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
       );
       // The call pauses the clock for its five seconds and never finishes.
       yield* TestClock.adjust(5_000);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       // The clock then runs again: one full limit of silence cuts the turn off.
       yield* TestClock.adjust(999);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* TestClock.adjust(1);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("pauses the clock indefinitely for a provider tool call when the longest pause is Off", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(30 * 60_000, null);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
       );
       // Well past the default two hours.
       yield* TestClock.adjust(6 * 60 * 60_000);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* Fiber.interrupt(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("resumes the clock from a provider tool call's finish, inside the longest pause or after it", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000, 5_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
@@ -253,58 +270,68 @@ describe("turn budget", () => {
         runtimeEvent({ kind: "tool-start", toolCallId: "call-2", toolName: "shell" }),
       );
       yield* TestClock.adjust(5_900);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* idle.observe(
         runtimeEvent({ kind: "tool-success", toolCallId: "call-2", summary: "Tool completed." }),
       );
       yield* TestClock.adjust(999);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* TestClock.adjust(1);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("pauses for the default two hours when nothing tells it the host's setting", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(60_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(
         runtimeEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "shell" }),
       );
       yield* TestClock.adjust(2 * 60 * 60_000 + 59_999);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* TestClock.adjust(1);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("still cuts a silent turn off when no tool call is running", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(1_000);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* idle.observe(runtimeEvent({ kind: "text-delta", text: "Working on it." }));
       yield* TestClock.adjust(999);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* TestClock.adjust(1);
       yield* Fiber.join(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("never cuts a turn off when the stalled-turn limit is Off", async () => {
     const program = Effect.gen(function* () {
       const idle = yield* makeIdleTimeout(null);
-      const watcher = yield* Effect.fork(idle.expired);
+      const watcher = yield* Effect.forkChild(idle.expired);
 
       yield* TestClock.adjust(7 * 24 * 60 * 60_000);
-      expect((yield* Fiber.poll(watcher))._tag).toBe("None");
+      expect((yield* Effect.sync(() => Option.fromUndefinedOr(watcher.pollUnsafe())))._tag).toBe(
+        "None",
+      );
       yield* Fiber.interrupt(watcher);
     });
-    await Effect.runPromise(program.pipe(Effect.provide(TestContext.TestContext)));
+    await Effect.runPromise(program.pipe(Effect.provide(TestClock.layer())));
   });
 
   it("reads the stalled-turn limit from the host setting, Off included", () => {

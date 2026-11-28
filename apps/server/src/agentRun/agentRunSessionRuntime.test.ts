@@ -360,7 +360,7 @@ function fakeProvider(options?: {
       Effect.sync(() => {
         turns.push(input);
         options?.onSend?.(emit);
-      }).pipe(wedge === "send" ? Effect.zipRight(Effect.never) : (self) => self),
+      }).pipe(wedge === "send" ? Effect.andThen(Effect.never) : (self) => self),
     interrupt: (session: string) =>
       Effect.suspend(() => {
         interrupts.push(session);
@@ -378,10 +378,10 @@ function fakeProvider(options?: {
           ? Effect.fail({ category: "provider-failed", message: "Stop was refused." })
           : Effect.void;
         return options?.shutdownDelayMs === undefined
-          ? Effect.sync(() => void stops.push(session)).pipe(Effect.zipRight(settle))
+          ? Effect.sync(() => void stops.push(session)).pipe(Effect.andThen(settle))
           : Effect.sleep(options.shutdownDelayMs).pipe(
-              Effect.zipRight(Effect.sync(() => void stops.push(session))),
-              Effect.zipRight(settle),
+              Effect.andThen(Effect.sync(() => void stops.push(session))),
+              Effect.andThen(settle),
             );
       }),
     answerApproval: (input: { readonly approved: boolean }) =>

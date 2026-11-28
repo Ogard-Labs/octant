@@ -26,6 +26,6 @@ export function isNativeImageAttachment(mediaType: string): boolean {
   return (NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES as ReadonlyArray<string>).includes(mediaType);
 }
 
-export const AnyAttachmentMediaType = Schema.String.pipe(
-  Schema.pattern(ATTACHMENT_MEDIA_TYPE_PATTERN),
+export const AnyAttachmentMediaType = Schema.String.check(
+  Schema.isPattern(ATTACHMENT_MEDIA_TYPE_PATTERN),
 );

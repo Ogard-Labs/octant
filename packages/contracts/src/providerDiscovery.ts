@@ -1,34 +1,34 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProviderDriverKind, ProviderInstanceId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 // ── Discovery readiness ─────────────────────────────────────────────────────
 
-export const DiscoveryReadiness = Schema.Literal(
+export const DiscoveryReadiness = Schema.Literals([
   "ready",
   "unauthenticated",
   "incompatible",
   "unavailable",
   "unknown",
-);
+]);
 export type DiscoveryReadiness = typeof DiscoveryReadiness.Type;
 
 // ── Discovery candidate ─────────────────────────────────────────────────────
 
-const SafePathSummary = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
-const AbsolutePath = Schema.NonEmptyTrimmedString.pipe(
-  Schema.filter((path) => path.startsWith("/")),
+const SafePathSummary = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
+const AbsolutePath = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((path) => path.startsWith("/")),
 );
 const CanonicalBinaryPath = AbsolutePath;
-const DetectedVersion = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
-const PickerReceiptId = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/));
+const DetectedVersion = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128));
+const PickerReceiptId = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/));
 
 export const DiscoveryCandidate = Schema.Struct({
   driverKind: ProviderDriverKind,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   binaryPath: CanonicalBinaryPath,
   /**
    * The path the scan actually examined when it differs from the canonical
@@ -40,14 +40,16 @@ export const DiscoveryCandidate = Schema.Struct({
   version: Schema.optional(DetectedVersion),
   readiness: DiscoveryReadiness,
   pathSummary: SafePathSummary,
-  onboardingGuidance: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  onboardingGuidance: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
   detectedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type DiscoveryCandidate = typeof DiscoveryCandidate.Type;
 
 // ── Discovery scan status ───────────────────────────────────────────────────
 
-export const DiscoveryScanStatus = Schema.Literal("completed", "partial", "cancelled", "failed");
+export const DiscoveryScanStatus = Schema.Literals(["completed", "partial", "cancelled", "failed"]);
 export type DiscoveryScanStatus = typeof DiscoveryScanStatus.Type;
 
 // ── Discovery snapshot ──────────────────────────────────────────────────────
@@ -55,18 +57,18 @@ export type DiscoveryScanStatus = typeof DiscoveryScanStatus.Type;
 export const DiscoveryDriverDirectoryCoverage = Schema.Struct({
   driverKind: ProviderDriverKind,
   directories: Schema.Array(AbsolutePath),
-}).annotations(strict);
+});
 export type DiscoveryDriverDirectoryCoverage = typeof DiscoveryDriverDirectoryCoverage.Type;
 
 export const DiscoverySnapshot = Schema.Struct({
   hostId: HostId,
-  candidates: Schema.Array(DiscoveryCandidate).pipe(
-    Schema.filter((candidates) => candidates.length <= 64),
+  candidates: Schema.Array(DiscoveryCandidate).check(
+    Schema.makeFilter((candidates) => candidates.length <= 64),
   ),
   scannedAt: UtcTimestamp,
-  scanDurationMs: Schema.Int.pipe(Schema.nonNegative()),
+  scanDurationMs: NonNegativeInt,
   status: DiscoveryScanStatus,
-  message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  message: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
   /**
    * Directories each driver scan actually examined. A configured binary is
    * absent only when its driverKind was scanned and its parent directory
@@ -89,97 +91,105 @@ export const DiscoverySnapshot = Schema.Struct({
    */
   claudeHostGateway: Schema.optional(
     Schema.Struct({
-      baseUrl: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+      baseUrl: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
       tokenVariable: Schema.Boolean,
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type DiscoverySnapshot = typeof DiscoverySnapshot.Type;
 
 // ── Discovery commands ──────────────────────────────────────────────────────
 
-export const DiscoveryCommand = Schema.Union(
+export const DiscoveryCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("scan"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("connect"),
     driverKind: ProviderDriverKind,
     binaryPath: CanonicalBinaryPath,
-    displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  }).annotations(strict),
-  /**
-   * Points a runtime at the executable a person chose in the host's native file
-   * picker. The renderer holds only the picker's opaque, window-bound receipt;
-   * it never names a path, so it cannot point a runtime anywhere the picker did
-   * not return.
-   */
+    displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("locate-binary"),
     instanceId: ProviderInstanceId,
     receiptId: PickerReceiptId,
-  }).annotations(strict),
-  /**
-   * Points a runtime at an executable the host's latest scan found for that
-   * runtime, instead of one the picker returned. The host accepts the path only
-   * when it names a candidate of the same driver kind from that scan, then
-   * checks it exactly as it checks a picked file, so a renderer cannot point a
-   * runtime at a path the host never discovered.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("locate-binary"),
     instanceId: ProviderInstanceId,
     scannedBinaryPath: CanonicalBinaryPath,
-  }).annotations(strict),
-);
+  }),
+]);
 export type DiscoveryCommand = typeof DiscoveryCommand.Type;
 
-export const DiscoveryCommandResult = Schema.Union(
+export const DiscoveryCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("scan-completed"),
     snapshot: DiscoverySnapshot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("candidate-connected"),
     instanceId: ProviderInstanceId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("binary-located"),
     instanceId: ProviderInstanceId,
     /** The first line the version probe printed. */
     version: DetectedVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type DiscoveryCommandResult = typeof DiscoveryCommandResult.Type;
 
-export const DiscoveryFailure = Schema.Union(
+export const DiscoveryFailure = Schema.Union([
   Schema.Struct({
     category: Schema.Literal("invalid-configuration"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unauthorized"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unavailable"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unsupported"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("unknown-candidate"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-).annotations(strict);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type DiscoveryFailure = typeof DiscoveryFailure.Type;
 
-export const decodeDiscoveryReadiness = Schema.decodeUnknownSync(DiscoveryReadiness);
-export const decodeDiscoveryCandidate = Schema.decodeUnknownSync(DiscoveryCandidate);
-export const decodeDiscoveryScanStatus = Schema.decodeUnknownSync(DiscoveryScanStatus);
-export const decodeDiscoverySnapshot = Schema.decodeUnknownSync(DiscoverySnapshot);
-export const decodeDiscoveryCommand = Schema.decodeUnknownSync(DiscoveryCommand);
-export const decodeDiscoveryCommandResult = Schema.decodeUnknownSync(DiscoveryCommandResult);
-export const decodeDiscoveryFailure = Schema.decodeUnknownSync(DiscoveryFailure);
+export const decodeDiscoveryReadiness = Schema.decodeUnknownSync(
+  DiscoveryReadiness,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoveryCandidate = Schema.decodeUnknownSync(
+  DiscoveryCandidate,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoveryScanStatus = Schema.decodeUnknownSync(
+  DiscoveryScanStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoverySnapshot = Schema.decodeUnknownSync(
+  DiscoverySnapshot,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoveryCommand = Schema.decodeUnknownSync(
+  DiscoveryCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoveryCommandResult = Schema.decodeUnknownSync(
+  DiscoveryCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDiscoveryFailure = Schema.decodeUnknownSync(
+  DiscoveryFailure,
+  STRICT_DECODE_OPTIONS,
+);

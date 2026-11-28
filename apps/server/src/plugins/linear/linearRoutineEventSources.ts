@@ -10,9 +10,9 @@ import type { IntegrationService } from "../../integration/integrationService";
 import { LINEAR_ASSIGNMENT_SOURCE_OPERATION } from "./linearAssignmentSource";
 
 const observation = Schema.Struct({
-  identity: Schema.NonEmptyTrimmedString,
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  events: Schema.Array(AutomationIntegrationEvent).pipe(Schema.maxItems(256)),
+  identity: Schema.Trimmed.check(Schema.isNonEmpty()),
+  label: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+  events: Schema.Array(AutomationIntegrationEvent).pipe(Schema.check(Schema.isMaxLength(256))),
 });
 
 export function linearRoutineEventSources(

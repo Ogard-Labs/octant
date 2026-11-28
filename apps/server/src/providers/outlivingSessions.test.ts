@@ -116,7 +116,7 @@ async function turn(
 ) {
   const scope = Effect.runSync(Scope.make());
   const connection = await Effect.runPromise(
-    Scope.extend(keeper.acquire(key, "same-folder", runtime.open, terms, posture), scope),
+    Scope.provide(keeper.acquire(key, "same-folder", runtime.open, terms, posture), scope),
   );
   await Effect.runPromise(connection.start(input));
   during(connection);
@@ -393,7 +393,7 @@ describe("OutlivingSessions", () => {
     const runtime = fakeRuntime();
     const keeper = keeperFor();
     const scope = Effect.runSync(Scope.make());
-    await Effect.runPromise(Scope.extend(keeper.acquire(key, "same-folder", runtime.open), scope));
+    await Effect.runPromise(Scope.provide(keeper.acquire(key, "same-folder", runtime.open), scope));
     const second = await Effect.runPromiseExit(
       Effect.scoped(keeper.acquire(key, "same-folder", runtime.open)),
     );
@@ -442,7 +442,7 @@ describe("OutlivingSessions", () => {
     const keeper = keeperFor();
     const first = Effect.runSync(Scope.make());
     const held = await Effect.runPromise(
-      Scope.extend(keeper.acquire(key, "same-folder", open), first),
+      Scope.provide(keeper.acquire(key, "same-folder", open), first),
     );
     await Effect.runPromise(held.start(start()));
     await Effect.runPromise(held.stop(sessionId));
@@ -459,7 +459,7 @@ describe("OutlivingSessions", () => {
     const next = Effect.runSync(Scope.make());
     let acquired = false;
     const acquiring = Effect.runPromise(
-      Scope.extend(keeper.acquire(key, "same-folder", open), next),
+      Scope.provide(keeper.acquire(key, "same-folder", open), next),
     ).then(() => {
       acquired = true;
     });
@@ -507,7 +507,7 @@ describe("OutlivingSessions", () => {
     const keeper = keeperFor();
     const scope = Effect.runSync(Scope.make());
     const held = await Effect.runPromise(
-      Scope.extend(keeper.acquire(key, "same-folder", Effect.succeed(connection)), scope),
+      Scope.provide(keeper.acquire(key, "same-folder", Effect.succeed(connection)), scope),
     );
     await Effect.runPromise(held.start(start()));
     await Effect.runPromise(held.stop(sessionId));

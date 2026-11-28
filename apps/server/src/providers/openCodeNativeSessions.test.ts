@@ -162,11 +162,11 @@ describe("OpenCode's own sessions", () => {
     });
     expect(await Effect.runPromise(native.list({ instanceId, projectRoot }))).toEqual([]);
     const second = await Effect.runPromise(
-      Effect.either(native.adopt(adoptInput("ses_person", otherSessionId))),
+      Effect.result(native.adopt(adoptInput("ses_person", otherSessionId))),
     );
     expect(second).toMatchObject({
-      _tag: "Left",
-      left: { message: "That OpenCode session already belongs to an Octant thread." },
+      _tag: "Failure",
+      failure: { message: "That OpenCode session already belongs to an Octant thread." },
     });
     // A release naming another Octant session leaves this one's claim.
     await Effect.runPromise(
@@ -195,9 +195,9 @@ describe("OpenCode's own sessions", () => {
       ["ses_elsewhere", "That OpenCode session is not one of this folder's."],
       ["ses_missing", "That OpenCode session is not one of this folder's."],
     ] as const) {
-      expect(await Effect.runPromise(Effect.either(native.adopt(adoptInput(id))))).toMatchObject({
-        _tag: "Left",
-        left: { message },
+      expect(await Effect.runPromise(Effect.result(native.adopt(adoptInput(id))))).toMatchObject({
+        _tag: "Failure",
+        failure: { message },
       });
     }
   });

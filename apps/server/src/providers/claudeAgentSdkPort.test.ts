@@ -2,7 +2,7 @@ import type { ProviderFailure } from "@octant/contracts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Chunk, Effect, Stream } from "effect";
+import { Effect, Stream } from "effect";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, test, vi } from "vitest";
@@ -220,7 +220,7 @@ async function collectMessages(output: readonly unknown[]) {
       }),
     ),
   );
-  return Chunk.toReadonlyArray(messages);
+  return messages;
 }
 
 /** What the stream carries for one frame sent after the runtime initialized. */
@@ -250,12 +250,12 @@ describe("Claude Agent SDK port", () => {
               env: {},
               signal: new AbortController().signal,
             });
-            return yield* Effect.either(query.forceKill());
+            return yield* Effect.result(query.forceKill());
           }),
         ),
       );
       expect(runtimeProcess.kill).toHaveBeenCalledWith("SIGKILL");
-      expect(outcome._tag).toBe(expected === "succeeds" ? "Right" : "Left");
+      expect(outcome._tag).toBe(expected === "succeeds" ? "Success" : "Failure");
     },
   );
 
@@ -305,7 +305,7 @@ describe("Claude Agent SDK port", () => {
           // The tool_use id rides along, so the call answers under its row.
           expect(calls).toEqual([["octant_browser", "{}", "toolu-1"]]);
           const messages = yield* Stream.runCollect(query.messages);
-          expect(Chunk.toReadonlyArray(messages)[0]).toMatchObject({ kind: "initialized" });
+          expect(messages[0]).toMatchObject({ kind: "initialized" });
         }),
       ),
     );
@@ -1197,7 +1197,7 @@ describe("Claude Agent SDK port", () => {
         Effect.gen(function* () {
           const query = yield* harness.port.openQuery(openInput);
           const first = yield* Stream.runCollect(query.messages);
-          expect(Chunk.toReadonlyArray(first)[0]?.kind).toBe("initialized");
+          expect(first[0]?.kind).toBe("initialized");
           const failed = yield* Effect.flip(Stream.runDrain(query.messages));
           expect(failed).toEqual({
             category: "protocol",
@@ -2008,7 +2008,7 @@ describe("Claude Agent SDK port", () => {
       ),
     );
 
-    expect(Chunk.toReadonlyArray(messages)).toEqual([
+    expect(messages).toEqual([
       {
         kind: "initialized",
         sessionId: "session-1",
@@ -2366,9 +2366,7 @@ describe("Claude Agent SDK port", () => {
           }),
         ),
       );
-      const results = Chunk.toReadonlyArray(messages).filter(
-        (message) => message.kind === "result",
-      );
+      const results = messages.filter((message) => message.kind === "result");
       if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
       else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
       // Its cost is measured from the result before it.
@@ -2780,7 +2778,7 @@ describe("Claude Agent SDK port", () => {
         ),
       );
 
-      expect(Chunk.toReadonlyArray(messages).at(-1)).toEqual({
+      expect(messages.at(-1)).toEqual({
         kind: "status",
         sessionId: "session-1",
         status: "requesting",
@@ -2975,7 +2973,7 @@ describe("Claude Agent SDK port", () => {
         Effect.gen(function* () {
           const query = yield* harness.port.openQuery(openInput);
           const messages = yield* Stream.runCollect(Stream.take(query.messages, 1));
-          return Chunk.toReadonlyArray(messages).map((message) => message.kind);
+          return messages.map((message) => message.kind);
         }),
       ),
     );
@@ -3229,7 +3227,7 @@ describe("Claude Agent SDK port", () => {
           }),
         ),
       );
-      return Chunk.toReadonlyArray(messages).find((message) => message.kind === "result");
+      return messages.find((message) => message.kind === "result");
     }
 
     test("attaches the runtime's own categories to the result that settles a turn", async () => {
@@ -3295,9 +3293,7 @@ describe("Claude Agent SDK port", () => {
           ),
         );
         await vi.advanceTimersByTimeAsync(10_000);
-        const results = Chunk.toReadonlyArray(await collected).filter(
-          (message) => message.kind === "result",
-        );
+        const results = (await collected).filter((message) => message.kind === "result");
 
         expect(results).toHaveLength(2);
         // One ask when the session opened, one at the first result; the second
@@ -3694,7 +3690,7 @@ describe("Claude running as itself", () => {
             tools: [...openInput.tools, "Agent"],
             nativeSetup: ownSetup,
           });
-          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+          return yield* Stream.runCollect(query.messages);
         }),
       ),
     );
@@ -3818,7 +3814,7 @@ describe("Claude running as itself", () => {
             tools: [...openInput.tools, "Agent"],
             nativeSetup: ownSetup,
           });
-          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+          return yield* Stream.runCollect(query.messages);
         }),
       ),
     );
@@ -3894,7 +3890,7 @@ describe("Claude running as itself", () => {
             tools: [...openInput.tools, "Agent"],
             nativeSetup: ownSetup,
           });
-          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+          return yield* Stream.runCollect(query.messages);
         }),
       ),
     );
@@ -3939,7 +3935,7 @@ describe("Claude running as itself", () => {
             ...openInput,
             nativeSetup: { ...ownSetup, projectCode: true },
           });
-          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+          return yield* Stream.runCollect(query.messages);
         }),
       ),
     );

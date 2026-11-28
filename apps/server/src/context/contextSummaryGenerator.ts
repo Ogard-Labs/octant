@@ -5,7 +5,7 @@ import type {
   ProviderSessionId,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Either, Fiber, Stream, type Scope } from "effect";
+import { Effect, Result, Fiber, Stream, type Scope } from "effect";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import type {
   ContextMaintenanceMaterial,
@@ -120,27 +120,29 @@ export function makeContextSummaryGenerator(
       // instead of leaving one running against the turn.
       Effect.scoped(
         runSummaryTurn(options, request, state).pipe(
-          Effect.timeoutFail({
+          Effect.timeoutOrElse({
             duration: timeoutMs,
-            onTimeout: () =>
-              new ContextSummaryGenerationFailed(
-                "The maintenance model did not answer within its deadline.",
-                "timed-out",
+            orElse: () =>
+              Effect.fail(
+                new ContextSummaryGenerationFailed(
+                  "The maintenance model did not answer within its deadline.",
+                  "timed-out",
+                ),
               ),
           }),
         ),
-      ).pipe(Effect.either),
+      ).pipe(Effect.result),
     ).catch(() => {
       throw new ContextSummaryGenerationFailed("Context maintenance request failed.");
     });
     // A rejected run promise wraps its failure, so the typed failure is read
     // here instead; otherwise every deadline would surface as a plain failure.
-    if (Either.isLeft(outcome)) {
-      throw outcome.left instanceof ContextSummaryGenerationFailed
-        ? outcome.left
+    if (Result.isFailure(outcome)) {
+      throw outcome.failure instanceof ContextSummaryGenerationFailed
+        ? outcome.failure
         : new ContextSummaryGenerationFailed("Context maintenance request failed.");
     }
-    const content = outcome.right;
+    const content = outcome.success;
     return {
       content,
       summaryTokens:
@@ -280,7 +282,7 @@ function stopMaintenanceSession(
     // by deadline or by answer, so there is nothing left for it to cut short.
     Effect.interruptible,
     Effect.timeout(shutdownTimeoutMs),
-    Effect.catchAll(() => Effect.void),
+    Effect.catch(() => Effect.void),
   );
 }
 

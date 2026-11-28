@@ -4,16 +4,19 @@ import { Schema } from "effect";
 import type { BrowserWindow } from "electron";
 import { BROWSER_TEXT_INPUT_FILENAME } from "./runtimePaths";
 
-const Coordinate = Schema.Number.pipe(Schema.finite(), Schema.between(0, 1920));
+const Coordinate = Schema.Number.pipe(
+  Schema.check(Schema.isFinite()),
+  Schema.check(Schema.isBetween({ minimum: 0, maximum: 1920 })),
+);
 const Observation = Schema.Struct({
   status: Schema.Literal("observed"),
   x: Coordinate,
   y: Coordinate,
   width: Coordinate,
   height: Schema.Number.pipe(
-    Schema.finite(),
-    Schema.greaterThan(0),
-    Schema.lessThanOrEqualTo(1200),
+    Schema.check(Schema.isFinite()),
+    Schema.check(Schema.isGreaterThan(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(1200)),
   ),
 });
 const decode = Schema.decodeUnknownSync(Observation, { onExcessProperty: "error" });

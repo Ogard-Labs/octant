@@ -73,7 +73,7 @@ export function createBenchmarksClient(options: BenchmarksClientOptions): Benchm
   async function call<A, I>(
     path: string,
     body: unknown,
-    schema: Schema.Schema<A, I, never>,
+    schema: Schema.Codec<A, I>,
     timeoutMs: number = DEFAULT_TIMEOUT_MS,
   ): Promise<A> {
     const controller = new AbortController();

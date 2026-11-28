@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { BrowserContextPolicy } from "./browserAutomation";
 import {
   decodeCodeDebugEvaluateToolArguments,
@@ -19,13 +20,11 @@ import {
   type ToolActionCapability as ToolActionCapabilityType,
 } from "./toolActions";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /**
  * Approval categories from rewrite design §8.4 — independent axes enforced at
  * policy step 7 (thread elevation / approval / taint).
  */
-export const ToolApprovalClass = Schema.Literal(
+export const ToolApprovalClass = Schema.Literals([
   "project-file-writes",
   "shell-commands",
   "network-access",
@@ -34,60 +33,44 @@ export const ToolApprovalClass = Schema.Literal(
   "credential-secret-access",
   "access-outside-project",
   "privilege-expansion",
-  /**
-   * Publishing to a target the user owns. Its own class rather than a variation
-   * on repository writes: it is outward-facing and usually irreversible, and no
-   * local checkpoint undoes something other people can already see.
-   */
   "publish-to-target",
-  /**
-   * Reading inside the thread's own root. Its own class because a read has
-   * nothing an approval could gate, so it stays available under every posture
-   * that can see the root at all, Plan included.
-   */
   "project-file-reads",
-  /** Writes that never leave the thread's journal: task lists, harness reads. */
   "thread-local",
-  /**
-   * Starting a child run. Gated by the creation posture, not by the thread's
-   * access posture: a child can never hold more than its parent, so the
-   * question is whether the user lets children start at all.
-   */
   "child-agent-creation",
-);
+]);
 export type ToolApprovalClass = typeof ToolApprovalClass.Type;
 
 /**
  * Per-thread network egress levels resolved by the tool-call policy engine.
  * Code approval-gated defaults to `provider-endpoints-only` (approved 2026-08-12).
  */
-export const ToolNetworkEgressPolicy = Schema.Literal(
+export const ToolNetworkEgressPolicy = Schema.Literals([
   "none",
   "provider-endpoints-only",
   "unrestricted",
-);
+]);
 export type ToolNetworkEgressPolicy = typeof ToolNetworkEgressPolicy.Type;
 
-export const ToolCatalogOwner = Schema.Literal("core", "extension-namespaced");
+export const ToolCatalogOwner = Schema.Literals(["core", "extension-namespaced"]);
 export type ToolCatalogOwner = typeof ToolCatalogOwner.Type;
 
-export const ToolCatalogCapabilityClass = Schema.Union(
+export const ToolCatalogCapabilityClass = Schema.Union([
   ExtensionCapability,
   Schema.Literal("validation"),
-);
+]);
 export type ToolCatalogCapabilityClass = typeof ToolCatalogCapabilityClass.Type;
 
 const McpToolArguments = Schema.Struct({
-  mcpToolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  providerToolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  inputJson: Schema.String.pipe(Schema.maxLength(64 * 1024)),
+  mcpToolName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  providerToolName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  inputJson: Schema.String.check(Schema.isMaxLength(64 * 1024)),
   requiredCapabilityClass: ExtensionCapability,
-}).annotations(strict);
+});
 export type McpToolArguments = typeof McpToolArguments.Type;
 
 const ValidationToolArguments = Schema.Struct({
-  intent: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4 * 1024))),
-}).annotations(strict);
+  intent: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4 * 1024))),
+});
 
 export type ClosedToolCatalogEntry = {
   readonly capabilityId: ToolCapabilityId;
@@ -124,7 +107,10 @@ function entry(input: {
   readonly requiresAppManagedTools: boolean;
   readonly decodeArguments: (value: unknown) => unknown;
 }): ClosedToolCatalogEntry {
-  const capabilityId = Schema.decodeUnknownSync(ToolCapabilityId)(input.capabilityId);
+  const capabilityId = Schema.decodeUnknownSync(
+    ToolCapabilityId,
+    STRICT_DECODE_OPTIONS,
+  )(input.capabilityId);
   return {
     capabilityId,
     version: input.version,
@@ -140,10 +126,16 @@ function entry(input: {
   };
 }
 
-const decodeBrowserContextPolicy = Schema.decodeUnknownSync(BrowserContextPolicy);
-const decodeComputerUsePolicy = Schema.decodeUnknownSync(ComputerUsePolicy);
-const decodeMcpToolArguments = Schema.decodeUnknownSync(McpToolArguments);
-const decodeValidationToolArguments = Schema.decodeUnknownSync(ValidationToolArguments);
+const decodeBrowserContextPolicy = Schema.decodeUnknownSync(
+  BrowserContextPolicy,
+  STRICT_DECODE_OPTIONS,
+);
+const decodeComputerUsePolicy = Schema.decodeUnknownSync(ComputerUsePolicy, STRICT_DECODE_OPTIONS);
+const decodeMcpToolArguments = Schema.decodeUnknownSync(McpToolArguments, STRICT_DECODE_OPTIONS);
+const decodeValidationToolArguments = Schema.decodeUnknownSync(
+  ValidationToolArguments,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Closed Octant-owned tool catalog. Capability ids and argument schemas are
@@ -441,6 +433,15 @@ export function listClosedToolCatalog(): ReadonlyArray<ClosedToolCatalogEntry> {
   return CLOSED_TOOL_CATALOG;
 }
 
-export const decodeToolApprovalClass = Schema.decodeUnknownSync(ToolApprovalClass);
-export const decodeToolNetworkEgressPolicy = Schema.decodeUnknownSync(ToolNetworkEgressPolicy);
-export const decodeToolActionCapabilityForCatalog = Schema.decodeUnknownSync(ToolActionCapability);
+export const decodeToolApprovalClass = Schema.decodeUnknownSync(
+  ToolApprovalClass,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeToolNetworkEgressPolicy = Schema.decodeUnknownSync(
+  ToolNetworkEgressPolicy,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeToolActionCapabilityForCatalog = Schema.decodeUnknownSync(
+  ToolActionCapability,
+  STRICT_DECODE_OPTIONS,
+);

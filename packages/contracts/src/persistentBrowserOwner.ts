@@ -1,18 +1,24 @@
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { BrowserThreadId } from "./browserAutomation";
 import { StoredBrowserProfile } from "./browserProfiles";
 import { UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-export const PersistentBrowserOwnerId = Schema.UUID.pipe(Schema.brand("PersistentBrowserOwnerId"));
+export const PersistentBrowserOwnerId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PersistentBrowserOwnerId"),
+);
 export type PersistentBrowserOwnerId = typeof PersistentBrowserOwnerId.Type;
-export const PersistentBrowserLeaseId = Schema.UUID.pipe(Schema.brand("PersistentBrowserLeaseId"));
+export const PersistentBrowserLeaseId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PersistentBrowserLeaseId"),
+);
 export type PersistentBrowserLeaseId = typeof PersistentBrowserLeaseId.Type;
-const bounded = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192));
-const origin = Schema.String.pipe(
-  Schema.maxLength(2048),
-  Schema.filter((value) => {
+const bounded = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192));
+const origin = Schema.String.check(
+  Schema.isMaxLength(2048),
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return (
@@ -30,42 +36,43 @@ const origin = Schema.String.pipe(
 /** Server-derived execution receipt; discovery and profile selection grant no authority. */
 export const PersistentBrowserLeaseBinding = Schema.Struct({
   ownerId: PersistentBrowserOwnerId,
-  grantId: Schema.UUID,
+  grantId: GuidString,
   executionId: bounded,
   threadId: BrowserThreadId,
-  mode: Schema.Literal("work", "code"),
+  mode: Schema.Literals(["work", "code"]),
   projectId: ProjectId,
   providerId: bounded,
   modelId: bounded,
   authorityRevision: bounded,
   profile: StoredBrowserProfile,
-  origins: Schema.Array(origin).pipe(Schema.minItems(1), Schema.maxItems(64)),
+  origins: Schema.Array(origin).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
   expiresAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PersistentBrowserLeaseBinding = typeof PersistentBrowserLeaseBinding.Type;
 export const decodePersistentBrowserLeaseBinding = Schema.decodeUnknownSync(
   PersistentBrowserLeaseBinding,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const PersistentBrowserOwnerStatus = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("disabled", "unavailable") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("ready"), ownerId: PersistentBrowserOwnerId }).annotations(
-    strict,
-  ),
-);
+export const PersistentBrowserOwnerStatus = Schema.Union([
+  Schema.Struct({ status: Schema.Literals(["disabled", "unavailable"]) }),
+  Schema.Struct({ status: Schema.Literal("ready"), ownerId: PersistentBrowserOwnerId }),
+]);
 export type PersistentBrowserOwnerStatus = typeof PersistentBrowserOwnerStatus.Type;
 export const decodePersistentBrowserOwnerStatus = Schema.decodeUnknownSync(
   PersistentBrowserOwnerStatus,
+  STRICT_DECODE_OPTIONS,
 );
-export const PersistentBrowserContextCreated = Schema.Union(
+export const PersistentBrowserContextCreated = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("created"),
     ownerId: PersistentBrowserOwnerId,
     leaseId: PersistentBrowserLeaseId,
-  }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("unavailable") }).annotations(strict),
-);
+  }),
+  Schema.Struct({ status: Schema.Literal("unavailable") }),
+]);
 export type PersistentBrowserContextCreated = typeof PersistentBrowserContextCreated.Type;
 export const decodePersistentBrowserContextCreated = Schema.decodeUnknownSync(
   PersistentBrowserContextCreated,
+  STRICT_DECODE_OPTIONS,
 );

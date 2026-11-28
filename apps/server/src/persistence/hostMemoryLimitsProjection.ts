@@ -12,7 +12,7 @@ import type { SqliteConnection } from "./sqlitePort";
 
 /** The one aggregate that holds the host's memory limits. */
 export const HOST_MEMORY_LIMITS_AGGREGATE_ID = Schema.decodeUnknownSync(
-  Schema.UUID.pipe(Schema.brand("AggregateId")),
+  Schema.String.check(Schema.isGUID()).pipe(Schema.brand("AggregateId")),
 )("00000000-0000-4000-8000-000000000033");
 
 export class HostMemoryLimitsProjection implements Projection {

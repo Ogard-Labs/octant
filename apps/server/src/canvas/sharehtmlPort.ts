@@ -19,13 +19,11 @@ const SharehtmlPage = Schema.Struct({
   id: Schema.String,
   url: Schema.String,
   manageUrl: Schema.optional(Schema.String),
-}).annotations({ strict: true });
+});
 
 const SharehtmlFailure = Schema.Struct({
-  error: Schema.Struct({ code: Schema.String, message: Schema.String }).annotations({
-    strict: true,
-  }),
-}).annotations({ strict: true });
+  error: Schema.Struct({ code: Schema.String, message: Schema.String }),
+});
 
 /** Codes that mean the page itself was not accepted — never worth retrying. */
 const REFUSED_CODES = new Set([

@@ -10,16 +10,15 @@
  */
 
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, UtcTimestamp } from "./events";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** Who answers a Reviewed thread's prompts. */
-export const AutoReviewer = Schema.Literal("provider", "octant-shield");
+export const AutoReviewer = Schema.Literals(["provider", "octant-shield"]);
 export type AutoReviewer = typeof AutoReviewer.Type;
 
-export const ShieldVerdict = Schema.Literal("allow", "ask", "deny");
+export const ShieldVerdict = Schema.Literals(["allow", "ask", "deny"]);
 export type ShieldVerdict = typeof ShieldVerdict.Type;
 
 /**
@@ -28,7 +27,7 @@ export type ShieldVerdict = typeof ShieldVerdict.Type;
  * Shield pausing after repeated denials, and `fail-closed` is a model that
  * answered nothing usable, so the person decides.
  */
-export const ShieldStage = Schema.Literal(
+export const ShieldStage = Schema.Literals([
   "hard-line",
   "deny-rule",
   "taint-limit",
@@ -36,14 +35,14 @@ export const ShieldStage = Schema.Literal(
   "model",
   "brake",
   "fail-closed",
-);
+]);
 export type ShieldStage = typeof ShieldStage.Type;
 
 /** The model that judges: a configured provider instance and one of its models. */
 export const ShieldModelChoice = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type ShieldModelChoice = typeof ShieldModelChoice.Type;
 
 export const MAX_SHIELD_REASON_LENGTH = 280;
@@ -59,15 +58,15 @@ export const ShieldDecision = Schema.Struct({
   stage: ShieldStage,
   /** The rule that decided, for every stage but the model's. */
   rule: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SHIELD_RULE_LENGTH)),
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SHIELD_RULE_LENGTH)),
   ),
   /** One sentence: the rule's words or the model's. */
-  reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SHIELD_REASON_LENGTH)),
+  reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SHIELD_REASON_LENGTH)),
   /** The model asked, when the model stage ran or failed. */
   model: Schema.optional(ShieldModelChoice),
-  latencyMs: Schema.Int.pipe(Schema.nonNegative()),
+  latencyMs: NonNegativeInt,
   decidedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ShieldDecision = typeof ShieldDecision.Type;
 
 /**
@@ -77,22 +76,22 @@ export type ShieldDecision = typeof ShieldDecision.Type;
  */
 export const ProviderReviewDecision = Schema.Struct({
   reviewer: Schema.Literal("provider"),
-  verdict: Schema.Literal("allow", "deny"),
+  verdict: Schema.Literals(["allow", "deny"]),
   /** The call it covered, matching a tool row in the same turn, when the runtime named one. */
-  toolCallId: Schema.optional(Schema.NonEmptyTrimmedString),
-  riskLevel: Schema.optional(Schema.Literal("low", "medium", "high", "critical")),
+  toolCallId: Schema.optional(NonEmptyTrimmedString),
+  riskLevel: Schema.optional(Schema.Literals(["low", "medium", "high", "critical"])),
   reason: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_SHIELD_REASON_LENGTH)),
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(MAX_SHIELD_REASON_LENGTH)),
   ),
   decidedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ProviderReviewDecision = typeof ProviderReviewDecision.Type;
 
 /** A reviewer's decision on one call: Octant Shield's or the provider's. */
-export const ReviewDecision = Schema.Union(ShieldDecision, ProviderReviewDecision);
+export const ReviewDecision = Schema.Union([ShieldDecision, ProviderReviewDecision]);
 export type ReviewDecision = typeof ReviewDecision.Type;
 
-export const decodeShieldDecision = Schema.decodeUnknownSync(ShieldDecision);
+export const decodeShieldDecision = Schema.decodeUnknownSync(ShieldDecision, STRICT_DECODE_OPTIONS);
 
 /**
  * What Shield tags at Full access, where it judges nothing: a command that
@@ -110,9 +109,9 @@ export const MAX_SHIELD_TAGGED_COMMAND_LENGTH = 2_048;
 export const ShieldTagRecordedPayload = Schema.Struct({
   threadId: AggregateId,
   tag: ShieldTag,
-  command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
+  command: Schema.String.check(Schema.isMaxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ShieldTagRecordedPayload = typeof ShieldTagRecordedPayload.Type;
 
 /**
@@ -129,35 +128,40 @@ export const SHIELD_FORGE_CHANGES_AGGREGATE = "shield-forge-changes";
 export const SHIELD_FORGE_CHANGE_EVENT_NAMES = {
   observed: "shield-forge-changes.observed@1",
 } as const;
-export const ShieldForgeChangeKind = Schema.Literal("push", "force-push", "merge", "pull-request");
+export const ShieldForgeChangeKind = Schema.Literals([
+  "push",
+  "force-push",
+  "merge",
+  "pull-request",
+]);
 export type ShieldForgeChangeKind = typeof ShieldForgeChangeKind.Type;
-export const ShieldForgeHardLine = Schema.Literal(
+export const ShieldForgeHardLine = Schema.Literals([
   "merge-not-asked",
   "force-push-not-asked",
   "other-thread-branch",
-);
+]);
 export type ShieldForgeHardLine = typeof ShieldForgeHardLine.Type;
 /** `refused` before it ran, `ran` once it ended, `seen-after-start` when Octant could only watch. */
-export const ShieldForgeChangeOutcome = Schema.Literal("refused", "ran", "seen-after-start");
+export const ShieldForgeChangeOutcome = Schema.Literals(["refused", "ran", "seen-after-start"]);
 export type ShieldForgeChangeOutcome = typeof ShieldForgeChangeOutcome.Type;
 export const MAX_SHIELD_FORGE_CHANGE_BRANCHES = 8;
 
 export const ShieldForgeChangeObservedPayload = Schema.Struct({
   threadId: AggregateId,
-  via: Schema.Literal("octant-harness", "provider-runtime"),
-  changes: Schema.Array(ShieldForgeChangeKind).pipe(Schema.minItems(1), Schema.maxItems(4)),
+  via: Schema.Literals(["octant-harness", "provider-runtime"]),
+  changes: Schema.Array(ShieldForgeChangeKind).check(Schema.isMinLength(1), Schema.isMaxLength(4)),
   branches: Schema.optional(
-    Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))).pipe(
-      Schema.maxItems(MAX_SHIELD_FORGE_CHANGE_BRANCHES),
+    Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255))).check(
+      Schema.isMaxLength(MAX_SHIELD_FORGE_CHANGE_BRANCHES),
     ),
   ),
   unreadable: Schema.Boolean,
   outcome: ShieldForgeChangeOutcome,
   hardLine: Schema.optional(ShieldForgeHardLine),
-  command: Schema.String.pipe(Schema.maxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
+  command: Schema.String.check(Schema.isMaxLength(MAX_SHIELD_TAGGED_COMMAND_LENGTH)),
   exitCode: Schema.optional(Schema.Int),
   recordedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ShieldForgeChangeObservedPayload = typeof ShieldForgeChangeObservedPayload.Type;
 
 export {

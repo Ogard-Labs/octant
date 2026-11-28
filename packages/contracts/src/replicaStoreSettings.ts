@@ -12,11 +12,10 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { FolderBrowseMode, FolderCandidateId } from "./folderBrowse";
 import { HostId } from "./host";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const REPLICA_STORE_SETTINGS_SCHEMA_VERSION = 1 as const;
 export const ReplicaStoreSettingsSchemaVersion = Schema.Literal(
@@ -26,10 +25,11 @@ export const ReplicaStoreSettingsSchemaVersion = Schema.Literal(
 const noWhitespace = (value: string) => !/\s/.test(value);
 
 /** A folder on this machine, as the host canonicalized it. */
-export const ReplicaStoreFolder = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0"), {
-    message: () => "A sync folder must be an absolute path with no NUL.",
+export const ReplicaStoreFolder = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0"), {
+    message: "A sync folder must be an absolute path with no NUL.",
   }),
 );
 export type ReplicaStoreFolder = typeof ReplicaStoreFolder.Type;
@@ -91,26 +91,29 @@ function isHttpsOrigin(value: string): boolean {
  * The bucket provider's base address. Only `https:` with no path is accepted,
  * and never a link-local address.
  */
-export const ReplicaStoreS3Endpoint = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter(isHttpsOrigin, {
-    message: () => "The endpoint must be an https address with no path, and not link-local.",
+export const ReplicaStoreS3Endpoint = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(isHttpsOrigin, {
+    message: "The endpoint must be an https address with no path, and not link-local.",
   }),
 );
 export type ReplicaStoreS3Endpoint = typeof ReplicaStoreS3Endpoint.Type;
 
 /** Path-style (`endpoint/bucket/key`) or virtual-host (`bucket.endpoint/key`). */
-export const ReplicaStoreS3Addressing = Schema.Literal("path", "virtual-host");
+export const ReplicaStoreS3Addressing = Schema.Literals(["path", "virtual-host"]);
 export type ReplicaStoreS3Addressing = typeof ReplicaStoreS3Addressing.Type;
 
-export const ReplicaStoreS3Region = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(/^[A-Za-z0-9_-]+$/),
+export const ReplicaStoreS3Region = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/),
 );
 
-export const ReplicaStoreS3Bucket = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(63),
-  Schema.filter(
+export const ReplicaStoreS3Bucket = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(63),
+  Schema.makeFilter(
     (value) =>
       noWhitespace(value) && !value.includes("/") && !value.includes("\\") && !value.includes(".."),
   ),
@@ -126,10 +129,11 @@ function isKeyPrefix(value: string): boolean {
 }
 
 /** A folder inside the bucket, like `octant/laptop`. */
-export const ReplicaStoreS3Prefix = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.filter(isKeyPrefix, {
-    message: () => "The prefix must be a relative folder inside the bucket.",
+export const ReplicaStoreS3Prefix = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.makeFilter(isKeyPrefix, {
+    message: "The prefix must be a relative folder inside the bucket.",
   }),
 );
 
@@ -144,26 +148,25 @@ export const ReplicaStoreS3Settings = Schema.Struct({
   bucket: ReplicaStoreS3Bucket,
   prefix: Schema.optional(ReplicaStoreS3Prefix),
   addressing: ReplicaStoreS3Addressing,
-})
-  .annotations(strict)
-  .pipe(
-    // A virtual-host bucket becomes a DNS label in the request host.
-    Schema.filter(
+}).pipe(
+  // A virtual-host bucket becomes a DNS label in the request host.
+  Schema.check(
+    Schema.makeFilter(
       (settings) =>
         settings.addressing === "path" || /^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(settings.bucket),
-      { message: () => "A virtual-host bucket name must be lowercase and DNS-safe." },
+      { message: "A virtual-host bucket name must be lowercase and DNS-safe." },
     ),
-    // Prefixing an IP address with the bucket gives `bucket.10.0.0.5` or
-    // `bucket.[::1]`, which no resolver answers, so Test connection would only
-    // say unreachable without naming the addressing choice as the cause.
-    Schema.filter(
+  ),
+  // Prefixing an IP address with the bucket gives `bucket.10.0.0.5` or
+  // `bucket.[::1]`, which no resolver answers, so Test connection would only
+  // say unreachable without naming the addressing choice as the cause.
+  Schema.check(
+    Schema.makeFilter(
       (settings) => settings.addressing === "path" || !isIpAddressEndpoint(settings.endpoint),
-      {
-        message: () =>
-          "Virtual-host addressing needs an endpoint with a DNS name, not an IP address.",
-      },
+      { message: "Virtual-host addressing needs an endpoint with a DNS name, not an IP address." },
     ),
-  );
+  ),
+);
 export type ReplicaStoreS3Settings = typeof ReplicaStoreS3Settings.Type;
 
 /**
@@ -171,32 +174,33 @@ export type ReplicaStoreS3Settings = typeof ReplicaStoreS3Settings.Type;
  * command that saves it and never appears in settings, a view, or a result.
  */
 export const ReplicaStoreS3Credentials = Schema.Struct({
-  accessKeyId: Schema.NonEmptyTrimmedString.pipe(
-    Schema.maxLength(256),
-    Schema.filter(noWhitespace),
+  accessKeyId: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(256),
+    Schema.makeFilter(noWhitespace),
   ),
-  secretAccessKey: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(1_024),
-    Schema.filter(noWhitespace),
+  secretAccessKey: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(1_024),
+    Schema.makeFilter(noWhitespace),
   ),
-}).annotations(strict);
+});
 export type ReplicaStoreS3Credentials = typeof ReplicaStoreS3Credentials.Type;
 
 /** The store a person chose. `none` is the default and makes no store calls. */
-export const ReplicaStoreChoice = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const ReplicaStoreChoice = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("synced-folder"),
     folder: ReplicaStoreFolder,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("s3"),
     settings: ReplicaStoreS3Settings,
     /** The host credential-store entry holding the key pair; an id, not a secret. */
-    credentialRef: Schema.UUID,
-  }).annotations(strict),
-);
+    credentialRef: GuidString,
+  }),
+]);
 export type ReplicaStoreChoice = typeof ReplicaStoreChoice.Type;
 
 /**
@@ -210,35 +214,33 @@ export const ReplicaStoreSettings = Schema.Struct({
   syncOn: Schema.Boolean,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((settings) => !settings.syncOn || settings.store.kind !== "none", {
-      message: () => "Sync cannot be on without a store.",
-    }),
-  );
+}).check(
+  Schema.makeFilter((settings) => !settings.syncOn || settings.store.kind !== "none", {
+    message: "Sync cannot be on without a store.",
+  }),
+);
 export type ReplicaStoreSettings = typeof ReplicaStoreSettings.Type;
 
 /**
  * Whether the bucket's key pair is in the host credential store. `unavailable`
  * means the credential store could not be asked, not that the key is gone.
  */
-export const ReplicaStoreCredentialState = Schema.Literal("saved", "missing", "unavailable");
+export const ReplicaStoreCredentialState = Schema.Literals(["saved", "missing", "unavailable"]);
 export type ReplicaStoreCredentialState = typeof ReplicaStoreCredentialState.Type;
 
 /** The chosen store as Settings shows it: the credential reference stays on the host. */
-export const ReplicaStoreChoiceView = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
+export const ReplicaStoreChoiceView = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("none") }),
   Schema.Struct({
     kind: Schema.Literal("synced-folder"),
     folder: ReplicaStoreFolder,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("s3"),
     settings: ReplicaStoreS3Settings,
     credentials: ReplicaStoreCredentialState,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaStoreChoiceView = typeof ReplicaStoreChoiceView.Type;
 
 /**
@@ -253,14 +255,14 @@ export const ReplicaStoreSettingsView = Schema.Struct({
   version: AggregateVersion,
   hostId: HostId,
   mode: FolderBrowseMode,
-  credentialStore: Schema.Literal("available", "unavailable"),
+  credentialStore: Schema.Literals(["available", "unavailable"]),
   /**
    * This computer has an identity in a replica in the chosen store. Its store
    * cannot change until it leaves that replica; sync on/off and a new key pair
    * for the same bucket still can.
    */
   replicaMember: Schema.Boolean,
-}).annotations(strict);
+});
 export type ReplicaStoreSettingsView = typeof ReplicaStoreSettingsView.Type;
 
 /**
@@ -271,14 +273,14 @@ export type ReplicaStoreSettingsView = typeof ReplicaStoreSettingsView.Type;
  * leaves sync off: the storage provider can read the files, and turning sync
  * on is where the person accepts that for this store.
  */
-export const ReplicaStoreSettingsCommand = Schema.Union(
+export const ReplicaStoreSettingsCommand = Schema.Union([
   Schema.Struct({
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("choose-synced-folder"),
     mode: FolderBrowseMode,
     candidateId: FolderCandidateId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("configure-s3"),
@@ -289,26 +291,26 @@ export const ReplicaStoreSettingsCommand = Schema.Union(
      */
     credentials: Schema.optional(ReplicaStoreS3Credentials),
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("clear-store"),
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("set-sync"),
     syncOn: Schema.Boolean,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     schemaVersion: ReplicaStoreSettingsSchemaVersion,
     kind: Schema.Literal("test-connection"),
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaStoreSettingsCommand = typeof ReplicaStoreSettingsCommand.Type;
 
-export const ReplicaStoreRefusalReason = Schema.Literal(
+export const ReplicaStoreRefusalReason = Schema.Literals([
   "malformed",
   "stale-version",
   "candidate-unavailable",
@@ -317,7 +319,7 @@ export const ReplicaStoreRefusalReason = Schema.Literal(
   "credential-store-unavailable",
   "not-configured",
   "member-of-replica",
-);
+]);
 export type ReplicaStoreRefusalReason = typeof ReplicaStoreRefusalReason.Type;
 
 /**
@@ -325,7 +327,7 @@ export type ReplicaStoreRefusalReason = typeof ReplicaStoreRefusalReason.Type;
  * `sync-off`, `not-configured`, and `credential-store-unavailable` mean no
  * store was called at all.
  */
-export const ReplicaStoreConnectionOutcome = Schema.Literal(
+export const ReplicaStoreConnectionOutcome = Schema.Literals([
   "reachable",
   "sync-off",
   "not-configured",
@@ -337,35 +339,46 @@ export const ReplicaStoreConnectionOutcome = Schema.Literal(
   "not-found",
   "throttled",
   "unreachable",
-);
+]);
 export type ReplicaStoreConnectionOutcome = typeof ReplicaStoreConnectionOutcome.Type;
 
-const Message = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+const Message = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
 
-export const ReplicaStoreSettingsResult = Schema.Union(
+export const ReplicaStoreSettingsResult = Schema.Union([
   ReplicaStoreSettingsView,
   Schema.Struct({
     kind: Schema.Literal("replica-store-refused"),
     reason: ReplicaStoreRefusalReason,
     message: Message,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("replica-store-connection-tested"),
     outcome: ReplicaStoreConnectionOutcome,
     message: Message,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ReplicaStoreSettingsResult = typeof ReplicaStoreSettingsResult.Type;
 
 export const REPLICA_STORE_SETTINGS_AGGREGATE_TYPE = "replica-store-settings";
 export const REPLICA_STORE_SETTINGS_CHANGED = "replica.store-settings-changed@1";
 
-export const decodeReplicaStoreS3Settings = Schema.decodeUnknownSync(ReplicaStoreS3Settings);
-export const decodeReplicaStoreSettings = Schema.decodeUnknownSync(ReplicaStoreSettings);
-export const decodeReplicaStoreSettingsView = Schema.decodeUnknownSync(ReplicaStoreSettingsView);
+export const decodeReplicaStoreS3Settings = Schema.decodeUnknownSync(
+  ReplicaStoreS3Settings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaStoreSettings = Schema.decodeUnknownSync(
+  ReplicaStoreSettings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeReplicaStoreSettingsView = Schema.decodeUnknownSync(
+  ReplicaStoreSettingsView,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeReplicaStoreSettingsCommand = Schema.decodeUnknownSync(
   ReplicaStoreSettingsCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeReplicaStoreSettingsResult = Schema.decodeUnknownSync(
   ReplicaStoreSettingsResult,
+  STRICT_DECODE_OPTIONS,
 );

@@ -341,7 +341,7 @@ describe("BrowserAutomationFailure", () => {
 });
 
 it("accepts bounded exact HTTPS download origins and refuses URL paths, credentials and unknown fields", () => {
-  const decode = Schema.decodeUnknownSync(BrowserDownloadSource);
+  const decode = Schema.decodeUnknownSync(BrowserDownloadSource, { onExcessProperty: "error" });
   expect(
     decode({
       kind: "https-origin-chain",

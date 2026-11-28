@@ -379,9 +379,9 @@ function sessionIdFromPath(value: string): string {
 }
 
 const CodexCheckpoint = Schema.Struct({
-  models: Schema.Array(Schema.Tuple(Schema.String, Schema.String)),
+  models: Schema.Array(Schema.Tuple([Schema.String, Schema.String])),
   cumulative: Schema.Array(
-    Schema.Tuple(
+    Schema.Tuple([
       Schema.String,
       Schema.Struct({
         inputTokens: Schema.Number,
@@ -391,9 +391,9 @@ const CodexCheckpoint = Schema.Struct({
         reasoningTokens: Schema.optional(Schema.Number),
         totalTokens: Schema.optional(Schema.Number),
       }),
-    ),
+    ]),
   ),
-  sessionFiles: Schema.Array(Schema.Tuple(Schema.String, Schema.Array(Schema.String))),
+  sessionFiles: Schema.Array(Schema.Tuple([Schema.String, Schema.Array(Schema.String)])),
 });
 function codexParserCheckpoint(state: CodexParserState) {
   return {

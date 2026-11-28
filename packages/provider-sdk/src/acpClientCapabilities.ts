@@ -1,16 +1,14 @@
 import { Schema } from "effect";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 const AcpTerminalEnvironment = Schema.Struct({
   name: Schema.String,
   value: Schema.String,
-}).annotations(strict);
+});
 
 const AcpExitStatus = Schema.Struct({
   exitCode: Schema.optional(Schema.Int),
   signal: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 
 export const ACP_CLIENT_TOOL_NAMES = {
   readTextFile: "octant_acp_fs_read_text_file",
@@ -34,21 +32,21 @@ export const AcpClientReadTextFileInput = Schema.Struct({
   path: Schema.String,
   line: Schema.optional(Schema.Int),
   limit: Schema.optional(Schema.Int),
-}).annotations(strict);
+});
 export type AcpClientReadTextFileInput = typeof AcpClientReadTextFileInput.Type;
 
 export const AcpClientReadTextFileResult = Schema.Struct({
   content: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientReadTextFileResult = typeof AcpClientReadTextFileResult.Type;
 
 export const AcpClientWriteTextFileInput = Schema.Struct({
   path: Schema.String,
   content: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientWriteTextFileInput = typeof AcpClientWriteTextFileInput.Type;
 
-export const AcpClientWriteTextFileResult = Schema.Struct({}).annotations(strict);
+export const AcpClientWriteTextFileResult = Schema.Struct({});
 export type AcpClientWriteTextFileResult = typeof AcpClientWriteTextFileResult.Type;
 
 export const AcpClientTerminalCreateInput = Schema.Struct({
@@ -57,29 +55,29 @@ export const AcpClientTerminalCreateInput = Schema.Struct({
   env: Schema.optional(Schema.Array(AcpTerminalEnvironment)),
   cwd: Schema.optional(Schema.String),
   outputByteLimit: Schema.optional(Schema.Int),
-}).annotations(strict);
+});
 export type AcpClientTerminalCreateInput = typeof AcpClientTerminalCreateInput.Type;
 
 export const AcpClientTerminalCreateResult = Schema.Struct({
   terminalId: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientTerminalCreateResult = typeof AcpClientTerminalCreateResult.Type;
 
 export const AcpClientTerminalOutputInput = Schema.Struct({
   terminalId: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientTerminalOutputInput = typeof AcpClientTerminalOutputInput.Type;
 
 export const AcpClientTerminalOutputResult = Schema.Struct({
   output: Schema.String,
   truncated: Schema.Boolean,
   exitStatus: Schema.optional(AcpExitStatus),
-}).annotations(strict);
+});
 export type AcpClientTerminalOutputResult = typeof AcpClientTerminalOutputResult.Type;
 
 export const AcpClientTerminalWaitForExitInput = Schema.Struct({
   terminalId: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientTerminalWaitForExitInput = typeof AcpClientTerminalWaitForExitInput.Type;
 
 export const AcpClientTerminalWaitForExitResult = AcpExitStatus;
@@ -87,16 +85,16 @@ export type AcpClientTerminalWaitForExitResult = typeof AcpClientTerminalWaitFor
 
 export const AcpClientTerminalKillInput = Schema.Struct({
   terminalId: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientTerminalKillInput = typeof AcpClientTerminalKillInput.Type;
 
-export const AcpClientTerminalKillResult = Schema.Struct({}).annotations(strict);
+export const AcpClientTerminalKillResult = Schema.Struct({});
 export type AcpClientTerminalKillResult = typeof AcpClientTerminalKillResult.Type;
 
 export const AcpClientTerminalReleaseInput = Schema.Struct({
   terminalId: Schema.String,
-}).annotations(strict);
+});
 export type AcpClientTerminalReleaseInput = typeof AcpClientTerminalReleaseInput.Type;
 
-export const AcpClientTerminalReleaseResult = Schema.Struct({}).annotations(strict);
+export const AcpClientTerminalReleaseResult = Schema.Struct({});
 export type AcpClientTerminalReleaseResult = typeof AcpClientTerminalReleaseResult.Type;

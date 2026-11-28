@@ -126,7 +126,7 @@ describe("installed Codex runtime", () => {
               if (started.resumeCursor?.driverKind !== "codex") {
                 throw new Error("Installed Codex smoke did not receive an opaque resume cursor.");
               }
-              const planEvents = collectEvents(Stream.unwrapScoped(plan.connection.subscribe));
+              const planEvents = collectEvents(Stream.unwrap(plan.connection.subscribe));
               await Effect.runPromise(
                 plan.connection.send({
                   sessionId: planSessionId,
@@ -170,7 +170,7 @@ describe("installed Codex runtime", () => {
                 resumedHandle.resumeCursor.value === resumeCursor.value,
             ).toBe(true);
             expect(processStarts).toBeGreaterThanOrEqual(2);
-            const eventsPromise = collectEvents(Stream.unwrapScoped(resumed.connection.subscribe));
+            const eventsPromise = collectEvents(Stream.unwrap(resumed.connection.subscribe));
             await Effect.runPromise(
               resumed.connection.send({
                 sessionId: planSessionId,
@@ -200,7 +200,7 @@ describe("installed Codex runtime", () => {
             );
             let interruptionRequested = false;
             const interruptedEvents = collectEvents(
-              Stream.unwrapScoped(interrupt.connection.subscribe),
+              Stream.unwrap(interrupt.connection.subscribe),
               (event) => {
                 if (event.kind !== "text-delta" || interruptionRequested) return Effect.void;
                 interruptionRequested = true;
@@ -250,7 +250,7 @@ describe("installed Codex runtime", () => {
                   }),
                 );
                 const approvalEvents = collectApprovalAttempt(
-                  Stream.unwrapScoped(approval.connection.subscribe),
+                  Stream.unwrap(approval.connection.subscribe),
                   (event) => {
                     if (approvalDeclined) return Effect.void;
                     approvalDeclined = true;
@@ -307,7 +307,7 @@ describe("installed Codex runtime", () => {
                 }),
               );
               const approvalEvents = collectApprovalAttempt(
-                Stream.unwrapScoped(approval.connection.subscribe),
+                Stream.unwrap(approval.connection.subscribe),
                 (event) => {
                   if (answeredAction !== undefined) return Effect.void;
                   answeredAction = event.action;

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import {
   GeminiImageAspectRatio,
@@ -10,10 +11,10 @@ import {
   ProviderModelId,
 } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const ContentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const ContentDigest = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 
 export const ImageJobId = brandedUuid("ImageJobId");
 export type ImageJobId = typeof ImageJobId.Type;
@@ -32,9 +33,10 @@ export type ImageGenerationScopeId = typeof ImageGenerationScopeId.Type;
  * thread: every registered window of a host shares it, and its artifacts stay
  * in the host's managed attachment store like any thread's.
  */
-export const IMAGE_LIBRARY_SCOPE_ID = Schema.decodeSync(ImageGenerationScopeId)(
-  "00000000-0000-4000-8000-00000000f1e1",
-);
+export const IMAGE_LIBRARY_SCOPE_ID = Schema.decodeSync(
+  ImageGenerationScopeId,
+  STRICT_DECODE_OPTIONS,
+)("00000000-0000-4000-8000-00000000f1e1");
 
 export const IMAGE_JOB_AGGREGATE_TYPE = "image-job";
 export const IMAGE_JOB_QUEUED = "image.job-queued@1";
@@ -49,7 +51,7 @@ export const IMAGE_JOB_STATUSES = [
   "failed",
   "cancelled",
 ] as const;
-export const ImageJobStatus = Schema.Literal(...IMAGE_JOB_STATUSES);
+export const ImageJobStatus = Schema.Literals(IMAGE_JOB_STATUSES);
 export type ImageJobStatus = typeof ImageJobStatus.Type;
 
 export const IMAGE_JOB_TERMINAL_STATUSES = [
@@ -64,7 +66,7 @@ export const IMAGE_ARTIFACT_MEDIA_TYPES = [
   "image/webp",
   "image/gif",
 ] as const;
-export const ImageArtifactMediaType = Schema.Literal(...IMAGE_ARTIFACT_MEDIA_TYPES);
+export const ImageArtifactMediaType = Schema.Literals(IMAGE_ARTIFACT_MEDIA_TYPES);
 export type ImageArtifactMediaType = typeof ImageArtifactMediaType.Type;
 
 export const MAX_GENERATED_IMAGE_BYTES = 20_971_520;
@@ -78,9 +80,9 @@ export const IMAGE_JOB_HOST_CONCURRENCY = 2;
 export const ImageArtifactRef = Schema.Struct({
   attachmentId: ImageArtifactId,
   hash: ContentDigest,
-  size: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_GENERATED_IMAGE_BYTES)),
+  size: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_GENERATED_IMAGE_BYTES)),
   mime: ImageArtifactMediaType,
-}).annotations(strict);
+});
 export type ImageArtifactRef = typeof ImageArtifactRef.Type;
 
 /**
@@ -93,24 +95,24 @@ export const ImageGenerationEvidence = Schema.Struct({
   promptHash: ContentDigest,
   jobId: ImageJobId,
   parentArtifactRef: Schema.optional(ImageArtifactRef),
-}).annotations(strict);
+});
 export type ImageGenerationEvidence = typeof ImageGenerationEvidence.Type;
 
 export const ImageArtifactRecord = Schema.Struct({
   attachmentId: ImageArtifactId,
   hash: ContentDigest,
-  size: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_GENERATED_IMAGE_BYTES)),
+  size: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_GENERATED_IMAGE_BYTES)),
   mime: ImageArtifactMediaType,
   evidence: ImageGenerationEvidence,
-}).annotations(strict);
+});
 export type ImageArtifactRecord = typeof ImageArtifactRecord.Type;
 
-export const ImageJobThreadKind = Schema.Literal(
+export const ImageJobThreadKind = Schema.Literals([
   "chat-thread",
   "work-thread",
   "code-thread",
   "image-library",
-);
+]);
 export type ImageJobThreadKind = typeof ImageJobThreadKind.Type;
 
 export const ImageJob = Schema.Struct({
@@ -122,30 +124,30 @@ export const ImageJob = Schema.Struct({
   modelId: ProviderModelId,
   promptHash: ContentDigest,
   parentArtifactRef: Schema.optional(ImageArtifactRef),
-  artifacts: Schema.Array(ImageArtifactRecord).pipe(Schema.maxItems(MAX_IMAGE_VARIANTS)),
-  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  artifacts: Schema.Array(ImageArtifactRecord).check(Schema.isMaxLength(MAX_IMAGE_VARIANTS)),
+  safetyRefusal: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
   failure: Schema.optional(ProviderFailure),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((job) => {
-      if (job.updatedAt < job.createdAt) return false;
-      const hasArtifacts = job.artifacts.length > 0;
-      if (job.status === "completed") {
-        return hasArtifacts && job.failure === undefined && job.safetyRefusal === undefined;
-      }
-      if (job.status === "failed") {
-        return !hasArtifacts && (job.failure !== undefined || job.safetyRefusal !== undefined);
-      }
-      return !hasArtifacts && job.failure === undefined && job.safetyRefusal === undefined;
-    }),
-  );
+}).check(
+  Schema.makeFilter((job) => {
+    if (job.updatedAt < job.createdAt) return false;
+    const hasArtifacts = job.artifacts.length > 0;
+    if (job.status === "completed") {
+      return hasArtifacts && job.failure === undefined && job.safetyRefusal === undefined;
+    }
+    if (job.status === "failed") {
+      return !hasArtifacts && (job.failure !== undefined || job.safetyRefusal !== undefined);
+    }
+    return !hasArtifacts && job.failure === undefined && job.safetyRefusal === undefined;
+  }),
+);
 export type ImageJob = typeof ImageJob.Type;
 
-export const ImageJobQueued = Schema.Struct({ job: ImageJob }).annotations(strict);
+export const ImageJobQueued = Schema.Struct({ job: ImageJob });
 export type ImageJobQueued = typeof ImageJobQueued.Type;
 
 export const ImageJobStatusChanged = Schema.Struct({
@@ -154,42 +156,76 @@ export const ImageJobStatusChanged = Schema.Struct({
   toStatus: ImageJobStatus,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-  recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
-  safetyRefusal: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000))),
+  recoveryReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  ),
+  safetyRefusal: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  ),
   failure: Schema.optional(ProviderFailure),
   artifacts: Schema.optional(
-    Schema.Array(ImageArtifactRecord).pipe(Schema.maxItems(MAX_IMAGE_VARIANTS)),
+    Schema.Array(ImageArtifactRecord).check(Schema.isMaxLength(MAX_IMAGE_VARIANTS)),
   ),
-}).annotations(strict);
+});
 export type ImageJobStatusChanged = typeof ImageJobStatusChanged.Type;
 
-export const decodeImageJobId = Schema.decodeUnknownSync(ImageJobId);
-export const decodeImageArtifactId = Schema.decodeUnknownSync(ImageArtifactId);
-export const decodeImageGenerationScopeId = Schema.decodeUnknownSync(ImageGenerationScopeId);
-export const decodeImageJobStatus = Schema.decodeUnknownSync(ImageJobStatus);
-export const decodeImageArtifactMediaType = Schema.decodeUnknownSync(ImageArtifactMediaType);
-export const decodeImageArtifactRef = Schema.decodeUnknownSync(ImageArtifactRef);
-export const decodeImageGenerationEvidence = Schema.decodeUnknownSync(ImageGenerationEvidence);
-export const decodeImageArtifactRecord = Schema.decodeUnknownSync(ImageArtifactRecord);
-export const decodeImageJob = Schema.decodeUnknownSync(ImageJob);
-export const decodeImageJobQueued = Schema.decodeUnknownSync(ImageJobQueued);
-export const decodeImageJobStatusChanged = Schema.decodeUnknownSync(ImageJobStatusChanged);
+export const decodeImageJobId = Schema.decodeUnknownSync(ImageJobId, STRICT_DECODE_OPTIONS);
+export const decodeImageArtifactId = Schema.decodeUnknownSync(
+  ImageArtifactId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageGenerationScopeId = Schema.decodeUnknownSync(
+  ImageGenerationScopeId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageJobStatus = Schema.decodeUnknownSync(ImageJobStatus, STRICT_DECODE_OPTIONS);
+export const decodeImageArtifactMediaType = Schema.decodeUnknownSync(
+  ImageArtifactMediaType,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageArtifactRef = Schema.decodeUnknownSync(
+  ImageArtifactRef,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageGenerationEvidence = Schema.decodeUnknownSync(
+  ImageGenerationEvidence,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageArtifactRecord = Schema.decodeUnknownSync(
+  ImageArtifactRecord,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeImageJob = Schema.decodeUnknownSync(ImageJob, STRICT_DECODE_OPTIONS);
+export const decodeImageJobQueued = Schema.decodeUnknownSync(ImageJobQueued, STRICT_DECODE_OPTIONS);
+export const decodeImageJobStatusChanged = Schema.decodeUnknownSync(
+  ImageJobStatusChanged,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const IMAGE_USAGE_UNITS_MAX_SIZE_LENGTH = 32;
 export const IMAGE_USAGE_UNITS_MAX_QUALITY_LENGTH = 32;
 
 export const ImageUsageUnits = Schema.Struct({
-  count: PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_IMAGE_VARIANTS)),
-  quality: Schema.Literal("exact", "estimated", "unavailable"),
+  count: PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_IMAGE_VARIANTS)),
+  quality: Schema.Literals(["exact", "estimated", "unavailable"]),
   size: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(IMAGE_USAGE_UNITS_MAX_SIZE_LENGTH)),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(IMAGE_USAGE_UNITS_MAX_SIZE_LENGTH),
+    ),
   ),
   outputQuality: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(IMAGE_USAGE_UNITS_MAX_QUALITY_LENGTH)),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(IMAGE_USAGE_UNITS_MAX_QUALITY_LENGTH),
+    ),
   ),
-}).annotations(strict);
+});
 export type ImageUsageUnits = typeof ImageUsageUnits.Type;
-export const decodeImageUsageUnits = Schema.decodeUnknownSync(ImageUsageUnits);
+export const decodeImageUsageUnits = Schema.decodeUnknownSync(
+  ImageUsageUnits,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const IMAGE_GENERATION_MAX_CUSTOM_SOURCES = 20;
 
@@ -201,8 +237,8 @@ export const IMAGE_GENERATION_MAX_CUSTOM_SOURCES = 20;
 export const ImageGenerationCustomSource = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
-}).annotations(strict);
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(120)),
+});
 export type ImageGenerationCustomSource = typeof ImageGenerationCustomSource.Type;
 
 /**
@@ -211,8 +247,8 @@ export type ImageGenerationCustomSource = typeof ImageGenerationCustomSource.Typ
  * named settings.
  */
 export const ImageGenerationSettings = Schema.Struct({
-  customSources: Schema.Array(ImageGenerationCustomSource).pipe(
-    Schema.maxItems(IMAGE_GENERATION_MAX_CUSTOM_SOURCES),
+  customSources: Schema.Array(ImageGenerationCustomSource).check(
+    Schema.isMaxLength(IMAGE_GENERATION_MAX_CUSTOM_SOURCES),
   ),
   /**
    * The image profile a thread at Full access generates on when several are
@@ -220,13 +256,17 @@ export const ImageGenerationSettings = Schema.Struct({
    * not ready, means the first ready profile.
    */
   defaultProfileInstanceId: Schema.optional(ProviderInstanceId),
-}).annotations(strict);
+});
 export type ImageGenerationSettings = typeof ImageGenerationSettings.Type;
 
 export const decodeImageGenerationCustomSource = Schema.decodeUnknownSync(
   ImageGenerationCustomSource,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeImageGenerationSettings = Schema.decodeUnknownSync(ImageGenerationSettings);
+export const decodeImageGenerationSettings = Schema.decodeUnknownSync(
+  ImageGenerationSettings,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * An enabled image profile the renderer may name. Credentials never appear:
@@ -234,16 +274,16 @@ export const decodeImageGenerationSettings = Schema.decodeUnknownSync(ImageGener
  */
 export const ImageGenerationProfileView = Schema.Struct({
   instanceId: ProviderInstanceId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
-  driverKind: Schema.Literal(
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(120)),
+  driverKind: Schema.Literals([
     "openai-image",
     "gemini-native-image",
     "openai-compatible-image",
     "bfl-image",
     "ideogram-image",
     "outside-image",
-  ),
-  modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
+  ]),
+  modelAllowlist: Schema.Array(ProviderModelId).check(Schema.isMinLength(1)),
   defaultModel: ProviderModelId,
   /**
    * Custom image sources only: the label Settings gave the source behind each
@@ -254,20 +294,20 @@ export const ImageGenerationProfileView = Schema.Struct({
     Schema.Array(
       Schema.Struct({
         modelId: ProviderModelId,
-        label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
-      }).annotations(strict),
+        label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(120)),
+      }),
     ),
   ),
   quality: Schema.optional(OpenAiImageQuality),
   size: Schema.optional(OpenAiImageSize),
   aspectRatio: Schema.optional(GeminiImageAspectRatio),
   resolution: Schema.optional(GeminiImageResolution),
-}).annotations(strict);
+});
 export type ImageGenerationProfileView = typeof ImageGenerationProfileView.Type;
 
 export const ImageGenerationProfilesResponse = Schema.Struct({
   profiles: Schema.Array(ImageGenerationProfileView),
-}).annotations(strict);
+});
 export type ImageGenerationProfilesResponse = typeof ImageGenerationProfilesResponse.Type;
 
 /**
@@ -276,10 +316,10 @@ export type ImageGenerationProfilesResponse = typeof ImageGenerationProfilesResp
  */
 export const ImageGenerationReferenceInput = Schema.Struct({
   mediaType: ImageArtifactMediaType,
-  base64: Schema.NonEmptyString.pipe(
-    Schema.maxLength(Math.ceil((MAX_GENERATED_IMAGE_BYTES * 4) / 3) + 8),
+  base64: Schema.NonEmptyString.check(
+    Schema.isMaxLength(Math.ceil((MAX_GENERATED_IMAGE_BYTES * 4) / 3) + 8),
   ),
-}).annotations(strict);
+});
 export type ImageGenerationReferenceInput = typeof ImageGenerationReferenceInput.Type;
 
 export const ImageGenerationEnqueueRequest = Schema.Struct({
@@ -287,43 +327,46 @@ export const ImageGenerationEnqueueRequest = Schema.Struct({
   scopeId: ImageGenerationScopeId,
   profileInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-  prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_PROMPT_CHARACTERS)),
-  variantCount: Schema.optional(PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_IMAGE_VARIANTS))),
+  prompt: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_IMAGE_PROMPT_CHARACTERS),
+  ),
+  variantCount: Schema.optional(PositiveInt.check(Schema.isLessThanOrEqualTo(MAX_IMAGE_VARIANTS))),
   quality: Schema.optional(OpenAiImageQuality),
   size: Schema.optional(OpenAiImageSize),
   aspectRatio: Schema.optional(GeminiImageAspectRatio),
   resolution: Schema.optional(GeminiImageResolution),
   parentArtifactRef: Schema.optional(ImageArtifactRef),
   references: Schema.optional(
-    Schema.Array(ImageGenerationReferenceInput).pipe(Schema.maxItems(MAX_IMAGE_REFERENCES)),
+    Schema.Array(ImageGenerationReferenceInput).check(Schema.isMaxLength(MAX_IMAGE_REFERENCES)),
   ),
-}).annotations(strict);
+});
 export type ImageGenerationEnqueueRequest = typeof ImageGenerationEnqueueRequest.Type;
 
 export const ImageGenerationJobsResponse = Schema.Struct({
   jobs: Schema.Array(ImageJob),
-}).annotations(strict);
+});
 export type ImageGenerationJobsResponse = typeof ImageGenerationJobsResponse.Type;
 
 export const ImageGenerationSaveRequest = Schema.Struct({
-  relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  relativePath: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+});
 export type ImageGenerationSaveRequest = typeof ImageGenerationSaveRequest.Type;
 
-export const ImageGenerationSaveResult = Schema.Union(
+export const ImageGenerationSaveResult = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("saved"),
-    relativePath: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
+    relativePath: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
-  }).annotations(strict),
+    reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
-  }).annotations(strict),
-);
+    reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  }),
+]);
 export type ImageGenerationSaveResult = typeof ImageGenerationSaveResult.Type;
 
 export const ImageGenerationOfferId = brandedUuid("ImageGenerationOfferId");
@@ -338,7 +381,7 @@ export const MAX_PENDING_IMAGE_GENERATION_OFFERS = 32;
  * a Project (`rememberForThread` keeps its name for clients already built); `agent-draws` lets the agent make the visual with its own output;
  * `save` writes the image a save offer names; `cancel` does nothing.
  */
-export const ImageGenerationOfferDecision = Schema.Union(
+export const ImageGenerationOfferDecision = Schema.Union([
   Schema.Struct({
     offerId: ImageGenerationOfferId,
     decision: Schema.Literal("generate"),
@@ -346,51 +389,63 @@ export const ImageGenerationOfferDecision = Schema.Union(
     modelId: ProviderModelId,
     rememberForThread: Schema.Boolean,
     referenceImagesConfirmed: Schema.optional(Schema.Literal(true)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     offerId: ImageGenerationOfferId,
     /** `save` answers a save offer; `agent-draws` a generate offer; `cancel` either. */
-    decision: Schema.Literal("agent-draws", "save", "cancel"),
-  }).annotations(strict),
-);
+    decision: Schema.Literals(["agent-draws", "save", "cancel"]),
+  }),
+]);
 export type ImageGenerationOfferDecision = typeof ImageGenerationOfferDecision.Type;
 
-export const ImageGenerationOfferDecisionResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("image-offer-answered") }).annotations(strict),
-  /** The offer is no longer waiting: answered, expired, or its turn stopped. */
-  Schema.Struct({ kind: Schema.Literal("image-offer-gone") }).annotations(strict),
-  /** The chosen profile or model is not one this host can generate with now. */
+export const ImageGenerationOfferDecisionResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("image-offer-answered") }),
+  Schema.Struct({ kind: Schema.Literal("image-offer-gone") }),
   Schema.Struct({
     kind: Schema.Literal("image-offer-refused"),
-    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_000)),
-  }).annotations(strict),
-);
+    reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2_000)),
+  }),
+]);
 export type ImageGenerationOfferDecisionResult = typeof ImageGenerationOfferDecisionResult.Type;
 
-export const decodeImageGenerationOfferId = Schema.decodeUnknownSync(ImageGenerationOfferId);
+export const decodeImageGenerationOfferId = Schema.decodeUnknownSync(
+  ImageGenerationOfferId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeImageGenerationOfferDecision = Schema.decodeUnknownSync(
   ImageGenerationOfferDecision,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationOfferDecisionResult = Schema.decodeUnknownSync(
   ImageGenerationOfferDecisionResult,
+  STRICT_DECODE_OPTIONS,
 );
 
 export const decodeImageGenerationProfileView = Schema.decodeUnknownSync(
   ImageGenerationProfileView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationProfilesResponse = Schema.decodeUnknownSync(
   ImageGenerationProfilesResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationReferenceInput = Schema.decodeUnknownSync(
   ImageGenerationReferenceInput,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationEnqueueRequest = Schema.decodeUnknownSync(
   ImageGenerationEnqueueRequest,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationJobsResponse = Schema.decodeUnknownSync(
   ImageGenerationJobsResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeImageGenerationSaveRequest = Schema.decodeUnknownSync(
   ImageGenerationSaveRequest,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeImageGenerationSaveResult = Schema.decodeUnknownSync(ImageGenerationSaveResult);
+export const decodeImageGenerationSaveResult = Schema.decodeUnknownSync(
+  ImageGenerationSaveResult,
+  STRICT_DECODE_OPTIONS,
+);

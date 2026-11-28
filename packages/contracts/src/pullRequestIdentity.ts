@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CodeThreadId } from "./code";
 import { UtcTimestamp } from "./events";
 import {
@@ -8,23 +9,23 @@ import {
 } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter(
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\0"),
     ),
   );
 
-const branchName = boundedNonEmptyText(255).pipe(
-  Schema.filter((value) => !/\s/.test(value) && !value.includes("..")),
+const branchName = boundedNonEmptyText(255).check(
+  Schema.makeFilter((value) => !/\s/.test(value) && !value.includes("..")),
 );
 
-const PullRequestUrl = Schema.String.pipe(
-  Schema.maxLength(2_048),
-  Schema.filter((value) => {
+const PullRequestUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
     try {
       const url = new URL(value);
       return url.protocol === "https:" && url.username === "" && url.password === "";
@@ -35,11 +36,11 @@ const PullRequestUrl = Schema.String.pipe(
 );
 
 /** Fork or base head owner login as observed on github.com; display-only. */
-const PullRequestHeadOwner = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,128}$/));
+const PullRequestHeadOwner = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]{1,128}$/));
 
-const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =>
-  Schema.Array(schema).pipe(
-    Schema.filter(
+const uniqueArray = <S extends Schema.Top>(schema: S, maximum: number) =>
+  Schema.Array(schema).check(
+    Schema.makeFilter(
       (values) =>
         values.length <= maximum &&
         new Set(values.map((value) => String(value))).size === values.length,
@@ -49,17 +50,20 @@ const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =
 export const MAX_CODE_PULL_REQUEST_LINK_THREADS = 32;
 
 /** Stable host-local identifier of one linked pull request record in the journal. */
-export const PullRequestLinkId = Schema.UUID.pipe(Schema.brand("PullRequestLinkId"));
+export const PullRequestLinkId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PullRequestLinkId"),
+);
 export type PullRequestLinkId = typeof PullRequestLinkId.Type;
 
 /** Strict GitHub GraphQL / REST node identity for a pull request on github.com. */
-export const GithubPullRequestNodeId = Schema.String.pipe(
-  Schema.filter((value) => /^[A-Za-z0-9+/=_-]{1,128}$/.test(value)),
+export const GithubPullRequestNodeId = Schema.String.check(
+  Schema.makeFilter((value) => /^[A-Za-z0-9+/=_-]{1,128}$/.test(value)),
 );
 export type GithubPullRequestNodeId = typeof GithubPullRequestNodeId.Type;
 
 /** Which automated pull-request switch was reconciled during duplicate link merging. */
-export const PullRequestSwitchKind = Schema.Literal("merge-when-ready", "auto-fix", "watch");
+export const PullRequestSwitchKind = Schema.Literals(["merge-when-ready", "auto-fix", "watch"]);
 export type PullRequestSwitchKind = typeof PullRequestSwitchKind.Type;
 
 /** Aggregate type for every linked pull-request identity journal stream. */
@@ -88,7 +92,7 @@ export const CodePullRequestLinkCreated = Schema.Struct({
   host: Schema.Literal("github.com"),
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   url: Schema.optional(PullRequestUrl),
   baseBranch: Schema.optional(branchName),
   headOwner: Schema.optional(PullRequestHeadOwner),
@@ -96,14 +100,14 @@ export const CodePullRequestLinkCreated = Schema.Struct({
   pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
   baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   linkedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type CodePullRequestLinkCreated = typeof CodePullRequestLinkCreated.Type;
 
 /** Records an additional Code thread linked to an existing pull-request link. */
 export const CodePullRequestLinkThreadAttached = Schema.Struct({
   linkId: PullRequestLinkId,
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type CodePullRequestLinkThreadAttached = typeof CodePullRequestLinkThreadAttached.Type;
 
 /**
@@ -114,13 +118,11 @@ export const CodePullRequestLinkForgeIdsBackfilled = Schema.Struct({
   linkId: PullRequestLinkId,
   pullRequestNodeId: Schema.optional(GithubPullRequestNodeId),
   baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (value) => value.pullRequestNodeId !== undefined || value.baseRepositoryNodeId !== undefined,
-    ),
-  );
+}).check(
+  Schema.makeFilter(
+    (value) => value.pullRequestNodeId !== undefined || value.baseRepositoryNodeId !== undefined,
+  ),
+);
 export type CodePullRequestLinkForgeIdsBackfilled =
   typeof CodePullRequestLinkForgeIdsBackfilled.Type;
 
@@ -133,12 +135,12 @@ export const CodePullRequestLinkDisplayUpdated = Schema.Struct({
   linkId: PullRequestLinkId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
+  number: PositiveInt,
   url: Schema.optional(PullRequestUrl),
   baseBranch: Schema.optional(branchName),
   headOwner: Schema.optional(PullRequestHeadOwner),
   headBranch: Schema.optional(branchName),
-}).annotations(strict);
+});
 export type CodePullRequestLinkDisplayUpdated = typeof CodePullRequestLinkDisplayUpdated.Type;
 
 /**
@@ -154,25 +156,34 @@ export const CodePullRequestLinkMergedInto = Schema.Struct({
   baseRepositoryNodeId: Schema.optional(GithubRepositoryNodeId),
   movedThreadIds: uniqueArray(CodeThreadId, MAX_CODE_PULL_REQUEST_LINK_THREADS),
   disabledSwitches: uniqueArray(PullRequestSwitchKind, 3),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((value) => String(value.linkId) !== String(value.survivingLinkId)));
+}).check(Schema.makeFilter((value) => String(value.linkId) !== String(value.survivingLinkId)));
 export type CodePullRequestLinkMergedInto = typeof CodePullRequestLinkMergedInto.Type;
 
-export const decodePullRequestLinkId = Schema.decodeUnknownSync(PullRequestLinkId);
-export const decodeGithubPullRequestNodeId = Schema.decodeUnknownSync(GithubPullRequestNodeId);
+export const decodePullRequestLinkId = Schema.decodeUnknownSync(
+  PullRequestLinkId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeGithubPullRequestNodeId = Schema.decodeUnknownSync(
+  GithubPullRequestNodeId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeCodePullRequestLinkCreated = Schema.decodeUnknownSync(
   CodePullRequestLinkCreated,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePullRequestLinkThreadAttached = Schema.decodeUnknownSync(
   CodePullRequestLinkThreadAttached,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePullRequestLinkForgeIdsBackfilled = Schema.decodeUnknownSync(
   CodePullRequestLinkForgeIdsBackfilled,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePullRequestLinkDisplayUpdated = Schema.decodeUnknownSync(
   CodePullRequestLinkDisplayUpdated,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeCodePullRequestLinkMergedInto = Schema.decodeUnknownSync(
   CodePullRequestLinkMergedInto,
+  STRICT_DECODE_OPTIONS,
 );

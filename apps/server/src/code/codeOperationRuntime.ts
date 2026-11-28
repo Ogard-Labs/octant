@@ -2680,18 +2680,18 @@ export function createCodeOperationRuntime(
               : { adopted: adoptedWithHistory(threadId, target.adopted) }),
           };
         const listed = await Effect.runPromise(
-          Effect.either(
+          Effect.result(
             target.nativeSessions.list({
               instanceId: target.thread.providerInstanceId,
               projectRoot: target.projectRoot,
             }),
           ),
         );
-        if (listed._tag === "Left")
-          return { threadId, sessions: [], unavailable: listed.left.message };
+        if (listed._tag === "Failure")
+          return { threadId, sessions: [], unavailable: listed.failure.message };
         return {
           threadId,
-          sessions: listed.right.flatMap((session) => {
+          sessions: listed.success.flatMap((session) => {
             try {
               return [
                 {
@@ -2723,7 +2723,7 @@ export function createCodeOperationRuntime(
             return { kind: "code-native-session-refused", message: target.message };
           const sessionId = decodeProviderSessionId(options.uuid());
           const adopted = await Effect.runPromise(
-            Effect.either(
+            Effect.result(
               target.nativeSessions.adopt({
                 instanceId: target.thread.providerInstanceId,
                 projectRoot: target.projectRoot,
@@ -2734,8 +2734,8 @@ export function createCodeOperationRuntime(
               }),
             ),
           );
-          if (adopted._tag === "Left")
-            return { kind: "code-native-session-refused", message: adopted.left.message };
+          if (adopted._tag === "Failure")
+            return { kind: "code-native-session-refused", message: adopted.failure.message };
           // The provider claimed the session for this thread before the thread
           // could record it. An adoption that is not recorded gives the claim
           // back, or the session could never be offered or adopted again.
@@ -2790,7 +2790,7 @@ export function createCodeOperationRuntime(
               };
             const operationId = decodeCodeOperationId(options.uuid());
             const thread = target.thread;
-            const cursor = adopted.right;
+            const cursor = adopted.success;
             // One journal unit: an adoption is recorded whole or not at all, so
             // a claim given back never leaves half an adoption behind.
             const releaseActor = events.actingFor(operationId, adoptingActor);
@@ -2849,7 +2849,7 @@ export function createCodeOperationRuntime(
                     nativeSessionId,
                     sessionId,
                   }) ?? Effect.void
-                ).pipe(Effect.catchAll(() => Effect.void)),
+                ).pipe(Effect.catch(() => Effect.void)),
               );
           }
         } finally {
@@ -5302,7 +5302,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approved: false,
             scope: "once",
           })
-          .pipe(Effect.catchAll(() => Effect.void)),
+          .pipe(Effect.catch(() => Effect.void)),
       );
       return;
     }
@@ -6128,7 +6128,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             approved,
             scope: "once",
           })
-          .pipe(Effect.catchAll(() => Effect.void)),
+          .pipe(Effect.catch(() => Effect.void)),
       );
     active.approvals.delete(input.approvalId);
     active.approvalPostures.delete(input.approvalId);
@@ -6201,7 +6201,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
     await Effect.runPromise(
-      connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+      connection.interrupt(active.sessionId as never).pipe(Effect.catch(() => Effect.void)),
     );
     return turnState("interrupted");
   }
@@ -6438,7 +6438,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     if (connection !== undefined) {
       const confirmed = await settlesWithin(
         Effect.runPromise(
-          connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+          connection.interrupt(active.sessionId as never).pipe(Effect.catch(() => Effect.void)),
         ),
         this.#options.stopConfirmationMs ?? STOP_CONFIRMATION_MS,
       );
@@ -6486,12 +6486,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         await Effect.runPromise(
           active.connection
             .interrupt(active.sessionId as never)
-            .pipe(Effect.catchAll(() => Effect.void)),
+            .pipe(Effect.catch(() => Effect.void)),
         );
         await Effect.runPromise(
-          active.connection
-            .stop(active.sessionId as never)
-            .pipe(Effect.catchAll(() => Effect.void)),
+          active.connection.stop(active.sessionId as never).pipe(Effect.catch(() => Effect.void)),
         );
       }),
     );

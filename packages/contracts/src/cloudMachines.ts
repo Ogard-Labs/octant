@@ -11,6 +11,7 @@
  */
 
 import { Schema } from "effect";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateId, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import {
@@ -21,8 +22,6 @@ import {
   ServerProjectName,
 } from "./serverProjects";
 import { ShieldServerAlias, ShieldServerUser } from "./shieldServers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const CLOUD_MACHINES_AGGREGATE = "cloud-machines";
 export const CLOUD_MACHINES_EVENT_NAMES = {
@@ -47,22 +46,22 @@ export const MAX_SETTLED_CLOUD_MACHINES_SHOWN = 16;
 export const MAX_CLOUD_MACHINE_SETUP_SCRIPT_BYTES = 16_384;
 
 const boundedToken = (max: number) =>
-  Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(max),
-    Schema.filter((value) => !/\s/.test(value) && !value.includes("\u0000")),
+  Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(max),
+    Schema.makeFilter((value) => !/\s/.test(value) && !value.includes("\u0000")),
   );
 
 /** A target as the plugin host names it: the plugin and its component. */
-export const CloudMachineTargetId = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(128),
-  Schema.pattern(/^[a-z0-9][a-z0-9._/-]*$/),
+export const CloudMachineTargetId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[a-z0-9][a-z0-9._/-]*$/),
 );
 export type CloudMachineTargetId = typeof CloudMachineTargetId.Type;
 
 /** The credential broker's reference for the cloud account; never its value. */
-export const CloudCredentialReference = Schema.UUID;
+export const CloudCredentialReference = GuidString;
 export type CloudCredentialReference = typeof CloudCredentialReference.Type;
 
 /**
@@ -74,14 +73,17 @@ export const CloudMachineRecipe = Schema.Struct({
   size: boundedToken(128),
   region: boundedToken(128),
   setupScript: Schema.optional(
-    Schema.String.pipe(
-      Schema.maxLength(MAX_CLOUD_MACHINE_SETUP_SCRIPT_BYTES),
-      Schema.filter((script) => !script.includes("\u0000")),
+    Schema.String.check(
+      Schema.isMaxLength(MAX_CLOUD_MACHINE_SETUP_SCRIPT_BYTES),
+      Schema.makeFilter((script) => !script.includes("\u0000")),
     ),
   ),
-}).annotations(strict);
+});
 export type CloudMachineRecipe = typeof CloudMachineRecipe.Type;
-export const decodeCloudMachineRecipe = Schema.decodeUnknownSync(CloudMachineRecipe);
+export const decodeCloudMachineRecipe = Schema.decodeUnknownSync(
+  CloudMachineRecipe,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * One SSH host public key as the provider reports it, in the `known_hosts`
@@ -89,9 +91,9 @@ export const decodeCloudMachineRecipe = Schema.decodeUnknownSync(CloudMachineRec
  * Only OpenSSH's current host key types are accepted, and nothing else may
  * ride on the line, because the host writes it into a known hosts file.
  */
-export const SshHostPublicKey = Schema.String.pipe(
-  Schema.maxLength(4_096),
-  Schema.pattern(
+export const SshHostPublicKey = Schema.String.check(
+  Schema.isMaxLength(4_096),
+  Schema.isPattern(
     /^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-rsa|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,2}$/,
   ),
 );
@@ -110,9 +112,9 @@ export const CloudMachineSshEndpoint = Schema.Struct({
   host: ShieldServerAlias,
   user: ShieldServerUser,
   hostKeys: Schema.optional(
-    Schema.Array(SshHostPublicKey).pipe(Schema.minItems(1), Schema.maxItems(8)),
+    Schema.Array(SshHostPublicKey).check(Schema.isMinLength(1), Schema.isMaxLength(8)),
   ),
-}).annotations(strict);
+});
 export type CloudMachineSshEndpoint = typeof CloudMachineSshEndpoint.Type;
 
 /**
@@ -122,15 +124,15 @@ export type CloudMachineSshEndpoint = typeof CloudMachineSshEndpoint.Type;
  * never estimates, converts or totals it.
  */
 export const CloudMachineHourlyCost = Schema.Struct({
-  amount: Schema.String.pipe(Schema.pattern(/^\d{1,9}(\.\d{1,9})?$/)),
-  currency: Schema.String.pipe(Schema.pattern(/^[A-Z]{3}$/)),
+  amount: Schema.String.check(Schema.isPattern(/^\d{1,9}(\.\d{1,9})?$/)),
+  currency: Schema.String.check(Schema.isPattern(/^[A-Z]{3}$/)),
   /** The provider record the figure came from, such as its price list for the size. */
-  source: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(120),
-    Schema.filter((value) => !/[\u0000-\u001f]/.test(value)),
+  source: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(120),
+    Schema.makeFilter((value) => !/[\u0000-\u001f]/.test(value)),
   ),
-}).annotations(strict);
+});
 export type CloudMachineHourlyCost = typeof CloudMachineHourlyCost.Type;
 
 /** The provider's machine as a target plugin reports it; decoded before it is believed. */
@@ -140,9 +142,12 @@ export const CloudMachineDescription = Schema.Struct({
   endpoint: Schema.optional(CloudMachineSshEndpoint),
   /** Absent when the provider reports no price for this machine; never filled in by Octant. */
   costPerHour: Schema.optional(CloudMachineHourlyCost),
-}).annotations(strict);
+});
 export type CloudMachineDescription = typeof CloudMachineDescription.Type;
-export const decodeCloudMachineDescription = Schema.decodeUnknownOption(CloudMachineDescription);
+export const decodeCloudMachineDescription = Schema.decodeUnknownOption(
+  CloudMachineDescription,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Where a machine's creation stands. `creating` is journaled before the
@@ -150,13 +155,13 @@ export const decodeCloudMachineDescription = Schema.decodeUnknownOption(CloudMac
  * `creation-uncertain` means the provider's answer never arrived or could not
  * be read, and a machine may exist that the person must check for themselves.
  */
-export const CloudMachineLifecycle = Schema.Literal(
+export const CloudMachineLifecycle = Schema.Literals([
   "creating",
   "created",
   "creation-refused",
   "creation-uncertain",
   "destroyed",
-);
+]);
 export type CloudMachineLifecycle = typeof CloudMachineLifecycle.Type;
 
 export const CloudMachine = Schema.Struct({
@@ -175,18 +180,16 @@ export const CloudMachine = Schema.Struct({
   endpoint: Schema.optional(CloudMachineSshEndpoint),
   /** The provider's last reported hourly cost and when it was read. */
   costPerHour: Schema.optional(
-    Schema.Struct({ ...CloudMachineHourlyCost.fields, observedAt: UtcTimestamp }).annotations(
-      strict,
-    ),
+    Schema.Struct({ ...CloudMachineHourlyCost.fields, observedAt: UtcTimestamp }),
   ),
   serverId: Schema.optional(AggregateId),
   projectId: Schema.optional(ProjectId),
-  detail: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  detail: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+});
 export type CloudMachine = typeof CloudMachine.Type;
 
 /** Version 1 records name only a local window; version 2 also names a person-paired device. */
-const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") }).annotations(strict);
+const localWindow = Schema.Struct({ kind: Schema.Literal("local-window") });
 export const CloudMachineEventPrincipalV2 = ServerProjectEventPrincipalV2;
 export type CloudMachineEventPrincipalV2 = ServerProjectEventPrincipalV2;
 
@@ -199,18 +202,18 @@ const CloudMachineCreationRequestedMachine = Schema.Struct({
   folder: ServerFolderPath,
   mode: Schema.optional(ServerProjectMode),
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 export const CloudMachineCreationRequestedPayload = Schema.Struct({
   machine: CloudMachineCreationRequestedMachine,
   principal: localWindow,
-}).annotations(strict);
+});
 export type CloudMachineCreationRequestedPayload = typeof CloudMachineCreationRequestedPayload.Type;
 
 export const CloudMachineCreationRequestedPayloadV2 = Schema.Struct({
   machine: CloudMachineCreationRequestedMachine,
   principal: CloudMachineEventPrincipalV2,
-}).annotations(strict);
+});
 export type CloudMachineCreationRequestedPayloadV2 =
   typeof CloudMachineCreationRequestedPayloadV2.Type;
 
@@ -218,80 +221,80 @@ export const CloudMachineCreatedPayload = Schema.Struct({
   machineId: AggregateId,
   machine: CloudMachineDescription,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 
 export const CloudMachineCreationEndedPayload = Schema.Struct({
   machineId: AggregateId,
-  outcome: Schema.Literal("refused", "uncertain"),
-  detail: Schema.String.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  outcome: Schema.Literals(["refused", "uncertain"]),
+  detail: Schema.String.check(Schema.isMaxLength(512)),
+});
 
 export const CloudMachineProjectBoundPayload = Schema.Struct({
   machineId: AggregateId,
   serverId: AggregateId,
   projectId: ProjectId,
   principal: localWindow,
-}).annotations(strict);
+});
 
 export const CloudMachineProjectBoundPayloadV2 = Schema.Struct({
   machineId: AggregateId,
   serverId: AggregateId,
   projectId: ProjectId,
   principal: CloudMachineEventPrincipalV2,
-}).annotations(strict);
+});
 
 export const CloudMachineStateChangedPayload = Schema.Struct({
   machineId: AggregateId,
   /** `destroy` is a destroy the provider is still finishing; `observe` is a refresh. */
-  act: Schema.Literal("suspend", "resume", "destroy", "observe"),
+  act: Schema.Literals(["suspend", "resume", "destroy", "observe"]),
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   /** Present only when the provider reported a cost with this answer. */
   costPerHour: Schema.optional(CloudMachineHourlyCost),
   principal: localWindow,
-}).annotations(strict);
+});
 
 export const CloudMachineStateChangedPayloadV2 = Schema.Struct({
   machineId: AggregateId,
   /** `destroy` is a destroy the provider is still finishing; `observe` is a refresh. */
-  act: Schema.Literal("suspend", "resume", "destroy", "observe"),
+  act: Schema.Literals(["suspend", "resume", "destroy", "observe"]),
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   /** Present only when the provider reported a cost with this answer. */
   costPerHour: Schema.optional(CloudMachineHourlyCost),
   principal: CloudMachineEventPrincipalV2,
-}).annotations(strict);
+});
 
 export const CloudMachineDestroyedPayload = Schema.Struct({
   machineId: AggregateId,
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   principal: localWindow,
-}).annotations(strict);
+});
 
 export const CloudMachineDestroyedPayloadV2 = Schema.Struct({
   machineId: AggregateId,
   state: CloudMachineState,
   observedAt: UtcTimestamp,
   principal: CloudMachineEventPrincipalV2,
-}).annotations(strict);
+});
 
 /** A target the plugin host offers now: installed, trusted and enabled. */
 export const CloudMachineTargetEntry = Schema.Struct({
   targetId: CloudMachineTargetId,
-  displayName: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(120)),
-}).annotations(strict);
+  displayName: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
+});
 export type CloudMachineTargetEntry = typeof CloudMachineTargetEntry.Type;
 
 export const CloudMachinesView = Schema.Struct({
   targets: Schema.Array(CloudMachineTargetEntry),
-  machines: Schema.Array(CloudMachine).pipe(
-    Schema.maxItems(MAX_CLOUD_MACHINES + MAX_SETTLED_CLOUD_MACHINES_SHOWN),
+  machines: Schema.Array(CloudMachine).check(
+    Schema.isMaxLength(MAX_CLOUD_MACHINES + MAX_SETTLED_CLOUD_MACHINES_SHOWN),
   ),
-}).annotations(strict);
+});
 export type CloudMachinesView = typeof CloudMachinesView.Type;
 
-export const CloudMachinesCommand = Schema.Union(
+export const CloudMachinesCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("create-cloud-machine"),
     targetId: CloudMachineTargetId,
@@ -300,40 +303,40 @@ export const CloudMachinesCommand = Schema.Union(
     credentialReference: CloudCredentialReference,
     folder: ServerFolderPath,
     mode: Schema.optional(ServerProjectMode),
-  }).annotations(strict),
-  /** Registers and binds the machine again after a binding that was refused. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("bind-cloud-machine-project"),
     machineId: AggregateId,
-  }).annotations(strict),
-  /** Reads where the machine stands from its provider and records it. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("refresh-cloud-machine"),
     machineId: AggregateId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("suspend-cloud-machine"),
     machineId: AggregateId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resume-cloud-machine"),
     machineId: AggregateId,
-  }).annotations(strict),
-  /** Asks for the one confirmation a destroy needs; changes nothing. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("request-cloud-machine-destroy"),
     machineId: AggregateId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("destroy-cloud-machine"),
     machineId: AggregateId,
-    confirmation: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  }).annotations(strict),
-);
+    confirmation: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  }),
+]);
 export type CloudMachinesCommand = typeof CloudMachinesCommand.Type;
-export const decodeCloudMachinesCommand = Schema.decodeUnknownSync(CloudMachinesCommand);
+export const decodeCloudMachinesCommand = Schema.decodeUnknownSync(
+  CloudMachinesCommand,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const CloudMachinesRefusalReason = Schema.Literal(
+export const CloudMachinesRefusalReason = Schema.Literals([
   "needs-person",
   "needs-local-window",
   "target-not-offered",
@@ -348,25 +351,25 @@ export const CloudMachinesRefusalReason = Schema.Literal(
   "provider-failed",
   "binding-refused",
   "unavailable",
-);
+]);
 export type CloudMachinesRefusalReason = typeof CloudMachinesRefusalReason.Type;
 
-export const CloudMachinesCommandResult = Schema.Union(
+export const CloudMachinesCommandResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("cloud-machines-updated"),
     view: CloudMachinesView,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cloud-machine-destroy-confirmation"),
     machineId: AggregateId,
     name: ServerProjectName,
     confirmation: Schema.String,
     expiresAt: UtcTimestamp,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cloud-machines-refused"),
     reason: CloudMachinesRefusalReason,
     message: Schema.String,
-  }).annotations(strict),
-);
+  }),
+]);
 export type CloudMachinesCommandResult = typeof CloudMachinesCommandResult.Type;

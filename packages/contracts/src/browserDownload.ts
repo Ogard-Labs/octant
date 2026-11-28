@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   BrowserThreadId,
   MAX_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
@@ -6,8 +7,6 @@ import {
 } from "./browserAutomation";
 import { ProjectWorkingFolderId } from "./workingDirectory";
 import { UtcTimestamp } from "./events";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * The largest file an agent's download may hold or save unless the person
@@ -32,7 +31,7 @@ export const BROWSER_DOWNLOAD_EVENT_NAMES = {
   refused: "browser.download-refused@1",
 } as const;
 
-const Origin = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048));
+const Origin = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048));
 
 /**
  * A download the agent saved into the thread's workspace after the person
@@ -43,35 +42,36 @@ export const BrowserDownloadSaved = Schema.Struct({
   /** The page the file came from. */
   origin: Origin,
   /** Where it landed, relative to the workspace root. */
-  path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-  sizeBytes: Schema.Int.pipe(
-    Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES),
+  path: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  sizeBytes: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(MAX_BROWSER_DOWNLOAD_RECEIPT_BYTES),
   ),
-  mediaType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  sha256: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/)),
+  mediaType: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   savedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BrowserDownloadSaved = typeof BrowserDownloadSaved.Type;
 
 export const BrowserDownloadDestinationReceipt = Schema.Struct({
   approvedFolderId: ProjectWorkingFolderId,
-  label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
   pathBase: Schema.Literal("selected-root"),
-}).annotations(strict);
+});
 export type BrowserDownloadDestinationReceipt = typeof BrowserDownloadDestinationReceipt.Type;
 /** A separate event preserves the legacy workspace-relative saved receipt. */
 export const BrowserDownloadSelectedSaved = Schema.Struct({
   ...BrowserDownloadSaved.fields,
   destination: BrowserDownloadDestinationReceipt,
-}).annotations(strict);
+});
 export type BrowserDownloadSelectedSaved = typeof BrowserDownloadSelectedSaved.Type;
 export const decodeBrowserDownloadSelectedSaved = Schema.decodeUnknownSync(
   BrowserDownloadSelectedSaved,
+  STRICT_DECODE_OPTIONS,
 );
 
 /** Why a download was not kept. */
-export const BrowserDownloadRefusalReason = Schema.Literal(
+export const BrowserDownloadRefusalReason = Schema.Literals([
   "too-large",
   "executable",
   "denied",
@@ -80,7 +80,7 @@ export const BrowserDownloadRefusalReason = Schema.Literal(
   "symlink",
   "unavailable",
   "changed",
-);
+]);
 export type BrowserDownloadRefusalReason = typeof BrowserDownloadRefusalReason.Type;
 
 /** A download that was cancelled, refused, or denied. No bytes. */
@@ -88,13 +88,19 @@ export const BrowserDownloadRefused = Schema.Struct({
   threadId: BrowserThreadId,
   origin: Origin,
   /** The page's suggested name, reduced to a safe basename. */
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  sizeBytes: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-  mediaType: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  sizeBytes: Schema.optional(NonNegativeInt),
+  mediaType: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
   reason: BrowserDownloadRefusalReason,
   refusedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type BrowserDownloadRefused = typeof BrowserDownloadRefused.Type;
 
-export const decodeBrowserDownloadSaved = Schema.decodeUnknownSync(BrowserDownloadSaved);
-export const decodeBrowserDownloadRefused = Schema.decodeUnknownSync(BrowserDownloadRefused);
+export const decodeBrowserDownloadSaved = Schema.decodeUnknownSync(
+  BrowserDownloadSaved,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeBrowserDownloadRefused = Schema.decodeUnknownSync(
+  BrowserDownloadRefused,
+  STRICT_DECODE_OPTIONS,
+);

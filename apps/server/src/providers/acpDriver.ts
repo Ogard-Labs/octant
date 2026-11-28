@@ -233,7 +233,7 @@ interface AcpRetainedRuntime {
   /** Every other agent's usage, read by ACP's standard schema. */
   readonly reported?: AcpReportedUsageState;
   readonly source: AcpNewSessionResult;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly client: AcpClientPort;
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
@@ -260,7 +260,7 @@ interface SessionState {
   readonly executionPolicy: ProviderExecutionPolicy;
   /** The host answers every approval for one call, as for a helper run. */
   readonly answersOncePerCall: boolean;
-  readonly scope: Scope.CloseableScope;
+  readonly scope: Scope.Closeable;
   readonly client: AcpClientPort;
   readonly context: AcpEventContext;
   readonly removeNotification: () => void;
@@ -1655,7 +1655,7 @@ function makeConnection(
         readonly nativeSetup?: ProviderNativeSetup;
       },
       source: AcpNewSessionResult,
-      scope: Scope.CloseableScope,
+      scope: Scope.Closeable,
       client: AcpClientPort,
       managedTools: AcpManagedToolsLease | undefined,
       appManagedTools: ProviderCapabilitySupport,
@@ -1745,7 +1745,7 @@ function makeConnection(
       nativeSetup?: ProviderNativeSetup,
       signal?: AbortSignal,
     ): Promise<{
-      readonly scope: Scope.CloseableScope;
+      readonly scope: Scope.Closeable;
       readonly client: AcpClientPort;
       readonly connection: AcpAgentConnection;
     }> => {
@@ -1763,7 +1763,7 @@ function makeConnection(
         const runOptions = signal === undefined ? undefined : { signal };
         const apiKeyExit = await Effect.runPromiseExit(resolveApiKey(options), runOptions);
         if (Exit.isFailure(apiKeyExit)) {
-          throw Option.getOrElse(Cause.failureOption(apiKeyExit.cause), () =>
+          throw Option.getOrElse(Cause.findErrorOption(apiKeyExit.cause), () =>
             failure("provider-failed", `${name} credentials could not be resolved.`),
           );
         }
@@ -1800,7 +1800,7 @@ function makeConnection(
           runOptions,
         );
         if (Exit.isFailure(startedExit)) {
-          throw Option.getOrElse(Cause.failureOption(startedExit.cause), () =>
+          throw Option.getOrElse(Cause.findErrorOption(startedExit.cause), () =>
             failure("provider-failed", `${name} process failed without a typed failure.`),
           );
         }
@@ -1814,7 +1814,7 @@ function makeConnection(
           runOptions,
         );
         if (Exit.isFailure(signedInExit)) {
-          throw Option.getOrElse(Cause.failureOption(signedInExit.cause), () =>
+          throw Option.getOrElse(Cause.findErrorOption(signedInExit.cause), () =>
             failure("provider-failed", `${name} sign-in failed without a typed failure.`),
           );
         }
@@ -1918,7 +1918,7 @@ function makeConnection(
             if (claim.status === "refused") throw claim.failure;
             releaseNative = claim.release;
           };
-          let scope: Scope.CloseableScope | undefined;
+          let scope: Scope.Closeable | undefined;
           let managedTools: AcpManagedToolsLease | undefined;
           let registered: SessionState | undefined;
           let removeUsage = () => {};
@@ -2605,7 +2605,7 @@ function makeConnection(
       toolRequestSignal: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingToolAnswers.get(requestId)?.controller.signal ??
         AbortSignal.abort(),
-      subscribe: Stream.fromPubSub(queue, { scoped: true }),
+      subscribe: Effect.map(PubSub.subscribe(queue), Stream.fromSubscription),
       start: (input) =>
         createState({ ...input, tools: input.tools ?? [] }).pipe(
           Effect.map((state) => ({
@@ -2889,7 +2889,7 @@ function makeConnection(
               return request(() =>
                 state.client.respondPermission(pending.providerRequestId, pending.rejectOptionId),
               ).pipe(
-                Effect.zipRight(
+                Effect.andThen(
                   Effect.fail(
                     failure("unauthorized", "Plan mode cannot approve provider actions."),
                   ),

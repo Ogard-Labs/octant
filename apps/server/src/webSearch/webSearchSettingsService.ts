@@ -54,10 +54,12 @@ const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
-const decodeAggregateId = Schema.decodeUnknownSync(Schema.UUID.pipe(Schema.brand("AggregateId")));
+const decodeAggregateId = Schema.decodeUnknownSync(
+  Schema.String.check(Schema.isGUID()).pipe(Schema.brand("AggregateId")),
+);
 const decodeAggregateIdOption = Schema.decodeUnknownOption(AggregateId);
 const decodeToolCallIdOption = Schema.decodeUnknownOption(
-  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(255))),
 );
 
 /**
@@ -65,7 +67,7 @@ const decodeToolCallIdOption = Schema.decodeUnknownOption(
  * projection in the schema's key order, and a rebuilt entry carries its
  * credential reference last, so equal lists serialize differently.
  */
-const sameWebSearchSettings = Schema.equivalence(WebSearchSettings);
+const sameWebSearchSettings = Schema.toEquivalence(WebSearchSettings);
 
 /** The id the entry migrated from Chat's SearXNG address keeps once saved. */
 export const MIGRATED_SEARXNG_ENTRY_ID = decodeWebSearchBackendId(

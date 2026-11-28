@@ -79,7 +79,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
       mode: "chat",
     });
     yield* Effect.addFinalizer(() =>
-      connection.stop(input.sessionId).pipe(Effect.catchAll(() => Effect.void)),
+      connection.stop(input.sessionId).pipe(Effect.catch(() => Effect.void)),
     );
     yield* connection.start({
       sessionId: input.sessionId,
@@ -169,10 +169,9 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
   try {
     return await Effect.runPromise(
       Effect.scoped(program).pipe(
-        Effect.timeoutTo({
+        Effect.timeoutOrElse({
           duration: input.timeoutMs,
-          onTimeout: (): OneShotOutcome => ({ status: "timed-out" }),
-          onSuccess: (value: OneShotOutcome) => value,
+          orElse: () => Effect.succeed<OneShotOutcome>({ status: "timed-out" }),
         }),
       ),
       input.signal === undefined ? undefined : { signal: input.signal },

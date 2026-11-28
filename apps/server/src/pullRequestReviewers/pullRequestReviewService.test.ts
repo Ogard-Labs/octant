@@ -30,7 +30,7 @@ import {
   type TurnUsage,
 } from "@octant/contracts";
 import { settleSpendCeilingReservation } from "@octant/domain";
-import { Effect, Schema, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { afterEach, describe, expect, it } from "vitest";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
@@ -766,18 +766,22 @@ describe("second-model pull request reviewer service", () => {
               stopCompleted = true;
             }),
           subscribe: Effect.succeed(
-            Stream.async<ProviderRuntimeEvent>((emit) => {
-              const flush = () => {
-                for (const event of pendingEvents.splice(0)) {
-                  void emit.single(event);
-                }
-              };
-              flushPending = flush;
-              flush();
-              return Effect.sync(() => {
-                fiberInterrupted = true;
-              });
-            }),
+            Stream.callback<ProviderRuntimeEvent>((queue) =>
+              Effect.gen(function* () {
+                yield* Effect.addFinalizer(() =>
+                  Effect.sync(() => {
+                    fiberInterrupted = true;
+                  }),
+                );
+                const flush = () => {
+                  for (const event of pendingEvents.splice(0)) {
+                    Queue.offerUnsafe(queue, event);
+                  }
+                };
+                flushPending = flush;
+                flush();
+              }),
+            ),
           ),
         } as never),
     };

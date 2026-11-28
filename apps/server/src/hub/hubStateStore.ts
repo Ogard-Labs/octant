@@ -49,11 +49,10 @@ import { Schema } from "effect";
 
 const SUBDIR = "hub";
 const FILE = "hub-state.json";
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const digest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
-const key = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(512),
-  Schema.pattern(/^[A-Za-z0-9_-]+$/),
+const digest = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)));
+const key = Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+  Schema.check(Schema.isMaxLength(512)),
+  Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
 );
 
 /** What the hub keeps for a member beyond its roster entry. */
@@ -65,9 +64,11 @@ export const HubMemberRecord = Schema.Struct({
    * standby added while it stood in: it paired with the standby, so this hub
    * holds no device to revoke and the member holds no owner powers here.
    */
-  deviceId: Schema.optional(Schema.UUID),
+  deviceId: Schema.optional(Schema.String.check(Schema.isGUID())),
   /** Absent for a guest, which runs no listener the hub could reach. */
-  listenerOrigin: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300))),
+  listenerOrigin: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(300))),
+  ),
   /**
    * For a guest that is a desktop window of a member: that member (the hub's
    * own id for a window on the hub). The guest leaves the roster with it, and
@@ -79,15 +80,15 @@ export const HubMemberRecord = Schema.Struct({
    * asked it directly, which the hub's own Act list bounds. Revoked when the
    * guest leaves the roster, is replaced, or the hub role is turned off.
    */
-  windowDeviceId: Schema.optional(Schema.UUID),
-}).annotations(strict);
+  windowDeviceId: Schema.optional(Schema.String.check(Schema.isGUID())),
+});
 export type HubMemberRecord = typeof HubMemberRecord.Type;
 
 /** A join code the hub made and has not yet seen used. */
 export const HubJoinTicketRecord = Schema.Struct({
-  ticketId: Schema.UUID,
+  ticketId: Schema.String.check(Schema.isGUID()),
   owner: Schema.Boolean,
-}).annotations(strict);
+});
 export type HubJoinTicketRecord = typeof HubJoinTicketRecord.Type;
 
 /**
@@ -98,11 +99,11 @@ export type HubJoinTicketRecord = typeof HubJoinTicketRecord.Type;
  */
 export const HostOwnerRecord = Schema.Struct({
   memberId: HubMemberId,
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(128))),
   identityKeyFingerprint: digest,
   unlockKeyFingerprint: digest,
   unlockPublicKey: key,
-}).annotations(strict);
+});
 export type HostOwnerRecord = typeof HostOwnerRecord.Type;
 
 /**
@@ -114,10 +115,8 @@ export type HostOwnerRecord = typeof HostOwnerRecord.Type;
 export const WakeSpokeRecord = Schema.Struct({
   ...HubWakeSpokeTimes.fields,
   reportedAt: Schema.Int,
-  lastResult: Schema.optional(
-    Schema.Struct({ at: Schema.Int, result: HubWakeResult }).annotations(strict),
-  ),
-}).annotations(strict);
+  lastResult: Schema.optional(Schema.Struct({ at: Schema.Int, result: HubWakeResult })),
+});
 export type WakeSpokeRecord = typeof WakeSpokeRecord.Type;
 
 /**
@@ -128,8 +127,8 @@ export const WakeWithdrawal = Schema.Struct({
   memberId: HubMemberId,
   withdrawnAt: Schema.Int,
   /** The sequence of the withdrawing report, so an older report arriving later is ignored. */
-  sequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
-}).annotations(strict);
+  sequence: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
+});
 export type WakeWithdrawal = typeof WakeWithdrawal.Type;
 
 /** The hub's wake service: its own switch, off until the person turns it on, and the times it holds. */
@@ -141,7 +140,7 @@ export const HubWakeState = Schema.Struct({
   generation: Schema.optional(Schema.Int),
   /** The revision of the last copy handed to the standbys; it only rises, so a late older copy can be told apart. */
   copyRevision: Schema.optional(Schema.Int),
-}).annotations(strict);
+});
 export type HubWakeState = typeof HubWakeState.Type;
 
 /**
@@ -151,19 +150,17 @@ export type HubWakeState = typeof HubWakeState.Type;
  */
 export const PushSpokeRecord = Schema.Struct({
   memberId: HubMemberId,
-  forwarded: Schema.Int.pipe(Schema.nonNegative()),
-  refused: Schema.Int.pipe(Schema.nonNegative()),
-  lastResult: Schema.optional(
-    Schema.Struct({ at: Schema.Int, result: HubPushResult }).annotations(strict),
-  ),
-}).annotations(strict);
+  forwarded: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  refused: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  lastResult: Schema.optional(Schema.Struct({ at: Schema.Int, result: HubPushResult })),
+});
 export type PushSpokeRecord = typeof PushSpokeRecord.Type;
 
 /** The hub's push sender: its own switch, off until the person turns it on, and what it counted. */
 export const HubPushState = Schema.Struct({
   enabled: Schema.Boolean,
   spokes: Schema.Array(PushSpokeRecord),
-}).annotations(strict);
+});
 export type HubPushState = typeof HubPushState.Type;
 
 /**
@@ -174,7 +171,7 @@ export type HubPushState = typeof HubPushState.Type;
 export const HubDirectPushState = Schema.Struct({
   enabled: Schema.Boolean,
   environment: HubDirectPushEnvironment,
-}).annotations(strict);
+});
 export type HubDirectPushState = typeof HubDirectPushState.Type;
 
 /** How the hub's last attempt to hand one spoke one offer ended. */
@@ -183,7 +180,7 @@ export const ProvisionDeliveryRecord = Schema.Struct({
   at: Schema.Int,
   result: HubOfferDeliveryResult,
   reason: Schema.optional(HubProvisionReason),
-}).annotations(strict);
+});
 export type ProvisionDeliveryRecord = typeof ProvisionDeliveryRecord.Type;
 
 /**
@@ -197,14 +194,14 @@ export const ProvisionOfferRecord = Schema.Struct({
   offer: HubOfferBody,
   mirrorFeed: Schema.optional(AppUpdateFeed),
   deliveries: Schema.Array(ProvisionDeliveryRecord),
-}).annotations(strict);
+});
 export type ProvisionOfferRecord = typeof ProvisionOfferRecord.Type;
 
 /** The hub's provisioning: its own switch, off until the person turns it on, and the offers it holds. */
 export const HubProvisionState = Schema.Struct({
   enabled: Schema.Boolean,
   offers: Schema.Array(ProvisionOfferRecord),
-}).annotations(strict);
+});
 export type HubProvisionState = typeof HubProvisionState.Type;
 
 /** An offer a spoke holds as a proposal until its person applies it, dismisses it, or it lapses. */
@@ -213,7 +210,7 @@ export const ProvisionProposalRecord = Schema.Struct({
   offer: HubOfferBody,
   receivedAtMs: Schema.Int,
   expiresAtMs: Schema.Int,
-}).annotations(strict);
+});
 export type ProvisionProposalRecord = typeof ProvisionProposalRecord.Type;
 
 /**
@@ -225,7 +222,7 @@ export const SpokeProvisionState = Schema.Struct({
   proposals: Schema.Array(ProvisionProposalRecord),
   autoApply: Schema.Array(HubAutoApplyKind),
   verifiedFeed: Schema.optional(AppUpdateFeed),
-}).annotations(strict);
+});
 export type SpokeProvisionState = typeof SpokeProvisionState.Type;
 
 /**
@@ -240,12 +237,12 @@ export const SignInAskRecord = Schema.Struct({
   askedAtMs: Schema.Int,
   outcome: Schema.optional(HubSignInOutcome),
   refused: Schema.optional(HubSignInReason),
-}).annotations(strict);
+});
 export type SignInAskRecord = typeof SignInAskRecord.Type;
 
 export const HubSignInState = Schema.Struct({
   asks: Schema.Array(SignInAskRecord),
-}).annotations(strict);
+});
 export type HubSignInState = typeof HubSignInState.Type;
 
 /** A request a spoke holds for its person: asked, then accepted once they say so. */
@@ -254,10 +251,10 @@ export const SignInRequestRecord = Schema.Struct({
   kind: HubSignInKind,
   receivedAtMs: Schema.Int,
   expiresAtMs: Schema.Int,
-  state: Schema.Literal("asked", "accepted"),
+  state: Schema.Literals(["asked", "accepted"]),
   /** The provider's sign-in command for the account this host uses, fixed when the request arrived. */
   command: Schema.optional(Schema.String),
-}).annotations(strict);
+});
 export type SignInRequestRecord = typeof SignInRequestRecord.Type;
 
 /**
@@ -269,9 +266,9 @@ export const SpokeSignInState = Schema.Struct({
   requests: Schema.Array(SignInRequestRecord),
   arrivedAtMs: Schema.Array(Schema.Int),
   unreported: Schema.Array(
-    Schema.Struct({ requestId: HubSignInRequestId, outcome: HubSignInOutcome }).annotations(strict),
+    Schema.Struct({ requestId: HubSignInRequestId, outcome: HubSignInOutcome }),
   ),
-}).annotations(strict);
+});
 export type SpokeSignInState = typeof SpokeSignInState.Type;
 
 export const HubSideState = Schema.Struct({
@@ -303,21 +300,23 @@ export const HubSideState = Schema.Struct({
     Schema.Array(
       Schema.Struct({
         memberId: HubMemberId,
-        sequence: Schema.Int.pipe(Schema.positive()),
-      }).annotations(strict),
+        sequence: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+      }),
     ),
   ),
-}).annotations(strict);
+});
 export type HubSideState = typeof HubSideState.Type;
 
 /** A member a standby added while standing in, kept until the hub takes it back. */
 export const StandInAddedRecord = Schema.Struct({
   member: RosterMember,
   identityPublicKey: key,
-  listenerOrigin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300)),
+  listenerOrigin: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+    Schema.check(Schema.isMaxLength(300)),
+  ),
   /** The paired device the standby made for the member. */
-  deviceId: Schema.UUID,
-}).annotations(strict);
+  deviceId: Schema.String.check(Schema.isGUID()),
+});
 export type StandInAddedRecord = typeof StandInAddedRecord.Type;
 
 /**
@@ -327,10 +326,10 @@ export type StandInAddedRecord = typeof StandInAddedRecord.Type;
  */
 export const StandInState = Schema.Struct({
   startedAt: Schema.Int,
-  baseSequence: Schema.Int.pipe(Schema.positive()),
+  baseSequence: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   added: Schema.Array(StandInAddedRecord),
   removed: Schema.Array(HubMemberId),
-  joinTickets: Schema.Array(Schema.UUID),
+  joinTickets: Schema.Array(Schema.String.check(Schema.isGUID())),
   /** Routine times spokes reported to this standby while it stood in; handed back with the changes above. */
   wakeReports: Schema.optional(Schema.Array(WakeSpokeRecord)),
   /**
@@ -339,7 +338,7 @@ export const StandInState = Schema.Struct({
    * when the stand-in ends.
    */
   handingBack: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type StandInState = typeof StandInState.Type;
 
 /**
@@ -355,28 +354,30 @@ export const SpokeWakeState = Schema.Struct({
    */
   shared: Schema.optional(Schema.Literal(true)),
   /** The sequence of the last report this spoke started; the next is above it, and above the clock. */
-  reportSequence: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  reportSequence: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
   routines: Schema.Array(
     Schema.Struct({
-      automationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      automationId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(
+        Schema.check(Schema.isMaxLength(128)),
+      ),
       routineId: WakeRoutineId,
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 export type SpokeWakeState = typeof SpokeWakeState.Type;
 
 export const GuestDeviceRecord = Schema.Struct({
   memberId: HubMemberId,
-  deviceId: Schema.UUID,
-}).annotations(strict);
+  deviceId: Schema.String.check(Schema.isGUID()),
+});
 export type GuestDeviceRecord = typeof GuestDeviceRecord.Type;
 
 /** The hub as a spoke knows it, and what that spoke lets it do. */
 export const HubLinkState = Schema.Struct({
   selfMemberId: HubMemberId,
   hubMemberId: HubMemberId,
-  hubName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  hubOrigin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(300)),
+  hubName: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(128))),
+  hubOrigin: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(300))),
   hubListenerPin: digest,
   hubIdentityPublicKey: key,
   rosterSigningPublicKey: key,
@@ -414,12 +415,12 @@ export const HubLinkState = Schema.Struct({
   /** This spoke's side of the wake service. */
   wake: Schema.optional(SpokeWakeState),
   /** Whether the hub's push switch was on when it last told this standby, so a stand-in forwards only then. */
-  pushCopy: Schema.optional(Schema.Struct({ enabled: Schema.Boolean }).annotations(strict)),
+  pushCopy: Schema.optional(Schema.Struct({ enabled: Schema.Boolean })),
   /** This spoke's side of provisioning: proposals, auto-apply choices, the verified mirrored feed. */
   provision: Schema.optional(SpokeProvisionState),
   /** This spoke's side of hub-started sign-in: the requests its person has yet to answer. */
   signIn: Schema.optional(SpokeSignInState),
-}).annotations(strict);
+});
 export type HubLinkState = typeof HubLinkState.Type;
 
 /**
@@ -430,8 +431,10 @@ export type HubLinkState = typeof HubLinkState.Type;
  */
 export const PublicEntranceState = Schema.Struct({
   enabled: Schema.Boolean,
-  port: Schema.optional(Schema.Int.pipe(Schema.between(1, 65_535))),
-  funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort }).annotations(strict)),
+  port: Schema.optional(
+    Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum: 65_535 }))),
+  ),
+  funnel: Schema.optional(Schema.Struct({ port: PublicFunnelPort })),
   /** A standby's own choice to serve the entrance while it stands in for the hub. */
   serveWhileStandingIn: Schema.optional(Schema.Boolean),
   /**
@@ -440,20 +443,24 @@ export const PublicEntranceState = Schema.Struct({
    * serves only them.
    */
   fronts: Schema.optional(
-    Schema.Array(Schema.String.pipe(Schema.maxLength(64))).pipe(Schema.maxItems(8)),
+    Schema.Array(Schema.String.pipe(Schema.check(Schema.isMaxLength(64)))).pipe(
+      Schema.check(Schema.isMaxLength(8)),
+    ),
   ),
   /** The public address the person's own front answers on, as they typed it on this host. */
-  ownFrontOrigin: Schema.optional(Schema.String.pipe(Schema.maxLength(300))),
-}).annotations(strict);
+  ownFrontOrigin: Schema.optional(Schema.String.pipe(Schema.check(Schema.isMaxLength(300)))),
+});
 export type PublicEntranceState = typeof PublicEntranceState.Type;
 
 /** One delivery the hub holds for a spoke that has not taken it yet; never journaled. */
 export const HubWebhookQueued = Schema.Struct({
   spokeMemberId: HubMemberId,
-  keys: Schema.Array(Schema.String.pipe(Schema.maxLength(320))).pipe(Schema.maxItems(2)),
-  bytes: Schema.Int.pipe(Schema.nonNegative()),
+  keys: Schema.Array(Schema.String.pipe(Schema.check(Schema.isMaxLength(320)))).pipe(
+    Schema.check(Schema.isMaxLength(2)),
+  ),
+  bytes: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   envelope: WebhookDeliveryEnvelope,
-}).annotations(strict);
+});
 export type HubWebhookQueued = typeof HubWebhookQueued.Type;
 
 /**
@@ -462,17 +469,15 @@ export type HubWebhookQueued = typeof HubWebhookQueued.Type;
  * spoke, and counts. The routine an endpoint starts is never here.
  */
 export const HubWebhookHubState = Schema.Struct({
-  sealingKey: Schema.Struct({ publicKey: Schema.String, privateKey: Schema.String }).annotations(
-    strict,
-  ),
-  endpoints: Schema.Array(HubWebhookEndpoint).pipe(Schema.maxItems(4_096)),
+  sealingKey: Schema.Struct({ publicKey: Schema.String, privateKey: Schema.String }),
+  endpoints: Schema.Array(HubWebhookEndpoint).pipe(Schema.check(Schema.isMaxLength(4_096))),
   queue: Schema.Array(HubWebhookQueued),
   counts: Schema.Struct({
-    forwarded: Schema.Int.pipe(Schema.nonNegative()),
-    refused: Schema.Int.pipe(Schema.nonNegative()),
-    expired: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-}).annotations(strict);
+    forwarded: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+    refused: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+    expired: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+});
 
 /**
  * How many replaced Stripe secrets one endpoint can hold at once. Each is held
@@ -488,7 +493,9 @@ export const SpokeWebhookEndpoint = Schema.Struct({
   endpointId: WebhookEndpointId,
   scheme: WebhookSignatureScheme,
   /** Absent only for a Stripe endpoint whose person has not pasted Stripe's secret yet. */
-  secret: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256))),
+  secret: Schema.optional(
+    Schema.String.pipe(Schema.check(Schema.isMinLength(1)), Schema.check(Schema.isMaxLength(256))),
+  ),
   /**
    * The Stripe secrets newer pastes replaced, oldest first. A new delivery
    * signed with one is taken until its own `until`, a day after the paste
@@ -498,92 +505,109 @@ export const SpokeWebhookEndpoint = Schema.Struct({
   previousSecrets: Schema.optional(
     Schema.Array(
       Schema.Struct({
-        secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-        until: Schema.Int.pipe(Schema.nonNegative()),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(SPOKE_REPLACED_SECRETS_MAX)),
+        secret: Schema.String.pipe(
+          Schema.check(Schema.isMinLength(1)),
+          Schema.check(Schema.isMaxLength(256)),
+        ),
+        until: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+      }),
+    ).pipe(Schema.check(Schema.isMaxLength(SPOKE_REPLACED_SECRETS_MAX))),
   ),
-  label: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-  createdAt: Schema.Int.pipe(Schema.nonNegative()),
+  label: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(128)),
+  ),
+  createdAt: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   /** The ids this endpoint replaced by rotation, so a routine that names one still reads it. */
-  formerIds: Schema.optional(Schema.Array(WebhookEndpointId).pipe(Schema.maxItems(8))),
-}).annotations(strict);
+  formerIds: Schema.optional(
+    Schema.Array(WebhookEndpointId).pipe(Schema.check(Schema.isMaxLength(8))),
+  ),
+});
 export type SpokeWebhookEndpoint = typeof SpokeWebhookEndpoint.Type;
 
 /** A delivery this spoke accepted: what its routine reads, as outside content. */
 export const SpokeWebhookDelivery = Schema.Struct({
   endpointId: WebhookEndpointId,
-  deliveryId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
-  receivedAt: Schema.Int.pipe(Schema.nonNegative()),
-  event: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
-  data: Schema.String.pipe(Schema.maxLength(2_048)),
+  deliveryId: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(256)),
+  ),
+  receivedAt: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  event: Schema.optional(Schema.String.pipe(Schema.check(Schema.isMaxLength(256)))),
+  data: Schema.String.pipe(Schema.check(Schema.isMaxLength(2_048))),
   /** When a routine's read first showed it; until then it counts against the endpoint's backlog. */
-  readAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-}).annotations(strict);
+  readAt: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
+});
 export type SpokeWebhookDelivery = typeof SpokeWebhookDelivery.Type;
 
 export const SpokeWebhookLogEntry = Schema.Struct({
-  at: Schema.Int.pipe(Schema.nonNegative()),
-  endpointId: Schema.String.pipe(Schema.maxLength(64)),
-  outcome: Schema.String.pipe(Schema.maxLength(64)),
-}).annotations(strict);
+  at: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  endpointId: Schema.String.pipe(Schema.check(Schema.isMaxLength(64))),
+  outcome: Schema.String.pipe(Schema.check(Schema.isMaxLength(64))),
+});
 export type SpokeWebhookLogEntry = typeof SpokeWebhookLogEntry.Type;
 
 /** This spoke's endpoints, the deliveries it accepted, the keys it claimed (kept seven days), and a short log. */
 export const SpokeWebhookState = Schema.Struct({
   endpoints: Schema.Array(SpokeWebhookEndpoint).pipe(
-    Schema.maxItems(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE),
+    Schema.check(Schema.isMaxLength(HUB_WEBHOOK_MAX_ENDPOINTS_PER_SPOKE)),
   ),
-  deliveries: Schema.Array(SpokeWebhookDelivery).pipe(Schema.maxItems(1_024)),
+  deliveries: Schema.Array(SpokeWebhookDelivery).pipe(Schema.check(Schema.isMaxLength(1_024))),
   claimed: Schema.Array(
     Schema.Struct({
-      key: Schema.String.pipe(Schema.maxLength(320)),
-      at: Schema.Int.pipe(Schema.nonNegative()),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(50_000)),
-  log: Schema.Array(SpokeWebhookLogEntry).pipe(Schema.maxItems(50)),
+      key: Schema.String.pipe(Schema.check(Schema.isMaxLength(320))),
+      at: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+    }),
+  ).pipe(Schema.check(Schema.isMaxLength(50_000))),
+  log: Schema.Array(SpokeWebhookLogEntry).pipe(Schema.check(Schema.isMaxLength(50))),
   /** The hub has not taken the current endpoint list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type SpokeWebhookState = typeof SpokeWebhookState.Type;
 
 /** One of this spoke's visitor links: the signed grant the hub holds, the thread only this spoke knows, and the browser bound to it. */
 export const SpokeVisitorLink = Schema.Struct({
   signed: SignedVisitorLinkGrant,
   mode: VisitorThreadMode,
-  threadId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  threadId: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(128)),
+  ),
   /** SHA-256 of the first browser's key; every later request must name it. */
-  binding: Schema.optional(Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/))),
+  binding: Schema.optional(Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)))),
   /** Set when the person stopped sharing; kept so the link answers "revoked" until it would have expired. */
-  stoppedAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-}).annotations(strict);
+  stoppedAt: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)))),
+});
 export type SpokeVisitorLink = typeof SpokeVisitorLink.Type;
 
 /** A visitor's comment waiting for the person's Send or Dismiss. */
 export const SpokeVisitorComment = Schema.Struct({
-  commentId: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22}$/)),
-  linkId: Schema.String.pipe(Schema.maxLength(64)),
-  text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_000)),
-  at: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  commentId: Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z0-9_-]{22}$/))),
+  linkId: Schema.String.pipe(Schema.check(Schema.isMaxLength(64))),
+  text: Schema.String.pipe(
+    Schema.check(Schema.isMinLength(1)),
+    Schema.check(Schema.isMaxLength(4_000)),
+  ),
+  at: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+});
 export type SpokeVisitorComment = typeof SpokeVisitorComment.Type;
 
 export const SpokeVisitorState = Schema.Struct({
-  links: Schema.Array(SpokeVisitorLink).pipe(Schema.maxItems(256)),
-  comments: Schema.Array(SpokeVisitorComment).pipe(Schema.maxItems(5_120)),
+  links: Schema.Array(SpokeVisitorLink).pipe(Schema.check(Schema.isMaxLength(256))),
+  comments: Schema.Array(SpokeVisitorComment).pipe(Schema.check(Schema.isMaxLength(5_120))),
   /** The hub has not taken the current grant list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type SpokeVisitorState = typeof SpokeVisitorState.Type;
 
 /** What the acting hub holds for visitor links: its switch and each spoke's signed grants. */
 export const HubVisitorHubState = Schema.Struct({
   enabled: Schema.Boolean,
-  grants: Schema.Array(SignedVisitorLinkGrant).pipe(Schema.maxItems(4_096)),
-}).annotations(strict);
+  grants: Schema.Array(SignedVisitorLinkGrant).pipe(Schema.check(Schema.isMaxLength(4_096))),
+});
 export type HubVisitorHubState = typeof HubVisitorHubState.Type;
 
-const keyDigest = Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/));
+const keyDigest = Schema.String.pipe(Schema.check(Schema.isPattern(/^[0-9a-f]{64}$/)));
 
 /** What the acting hub holds for the device relay: its switch and each host's listed device keys. */
 export const HubRelayHubState = Schema.Struct({
@@ -591,20 +615,22 @@ export const HubRelayHubState = Schema.Struct({
   hosts: Schema.Array(
     Schema.Struct({
       memberId: HubMemberId,
-      fingerprints: Schema.Array(keyDigest).pipe(Schema.maxItems(256)),
-    }).annotations(strict),
-  ).pipe(Schema.maxItems(256)),
-}).annotations(strict);
+      fingerprints: Schema.Array(keyDigest).pipe(Schema.check(Schema.isMaxLength(256))),
+    }),
+  ).pipe(Schema.check(Schema.isMaxLength(256))),
+});
 export type HubRelayHubState = typeof HubRelayHubState.Type;
 
 /** The paired devices this host's person lets through the hub's device relay. */
 export const SpokeRelayState = Schema.Struct({
-  deviceIds: Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(Schema.maxItems(256)),
+  deviceIds: Schema.Array(Schema.String.pipe(Schema.check(Schema.isMaxLength(128)))).pipe(
+    Schema.check(Schema.isMaxLength(256)),
+  ),
   /** The hub has not taken the current list yet; the next look sends it again. */
   unpublished: Schema.optional(Schema.Literal(true)),
   /** The relay address the hub last named in its answer, which this host tells its own devices. */
   address: Schema.optional(RelayAddress),
-}).annotations(strict);
+});
 export type SpokeRelayState = typeof SpokeRelayState.Type;
 
 export const HubState = Schema.Struct({
@@ -624,17 +650,17 @@ export const HubState = Schema.Struct({
   /** This host's own devices allowed through the relay. */
   relays: Schema.optional(SpokeRelayState),
   /** Guest devices a dropped link, or the hub dropping a member window, could not revoke because the device pairing was not running; revoked once it is. */
-  pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.UUID)),
+  pendingDeviceRevocations: Schema.optional(Schema.Array(Schema.String.check(Schema.isGUID()))),
   /** Devices that paired directly with this host, until a window clears each alert or the device is removed. */
   pairedDeviceAlerts: Schema.optional(Schema.Array(PairedDeviceAlert)),
   /** A paired phone or web client's merge needs a fresh unlock on an owner device; set only from a window on this host. */
   ownerUnlockBeforePairedMerge: Schema.optional(Schema.Literal(true)),
   /** Each approval answer from an owner device needs its own fresh unlock; unset, an open session covers them. Set only from a window on this host. */
   ownerUnlockPerApprovalAnswer: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type HubState = typeof HubState.Type;
 
-const decodeState = Schema.decodeUnknownSync(HubState);
+const decodeState = Schema.decodeUnknownSync(HubState, { onExcessProperty: "error" });
 const KNOWN_HUB_GRANT_ITEMS: ReadonlySet<string> = new Set(HUB_GRANT_ITEMS);
 
 /**

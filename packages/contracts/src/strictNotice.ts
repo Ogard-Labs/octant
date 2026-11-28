@@ -20,7 +20,7 @@ import { Schema } from "effect";
  * - `forge-asks`: the provider's own pushes, merges and pull-request changes
  *   ask.
  */
-export const StrictKeptProtection = Schema.Literal(
+export const StrictKeptProtection = Schema.Literals([
   "octant-sandbox",
   "protected-files",
   "fixed-environment",
@@ -28,12 +28,12 @@ export const StrictKeptProtection = Schema.Literal(
   "octant-project-trust",
   "outside-content-withdrawal",
   "forge-asks",
-);
+]);
 export type StrictKeptProtection = typeof StrictKeptProtection.Type;
 
 /** What Strict kept for one launch, in the fixed order above; never empty. */
-export const StrictKeptProtections = Schema.Array(StrictKeptProtection).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(7),
+export const StrictKeptProtections = Schema.Array(StrictKeptProtection).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(7),
 );
 export type StrictKeptProtections = typeof StrictKeptProtections.Type;

@@ -119,7 +119,7 @@ export async function observeWorkContext(input: {
             facts.observeModelLimits({ instanceId: input.plan.manifest.providerInstanceId }),
           ).pipe(
             Effect.timeout("2 seconds"),
-            Effect.catchAllCause(() => Effect.succeed([])),
+            Effect.catchCause(() => Effect.succeed([])),
           ),
           { signal: input.signal },
         ).catch(() => []);

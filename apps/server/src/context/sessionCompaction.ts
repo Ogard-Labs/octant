@@ -1,5 +1,5 @@
 import type { EventActor } from "@octant/contracts";
-import { Deferred, Effect, Either, Option, Stream } from "effect";
+import { Deferred, Effect, Result, Option, Stream } from "effect";
 import {
   decodeCapacityReservationId,
   decodeContextEntryId,
@@ -930,12 +930,12 @@ export class SessionCompactionService {
     const graceMs = this.#options.runtimeSettleGraceMs ?? DEFAULT_RUNTIME_SETTLE_GRACE_MS;
     const sessionId = session.resume.sessionId;
     const program = Effect.gen(function* () {
-      const acquired = yield* Effect.either(driver.acquire(session.acquire));
-      if (Either.isLeft(acquired)) return { kind: "not-asked" } as const;
-      const connection = acquired.right;
+      const acquired = yield* Effect.result(driver.acquire(session.acquire));
+      if (Result.isFailure(acquired)) return { kind: "not-asked" } as const;
+      const connection = acquired.success;
       const stop = connection.stop(sessionId).pipe(
         Effect.timeoutOption(shutdownMs),
-        Effect.catchAllCause(() => Effect.void),
+        Effect.catchCause(() => Effect.void),
       );
       yield* Effect.addFinalizer(() => stop);
       const events = yield* connection.subscribe;
@@ -957,11 +957,11 @@ export class SessionCompactionService {
               ? Deferred.succeed(closed, undefined)
               : Effect.void,
         ),
-        Effect.catchAllCause(() => Effect.void),
+        Effect.catchCause(() => Effect.void),
         Effect.forkScoped,
       );
-      const resumed = yield* Effect.either(connection.resume(session.resume));
-      if (Either.isLeft(resumed) || String(resumed.right.sessionId) !== String(sessionId)) {
+      const resumed = yield* Effect.result(connection.resume(session.resume));
+      if (Result.isFailure(resumed) || String(resumed.success.sessionId) !== String(sessionId)) {
         return { kind: "not-asked" } as const;
       }
       // A capability claimed for a connection that offers no `compact` is a
@@ -971,35 +971,35 @@ export class SessionCompactionService {
       // Once asked, the runtime may keep only a share of earlier prompts, so
       // the next turn sends its standing context again.
       heldTurnContext.forget(sessionId);
-      const answered = yield* Effect.either(
+      const answered = yield* Effect.result(
         compact({ sessionId, compactionId }).pipe(Effect.timeoutOption(timeoutMs)),
       );
-      if (Either.isLeft(answered)) {
+      if (Result.isFailure(answered)) {
         return {
           kind: "failed",
           message: "The runtime could not report its compaction.",
           sessionMayHaveChanged: true,
         } as const;
       }
-      if (Option.isNone(answered.right)) {
+      if (Option.isNone(answered.success)) {
         const interrupted = yield* connection.interrupt(sessionId).pipe(
           Effect.timeoutOption(shutdownMs),
           Effect.map(Option.isSome),
-          Effect.catchAllCause(() => Effect.succeed(false)),
+          Effect.catchCause(() => Effect.succeed(false)),
         );
         // The interrupted run reports its end before the session goes.
         if (interrupted) yield* Deferred.await(closed).pipe(Effect.timeoutOption(graceMs));
         yield* stop;
         return { kind: "timed-out" } as const;
       }
-      if (answered.right.value.kind !== "refused") {
+      if (answered.success.value.kind !== "refused") {
         yield* Deferred.await(closed).pipe(Effect.timeoutOption(graceMs));
       }
-      return answered.right.value;
+      return answered.success.value;
     });
     return await Effect.runPromise(
       Effect.scoped(program).pipe(
-        Effect.catchAllCause(() =>
+        Effect.catchCause(() =>
           Effect.succeed<RuntimeAnswer>({
             kind: "failed",
             message: "The runtime's session ended unexpectedly.",

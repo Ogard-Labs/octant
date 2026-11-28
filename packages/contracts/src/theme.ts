@@ -1,42 +1,49 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import {
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ZenBuiltinBackgroundId } from "./backgroundCatalog";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedString = <B extends string>(brand: B) =>
-  Schema.NonEmptyTrimmedString.pipe(Schema.brand(brand));
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedString = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.Trimmed.pipe(Schema.check(Schema.isNonEmpty()), Schema.brand<B>(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
-export const ThemeMode = Schema.Literal("system", "light", "dark");
+export const ThemeMode = Schema.Literals(["system", "light", "dark"]);
 export type ThemeMode = typeof ThemeMode.Type;
 
-export const ThemeDensity = Schema.Literal("comfortable", "compact");
+export const ThemeDensity = Schema.Literals(["comfortable", "compact"]);
 export type ThemeDensity = typeof ThemeDensity.Type;
 
-export const ThemeTranslucency = Schema.Literal("translucent", "opaque");
+export const ThemeTranslucency = Schema.Literals(["translucent", "opaque"]);
 export type ThemeTranslucency = typeof ThemeTranslucency.Type;
 
-export const ThemeTimestampFormat = Schema.Literal("12h", "24h");
+export const ThemeTimestampFormat = Schema.Literals(["12h", "24h"]);
 export type ThemeTimestampFormat = typeof ThemeTimestampFormat.Type;
 
-export const ThemeFontSmoothing = Schema.Literal("auto", "on", "off");
+export const ThemeFontSmoothing = Schema.Literals(["auto", "on", "off"]);
 export type ThemeFontSmoothing = typeof ThemeFontSmoothing.Type;
 
-export const ThemePresetId = brandedString("ThemePresetId").pipe(Schema.maxLength(128));
+export const ThemePresetId = brandedString("ThemePresetId").check(Schema.isMaxLength(128));
 export type ThemePresetId = typeof ThemePresetId.Type;
 
-export const ThemeTokenRole = brandedString("ThemeTokenRole").pipe(Schema.maxLength(64));
+export const ThemeTokenRole = brandedString("ThemeTokenRole").check(Schema.isMaxLength(64));
 export type ThemeTokenRole = typeof ThemeTokenRole.Type;
 
 export const ThemeHexColor = Schema.String.pipe(
-  Schema.pattern(/^#[0-9a-fA-F]{6}$/),
+  Schema.check(Schema.isPattern(/^#[0-9a-fA-F]{6}$/)),
   Schema.brand("ThemeHexColor"),
 );
 export type ThemeHexColor = typeof ThemeHexColor.Type;
 
-export const ThemeFontFamily = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(128),
-  Schema.filter((value) => {
+export const ThemeFontFamily = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.makeFilter((value) => {
     const lower = value.toLowerCase();
     if (
       lower.includes("url(") ||
@@ -59,45 +66,45 @@ export const ThemeFontFamily = Schema.NonEmptyTrimmedString.pipe(
 );
 export type ThemeFontFamily = typeof ThemeFontFamily.Type;
 
-export const ThemeFontSize = Schema.Int.pipe(Schema.between(8, 32));
+export const ThemeFontSize = Schema.Int.check(Schema.isBetween({ minimum: 8, maximum: 32 }));
 export type ThemeFontSize = typeof ThemeFontSize.Type;
 
-export const ThemeFontWeight = Schema.Int.pipe(Schema.between(300, 700));
+export const ThemeFontWeight = Schema.Int.check(Schema.isBetween({ minimum: 300, maximum: 700 }));
 export type ThemeFontWeight = typeof ThemeFontWeight.Type;
 
-export const ThemeLineHeight = Schema.Number.pipe(Schema.between(1, 2.5));
+export const ThemeLineHeight = Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 2.5 }));
 export type ThemeLineHeight = typeof ThemeLineHeight.Type;
 
 export const TypographyUi = Schema.Struct({
   family: ThemeFontFamily,
   size: ThemeFontSize,
-  weight: Schema.optionalWith(ThemeFontWeight, { default: () => 400 }),
-}).annotations(strict);
+  weight: ThemeFontWeight.pipe(Schema.withDecodingDefaultType(Effect.succeed(400))),
+});
 export type TypographyUi = typeof TypographyUi.Type;
 
 export const TypographyEditor = Schema.Struct({
   family: ThemeFontFamily,
   size: ThemeFontSize,
-  weight: Schema.optionalWith(ThemeFontWeight, { default: () => 400 }),
+  weight: ThemeFontWeight.pipe(Schema.withDecodingDefaultType(Effect.succeed(400))),
   lineHeight: ThemeLineHeight,
   ligatures: Schema.Boolean,
-}).annotations(strict);
+});
 export type TypographyEditor = typeof TypographyEditor.Type;
 
 export const TypographyTerminal = Schema.Struct({
   family: ThemeFontFamily,
   size: ThemeFontSize,
-  weight: Schema.optionalWith(ThemeFontWeight, { default: () => 400 }),
+  weight: ThemeFontWeight.pipe(Schema.withDecodingDefaultType(Effect.succeed(400))),
   lineHeight: ThemeLineHeight,
   ligatures: Schema.Boolean,
-}).annotations(strict);
+});
 export type TypographyTerminal = typeof TypographyTerminal.Type;
 
 export const ThemeTypography = Schema.Struct({
   ui: TypographyUi,
   editor: TypographyEditor,
   terminal: TypographyTerminal,
-}).annotations(strict);
+});
 export type ThemeTypography = typeof ThemeTypography.Type;
 
 // `mode` limits an override to the light or the dark theme. Without it the
@@ -106,12 +113,12 @@ export type ThemeTypography = typeof ThemeTypography.Type;
 export const ThemeSemanticOverrideEntry = Schema.Struct({
   role: ThemeTokenRole,
   color: ThemeHexColor,
-  mode: Schema.optional(Schema.Literal("light", "dark")),
-}).annotations(strict);
+  mode: Schema.optional(Schema.Literals(["light", "dark"])),
+});
 export type ThemeSemanticOverrideEntry = typeof ThemeSemanticOverrideEntry.Type;
 
-const UniqueThemeSemanticOverrides = Schema.Array(ThemeSemanticOverrideEntry).pipe(
-  Schema.filter((overrides) => {
+const UniqueThemeSemanticOverrides = Schema.Array(ThemeSemanticOverrideEntry).check(
+  Schema.makeFilter((overrides) => {
     const seen = new Set<string>();
     for (const entry of overrides) {
       const key = `${entry.role}:${entry.mode ?? "both"}`;
@@ -124,21 +131,23 @@ const UniqueThemeSemanticOverrides = Schema.Array(ThemeSemanticOverrideEntry).pi
 export const ThemeSemanticOverrides = UniqueThemeSemanticOverrides;
 export type ThemeSemanticOverrides = typeof ThemeSemanticOverrides.Type;
 
-export const SidebarBackgroundPresetId = brandedString("SidebarBackgroundPresetId").pipe(
-  Schema.maxLength(64),
+export const SidebarBackgroundPresetId = brandedString("SidebarBackgroundPresetId").check(
+  Schema.isMaxLength(64),
 );
 export type SidebarBackgroundPresetId = typeof SidebarBackgroundPresetId.Type;
 
 export const SidebarBackgroundId = brandedUuid("SidebarBackgroundId");
 export type SidebarBackgroundId = typeof SidebarBackgroundId.Type;
 
-export const SidebarBackgroundKind = Schema.Literal("preset", "custom", "none");
+export const SidebarBackgroundKind = Schema.Literals(["preset", "custom", "none"]);
 export type SidebarBackgroundKind = typeof SidebarBackgroundKind.Type;
 
-export const SidebarOverlayOpacity = Schema.Int.pipe(Schema.between(0, 100));
+export const SidebarOverlayOpacity = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 100 }),
+);
 export type SidebarOverlayOpacity = typeof SidebarOverlayOpacity.Type;
 
-export const SidebarVibrancyMode = Schema.Literal("off", "subtle", "strong");
+export const SidebarVibrancyMode = Schema.Literals(["off", "subtle", "strong"]);
 export type SidebarVibrancyMode = typeof SidebarVibrancyMode.Type;
 
 const PresetSidebarBackground = Schema.Struct({
@@ -147,7 +156,7 @@ const PresetSidebarBackground = Schema.Struct({
   overlayColor: ThemeHexColor,
   overlayOpacity: SidebarOverlayOpacity,
   vibrancyMode: SidebarVibrancyMode,
-}).annotations(strict);
+});
 
 const CustomSidebarBackground = Schema.Struct({
   kind: Schema.Literal("custom"),
@@ -155,23 +164,26 @@ const CustomSidebarBackground = Schema.Struct({
   overlayColor: ThemeHexColor,
   overlayOpacity: SidebarOverlayOpacity,
   vibrancyMode: SidebarVibrancyMode,
-}).annotations(strict);
+});
 
 const NoneSidebarBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   overlayColor: ThemeHexColor,
   overlayOpacity: SidebarOverlayOpacity,
   vibrancyMode: SidebarVibrancyMode,
-}).annotations(strict);
+});
 
-export const SidebarBackground = Schema.Union(
+export const SidebarBackground = Schema.Union([
   PresetSidebarBackground,
   CustomSidebarBackground,
   NoneSidebarBackground,
-);
+]);
 export type SidebarBackground = typeof SidebarBackground.Type;
 
-export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(SidebarBackground)({
+export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(
+  SidebarBackground,
+  STRICT_DECODE_OPTIONS,
+)({
   kind: "none",
   overlayColor: "#1a1a1c",
   overlayOpacity: 100,
@@ -185,7 +197,7 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
 // the ground does not keep a second copy. The tuning fields travel with every
 // kind so switching away and back keeps what a person dialled in; each is
 // optional on the wire so old rows still decode.
-export const AppBackgroundKind = Schema.Literal(
+export const AppBackgroundKind = Schema.Literals([
   "theme",
   "builtin",
   "photo",
@@ -193,7 +205,7 @@ export const AppBackgroundKind = Schema.Literal(
   "pixels",
   "flowing",
   "none",
-);
+]);
 export type AppBackgroundKind = typeof AppBackgroundKind.Type;
 
 /** The first-party image catalog shared with Zen's Appearance panel. */
@@ -201,10 +213,12 @@ export const AppBackgroundPresetId = ZenBuiltinBackgroundId;
 export type AppBackgroundPresetId = typeof AppBackgroundPresetId.Type;
 
 /** Where the ground shows: behind the start screens only, or behind everything. */
-export const AppBackgroundScope = Schema.Literal("welcome", "everywhere");
+export const AppBackgroundScope = Schema.Literals(["welcome", "everywhere"]);
 export type AppBackgroundScope = typeof AppBackgroundScope.Type;
 
-export const AppBackgroundPercent = Schema.Int.pipe(Schema.between(0, 100));
+export const AppBackgroundPercent = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 100 }),
+);
 export type AppBackgroundPercent = typeof AppBackgroundPercent.Type;
 
 /**
@@ -214,7 +228,7 @@ export type AppBackgroundPercent = typeof AppBackgroundPercent.Type;
  * rows written before it existed; the resolver then reads the older
  * `photoDithered` switch, so a dithered photo stays dithered.
  */
-export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither", "ascii");
+export const AppBackgroundEffect = Schema.Literals(["none", "pixelate", "dither", "ascii"]);
 export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 
 /**
@@ -224,7 +238,7 @@ export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
  * character and pixel fields move and a printed picture stays still, which is
  * what each did before the choice existed.
  */
-export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
+export const AppBackgroundMotion = Schema.Literals(["still", "pulse", "wave"]);
 export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
 
 /**
@@ -234,20 +248,24 @@ export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
  * two tones. Absent on a pixel ground saved before scenes existed, which
  * resolves to Drift, the nearest to the drifting field those rows drew.
  */
-export const AppBackgroundScene = Schema.Literal("ridges", "burst", "drift", "picture");
+export const AppBackgroundScene = Schema.Literals(["ridges", "burst", "drift", "picture"]);
 export type AppBackgroundScene = typeof AppBackgroundScene.Type;
 
 /** CSS pixels per effect cell, and colour steps per channel for dither. */
-export const AppBackgroundEffectCell = Schema.Int.pipe(Schema.between(2, 16));
-export const AppBackgroundEffectTones = Schema.Int.pipe(Schema.between(2, 16));
+export const AppBackgroundEffectCell = Schema.Int.check(
+  Schema.isBetween({ minimum: 2, maximum: 16 }),
+);
+export const AppBackgroundEffectTones = Schema.Int.check(
+  Schema.isBetween({ minimum: 2, maximum: 16 }),
+);
 
 /**
  * The characters the character field draws, one code point per cell. No
  * controls, format or bidi characters, separators, whitespace, combining marks
  * or emoji, so every stored cell is one plain glyph the field can measure.
  */
-export const AppBackgroundCharacterSet = Schema.String.pipe(
-  Schema.pattern(/^[^\p{C}\p{Z}\p{M}\s\p{Extended_Pictographic}]{1,64}$/u),
+export const AppBackgroundCharacterSet = Schema.String.check(
+  Schema.isPattern(/^[^\p{C}\p{Z}\p{M}\s\p{Extended_Pictographic}]{1,64}$/u),
 );
 export type AppBackgroundCharacterSet = typeof AppBackgroundCharacterSet.Type;
 
@@ -255,31 +273,33 @@ export type AppBackgroundCharacterSet = typeof AppBackgroundCharacterSet.Type;
  * Which pattern the character field draws: each of its three in turn
  * (`cycle`, what an absent value means) or one of them held.
  */
-export const AppBackgroundCharacterPattern = Schema.Literal(
+export const AppBackgroundCharacterPattern = Schema.Literals([
   "cycle",
   "blotches",
   "currents",
   "rings",
-);
+]);
 export type AppBackgroundCharacterPattern = typeof AppBackgroundCharacterPattern.Type;
 
 const AppBackgroundTuning = {
   // Retired with the drawn dot pattern: rows written while it existed carry
   // these, so they still decode, and nothing reads them.
-  patternEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  patternOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 22 }),
-  patternSpeed: Schema.optionalWith(AppBackgroundPercent, { default: () => 50 }),
-  patternIntensity: Schema.optionalWith(AppBackgroundPercent, { default: () => 35 }),
+  patternEnabled: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
+  patternOpacity: AppBackgroundPercent.pipe(Schema.withDecodingDefaultType(Effect.succeed(22))),
+  patternSpeed: AppBackgroundPercent.pipe(Schema.withDecodingDefaultType(Effect.succeed(50))),
+  patternIntensity: AppBackgroundPercent.pipe(Schema.withDecodingDefaultType(Effect.succeed(35))),
   /** Whether a photo keeps the ordered-dither print treatment. */
-  photoDithered: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  photoDithered: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(true))),
   /** How much of a photo shows through the page. */
-  photoOpacity: Schema.optionalWith(AppBackgroundPercent, { default: () => 42 }),
-  scope: Schema.optionalWith(AppBackgroundScope, { default: () => "welcome" as const }),
+  photoOpacity: AppBackgroundPercent.pipe(Schema.withDecodingDefaultType(Effect.succeed(42))),
+  scope: AppBackgroundScope.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed("welcome" as const)),
+  ),
   /** Whether an everywhere ground also runs under the sidebar. */
-  coversSidebar: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  coversSidebar: Schema.Boolean.pipe(Schema.withDecodingDefaultType(Effect.succeed(false))),
   effect: Schema.optional(AppBackgroundEffect),
-  effectCell: Schema.optionalWith(AppBackgroundEffectCell, { default: () => 3 }),
-  effectTones: Schema.optionalWith(AppBackgroundEffectTones, { default: () => 8 }),
+  effectCell: AppBackgroundEffectCell.pipe(Schema.withDecodingDefaultType(Effect.succeed(3))),
+  effectTones: AppBackgroundEffectTones.pipe(Schema.withDecodingDefaultType(Effect.succeed(8))),
   motion: Schema.optional(AppBackgroundMotion),
   /** What the pixel ground draws; read by no other kind. */
   scene: Schema.optional(AppBackgroundScene),
@@ -294,19 +314,19 @@ const AppBackgroundTuning = {
 const ThemeAppBackground = Schema.Struct({
   kind: Schema.Literal("theme"),
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 const PhotoAppBackground = Schema.Struct({
   kind: Schema.Literal("photo"),
   backgroundId: SidebarBackgroundId,
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 const BuiltinAppBackground = Schema.Struct({
   kind: Schema.Literal("builtin"),
   presetId: AppBackgroundPresetId,
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 /**
  * A field of monospace characters that slowly pulse in and out, drawn by the
@@ -315,7 +335,7 @@ const BuiltinAppBackground = Schema.Struct({
 const CharactersAppBackground = Schema.Struct({
   kind: Schema.Literal("characters"),
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 /**
  * The pixel ground: square cells in the theme's own ink at a few ordered-dither
@@ -328,7 +348,7 @@ const PixelsAppBackground = Schema.Struct({
   /** The photo the Picture scene prints, from the shared image library. */
   backgroundId: Schema.optional(SidebarBackgroundId),
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 /**
  * A field of large, soft colour that drifts like ink in water. Its stops are
@@ -339,14 +359,14 @@ const PixelsAppBackground = Schema.Struct({
 const FlowingAppBackground = Schema.Struct({
   kind: Schema.Literal("flowing"),
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
 const NoneAppBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   ...AppBackgroundTuning,
-}).annotations(strict);
+});
 
-export const AppBackground = Schema.Union(
+export const AppBackground = Schema.Union([
   ThemeAppBackground,
   BuiltinAppBackground,
   PhotoAppBackground,
@@ -354,7 +374,7 @@ export const AppBackground = Schema.Union(
   PixelsAppBackground,
   FlowingAppBackground,
   NoneAppBackground,
-);
+]);
 export type AppBackground = typeof AppBackground.Type;
 
 // The retired pattern kind still decodes so older rows load. A new install
@@ -362,13 +382,19 @@ export type AppBackground = typeof AppBackground.Type;
 // empty grey box, and a coloured glow behind the heading competed with it.
 // Rows saved since the ground existed carry their own choice, "none"
 // included, so this reaches fresh installs and Reset only.
-export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({
+export const DEFAULT_APP_BACKGROUND: AppBackground = Schema.decodeSync(
+  AppBackground,
+  STRICT_DECODE_OPTIONS,
+)({
   kind: "characters",
 });
 
 // What a row written before the ground existed replays as. Those people saw
 // a plain page, and a replay must not repaint what they already had.
-const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ kind: "none" });
+const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(
+  AppBackground,
+  STRICT_DECODE_OPTIONS,
+)({ kind: "none" });
 
 /**
  * How much colour the chrome carries; the palette itself stays the preset's.
@@ -376,11 +402,11 @@ const PLAIN_APP_BACKGROUND: AppBackground = Schema.decodeSync(AppBackground)({ k
  * for what is now the default, kept so stored rows decode); "mono" is the grey
  * look the app had before colour became the default.
  */
-export const ThemeStyle = Schema.Literal("default", "vivid", "mono");
+export const ThemeStyle = Schema.Literals(["default", "vivid", "mono"]);
 export type ThemeStyle = typeof ThemeStyle.Type;
 
 /** How firmly the derived washes and edges draw: one step each way from standard. */
-export const ThemeCustomContrast = Schema.Literal("soft", "standard", "firm");
+export const ThemeCustomContrast = Schema.Literals(["soft", "standard", "firm"]);
 export type ThemeCustomContrast = typeof ThemeCustomContrast.Type;
 
 /**
@@ -393,7 +419,7 @@ export const ThemeCustomSeeds = Schema.Struct({
   ink: ThemeHexColor,
   accent: ThemeHexColor,
   contrast: ThemeCustomContrast,
-}).annotations(strict);
+});
 export type ThemeCustomSeeds = typeof ThemeCustomSeeds.Type;
 
 /** The id the preset pickers use for the preset built from the seeds. */
@@ -433,16 +459,16 @@ export const ThemeSettings = Schema.Struct({
   // Optional on the wire so journal events and projection rows written before
   // the application background existed still replay; they decode to the plain
   // page they showed, not to today's default picture.
-  appBackground: Schema.optionalWith(AppBackground, {
-    default: () => PLAIN_APP_BACKGROUND,
-  }),
+  appBackground: AppBackground.pipe(
+    Schema.withDecodingDefaultType(Effect.succeed(PLAIN_APP_BACKGROUND)),
+  ),
   /**
    * How much of the theme's sidebar colour lies over the glass behind the
    * sidebar and the card gutters, in percent. Absent means the glass level's
    * own default (Subtle or Strong); set, it replaces both. Optional so rows
    * written before the slider existed still decode.
    */
-  glassTint: Schema.optional(Schema.Int.pipe(Schema.between(0, 90))),
+  glassTint: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 90 }))),
   /**
    * Absent, "default" and "vivid" draw the colour look: an accent, status
    * hues, coloured count tiles, board marks, and Project accents. "mono" keeps
@@ -453,7 +479,7 @@ export const ThemeSettings = Schema.Struct({
   increasedContrast: Schema.Boolean,
   reducedMotion: Schema.Boolean,
   reducedTransparency: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThemeSettings = typeof ThemeSettings.Type;
 
 /**
@@ -525,52 +551,52 @@ export const ThemeSettingsUpdated = Schema.Struct({
   settings: ThemeSettings,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThemeSettingsUpdated = typeof ThemeSettingsUpdated.Type;
 
 export const UpdateThemeSettings = Schema.Struct({
   kind: Schema.Literal("update-theme-settings"),
   settings: ThemeSettings,
   expectedVersion: Schema.optional(AggregateVersion),
-}).annotations(strict);
+});
 export type UpdateThemeSettings = typeof UpdateThemeSettings.Type;
 
 export const ThemeBootstrap = Schema.Struct({
   settings: ThemeSettings,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type ThemeBootstrap = typeof ThemeBootstrap.Type;
 
-export const ThemeCommand = Schema.Union(UpdateThemeSettings).annotations(strict);
+export const ThemeCommand = Schema.Union([UpdateThemeSettings]);
 export type ThemeCommand = typeof ThemeCommand.Type;
 
 export const ThemeCommandResult = Schema.Struct({
   kind: Schema.Literal("theme-settings-replaced"),
   settings: ThemeSettings,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type ThemeCommandResult = typeof ThemeCommandResult.Type;
 
-export const ThemeFailure = Schema.Union(
+export const ThemeFailure = Schema.Union([
   Schema.Struct({
     category: Schema.Literal("invalid"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("conflict"),
-    message: Schema.NonEmptyTrimmedString,
+    message: NonEmptyTrimmedString,
     expectedVersion: AggregateVersion,
     actualVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     category: Schema.Literal("unavailable"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
+    message: NonEmptyTrimmedString,
+  }),
   Schema.Struct({
     category: Schema.Literal("recovery-required"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type ThemeFailure = typeof ThemeFailure.Type;
 
 export const MAX_SIDEBAR_BACKGROUND_BYTES = 8_388_608;
@@ -580,55 +606,77 @@ export const SIDEBAR_BACKGROUND_MEDIA_TYPES = ["image/png", "image/jpeg", "image
 
 export const SidebarBackgroundMetadata = Schema.Struct({
   id: SidebarBackgroundId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  mediaType: Schema.Literal(...SIDEBAR_BACKGROUND_MEDIA_TYPES),
-  byteLength: Schema.Int.pipe(Schema.nonNegative()),
-  width: Schema.Int.pipe(Schema.positive()),
-  height: Schema.Int.pipe(Schema.positive()),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  mediaType: Schema.Literals(SIDEBAR_BACKGROUND_MEDIA_TYPES),
+  byteLength: NonNegativeInt,
+  width: PositiveInt,
+  height: PositiveInt,
   uploadedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SidebarBackgroundMetadata = typeof SidebarBackgroundMetadata.Type;
 
 export const SidebarBackgroundUploadResult = Schema.Struct({
   backgroundId: SidebarBackgroundId,
-}).annotations(strict);
+});
 export type SidebarBackgroundUploadResult = typeof SidebarBackgroundUploadResult.Type;
 
 export const SidebarBackgroundListResult = Schema.Struct({
   backgrounds: Schema.Array(SidebarBackgroundMetadata),
-}).annotations(strict);
+});
 export type SidebarBackgroundListResult = typeof SidebarBackgroundListResult.Type;
 
 export const UpdateSidebarBackground = Schema.Struct({
   kind: Schema.Literal("update-sidebar-background"),
   background: SidebarBackground,
   expectedVersion: Schema.optional(AggregateVersion),
-}).annotations(strict);
+});
 export type UpdateSidebarBackground = typeof UpdateSidebarBackground.Type;
 
 export const DeleteSidebarBackground = Schema.Struct({
   kind: Schema.Literal("delete-sidebar-background"),
   backgroundId: SidebarBackgroundId,
-}).annotations(strict);
+});
 export type DeleteSidebarBackground = typeof DeleteSidebarBackground.Type;
 
-export const decodeThemeMode = Schema.decodeUnknownSync(ThemeMode);
-export const decodeThemePresetId = Schema.decodeUnknownSync(ThemePresetId);
-export const decodeThemeTokenRole = Schema.decodeUnknownSync(ThemeTokenRole);
-export const decodeThemeHexColor = Schema.decodeUnknownSync(ThemeHexColor);
-export const decodeThemeFontFamily = Schema.decodeUnknownSync(ThemeFontFamily);
-export const decodeThemeFontSize = Schema.decodeUnknownSync(ThemeFontSize);
-export const decodeThemeFontWeight = Schema.decodeUnknownSync(ThemeFontWeight);
-export const decodeThemeLineHeight = Schema.decodeUnknownSync(ThemeLineHeight);
-export const decodeTypographyUi = Schema.decodeUnknownSync(TypographyUi);
-export const decodeTypographyEditor = Schema.decodeUnknownSync(TypographyEditor);
-export const decodeTypographyTerminal = Schema.decodeUnknownSync(TypographyTerminal);
-export const decodeThemeTypography = Schema.decodeUnknownSync(ThemeTypography);
+export const decodeThemeMode = Schema.decodeUnknownSync(ThemeMode, STRICT_DECODE_OPTIONS);
+export const decodeThemePresetId = Schema.decodeUnknownSync(ThemePresetId, STRICT_DECODE_OPTIONS);
+export const decodeThemeTokenRole = Schema.decodeUnknownSync(ThemeTokenRole, STRICT_DECODE_OPTIONS);
+export const decodeThemeHexColor = Schema.decodeUnknownSync(ThemeHexColor, STRICT_DECODE_OPTIONS);
+export const decodeThemeFontFamily = Schema.decodeUnknownSync(
+  ThemeFontFamily,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThemeFontSize = Schema.decodeUnknownSync(ThemeFontSize, STRICT_DECODE_OPTIONS);
+export const decodeThemeFontWeight = Schema.decodeUnknownSync(
+  ThemeFontWeight,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThemeLineHeight = Schema.decodeUnknownSync(
+  ThemeLineHeight,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTypographyUi = Schema.decodeUnknownSync(TypographyUi, STRICT_DECODE_OPTIONS);
+export const decodeTypographyEditor = Schema.decodeUnknownSync(
+  TypographyEditor,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTypographyTerminal = Schema.decodeUnknownSync(
+  TypographyTerminal,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThemeTypography = Schema.decodeUnknownSync(
+  ThemeTypography,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThemeSemanticOverrideEntry = Schema.decodeUnknownSync(
   ThemeSemanticOverrideEntry,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeThemeSemanticOverrides = Schema.decodeUnknownSync(ThemeSemanticOverrides);
-const decodeThemeSettingsSchema = Schema.decodeUnknownSync(ThemeSettings);
+export const decodeThemeSemanticOverrides = Schema.decodeUnknownSync(
+  ThemeSemanticOverrides,
+  STRICT_DECODE_OPTIONS,
+);
+const decodeThemeSettingsSchema = Schema.decodeUnknownSync(ThemeSettings, STRICT_DECODE_OPTIONS);
 
 export function decodeThemeSettings(input: unknown): ThemeSettings {
   if (
@@ -644,22 +692,51 @@ export function decodeThemeSettings(input: unknown): ThemeSettings {
   }
   return decodeThemeSettingsSchema(input);
 }
-export const decodeThemeSettingsUpdated = Schema.decodeUnknownSync(ThemeSettingsUpdated);
-export const decodeUpdateThemeSettings = Schema.decodeUnknownSync(UpdateThemeSettings);
-export const decodeThemeBootstrap = Schema.decodeUnknownSync(ThemeBootstrap);
-export const decodeThemeCommand = Schema.decodeUnknownSync(ThemeCommand);
-export const decodeThemeCommandResult = Schema.decodeUnknownSync(ThemeCommandResult);
-export const decodeThemeFailure = Schema.decodeUnknownSync(ThemeFailure);
-export const decodeSidebarBackgroundId = Schema.decodeUnknownSync(SidebarBackgroundId);
-export const decodeSidebarBackgroundPresetId = Schema.decodeUnknownSync(SidebarBackgroundPresetId);
-export const decodeSidebarBackground = Schema.decodeUnknownSync(SidebarBackground);
-export const decodeAppBackground = Schema.decodeUnknownSync(AppBackground);
-export const decodeSidebarBackgroundMetadata = Schema.decodeUnknownSync(SidebarBackgroundMetadata);
+export const decodeThemeSettingsUpdated = Schema.decodeUnknownSync(
+  ThemeSettingsUpdated,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeUpdateThemeSettings = Schema.decodeUnknownSync(
+  UpdateThemeSettings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThemeBootstrap = Schema.decodeUnknownSync(ThemeBootstrap, STRICT_DECODE_OPTIONS);
+export const decodeThemeCommand = Schema.decodeUnknownSync(ThemeCommand, STRICT_DECODE_OPTIONS);
+export const decodeThemeCommandResult = Schema.decodeUnknownSync(
+  ThemeCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThemeFailure = Schema.decodeUnknownSync(ThemeFailure, STRICT_DECODE_OPTIONS);
+export const decodeSidebarBackgroundId = Schema.decodeUnknownSync(
+  SidebarBackgroundId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSidebarBackgroundPresetId = Schema.decodeUnknownSync(
+  SidebarBackgroundPresetId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSidebarBackground = Schema.decodeUnknownSync(
+  SidebarBackground,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAppBackground = Schema.decodeUnknownSync(AppBackground, STRICT_DECODE_OPTIONS);
+export const decodeSidebarBackgroundMetadata = Schema.decodeUnknownSync(
+  SidebarBackgroundMetadata,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeSidebarBackgroundUploadResult = Schema.decodeUnknownSync(
   SidebarBackgroundUploadResult,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeSidebarBackgroundListResult = Schema.decodeUnknownSync(
   SidebarBackgroundListResult,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeUpdateSidebarBackground = Schema.decodeUnknownSync(UpdateSidebarBackground);
-export const decodeDeleteSidebarBackground = Schema.decodeUnknownSync(DeleteSidebarBackground);
+export const decodeUpdateSidebarBackground = Schema.decodeUnknownSync(
+  UpdateSidebarBackground,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeDeleteSidebarBackground = Schema.decodeUnknownSync(
+  DeleteSidebarBackground,
+  STRICT_DECODE_OPTIONS,
+);

@@ -7,15 +7,14 @@
  */
 
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProjectId } from "./projects";
 import { PermissionMode } from "./providers";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const GUARDRAIL_LEVEL_LOWERED = "guardrail.level-lowered@1";
 
 /** Where a level was set: for every new thread, for a Project's, or for one thread. */
-export const GuardrailScope = Schema.Literal("global", "project", "thread");
+export const GuardrailScope = Schema.Literals(["global", "project", "thread"]);
 export type GuardrailScope = typeof GuardrailScope.Type;
 
 /**
@@ -25,7 +24,7 @@ export type GuardrailScope = typeof GuardrailScope.Type;
 export const GuardrailLevelChange = Schema.Struct({
   scope: GuardrailScope,
   /** Which mode's level changed: Code's or Work's. */
-  surface: Schema.Literal("code", "work"),
+  surface: Schema.Literals(["code", "work"]),
   /**
    * The level before. Absent when a Project's override replaced the default
    * it followed, which only the settings behind it can name.
@@ -36,13 +35,19 @@ export const GuardrailLevelChange = Schema.Struct({
   projectId: Schema.optional(ProjectId),
   /** Set for a thread's level. */
   threadId: Schema.optional(Schema.NonEmptyString),
-}).annotations(strict);
+});
 export type GuardrailLevelChange = typeof GuardrailLevelChange.Type;
 export const GuardrailLevelLowered = GuardrailLevelChange;
 export type GuardrailLevelLowered = GuardrailLevelChange;
 
-export const decodeGuardrailLevelLowered = Schema.decodeUnknownSync(GuardrailLevelChange);
-export const decodeGuardrailLevelChange = Schema.decodeUnknownSync(GuardrailLevelChange);
+export const decodeGuardrailLevelLowered = Schema.decodeUnknownSync(
+  GuardrailLevelChange,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeGuardrailLevelChange = Schema.decodeUnknownSync(
+  GuardrailLevelChange,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * A change that raised the thread's access but is no lowering the domain
@@ -51,7 +56,10 @@ export const decodeGuardrailLevelChange = Schema.decodeUnknownSync(GuardrailLeve
  * for `guardrailLowered` itself.
  */
 export const GUARDRAIL_ACCESS_RAISED = "guardrail.access-raised@1";
-export const decodeGuardrailAccessRaised = Schema.decodeUnknownSync(GuardrailLevelChange);
+export const decodeGuardrailAccessRaised = Schema.decodeUnknownSync(
+  GuardrailLevelChange,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Every other non-identity change: a tightening such as Full access to Ask

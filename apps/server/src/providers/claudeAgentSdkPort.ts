@@ -2189,7 +2189,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 }),
               ),
-              Stream.flattenIterables,
+              Stream.flattenIterable,
               Stream.map((message) => {
                 if (message.kind !== "result") return message;
                 const baseline = costBaseline;

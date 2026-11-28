@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { ShieldDecision } from "./shield";
 import { ToolOutsideContentMark } from "./shieldWatcherMark";
@@ -9,17 +10,17 @@ import {
   ThreadPublishedPage,
 } from "./threadToolSteps";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 // Kept apart from `threadToolSteps` because a step may carry Octant Shield's
 // decision, and the Shield schema reads the provider schema, which reads the
 // published page defined there.
-export const ThreadToolStepState = Schema.Literal("started", "running", "completed", "failed");
+export const ThreadToolStepState = Schema.Literals(["started", "running", "completed", "failed"]);
 export type ThreadToolStepState = typeof ThreadToolStepState.Type;
 
 /**
@@ -33,8 +34,8 @@ export type ThreadToolStepState = typeof ThreadToolStepState.Type;
 export const ThreadCallTiming = Schema.Struct({
   startedAt: UtcTimestamp,
   endedAt: UtcTimestamp,
-  approvalWaitMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
-}).annotations(strict);
+  approvalWaitMs: Schema.optional(NonNegativeInt),
+});
 export type ThreadCallTiming = typeof ThreadCallTiming.Type;
 
 /**
@@ -63,7 +64,7 @@ export const ThreadToolStep = Schema.Struct({
   canvasPreview: Schema.optional(ThreadCanvasPreviewReceipt),
   /** Present only on a terminal state of a call whose bounds were trusted. */
   timing: Schema.optional(ThreadCallTiming),
-}).annotations(strict);
+});
 export type ThreadToolStep = typeof ThreadToolStep.Type;
 
 /**
@@ -75,5 +76,8 @@ export type ThreadToolStep = typeof ThreadToolStep.Type;
 export const ThreadToolStepList = Schema.Array(ThreadToolStep);
 export type ThreadToolStepList = typeof ThreadToolStepList.Type;
 
-export const decodeThreadToolStep = Schema.decodeUnknownSync(ThreadToolStep);
-export const decodeThreadToolStepList = Schema.decodeUnknownSync(ThreadToolStepList);
+export const decodeThreadToolStep = Schema.decodeUnknownSync(ThreadToolStep, STRICT_DECODE_OPTIONS);
+export const decodeThreadToolStepList = Schema.decodeUnknownSync(
+  ThreadToolStepList,
+  STRICT_DECODE_OPTIONS,
+);

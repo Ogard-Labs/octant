@@ -1,25 +1,33 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const BoundedKey = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
-const SourceId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512));
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const BoundedKey = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255));
+const SourceId = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512));
 
-export const LocalUsageHistorySourceKind = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+export const LocalUsageHistorySourceKind = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+);
 export type LocalUsageHistorySourceKind = typeof LocalUsageHistorySourceKind.Type;
 
-export const LocalUsageHistoryStatus = Schema.Literal("ready", "partial", "unavailable", "failed");
+export const LocalUsageHistoryStatus = Schema.Literals([
+  "ready",
+  "partial",
+  "unavailable",
+  "failed",
+]);
 export type LocalUsageHistoryStatus = typeof LocalUsageHistoryStatus.Type;
 
 export const LocalUsageHistoryCost = Schema.Struct({
-  amount: Schema.Number.pipe(Schema.nonNegative(), Schema.finite()),
+  amount: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
   currency: Schema.Literal("USD"),
-  kind: Schema.Literal("api-estimate", "provider-recorded"),
+  kind: Schema.Literals(["api-estimate", "provider-recorded"]),
   pricingRevision: Schema.optional(BoundedKey),
   pricingSource: Schema.optional(BoundedKey),
-  cacheSavingsUsd: Schema.optional(Schema.Number.pipe(Schema.finite())),
-}).annotations(strict);
+  cacheSavingsUsd: Schema.optional(Schema.Number.check(Schema.isFinite())),
+});
 export type LocalUsageHistoryCost = typeof LocalUsageHistoryCost.Type;
 
 /** One accounting-only event projected from a provider's local history. */
@@ -39,11 +47,11 @@ export const LocalUsageHistoryRecord = Schema.Struct({
   /** Claude prompt-cache writes split by their independently priced TTL. */
   cacheWrite5mInputTokens: Schema.optional(NonNegativeInt),
   cacheWrite1hInputTokens: Schema.optional(NonNegativeInt),
-  cacheWriteDuration: Schema.optional(Schema.Literal("5-minute", "1-hour", "unknown")),
+  cacheWriteDuration: Schema.optional(Schema.Literals(["5-minute", "1-hour", "unknown"])),
   outputTokens: NonNegativeInt,
   reasoningTokens: Schema.optional(NonNegativeInt),
   cost: Schema.optional(LocalUsageHistoryCost),
-}).annotations(strict);
+});
 export type LocalUsageHistoryRecord = typeof LocalUsageHistoryRecord.Type;
 
 export const LocalUsageHistoryCoverage = Schema.Struct({
@@ -57,30 +65,34 @@ export const LocalUsageHistoryCoverage = Schema.Struct({
   coveredTo: Schema.optional(UtcTimestamp),
   truncated: Schema.Boolean,
   hasMore: Schema.Boolean,
-  detail: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-}).annotations(strict);
+  detail: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+});
 export type LocalUsageHistoryCoverage = typeof LocalUsageHistoryCoverage.Type;
 
 export const LocalUsageHistoryPricingReference = Schema.Struct({
   revision: BoundedKey,
-  source: Schema.String.pipe(Schema.pattern(/^https:\/\//), Schema.maxLength(255)),
-}).annotations(strict);
+  source: Schema.String.check(Schema.isPattern(/^https:\/\//), Schema.isMaxLength(255)),
+});
 export type LocalUsageHistoryPricingReference = typeof LocalUsageHistoryPricingReference.Type;
 
 export const LocalUsageHistoryCostTotals = Schema.Struct({
-  providerRecordedUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
-  apiEstimateUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  providerRecordedUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
+  apiEstimateUsd: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite()),
+  ),
   pricedRecordCount: NonNegativeInt,
   unpricedRecordCount: NonNegativeInt,
   providerRecordedRecordCount: Schema.optional(NonNegativeInt),
   apiEstimateRecordCount: Schema.optional(NonNegativeInt),
   excludedRecordCount: Schema.optional(NonNegativeInt),
-  cacheSavingsUsd: Schema.optional(Schema.Number.pipe(Schema.finite())),
+  cacheSavingsUsd: Schema.optional(Schema.Number.check(Schema.isFinite())),
   cacheSavingsRecordCount: Schema.optional(NonNegativeInt),
   pricingReferences: Schema.optional(
-    Schema.Array(LocalUsageHistoryPricingReference).pipe(Schema.maxItems(8)),
+    Schema.Array(LocalUsageHistoryPricingReference).check(Schema.isMaxLength(8)),
   ),
-}).annotations(strict);
+});
 export type LocalUsageHistoryCostTotals = typeof LocalUsageHistoryCostTotals.Type;
 
 export const LocalUsageHistoryTokenTotals = Schema.Struct({
@@ -95,20 +107,12 @@ export const LocalUsageHistoryTokenTotals = Schema.Struct({
   sessionCount: NonNegativeInt,
   excludedRecordCount: Schema.optional(NonNegativeInt),
   componentCoverage: Schema.Struct({
-    uncachedInput: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }).annotations(
-      strict,
-    ),
-    cacheRead: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }).annotations(
-      strict,
-    ),
-    cacheWrite: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }).annotations(
-      strict,
-    ),
-    reasoning: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }).annotations(
-      strict,
-    ),
-  }).annotations(strict),
-}).annotations(strict);
+    uncachedInput: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }),
+    cacheRead: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }),
+    cacheWrite: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }),
+    reasoning: Schema.Struct({ measured: NonNegativeInt, total: NonNegativeInt }),
+  }),
+});
 export type LocalUsageHistoryTokenTotals = typeof LocalUsageHistoryTokenTotals.Type;
 
 export const LocalUsageHistoryGroup = Schema.Struct({
@@ -117,21 +121,21 @@ export const LocalUsageHistoryGroup = Schema.Struct({
   providerKey: BoundedKey,
   totals: LocalUsageHistoryTokenTotals,
   cost: LocalUsageHistoryCostTotals,
-}).annotations(strict);
+});
 export type LocalUsageHistoryGroup = typeof LocalUsageHistoryGroup.Type;
 
 export const LocalUsageHistoryDay = Schema.Struct({
-  day: Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/)),
+  day: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
   providerKey: BoundedKey,
   totals: LocalUsageHistoryTokenTotals,
   cost: LocalUsageHistoryCostTotals,
-}).annotations(strict);
+});
 export type LocalUsageHistoryDay = typeof LocalUsageHistoryDay.Type;
 
 export const LocalUsageHistoryRequest = Schema.Struct({
   from: UtcTimestamp,
   to: UtcTimestamp,
-  timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  timeZone: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   /**
    * Answer from the host's last stored reading of this view instead of
    * reading provider history now. A surface that is opened repeatedly asks
@@ -142,14 +146,14 @@ export const LocalUsageHistoryRequest = Schema.Struct({
    * coverage[].hasMore and status before treating the totals as complete.
    */
   preferLastRead: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type LocalUsageHistoryRequest = typeof LocalUsageHistoryRequest.Type;
 
 export const LocalUsageHistoryResponse = Schema.Struct({
   source: Schema.Literal("local-provider-history"),
   from: UtcTimestamp,
   to: UtcTimestamp,
-  timeZone: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  timeZone: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   queryAt: UtcTimestamp,
   /**
    * Present and true when these totals are the host's earlier reading of this
@@ -160,18 +164,24 @@ export const LocalUsageHistoryResponse = Schema.Struct({
   fromLastRead: Schema.optional(Schema.Boolean),
   totals: LocalUsageHistoryTokenTotals,
   cost: LocalUsageHistoryCostTotals,
-  providers: Schema.Array(LocalUsageHistoryGroup).pipe(Schema.maxItems(128)),
-  models: Schema.Array(LocalUsageHistoryGroup).pipe(Schema.maxItems(256)),
-  days: Schema.Array(LocalUsageHistoryDay).pipe(Schema.maxItems(512)),
-  dailyTotals: Schema.Array(LocalUsageHistoryDay).pipe(Schema.maxItems(512)),
-  coverage: Schema.Array(LocalUsageHistoryCoverage).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  providers: Schema.Array(LocalUsageHistoryGroup).check(Schema.isMaxLength(128)),
+  models: Schema.Array(LocalUsageHistoryGroup).check(Schema.isMaxLength(256)),
+  days: Schema.Array(LocalUsageHistoryDay).check(Schema.isMaxLength(512)),
+  dailyTotals: Schema.Array(LocalUsageHistoryDay).check(Schema.isMaxLength(512)),
+  coverage: Schema.Array(LocalUsageHistoryCoverage).check(Schema.isMaxLength(32)),
+});
 export type LocalUsageHistoryResponse = typeof LocalUsageHistoryResponse.Type;
 
-export const decodeLocalUsageHistoryRecord = Schema.decodeUnknownSync(LocalUsageHistoryRecord);
-export const decodeLocalUsageHistoryCoverage = Schema.decodeUnknownSync(LocalUsageHistoryCoverage);
+export const decodeLocalUsageHistoryRecord = Schema.decodeUnknownSync(
+  LocalUsageHistoryRecord,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeLocalUsageHistoryCoverage = Schema.decodeUnknownSync(
+  LocalUsageHistoryCoverage,
+  STRICT_DECODE_OPTIONS,
+);
 export function decodeLocalUsageHistoryRequest(value: unknown): LocalUsageHistoryRequest {
-  const decoded = Schema.decodeUnknownSync(LocalUsageHistoryRequest)(value);
+  const decoded = Schema.decodeUnknownSync(LocalUsageHistoryRequest, STRICT_DECODE_OPTIONS)(value);
   if (Date.parse(decoded.from) > Date.parse(decoded.to)) {
     throw new Error("Local usage history range is inverted.");
   }
@@ -182,4 +192,7 @@ export function decodeLocalUsageHistoryRequest(value: unknown): LocalUsageHistor
   }
   return decoded;
 }
-export const decodeLocalUsageHistoryResponse = Schema.decodeUnknownSync(LocalUsageHistoryResponse);
+export const decodeLocalUsageHistoryResponse = Schema.decodeUnknownSync(
+  LocalUsageHistoryResponse,
+  STRICT_DECODE_OPTIONS,
+);

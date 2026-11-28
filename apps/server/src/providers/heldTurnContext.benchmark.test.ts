@@ -245,7 +245,7 @@ async function runTurn(
   let usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }> | undefined;
   const events = Effect.runPromise(
     Stream.runCollect(
-      Stream.unwrapScoped(connection.subscribe).pipe(
+      Stream.unwrap(connection.subscribe).pipe(
         Stream.filter((event) => String(event.sessionId) === String(sessionId)),
         Stream.tap((event) =>
           Effect.sync(() => {

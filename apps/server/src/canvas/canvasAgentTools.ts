@@ -23,7 +23,7 @@ import {
   type ThreadCanvasPreviewReceipt,
   type WindowId,
 } from "@octant/contracts";
-import { JSONSchema, Schema } from "effect";
+import { Schema } from "effect";
 import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
 import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -101,8 +101,7 @@ const MAX_DESCRIBED_BLOCK_KINDS = 3;
 const MAX_DESIGN_EDITS = 16;
 
 function memberKind(member: (typeof CanvasBlock.members)[number]): string {
-  const struct = "fields" in member ? member : member.from;
-  const kind = struct.fields.kind.literals[0];
+  const kind = member.fields.kind.literal;
   if (kind === undefined) {
     throw new Error("A Canvas block kind is missing from the catalogue.");
   }
@@ -1378,9 +1377,16 @@ function canvasToolSet(options: {
           requested.includes(memberKind(block)),
         );
         const examples = describedExamples(requested);
+        const targetSchema =
+          selected.length === 1 && selected[0] !== undefined ? selected[0] : Schema.Union(selected);
+        const doc = Schema.toJsonSchemaDocument(targetSchema, { onExcessProperty: "error" });
+        const blockSchema =
+          Object.keys(doc.definitions).length === 0
+            ? doc.schema
+            : { ...doc.schema, $defs: doc.definitions };
         return {
           result: {
-            blockSchema: JSONSchema.make(Schema.Union(...selected)),
+            blockSchema,
             guidance: describedGuidance(requested, options.mode, options.chatOwner, projectBrand),
             ...(input.blockKinds?.includes("design") === true ? brand : {}),
             ...(examples.length === 0 ? {} : { examples }),

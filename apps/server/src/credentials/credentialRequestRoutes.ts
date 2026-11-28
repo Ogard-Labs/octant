@@ -69,9 +69,9 @@ export function createCredentialRequestRoutes(
         if (size > 8192) return reply({ status: "invalid" }, 413);
         chunks.push(part.value);
       }
-      const answer = Schema.decodeUnknownSync(CredentialRequestAnswer)(
-        JSON.parse(Buffer.concat(chunks).toString("utf8")),
-      );
+      const answer = Schema.decodeUnknownSync(CredentialRequestAnswer, {
+        onExcessProperty: "error",
+      })(JSON.parse(Buffer.concat(chunks).toString("utf8")));
       // Reauthenticate after reading the body. It may have arrived slowly.
       const current = resolvePrincipalRouteContext({ request, store, now: Date.now() });
       if (

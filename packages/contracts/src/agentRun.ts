@@ -1,4 +1,11 @@
 import { ChildWorktreeSnapshot } from "./childWorktreeSources";
+import {
+  GuidString,
+  NonEmptyTrimmedString,
+  NonNegativeInt,
+  PositiveInt,
+  STRICT_DECODE_OPTIONS,
+} from "./schemaPrimitives";
 import { Schema } from "effect";
 import {
   ConversationInputManifest,
@@ -23,8 +30,8 @@ import { HostId } from "./host";
 import { UsageResumeThreadState } from "./usageResume";
 import { ExecutionResolutionReceipt } from "./agentProfile";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const AgentRunId = brandedUuid("AgentRunId");
 export type AgentRunId = typeof AgentRunId.Type;
@@ -72,16 +79,16 @@ export const MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS = 4_000;
  * is the one boundary every admitted selection crosses before it is stored, so
  * both bounds are enforced here rather than on a journal payload.
  */
-export const AgentRunAdmittedContext = Schema.Array(ProviderContextBlock).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
-  Schema.filter((blocks) =>
+export const AgentRunAdmittedContext = Schema.Array(ProviderContextBlock).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
+  Schema.makeFilter((blocks) =>
     blocks.every((block) => block.text.length <= MAX_AGENT_RUN_ADMITTED_CONTEXT_CHARACTERS),
   ),
 );
 export type AgentRunAdmittedContext = typeof AgentRunAdmittedContext.Type;
 
-export const AgentRunRole = Schema.Literal("research", "implementation", "review", "custom");
+export const AgentRunRole = Schema.Literals(["research", "implementation", "review", "custom"]);
 export type AgentRunRole = typeof AgentRunRole.Type;
 
 /**
@@ -90,13 +97,13 @@ export type AgentRunRole = typeof AgentRunRole.Type;
  * literal because journaled settings and AgentRun requests recorded it, and
  * replay must still decode them; the settings store reads it back as `off`.
  */
-export const AgentRunCreationPosture = Schema.Literal("off", "ask", "automatic");
+export const AgentRunCreationPosture = Schema.Literals(["off", "ask", "automatic"]);
 export type AgentRunCreationPosture = typeof AgentRunCreationPosture.Type;
 
-export const AgentRunExecutionKind = Schema.Literal("provider-native", "octant-managed");
+export const AgentRunExecutionKind = Schema.Literals(["provider-native", "octant-managed"]);
 export type AgentRunExecutionKind = typeof AgentRunExecutionKind.Type;
 
-export const AgentRunLifecycleStatus = Schema.Literal(
+export const AgentRunLifecycleStatus = Schema.Literals([
   "queued",
   "starting",
   "running",
@@ -105,7 +112,7 @@ export const AgentRunLifecycleStatus = Schema.Literal(
   "failed",
   "cancelled",
   "interrupted",
-);
+]);
 export type AgentRunLifecycleStatus = typeof AgentRunLifecycleStatus.Type;
 
 export const AGENT_RUN_TERMINAL_STATUSES = [
@@ -115,19 +122,19 @@ export const AGENT_RUN_TERMINAL_STATUSES = [
   "interrupted",
 ] as const satisfies ReadonlyArray<AgentRunLifecycleStatus>;
 
-export const AgentRunUsageQuality = Schema.Literal(
+export const AgentRunUsageQuality = Schema.Literals([
   "provider-reported",
   "estimated",
   "unavailable",
   "stale",
-);
+]);
 export type AgentRunUsageQuality = typeof AgentRunUsageQuality.Type;
 
 /** Token counts a provider actually reported for this run. Absent when unknown. */
 export const AgentRunTokenUsage = Schema.Struct({
-  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
-  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+});
 export type AgentRunTokenUsage = typeof AgentRunTokenUsage.Type;
 
 export const AgentRunAuthority = Schema.Struct({
@@ -139,31 +146,31 @@ export const AgentRunAuthority = Schema.Struct({
   subagents: Schema.Boolean,
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
-}).annotations(strict);
+});
 export type AgentRunAuthority = typeof AgentRunAuthority.Type;
 
-export const AgentRunWorkspaceReceipt = Schema.Union(
+export const AgentRunWorkspaceReceipt = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("chat-virtual"),
     mode: Schema.Literal("chat"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("work-root"),
     mode: Schema.Literal("work"),
     projectId: ProjectId,
     bindingRevisionId: BindingRevisionId,
-    canonicalRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-  }).annotations(strict),
+    canonicalRoot: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
     mode: Schema.Literal("code"),
     projectId: ProjectId,
-    checkoutRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
-    worktreeRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+    checkoutRoot: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
+    worktreeRoot: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096)),
     source: Schema.optional(ChildWorktreeSnapshot),
     verified: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AgentRunWorkspaceReceipt = typeof AgentRunWorkspaceReceipt.Type;
 
 /**
@@ -172,7 +179,7 @@ export type AgentRunWorkspaceReceipt = typeof AgentRunWorkspaceReceipt.Type;
  * These are expected failures a caller must handle. They never include
  * filesystem paths: the renderer only learns that the receipt is unusable.
  */
-export const AgentRunWorkspaceRefusalReason = Schema.Literal(
+export const AgentRunWorkspaceRefusalReason = Schema.Literals([
   "unauthorized",
   "unavailable",
   "stale",
@@ -183,7 +190,7 @@ export const AgentRunWorkspaceRefusalReason = Schema.Literal(
   "wider-than-parent",
   "unconfirmed",
   "unsupported",
-);
+]);
 export type AgentRunWorkspaceRefusalReason = typeof AgentRunWorkspaceRefusalReason.Type;
 
 /**
@@ -194,7 +201,7 @@ export type AgentRunWorkspaceRefusalReason = typeof AgentRunWorkspaceRefusalReas
 export const AgentRunPoolRoute = Schema.Struct({
   decision: MultiModelRouteDecisionReceipt,
   decidedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunPoolRoute = typeof AgentRunPoolRoute.Type;
 
 export const AgentRunRoutingReceipt = Schema.Struct({
@@ -203,23 +210,29 @@ export const AgentRunRoutingReceipt = Schema.Struct({
   attemptedExecutionKind: AgentRunExecutionKind,
   selectedProviderInstanceId: ProviderInstanceId,
   selectedModelId: ProviderModelId,
-  rawReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-  normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  rawReasoning: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+  normalizedReasoning: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  ),
   fallbackCandidates: Schema.Array(
     Schema.Struct({
       providerInstanceId: ProviderInstanceId,
       modelId: ProviderModelId,
-      rejectedReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-    }).annotations(strict),
+      rejectedReason: Schema.optional(
+        Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+      ),
+    }),
   ),
   selectedFallback: Schema.optional(
     Schema.Struct({
       providerInstanceId: ProviderInstanceId,
       modelId: ProviderModelId,
-      reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-    }).annotations(strict),
+      reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+    }),
   ),
-  capabilityDegradations: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  capabilityDegradations: Schema.Array(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
   contextSnapshotId: AgentRunContextSnapshotId,
   /**
    * How many parent-thread blocks were admitted under `contextSnapshotId`.
@@ -238,51 +251,51 @@ export const AgentRunRoutingReceipt = Schema.Struct({
    * running a child under less context than it was approved for.
    */
   admittedContextBlocks: Schema.optional(
-    Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS),
     ),
   ),
   admittedInputCount: Schema.optional(
-    Schema.Int.pipe(Schema.between(0, MAX_CONVERSATION_INPUT_SELECTIONS)),
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_CONVERSATION_INPUT_SELECTIONS })),
   ),
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
-  effectiveAuthorityDigest: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  capacityReservationId: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  effectiveAuthorityDigest: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  capacityReservationId: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  ),
   usageQuality: AgentRunUsageQuality,
   hostId: HostId,
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
   poolRoute: Schema.optional(AgentRunPoolRoute),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((receipt) => {
-      if (receipt.poolRoute === undefined) return true;
-      const decision = receipt.poolRoute.decision;
-      const requested = decision.request.requestedCandidate ?? decision.request.pool.candidates[0]!;
-      // The receipt primary selection is the immutable pool-requested
-      // candidate; the pool decision may not be re-scoped to another host,
-      // mode, or primary provider/model.
-      const primaryMatches =
-        String(requested.hostId) === String(receipt.hostId) &&
-        requested.providerInstanceId === receipt.selectedProviderInstanceId &&
-        requested.modelId === receipt.selectedModelId;
-      const scopeMatches =
-        decision.mode === receipt.mode && String(decision.activeHostId) === String(receipt.hostId);
-      if (!primaryMatches || !scopeMatches) return false;
-      if (decision.kind === "waiting" || decision.selectionKind === "requested") {
-        return receipt.selectedFallback === undefined;
-      }
-      // A pool fallback route must surface the explicit fallback it selected.
-      return (
-        receipt.selectedFallback !== undefined &&
-        receipt.selectedFallback.providerInstanceId ===
-          decision.selectedCandidate.providerInstanceId &&
-        receipt.selectedFallback.modelId === decision.selectedCandidate.modelId
-      );
-    }),
-  );
+}).check(
+  Schema.makeFilter((receipt) => {
+    if (receipt.poolRoute === undefined) return true;
+    const decision = receipt.poolRoute.decision;
+    const requested = decision.request.requestedCandidate ?? decision.request.pool.candidates[0]!;
+    // The receipt primary selection is the immutable pool-requested
+    // candidate; the pool decision may not be re-scoped to another host,
+    // mode, or primary provider/model.
+    const primaryMatches =
+      String(requested.hostId) === String(receipt.hostId) &&
+      requested.providerInstanceId === receipt.selectedProviderInstanceId &&
+      requested.modelId === receipt.selectedModelId;
+    const scopeMatches =
+      decision.mode === receipt.mode && String(decision.activeHostId) === String(receipt.hostId);
+    if (!primaryMatches || !scopeMatches) return false;
+    if (decision.kind === "waiting" || decision.selectionKind === "requested") {
+      return receipt.selectedFallback === undefined;
+    }
+    // A pool fallback route must surface the explicit fallback it selected.
+    return (
+      receipt.selectedFallback !== undefined &&
+      receipt.selectedFallback.providerInstanceId ===
+        decision.selectedCandidate.providerInstanceId &&
+      receipt.selectedFallback.modelId === decision.selectedCandidate.modelId
+    );
+  }),
+);
 export type AgentRunRoutingReceipt = typeof AgentRunRoutingReceipt.Type;
 
 /**
@@ -304,8 +317,9 @@ export const MAX_AGENT_RUN_RESULT_CHARACTERS = 16_384;
  * permanent thread deletion can destroy it. This schema is the one boundary
  * every stored reply crosses, so the bound is enforced here.
  */
-export const AgentRunResultText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(MAX_AGENT_RUN_RESULT_CHARACTERS),
+export const AgentRunResultText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAX_AGENT_RUN_RESULT_CHARACTERS),
 );
 export type AgentRunResultText = typeof AgentRunResultText.Type;
 
@@ -322,84 +336,90 @@ export type AgentRunResultText = typeof AgentRunResultText.Type;
  */
 export const AgentRunReviewMetadata = Schema.Struct({
   capturedAt: UtcTimestamp,
-  baseTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
-  resultTree: Schema.String.pipe(Schema.pattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
-  changedPaths: Schema.Array(Schema.NonEmptyString.pipe(Schema.maxLength(2048))).pipe(
-    Schema.maxItems(128),
+  baseTree: Schema.String.check(Schema.isPattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  resultTree: Schema.String.check(Schema.isPattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)),
+  changedPaths: Schema.Array(Schema.NonEmptyString.check(Schema.isMaxLength(2048))).check(
+    Schema.isMaxLength(128),
   ),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export const AgentRunReviewSnapshot = Schema.Struct({
   ...AgentRunReviewMetadata.fields,
-  diff: Schema.String.pipe(Schema.maxLength(65_536)),
-})
-  .annotations(strict)
-  .pipe(Schema.filter((value) => JSON.stringify(value).length <= 120_000));
+  diff: Schema.String.check(Schema.isMaxLength(65_536)),
+}).check(Schema.makeFilter((value) => JSON.stringify(value).length <= 120_000));
 export type AgentRunReviewSnapshot = typeof AgentRunReviewSnapshot.Type;
-export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(AgentRunReviewSnapshot);
+export const decodeAgentRunReviewSnapshot = Schema.decodeUnknownSync(
+  AgentRunReviewSnapshot,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const AgentRunWorkingTime = Schema.Struct({
-  attemptId: Schema.UUID,
-  activeMs: Schema.Int.pipe(Schema.nonNegative()),
-  totalActiveMs: Schema.Int.pipe(Schema.nonNegative()),
-  attempts: Schema.Int.pipe(Schema.positive()),
+  attemptId: GuidString,
+  activeMs: NonNegativeInt,
+  totalActiveMs: NonNegativeInt,
+  attempts: PositiveInt,
   /** Absent when the attempt ran with no working-time limit. */
-  limitMs: Schema.optional(Schema.Int.pipe(Schema.positive())),
-}).annotations(strict);
+  limitMs: Schema.optional(PositiveInt),
+});
 export type AgentRunWorkingTime = typeof AgentRunWorkingTime.Type;
 
 export const AgentRunResultEvidence = Schema.Struct({
   workingTime: Schema.optional(AgentRunWorkingTime),
   review: Schema.optional(AgentRunReviewSnapshot),
   files: Schema.Struct({
-    reviewStatus: Schema.optional(Schema.Literal("available", "unavailable")),
-    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    reviewStatus: Schema.optional(Schema.Literals(["available", "unavailable"])),
+    status: Schema.Literals(["recorded", "unavailable", "truncated"]),
     items: Schema.Array(
       Schema.Struct({
-        path: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
-        change: Schema.Literal("created", "modified", "deleted"),
-        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        path: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
+        change: Schema.Literals(["created", "modified", "deleted"]),
+        reference: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
         source: Schema.Literal("provider-reported"),
         verified: Schema.Literal(false),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
+      }),
+    ).check(Schema.isMaxLength(32)),
+  }),
   checks: Schema.Struct({
-    status: Schema.Literal("recorded", "unavailable", "truncated"),
+    status: Schema.Literals(["recorded", "unavailable", "truncated"]),
     items: Schema.Array(
       Schema.Struct({
-        label: Schema.NonEmptyString.pipe(Schema.maxLength(512)),
-        outcome: Schema.Literal("passed", "failed", "unknown"),
-        reference: Schema.NonEmptyString.pipe(Schema.maxLength(2048)),
+        label: Schema.NonEmptyString.check(Schema.isMaxLength(512)),
+        outcome: Schema.Literals(["passed", "failed", "unknown"]),
+        reference: Schema.NonEmptyString.check(Schema.isMaxLength(2048)),
         source: Schema.Literal("host-recorded"),
         toolExecution: Schema.optional(
           Schema.Struct({
-            toolName: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
-            requestId: Schema.NonEmptyString.pipe(Schema.maxLength(255)),
+            toolName: Schema.NonEmptyString.check(Schema.isMaxLength(255)),
+            requestId: Schema.NonEmptyString.check(Schema.isMaxLength(255)),
             isError: Schema.Boolean,
-            output: Schema.String.pipe(Schema.maxLength(2048)),
+            output: Schema.String.check(Schema.isMaxLength(2048)),
             truncated: Schema.Boolean,
-          }).annotations(strict),
+          }),
         ),
-      }).annotations(strict),
-    ).pipe(Schema.maxItems(32)),
-  }).annotations(strict),
-}).annotations(strict);
+      }),
+    ).check(Schema.isMaxLength(32)),
+  }),
+});
 export type AgentRunResultEvidence = typeof AgentRunResultEvidence.Type;
-export const decodeAgentRunResultEvidence = Schema.decodeUnknownSync(AgentRunResultEvidence);
+export const decodeAgentRunResultEvidence = Schema.decodeUnknownSync(
+  AgentRunResultEvidence,
+  STRICT_DECODE_OPTIONS,
+);
 
 export const AgentRunResult = Schema.Struct({
-  reference: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  reference: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type AgentRunResult = typeof AgentRunResult.Type;
 
 export const AgentRunResultAcknowledgement = Schema.Struct({
   required: Schema.Boolean,
   acknowledged: Schema.Boolean,
   acknowledgedAt: Schema.optional(UtcTimestamp),
-  followUpReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-}).annotations(strict);
+  followUpReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
+});
 export type AgentRunResultAcknowledgement = typeof AgentRunResultAcknowledgement.Type;
 
 /**
@@ -408,42 +428,39 @@ export type AgentRunResultAcknowledgement = typeof AgentRunResultAcknowledgement
  * marks cover generation 1 only, so a resumed child can deliver a new result.
  */
 export const MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE = 16;
-export const AgentRunResultDeliveryRunIds = Schema.Array(AgentRunId).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE),
-  Schema.filter((ids) => new Set(ids.map(String)).size === ids.length),
+export const AgentRunResultDeliveryRunIds = Schema.Array(AgentRunId).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE),
+  Schema.makeFilter((ids) => new Set(ids.map(String)).size === ids.length),
 );
 
 export const AgentRunResultDeliveryGeneration = Schema.Struct({
   runId: AgentRunId,
-  generation: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-}).annotations(strict);
+  generation: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
 export const AgentRunResultDeliveryGenerations = Schema.Array(
   AgentRunResultDeliveryGeneration,
-).pipe(Schema.minItems(1), Schema.maxItems(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE));
+).check(Schema.isMinLength(1), Schema.isMaxLength(MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE));
 
 export const AgentRunResultDeliveryMark = Schema.Struct({
   kind: Schema.Literal("agent-result"),
   runId: AgentRunId,
   runIds: Schema.optional(AgentRunResultDeliveryRunIds),
   runGenerations: Schema.optional(AgentRunResultDeliveryGenerations),
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter((mark) => {
-      const ids = mark.runIds ?? [mark.runId];
-      return (
-        ids.some((id) => String(id) === String(mark.runId)) &&
-        (mark.runGenerations === undefined ||
-          (mark.runGenerations.length === ids.length &&
-            new Set(mark.runGenerations.map((member) => String(member.runId))).size ===
-              ids.length &&
-            mark.runGenerations.every((member) =>
-              ids.some((id) => String(id) === String(member.runId)),
-            )))
-      );
-    }),
-  );
+}).check(
+  Schema.makeFilter((mark) => {
+    const ids = mark.runIds ?? [mark.runId];
+    return (
+      ids.some((id) => String(id) === String(mark.runId)) &&
+      (mark.runGenerations === undefined ||
+        (mark.runGenerations.length === ids.length &&
+          new Set(mark.runGenerations.map((member) => String(member.runId))).size === ids.length &&
+          mark.runGenerations.every((member) =>
+            ids.some((id) => String(id) === String(member.runId)),
+          )))
+    );
+  }),
+);
 export type AgentRunResultDeliveryMark = typeof AgentRunResultDeliveryMark.Type;
 
 /** The framed text a steered delivery carried; the host's own batch prompt stays well inside it. */
@@ -461,16 +478,16 @@ export const MAX_AGENT_RESULTS_STEERED_PER_TURN = 32;
  */
 export const AgentResultSteeredIntoTurn = Schema.Struct({
   delivery: AgentRunResultDeliveryMark,
-  body: Schema.String.pipe(
-    Schema.minLength(1),
-    Schema.maxLength(MAX_AGENT_RESULT_STEERED_BODY_CHARACTERS),
+  body: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(MAX_AGENT_RESULT_STEERED_BODY_CHARACTERS),
   ),
   steeredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentResultSteeredIntoTurn = typeof AgentResultSteeredIntoTurn.Type;
 
-export const AgentResultsSteeredIntoTurn = Schema.Array(AgentResultSteeredIntoTurn).pipe(
-  Schema.maxItems(MAX_AGENT_RESULTS_STEERED_PER_TURN),
+export const AgentResultsSteeredIntoTurn = Schema.Array(AgentResultSteeredIntoTurn).check(
+  Schema.isMaxLength(MAX_AGENT_RESULTS_STEERED_PER_TURN),
 );
 
 /**
@@ -482,11 +499,14 @@ export const AgentResultsSteeredIntoTurn = Schema.Array(AgentResultSteeredIntoTu
 export const AgentResultSteered = Schema.Struct({
   kind: Schema.Literal("agent-result-steered"),
   threadId: AgentRunParentThreadId,
-  turnKey: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  turnKey: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   ...AgentResultSteeredIntoTurn.fields,
-}).annotations(strict);
+});
 export type AgentResultSteered = typeof AgentResultSteered.Type;
-export const decodeAgentResultSteered = Schema.decodeUnknownSync(AgentResultSteered);
+export const decodeAgentResultSteered = Schema.decodeUnknownSync(
+  AgentResultSteered,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * How the host settled one finished run's result delivery. `delivered` means
@@ -495,19 +515,19 @@ export const decodeAgentResultSteered = Schema.decodeUnknownSync(AgentResultStee
  * means the parent could no longer take a turn; `failed` means delivery was
  * refused, with the reason kept in `detail`.
  */
-export const AgentRunResultDeliveryOutcome = Schema.Literal(
+export const AgentRunResultDeliveryOutcome = Schema.Literals([
   "delivered",
   "consumed",
   "invalidated",
   "failed",
-);
+]);
 export type AgentRunResultDeliveryOutcome = typeof AgentRunResultDeliveryOutcome.Type;
 
 export const AgentRunResultDelivery = Schema.Struct({
   outcome: AgentRunResultDeliveryOutcome,
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
   settledAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunResultDelivery = typeof AgentRunResultDelivery.Type;
 
 /**
@@ -517,11 +537,11 @@ export type AgentRunResultDelivery = typeof AgentRunResultDelivery.Type;
  * interrupted. Existing runs only, so a cycle cannot be expressed.
  */
 export const MAX_AGENT_RUN_DEPENDENCIES = 8;
-export const AgentRunDependencies = Schema.Array(AgentRunId).pipe(
-  Schema.minItems(1),
-  Schema.maxItems(MAX_AGENT_RUN_DEPENDENCIES),
-  Schema.filter((ids) => new Set(ids.map(String)).size === ids.length, {
-    message: () => "AgentRun dependencies must be distinct",
+export const AgentRunDependencies = Schema.Array(AgentRunId).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_AGENT_RUN_DEPENDENCIES),
+  Schema.makeFilter((ids) => new Set(ids.map(String)).size === ids.length, {
+    message: "AgentRun dependencies must be distinct",
   }),
 );
 export type AgentRunDependencies = typeof AgentRunDependencies.Type;
@@ -530,16 +550,19 @@ export type AgentRunDependencies = typeof AgentRunDependencies.Type;
  * A label the parent agent may give sibling delegations so a person can
  * compare them side by side. The host only groups by it; it ranks nothing.
  */
-export const AgentRunCompareGroup = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+export const AgentRunCompareGroup = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+);
 export type AgentRunCompareGroup = typeof AgentRunCompareGroup.Type;
 
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
   /** Absent on legacy runs, which belong to generation 1. */
   generation: Schema.optional(
-    Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
     ),
   ),
   requestId: AgentRunRequestId,
@@ -549,9 +572,9 @@ export const AgentRun = Schema.Struct({
   dependsOn: Schema.optional(AgentRunDependencies),
   /** Optional so runs journaled before compare groups existed replay unchanged. */
   compareGroup: Schema.optional(AgentRunCompareGroup),
-  depth: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(2)),
+  depth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(2)),
   role: AgentRunRole,
-  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
   creationPosture: AgentRunCreationPosture,
   executionKind: AgentRunExecutionKind,
   lifecycleStatus: AgentRunLifecycleStatus,
@@ -569,7 +592,9 @@ export const AgentRun = Schema.Struct({
   resultDelivery: Schema.optional(AgentRunResultDelivery),
   /** Present only when a provider reported token usage for this run. */
   usage: Schema.optional(AgentRunTokenUsage),
-  recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  recoveryReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
   /**
    * The provider's own limit signal, journaled verbatim when the run's
    * session stopped on a usage limit. Present only while that limit-bound
@@ -585,10 +610,10 @@ export const AgentRun = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRun = typeof AgentRun.Type;
 
-export const AgentRunCommand = Schema.Union(
+export const AgentRunCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("request-agent-run"),
     requestId: AgentRunRequestId,
@@ -597,7 +622,7 @@ export const AgentRunCommand = Schema.Union(
     dependsOn: Schema.optional(AgentRunDependencies),
     compareGroup: Schema.optional(AgentRunCompareGroup),
     role: AgentRunRole,
-    task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+    task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
     creationPosture: AgentRunCreationPosture,
     requestedAuthority: AgentRunAuthority,
     routingReceipt: AgentRunRoutingReceipt,
@@ -610,30 +635,30 @@ export const AgentRunCommand = Schema.Union(
      */
     admittedContext: Schema.optional(AgentRunAdmittedContext),
     admittedInputs: Schema.optional(ConversationInputManifest),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("confirm-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("start-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("mark-agent-run-running"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("wait-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-    recoveryReason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
+    recoveryReason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
     /** The provider's own limit signal when this wait is a usage-limit stop. */
     usageLimit: Schema.optional(ProviderUsageLimit),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("complete-agent-run"),
     runId: AgentRunId,
@@ -643,86 +668,74 @@ export const AgentRunCommand = Schema.Union(
     resultText: AgentRunResultText,
     resultEvidence: Schema.optional(AgentRunResultEvidence),
     usage: Schema.optional(AgentRunTokenUsage),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("fail-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-    recoveryReason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-  }).annotations(strict),
+    recoveryReason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-    scope: Schema.Literal("self", "subtree", "hierarchy"),
-  }).annotations(strict),
+    scope: Schema.Literals(["self", "subtree", "hierarchy"]),
+  }),
   Schema.Struct({
     kind: Schema.Literal("interrupt-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-    recoveryReason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-  }).annotations(strict),
+    recoveryReason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("acknowledge-agent-run-result"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-  /**
-   * Journals how a finished run's result reached its parent. Written once per
-   * result generation, only after the delivery actually happened — a turn carrying it, the
-   * parent's tool returning it, or a refused/invalidated outcome — so a
-   * restarted host can tell an owed delivery from a settled one.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("settle-agent-run-result-delivery"),
     runId: AgentRunId,
     /** Omission names generation 1, never the latest generation. */
     generation: Schema.optional(
-      Schema.Int.pipe(
-        Schema.greaterThanOrEqualTo(1),
-        Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+      Schema.Int.check(
+        Schema.isGreaterThanOrEqualTo(1),
+        Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
       ),
     ),
     expectedVersion: AggregateVersion,
     outcome: AgentRunResultDeliveryOutcome,
-    detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-  }).annotations(strict),
+    detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024))),
+  }),
   Schema.Struct({
     kind: Schema.Literal("retry-agent-run"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resume-agent-run"),
     runId: AgentRunId,
-    message: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
+    message: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096))),
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-  /**
-   * The person's own opt-in to resume this limited run at the provider's
-   * declared reset. The record it journals derives from the run's stored
-   * limit fact, never from client-supplied fields, so the command carries
-   * only the run it binds to.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("schedule-agent-run-usage-resume"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("cancel-agent-run-usage-resume"),
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AgentRunCommand = typeof AgentRunCommand.Type;
 
-export const AgentRunCommandResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("run-accepted"), run: AgentRun }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("run-updated"), run: AgentRun }).annotations(strict),
+export const AgentRunCommandResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("run-accepted"), run: AgentRun }),
+  Schema.Struct({ kind: Schema.Literal("run-updated"), run: AgentRun }),
   Schema.Struct({
     kind: Schema.Literal("run-command-failed"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "invalid",
       "stale-version",
       "unauthorized",
@@ -731,29 +744,31 @@ export const AgentRunCommandResult = Schema.Union(
       "posture-rejected",
       "authority-widening",
       "fallback-forbidden",
-    ),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    ]),
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type AgentRunCommandResult = typeof AgentRunCommandResult.Type;
 
 export const AgentRunRequested = Schema.Struct({
   run: AgentRun,
-}).annotations(strict);
+});
 export type AgentRunRequested = typeof AgentRunRequested.Type;
 
 export const AgentRunStatusChanged = Schema.Struct({
   runId: AgentRunId,
   generation: Schema.optional(
-    Schema.Int.pipe(
-      Schema.greaterThanOrEqualTo(1),
-      Schema.lessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
+    Schema.Int.check(
+      Schema.isGreaterThanOrEqualTo(1),
+      Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
     ),
   ),
   fromStatus: AgentRunLifecycleStatus,
   toStatus: AgentRunLifecycleStatus,
   version: AggregateVersion,
-  recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  recoveryReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
   /** The provider's own limit signal; present only on a usage-limit wait. */
   usageLimit: Schema.optional(ProviderUsageLimit),
   /**
@@ -765,21 +780,21 @@ export const AgentRunStatusChanged = Schema.Struct({
   result: Schema.optional(AgentRunResult),
   /** Provider-reported token counts; present only on honest completions. */
   usage: Schema.optional(AgentRunTokenUsage),
-}).annotations(strict);
+});
 export type AgentRunStatusChanged = typeof AgentRunStatusChanged.Type;
 
 export const AgentRunResultAcknowledged = Schema.Struct({
   runId: AgentRunId,
   version: AggregateVersion,
   acknowledgedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunResultAcknowledged = typeof AgentRunResultAcknowledged.Type;
 
 export const AgentRunResultDeliverySettled = Schema.Struct({
   runId: AgentRunId,
   version: AggregateVersion,
   delivery: AgentRunResultDelivery,
-}).annotations(strict);
+});
 export type AgentRunResultDeliverySettled = typeof AgentRunResultDeliverySettled.Type;
 
 /** Maximum rows one Agents Center query may return in a single page. */
@@ -787,14 +802,14 @@ export const MAX_AGENT_RUN_CENTER_QUERY_LIMIT = 100;
 
 export const MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH = 256;
 
-export const AgentRunCenterStatusFilter = Schema.Literal("all", "active", "history");
+export const AgentRunCenterStatusFilter = Schema.Literals(["all", "active", "history"]);
 export type AgentRunCenterStatusFilter = typeof AgentRunCenterStatusFilter.Type;
 
-export const AgentRunCenterWorkspaceKind = Schema.Literal(
+export const AgentRunCenterWorkspaceKind = Schema.Literals([
   "chat-virtual",
   "work-root",
   "code-worktree",
-);
+]);
 export type AgentRunCenterWorkspaceKind = typeof AgentRunCenterWorkspaceKind.Type;
 
 export const AgentRunCenterRoute = Schema.Struct({
@@ -803,23 +818,25 @@ export const AgentRunCenterRoute = Schema.Struct({
   executionProviderInstanceId: ProviderInstanceId,
   executionModelId: ProviderModelId,
   poolDerived: Schema.Boolean,
-  selectionKind: Schema.optional(Schema.Literal("requested", "fallback")),
-  routingReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-}).annotations(strict);
+  selectionKind: Schema.optional(Schema.Literals(["requested", "fallback"])),
+  routingReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
+});
 export type AgentRunCenterRoute = typeof AgentRunCenterRoute.Type;
 
 export const AgentRunCenterSummary = Schema.Struct({
   runId: AgentRunId,
   requestId: AgentRunRequestId,
   parentThreadId: AgentRunParentThreadId,
-  parentThreadTitle: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  parentThreadTitle: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
   parentRunId: Schema.optional(AgentRunId),
   /** Present for Code child runs that occupy an isolated worktree thread. */
   childThreadId: Schema.optional(CodeThreadId),
   mode: OctantMode,
   projectId: Schema.optional(ProjectId),
   role: AgentRunRole,
-  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
   lifecycleStatus: AgentRunLifecycleStatus,
   executionKind: AgentRunExecutionKind,
   authority: AgentRunAuthority,
@@ -828,42 +845,46 @@ export const AgentRunCenterSummary = Schema.Struct({
   usageQuality: AgentRunUsageQuality,
   route: AgentRunCenterRoute,
   resultAcknowledgement: AgentRunResultAcknowledgement,
-  recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-  normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  recoveryReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
+  normalizedReasoning: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  ),
   usage: Schema.optional(AgentRunTokenUsage),
   usageLimit: Schema.optional(ProviderUsageLimit),
   usageResume: Schema.optional(UsageResumeThreadState),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunCenterSummary = typeof AgentRunCenterSummary.Type;
 
 export const AgentRunCenterQuery = Schema.Struct({
   status: AgentRunCenterStatusFilter,
-  mode: Schema.Literal("all", "chat", "work", "code"),
+  mode: Schema.Literals(["all", "chat", "work", "code"]),
   projectId: Schema.optional(ProjectId),
   providerInstanceId: Schema.optional(ProviderInstanceId),
   parentThreadId: Schema.optional(AgentRunParentThreadId),
-  search: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-  limit: Schema.Int.pipe(
-    Schema.greaterThanOrEqualTo(1),
-    Schema.lessThanOrEqualTo(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
+  search: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
+  limit: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
   ),
   cursor: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
   ),
-}).annotations(strict);
+});
 export type AgentRunCenterQuery = typeof AgentRunCenterQuery.Type;
 
 export const AgentRunCenterResponse = Schema.Struct({
-  items: Schema.Array(AgentRunCenterSummary).pipe(
-    Schema.maxItems(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
+  items: Schema.Array(AgentRunCenterSummary).check(
+    Schema.isMaxLength(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
   ),
   nextCursor: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
   ),
-}).annotations(strict);
+});
 export type AgentRunCenterResponse = typeof AgentRunCenterResponse.Type;
 
 /**
@@ -883,36 +904,40 @@ export const AgentRunGraphFact = Schema.Struct({
   parentRunId: Schema.optional(AgentRunId),
   dependsOn: Schema.optional(AgentRunDependencies),
   role: AgentRunRole,
-  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  task: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(8192)),
   lifecycleStatus: AgentRunLifecycleStatus,
   executionKind: AgentRunExecutionKind,
   route: AgentRunCenterRoute,
-  normalizedReasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  normalizedReasoning: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  ),
   /** The host holds the run until the runs it depends on finish. */
   heldForDependencies: Schema.optional(Schema.Literal(true)),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentRunGraphFact = typeof AgentRunGraphFact.Type;
 
 export const AgentRunCoordinatorGraphWorker = Schema.Struct({
   threadId: CodeThreadId,
   /** The worker's runs, oldest request first. */
-  runs: Schema.Array(AgentRunGraphFact).pipe(Schema.maxItems(MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS)),
+  runs: Schema.Array(AgentRunGraphFact).check(
+    Schema.isMaxLength(MAX_AGENT_RUN_COORDINATOR_GRAPH_RUNS),
+  ),
   /** The worker has more runs than are listed; the newest are kept. */
   runsTruncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type AgentRunCoordinatorGraphWorker = typeof AgentRunCoordinatorGraphWorker.Type;
 
 export const AgentRunCoordinatorGraph = Schema.Struct({
   coordinatorThreadId: CodeThreadId,
   /** Only workers with at least one run; a worker without any adds nothing to the picture. */
-  workers: Schema.Array(AgentRunCoordinatorGraphWorker).pipe(
-    Schema.maxItems(MAX_AGENT_RUN_COORDINATOR_GRAPH_WORKERS),
+  workers: Schema.Array(AgentRunCoordinatorGraphWorker).check(
+    Schema.isMaxLength(MAX_AGENT_RUN_COORDINATOR_GRAPH_WORKERS),
   ),
   /** The coordinator has more workers than were read. */
   workersTruncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type AgentRunCoordinatorGraph = typeof AgentRunCoordinatorGraph.Type;
 
 /**
@@ -927,12 +952,12 @@ export const MAX_AGENT_RUN_CONVERSATION_CURSOR_LENGTH = 64;
 /** Maximum encoded line size for one bounded conversation stream frame. */
 export const MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES = 64 * 1024;
 
-export const AgentRunConversationReadStatus = Schema.Literal(
+export const AgentRunConversationReadStatus = Schema.Literals([
   "live",
   "complete",
   "stale",
   "unavailable",
-);
+]);
 export type AgentRunConversationReadStatus = typeof AgentRunConversationReadStatus.Type;
 
 /** The longest summary a subagent's tool step keeps: one line, never the call's input or output. */
@@ -946,29 +971,28 @@ export const MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS = 512;
  * everything it did. It never carries the call's input or output.
  */
 export const AgentRunConversationTool = Schema.Struct({
-  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
-  state: Schema.Literal("started", "completed", "failed"),
+  toolCallId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  toolName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(256)),
+  state: Schema.Literals(["started", "completed", "failed"]),
   summary: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(
-      Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(MAX_AGENT_RUN_CONVERSATION_TOOL_SUMMARY_CHARACTERS),
     ),
   ),
-}).annotations(strict);
+});
 export type AgentRunConversationTool = typeof AgentRunConversationTool.Type;
 
 export const AgentRunConversationEntry = Schema.Struct({
   childActivity: Schema.optional(ProviderChildActivityEvent),
   /** Present exactly on a `tool` entry. */
   tool: Schema.optional(AgentRunConversationTool),
-  generation: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  sequence: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
-  kind: Schema.Literal("assistant", "status", "tool"),
-  text: Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),
+  generation: Schema.optional(PositiveInt),
+  sequence: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  kind: Schema.Literals(["assistant", "status", "tool"]),
+  text: Schema.String.check(Schema.isMaxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),
   occurredAt: UtcTimestamp,
-})
-  .pipe(Schema.filter((entry) => (entry.kind === "tool") === (entry.tool !== undefined)))
-  .annotations(strict);
+}).check(Schema.makeFilter((entry) => (entry.kind === "tool") === (entry.tool !== undefined)));
 export type AgentRunConversationEntry = typeof AgentRunConversationEntry.Type;
 
 const AgentRunConversationFields = {
@@ -979,19 +1003,17 @@ const AgentRunConversationFields = {
   lifecycleStatus: AgentRunLifecycleStatus,
   status: AgentRunConversationReadStatus,
   inputManifest: Schema.optional(ConversationInputManifest),
-  entries: Schema.Array(AgentRunConversationEntry).pipe(
-    Schema.maxItems(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
+  entries: Schema.Array(AgentRunConversationEntry).check(
+    Schema.isMaxLength(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
   ),
   truncated: Schema.Boolean,
   nextCursor: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_CURSOR_LENGTH)),
+    Schema.String.check(Schema.isMaxLength(MAX_AGENT_RUN_CONVERSATION_CURSOR_LENGTH)),
   ),
-  staleReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  staleReason: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
 } as const;
 
-export const AgentRunConversationResponse = Schema.Struct(AgentRunConversationFields).annotations(
-  strict,
-);
+export const AgentRunConversationResponse = Schema.Struct(AgentRunConversationFields);
 export type AgentRunConversationResponse = typeof AgentRunConversationResponse.Type;
 
 /**
@@ -1001,64 +1023,140 @@ export type AgentRunConversationResponse = typeof AgentRunConversationResponse.T
  * may carry a terminal/stale status with no entries.
  */
 export const AgentRunConversationStreamFrame = Schema.Struct({
-  kind: Schema.Literal("snapshot", "delta"),
+  kind: Schema.Literals(["snapshot", "delta"]),
   ...AgentRunConversationFields,
-}).annotations(strict);
+});
 export type AgentRunConversationStreamFrame = typeof AgentRunConversationStreamFrame.Type;
 
-export const decodeAgentRunId = Schema.decodeUnknownSync(AgentRunId);
-export const decodeAgentRunRequestId = Schema.decodeUnknownSync(AgentRunRequestId);
-export const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
-export const decodeAgentRunContextSnapshotId = Schema.decodeUnknownSync(AgentRunContextSnapshotId);
+export const decodeAgentRunId = Schema.decodeUnknownSync(AgentRunId, STRICT_DECODE_OPTIONS);
+export const decodeAgentRunRequestId = Schema.decodeUnknownSync(
+  AgentRunRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(
+  AgentRunParentThreadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunContextSnapshotId = Schema.decodeUnknownSync(
+  AgentRunContextSnapshotId,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAgentRunWorkspaceReceiptId = Schema.decodeUnknownSync(
   AgentRunWorkspaceReceiptId,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAgentRunWorkspaceRefusalReason = Schema.decodeUnknownSync(
   AgentRunWorkspaceRefusalReason,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAgentRunRole = Schema.decodeUnknownSync(AgentRunRole);
-export const decodeAgentRunCreationPosture = Schema.decodeUnknownSync(AgentRunCreationPosture);
-export const decodeAgentRunExecutionKind = Schema.decodeUnknownSync(AgentRunExecutionKind);
-export const decodeAgentRunLifecycleStatus = Schema.decodeUnknownSync(AgentRunLifecycleStatus);
-export const decodeAgentRunAuthority = Schema.decodeUnknownSync(AgentRunAuthority);
-export const decodeAgentRunWorkspaceReceipt = Schema.decodeUnknownSync(AgentRunWorkspaceReceipt);
-export const decodeAgentRunPoolRoute = Schema.decodeUnknownSync(AgentRunPoolRoute);
-export const decodeAgentRunRoutingReceipt = Schema.decodeUnknownSync(AgentRunRoutingReceipt);
-export const decodeAgentRunResult = Schema.decodeUnknownSync(AgentRunResult);
-export const decodeAgentRunResultText = Schema.decodeUnknownSync(AgentRunResultText);
-export const decodeAgentRunAdmittedContext = Schema.decodeUnknownSync(AgentRunAdmittedContext);
+export const decodeAgentRunRole = Schema.decodeUnknownSync(AgentRunRole, STRICT_DECODE_OPTIONS);
+export const decodeAgentRunCreationPosture = Schema.decodeUnknownSync(
+  AgentRunCreationPosture,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunExecutionKind = Schema.decodeUnknownSync(
+  AgentRunExecutionKind,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunLifecycleStatus = Schema.decodeUnknownSync(
+  AgentRunLifecycleStatus,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunAuthority = Schema.decodeUnknownSync(
+  AgentRunAuthority,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunWorkspaceReceipt = Schema.decodeUnknownSync(
+  AgentRunWorkspaceReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunPoolRoute = Schema.decodeUnknownSync(
+  AgentRunPoolRoute,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunRoutingReceipt = Schema.decodeUnknownSync(
+  AgentRunRoutingReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunResult = Schema.decodeUnknownSync(AgentRunResult, STRICT_DECODE_OPTIONS);
+export const decodeAgentRunResultText = Schema.decodeUnknownSync(
+  AgentRunResultText,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunAdmittedContext = Schema.decodeUnknownSync(
+  AgentRunAdmittedContext,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAgentRunResultAcknowledgement = Schema.decodeUnknownSync(
   AgentRunResultAcknowledgement,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAgentRun = Schema.decodeUnknownSync(AgentRun);
-export const decodeAgentRunCommand = Schema.decodeUnknownSync(AgentRunCommand);
-export const decodeAgentRunCommandResult = Schema.decodeUnknownSync(AgentRunCommandResult);
-export const decodeAgentRunRequested = Schema.decodeUnknownSync(AgentRunRequested);
-export const decodeAgentRunStatusChanged = Schema.decodeUnknownSync(AgentRunStatusChanged);
+export const decodeAgentRun = Schema.decodeUnknownSync(AgentRun, STRICT_DECODE_OPTIONS);
+export const decodeAgentRunCommand = Schema.decodeUnknownSync(
+  AgentRunCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunCommandResult = Schema.decodeUnknownSync(
+  AgentRunCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunRequested = Schema.decodeUnknownSync(
+  AgentRunRequested,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunStatusChanged = Schema.decodeUnknownSync(
+  AgentRunStatusChanged,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAgentRunResultDeliverySettled = Schema.decodeUnknownSync(
   AgentRunResultDeliverySettled,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAgentRunResultAcknowledged = Schema.decodeUnknownSync(
   AgentRunResultAcknowledged,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAgentRunCenterStatusFilter = Schema.decodeUnknownSync(
   AgentRunCenterStatusFilter,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAgentRunCenterWorkspaceKind = Schema.decodeUnknownSync(
   AgentRunCenterWorkspaceKind,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAgentRunCenterRoute = Schema.decodeUnknownSync(AgentRunCenterRoute);
-export const decodeAgentRunCenterSummary = Schema.decodeUnknownSync(AgentRunCenterSummary);
-export const decodeAgentRunCenterQuery = Schema.decodeUnknownSync(AgentRunCenterQuery);
-export const decodeAgentRunCenterResponse = Schema.decodeUnknownSync(AgentRunCenterResponse);
-export const decodeAgentRunCoordinatorGraph = Schema.decodeUnknownSync(AgentRunCoordinatorGraph);
+export const decodeAgentRunCenterRoute = Schema.decodeUnknownSync(
+  AgentRunCenterRoute,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunCenterSummary = Schema.decodeUnknownSync(
+  AgentRunCenterSummary,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunCenterQuery = Schema.decodeUnknownSync(
+  AgentRunCenterQuery,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunCenterResponse = Schema.decodeUnknownSync(
+  AgentRunCenterResponse,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentRunCoordinatorGraph = Schema.decodeUnknownSync(
+  AgentRunCoordinatorGraph,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAgentRunConversationReadStatus = Schema.decodeUnknownSync(
   AgentRunConversationReadStatus,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAgentRunConversationEntry = Schema.decodeUnknownSync(AgentRunConversationEntry);
+export const decodeAgentRunConversationEntry = Schema.decodeUnknownSync(
+  AgentRunConversationEntry,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeAgentRunConversationResponse = Schema.decodeUnknownSync(
   AgentRunConversationResponse,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodeAgentRunConversationStreamFrame = Schema.decodeUnknownSync(
   AgentRunConversationStreamFrame,
+  STRICT_DECODE_OPTIONS,
 );

@@ -126,11 +126,11 @@ describe("Browser session records", () => {
       ].sort(),
     );
     expect(
-      Schema.decodeUnknownEither(BrowserPageOpened)({
+      Schema.decodeUnknownResult(BrowserPageOpened, { onExcessProperty: "error" })({
         ...JSON.parse(events()[0]?.payload_json ?? "{}"),
         url: "https://example.com/private",
       })._tag,
-    ).toBe("Left");
+    ).toBe("Failure");
   });
 
   it("records a Private page only as the kind Private, and an account page with its account", () => {

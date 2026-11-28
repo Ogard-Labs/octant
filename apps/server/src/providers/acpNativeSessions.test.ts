@@ -54,7 +54,7 @@ describe("an ACP agent's own sessions", () => {
     const native = sessions([{ sessionId: "s1", cwd: "/work/app" }]);
     const adopt = (nativeSessionId: string) =>
       Effect.runPromise(
-        Effect.either(
+        Effect.result(
           native.adopt({
             instanceId,
             projectRoot: "/work/app",
@@ -67,20 +67,23 @@ describe("an ACP agent's own sessions", () => {
       );
     const first = await adopt("s1");
     expect(first).toMatchObject({
-      _tag: "Right",
-      right: { driverKind: "antigravity", value: "s1" },
+      _tag: "Success",
+      success: { driverKind: "antigravity", value: "s1" },
     });
-    expect(await adopt("s1")).toMatchObject({ _tag: "Left", left: { category: "unavailable" } });
+    expect(await adopt("s1")).toMatchObject({
+      _tag: "Failure",
+      failure: { category: "unavailable" },
+    });
     expect(await adopt("missing")).toMatchObject({
-      _tag: "Left",
-      left: { category: "stale-resume" },
+      _tag: "Failure",
+      failure: { category: "stale-resume" },
     });
   });
 
   it("says a session it could not reach is past what it reads, rather than gone, when the list stopped at a bound", async () => {
     const native = sessions([{ sessionId: "s1", cwd: "/work/app" }], [], true);
     const result = await Effect.runPromise(
-      Effect.either(
+      Effect.result(
         native.adopt({
           instanceId,
           projectRoot: "/work/app",
@@ -92,8 +95,8 @@ describe("an ACP agent's own sessions", () => {
       ),
     );
     expect(result).toMatchObject({
-      _tag: "Left",
-      left: {
+      _tag: "Failure",
+      failure: {
         category: "unavailable",
         message:
           "That session is past the sessions Octant can read; open it in Google Antigravity instead.",
@@ -103,9 +106,9 @@ describe("an ACP agent's own sessions", () => {
 
   it("says plainly when the agent does not list its sessions", async () => {
     const result = await Effect.runPromise(
-      Effect.either(sessions("unsupported").list({ instanceId, projectRoot: "/work/app" })),
+      Effect.result(sessions("unsupported").list({ instanceId, projectRoot: "/work/app" })),
     );
-    expect(result).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(result).toMatchObject({ _tag: "Failure", failure: { category: "unsupported" } });
   });
 
   it("reads the session/list reply and skips entries without an id", () => {

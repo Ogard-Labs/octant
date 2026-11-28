@@ -49,30 +49,46 @@ describe("SettingsSectionId", () => {
   });
 
   it("decodes a known section id and rejects an unknown one", () => {
-    expect(Schema.decodeUnknownSync(SettingsSectionId)("appearance")).toBe("appearance");
-    expect(Schema.decodeUnknownSync(SettingsSectionId)("github")).toBe("github");
-    expect(() => Schema.decodeUnknownSync(SettingsSectionId)("theme")).toThrow();
+    expect(
+      Schema.decodeUnknownSync(SettingsSectionId, { onExcessProperty: "error" })("appearance"),
+    ).toBe("appearance");
+    expect(
+      Schema.decodeUnknownSync(SettingsSectionId, { onExcessProperty: "error" })("github"),
+    ).toBe("github");
+    expect(() =>
+      Schema.decodeUnknownSync(SettingsSectionId, { onExcessProperty: "error" })("theme"),
+    ).toThrow();
   });
 });
 
 describe("SettingsSettingId", () => {
   it("decodes a non-empty trimmed string and rejects empty or whitespace", () => {
-    expect(Schema.decodeUnknownSync(SettingsSettingId)("sidebar-width")).toBe("sidebar-width");
-    expect(() => Schema.decodeUnknownSync(SettingsSettingId)("")).toThrow();
-    expect(() => Schema.decodeUnknownSync(SettingsSettingId)("  ")).toThrow();
+    expect(
+      Schema.decodeUnknownSync(SettingsSettingId, { onExcessProperty: "error" })("sidebar-width"),
+    ).toBe("sidebar-width");
+    expect(() =>
+      Schema.decodeUnknownSync(SettingsSettingId, { onExcessProperty: "error" })(""),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(SettingsSettingId, { onExcessProperty: "error" })("  "),
+    ).toThrow();
   });
 });
 
 describe("SettingsDeepLink", () => {
   it("decodes a section-only deep link", () => {
-    expect(Schema.decodeUnknownSync(SettingsDeepLink)({ section: "providers" })).toEqual({
+    expect(
+      Schema.decodeUnknownSync(SettingsDeepLink, { onExcessProperty: "error" })({
+        section: "providers",
+      }),
+    ).toEqual({
       section: "providers",
     });
   });
 
   it("decodes a section plus focused setting deep link", () => {
     expect(
-      Schema.decodeUnknownSync(SettingsDeepLink)({
+      Schema.decodeUnknownSync(SettingsDeepLink, { onExcessProperty: "error" })({
         section: "appearance",
         setting: "sidebar-width",
       }),
@@ -80,7 +96,7 @@ describe("SettingsDeepLink", () => {
   });
 
   it("reads a link to a retired section as the section that holds its settings now", () => {
-    const decode = Schema.decodeUnknownSync(SettingsDeepLink);
+    const decode = Schema.decodeUnknownSync(SettingsDeepLink, { onExcessProperty: "error" });
     expect(decode({ section: "advanced", setting: "reset-layout" })).toEqual({
       section: "host",
       setting: "reset-layout",
@@ -103,13 +119,15 @@ describe("SettingsDeepLink", () => {
 
   it("rejects a deep link without a section", () => {
     expect(() =>
-      Schema.decodeUnknownSync(SettingsDeepLink)({ setting: "sidebar-width" }),
+      Schema.decodeUnknownSync(SettingsDeepLink, { onExcessProperty: "error" })({
+        setting: "sidebar-width",
+      }),
     ).toThrow();
   });
 
   it("rejects excess properties", () => {
     expect(() =>
-      Schema.decodeUnknownSync(SettingsDeepLink)({
+      Schema.decodeUnknownSync(SettingsDeepLink, { onExcessProperty: "error" })({
         section: "appearance",
         setting: "sidebar-width",
         host: "local",

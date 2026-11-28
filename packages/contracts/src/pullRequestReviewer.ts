@@ -9,6 +9,7 @@
  */
 
 import { Schema } from "effect";
+import { NonNegativeInt, PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AgentRunId } from "./agentRun";
 import {
   CodeCheckoutId,
@@ -24,24 +25,24 @@ import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter(
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\u0000"),
     ),
   );
 
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(
-    Schema.filter(
+  Schema.String.check(
+    Schema.makeFilter(
       (value) => encoder.encode(value).byteLength <= maximumBytes && !value.includes("\u0000"),
     ),
   );
 
-const GitObjectId = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
+const GitObjectId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/));
 
 /** Maximum findings one pull request review run may submit. */
 export const MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN = 64;
@@ -56,15 +57,20 @@ export const MAX_PULL_REQUEST_REVIEW_FILE_PATCH_BYTES = 256 * 1024;
 
 /** A reviewer as the plugin host names it: the plugin and its component. */
 export const PullRequestReviewerId = Schema.String.pipe(
-  Schema.minLength(1),
-  Schema.maxLength(128),
-  Schema.pattern(/^[a-z0-9][a-z0-9._/-]*$/),
+  Schema.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(128),
+    Schema.isPattern(/^[a-z0-9][a-z0-9._/-]*$/),
+  ),
   Schema.brand("PullRequestReviewerId"),
 );
 export type PullRequestReviewerId = typeof PullRequestReviewerId.Type;
 
 /** One host-admitted invocation of a pull request reviewer on a specific head. */
-export const PullRequestReviewId = Schema.UUID.pipe(Schema.brand("PullRequestReviewId"));
+export const PullRequestReviewId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PullRequestReviewId"),
+);
 export type PullRequestReviewId = typeof PullRequestReviewId.Type;
 
 /** The pull request under review. */
@@ -72,15 +78,15 @@ export const PullRequestReviewTarget = Schema.Struct({
   projectId: ProjectId,
   repositoryOwner: GithubRepositoryOwner,
   repositoryName: GithubRepositoryName,
-  number: Schema.Int.pipe(Schema.positive()),
-}).annotations(strict);
+  number: PositiveInt,
+});
 export type PullRequestReviewTarget = typeof PullRequestReviewTarget.Type;
 
 /** The worker thread's route, given as a read-only fact so a reviewer knows what authored the diff. */
 export const PullRequestReviewWorkerRoute = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type PullRequestReviewWorkerRoute = typeof PullRequestReviewWorkerRoute.Type;
 
 /**
@@ -92,7 +98,7 @@ export const PullRequestReviewRoute = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   effort: Schema.optional(boundedNonEmptyText(64)),
-}).annotations(strict);
+});
 export type PullRequestReviewRoute = typeof PullRequestReviewRoute.Type;
 
 /**
@@ -102,7 +108,7 @@ export type PullRequestReviewRoute = typeof PullRequestReviewRoute.Type;
 export const PullRequestReviewOptIns = Schema.Struct({
   postSummaryComment: Schema.Boolean,
   sendBlockingFindingsToWorker: Schema.Boolean,
-}).annotations(strict);
+});
 export type PullRequestReviewOptIns = typeof PullRequestReviewOptIns.Type;
 
 /** Immutable host-assembled request describing the exact PR head to review. */
@@ -117,7 +123,7 @@ export const PullRequestReviewRequest = Schema.Struct({
   workerRoute: PullRequestReviewWorkerRoute,
   configuredRoute: Schema.optional(PullRequestReviewRoute),
   optIns: PullRequestReviewOptIns,
-}).annotations(strict);
+});
 export type PullRequestReviewRequest = typeof PullRequestReviewRequest.Type;
 
 /** One changed file in a host-verified PR diff snapshot; carries no host filesystem path. */
@@ -125,11 +131,11 @@ export const PullRequestReviewDiffFile = Schema.Struct({
   fileId: CodeFileId,
   path: CodeRelativePath,
   fileDigest: CodeDigest,
-  status: Schema.Literal("added", "modified", "deleted", "renamed"),
+  status: Schema.Literals(["added", "modified", "deleted", "renamed"]),
   previousPath: Schema.optional(CodeRelativePath),
   patch: Schema.optional(boundedText(MAX_PULL_REQUEST_REVIEW_FILE_PATCH_BYTES)),
   truncated: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type PullRequestReviewDiffFile = typeof PullRequestReviewDiffFile.Type;
 
 /** Host-verified read-only diff snapshot bound to one exact pull request head. */
@@ -138,11 +144,11 @@ export const PullRequestReviewDiffSnapshot = Schema.Struct({
   baseRef: boundedNonEmptyText(512),
   baseSha: Schema.optional(GitObjectId),
   reviewOperationId: CodeOperationId,
-  files: Schema.Array(PullRequestReviewDiffFile).pipe(
-    Schema.maxItems(MAX_PULL_REQUEST_REVIEW_DIFF_FILES),
+  files: Schema.Array(PullRequestReviewDiffFile).check(
+    Schema.isMaxLength(MAX_PULL_REQUEST_REVIEW_DIFF_FILES),
   ),
   truncated: Schema.optional(Schema.Boolean),
-}).annotations(strict);
+});
 export type PullRequestReviewDiffSnapshot = typeof PullRequestReviewDiffSnapshot.Type;
 
 /**
@@ -153,10 +159,10 @@ export type PullRequestReviewDiffSnapshot = typeof PullRequestReviewDiffSnapshot
 export const PullRequestReviewFindingProposal = Schema.Struct({
   path: CodeRelativePath,
   location: CodeReviewLocation,
-  side: Schema.optional(Schema.Literal("original", "modified")),
-  severity: Schema.Literal("note", "warning", "error"),
+  side: Schema.optional(Schema.Literals(["original", "modified"])),
+  severity: Schema.Literals(["note", "warning", "error"]),
   summary: boundedNonEmptyText(4_096),
-}).annotations(strict);
+});
 export type PullRequestReviewFindingProposal = typeof PullRequestReviewFindingProposal.Type;
 
 /**
@@ -164,7 +170,7 @@ export type PullRequestReviewFindingProposal = typeof PullRequestReviewFindingPr
  * reason is explicit so the review pane can tell the person why nothing ran
  * without falling back silently to another model.
  */
-export const PullRequestReviewTurnRefusalReason = Schema.Literal(
+export const PullRequestReviewTurnRefusalReason = Schema.Literals([
   "no-route-configured",
   "no-account",
   "route-refused",
@@ -173,44 +179,44 @@ export const PullRequestReviewTurnRefusalReason = Schema.Literal(
   "head-stale",
   "not-effective",
   "unsupported",
-);
+]);
 export type PullRequestReviewTurnRefusalReason = typeof PullRequestReviewTurnRefusalReason.Type;
 
 /** The settled outcome of one pull request reviewer invocation. */
-export const PullRequestReviewOutcome = Schema.Union(
+export const PullRequestReviewOutcome = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("completed"),
-    findingIds: Schema.Array(CodeReviewFindingId).pipe(
-      Schema.maxItems(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN),
+    findingIds: Schema.Array(CodeReviewFindingId).check(
+      Schema.isMaxLength(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN),
     ),
     runId: Schema.optional(AgentRunId),
     summaryCommentPosted: Schema.optional(Schema.Boolean),
     handedBackToWorker: Schema.optional(Schema.Boolean),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("stale"),
     currentHeadSha: Schema.optional(GitObjectId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("refused"),
     reason: PullRequestReviewTurnRefusalReason,
     detail: boundedNonEmptyText(2_048),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("cancelled"),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     status: Schema.Literal("failed"),
     detail: boundedNonEmptyText(2_048),
-  }).annotations(strict),
-);
+  }),
+]);
 export type PullRequestReviewOutcome = typeof PullRequestReviewOutcome.Type;
 
 /** Summary of one currently offered pull request reviewer plugin contribution. */
 export const OfferedPullRequestReviewerSummary = Schema.Struct({
   reviewerId: PullRequestReviewerId,
   displayName: boundedNonEmptyText(128),
-}).annotations(strict);
+});
 export type OfferedPullRequestReviewerSummary = typeof OfferedPullRequestReviewerSummary.Type;
 
 /**
@@ -227,7 +233,7 @@ export const PullRequestReviewProjectSettings = Schema.Struct({
   guideRoute: Schema.optional(PullRequestReviewRoute),
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type PullRequestReviewProjectSettings = typeof PullRequestReviewProjectSettings.Type;
 
 /**
@@ -235,7 +241,11 @@ export type PullRequestReviewProjectSettings = typeof PullRequestReviewProjectSe
  * owning Code Project's setting; `enabled` or `disabled` overrides it for this
  * thread only.
  */
-export const PullRequestReviewThreadOverrideMode = Schema.Literal("inherit", "enabled", "disabled");
+export const PullRequestReviewThreadOverrideMode = Schema.Literals([
+  "inherit",
+  "enabled",
+  "disabled",
+]);
 export type PullRequestReviewThreadOverrideMode = typeof PullRequestReviewThreadOverrideMode.Type;
 
 export const PullRequestReviewThreadOverride = Schema.Struct({
@@ -244,7 +254,7 @@ export const PullRequestReviewThreadOverride = Schema.Struct({
   route: Schema.optional(PullRequestReviewRoute),
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type PullRequestReviewThreadOverride = typeof PullRequestReviewThreadOverride.Type;
 
 /** Per-PR opt-in for handing blocking reviewer findings back to the worker thread. */
@@ -253,7 +263,7 @@ export const PullRequestReviewPullRequestSettings = Schema.Struct({
   sendBlockingFindingsToWorker: Schema.Boolean,
   version: AggregateVersion,
   updatedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type PullRequestReviewPullRequestSettings = typeof PullRequestReviewPullRequestSettings.Type;
 
 /** Journaled state of one pull request reviewer invocation on a specific PR head. */
@@ -264,20 +274,20 @@ export const PullRequestReviewRunRecord = Schema.Struct({
   threadId: CodeThreadId,
   headSha: GitObjectId,
   currentHeadSha: Schema.optional(GitObjectId),
-  status: Schema.Literal("running", "completed", "stale", "refused", "cancelled", "failed"),
+  status: Schema.Literals(["running", "completed", "stale", "refused", "cancelled", "failed"]),
   route: Schema.optional(PullRequestReviewRoute),
   runId: Schema.optional(AgentRunId),
-  findingIds: Schema.Array(CodeReviewFindingId).pipe(
-    Schema.maxItems(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN),
+  findingIds: Schema.Array(CodeReviewFindingId).check(
+    Schema.isMaxLength(MAX_PULL_REQUEST_REVIEW_FINDINGS_PER_RUN),
   ),
   summaryCommentPosted: Schema.Boolean,
   handedBackToWorker: Schema.Boolean,
-  handBackAttempt: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  handBackAttempt: Schema.optional(PositiveInt),
   reason: Schema.optional(PullRequestReviewTurnRefusalReason),
   detail: Schema.optional(boundedNonEmptyText(2_048)),
   startedAt: UtcTimestamp,
   completedAt: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type PullRequestReviewRunRecord = typeof PullRequestReviewRunRecord.Type;
 
 /** Host-resolved effective reviewer posture for a thread or pull request. */
@@ -289,12 +299,12 @@ export const PullRequestReviewEffectiveConfig = Schema.Struct({
   sendBlockingFindingsToWorker: Schema.Boolean,
   unavailableReason: Schema.optional(PullRequestReviewTurnRefusalReason),
   unavailableDetail: Schema.optional(boundedNonEmptyText(2_048)),
-}).annotations(strict);
+});
 export type PullRequestReviewEffectiveConfig = typeof PullRequestReviewEffectiveConfig.Type;
 
 export const PullRequestReviewProjectQuery = Schema.Struct({
   projectId: ProjectId,
-}).annotations(strict);
+});
 export type PullRequestReviewProjectQuery = typeof PullRequestReviewProjectQuery.Type;
 
 export const PullRequestReviewProjectSettingsCommand = Schema.Struct({
@@ -305,26 +315,26 @@ export const PullRequestReviewProjectSettingsCommand = Schema.Struct({
   postSummaryComment: Schema.Boolean,
   /** Absent keeps the guide model; null clears it. */
   guideRoute: Schema.optional(Schema.NullOr(PullRequestReviewRoute)),
-}).annotations(strict);
+});
 export type PullRequestReviewProjectSettingsCommand =
   typeof PullRequestReviewProjectSettingsCommand.Type;
 
 export const PullRequestReviewProjectView = Schema.Struct({
   settings: PullRequestReviewProjectSettings,
-  offeredReviewers: Schema.Array(OfferedPullRequestReviewerSummary).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  offeredReviewers: Schema.Array(OfferedPullRequestReviewerSummary).check(Schema.isMaxLength(32)),
+});
 export type PullRequestReviewProjectView = typeof PullRequestReviewProjectView.Type;
 
 export const PullRequestReviewThreadQuery = Schema.Struct({
   threadId: CodeThreadId,
-}).annotations(strict);
+});
 export type PullRequestReviewThreadQuery = typeof PullRequestReviewThreadQuery.Type;
 
 export const PullRequestReviewThreadOverrideCommand = Schema.Struct({
   threadId: CodeThreadId,
   mode: PullRequestReviewThreadOverrideMode,
   route: Schema.optional(Schema.NullOr(PullRequestReviewRoute)),
-}).annotations(strict);
+});
 export type PullRequestReviewThreadOverrideCommand =
   typeof PullRequestReviewThreadOverrideCommand.Type;
 
@@ -333,20 +343,20 @@ export const PullRequestReviewThreadView = Schema.Struct({
   projectSettings: PullRequestReviewProjectSettings,
   effective: PullRequestReviewEffectiveConfig,
   latestReview: Schema.optional(PullRequestReviewRunRecord),
-  offeredReviewers: Schema.Array(OfferedPullRequestReviewerSummary).pipe(Schema.maxItems(32)),
-}).annotations(strict);
+  offeredReviewers: Schema.Array(OfferedPullRequestReviewerSummary).check(Schema.isMaxLength(32)),
+});
 export type PullRequestReviewThreadView = typeof PullRequestReviewThreadView.Type;
 
 export const PullRequestReviewPullRequestQuery = Schema.Struct({
   target: PullRequestReviewTarget,
   threadId: Schema.optional(CodeThreadId),
-}).annotations(strict);
+});
 export type PullRequestReviewPullRequestQuery = typeof PullRequestReviewPullRequestQuery.Type;
 
 export const PullRequestReviewPullRequestSettingsCommand = Schema.Struct({
   target: PullRequestReviewTarget,
   sendBlockingFindingsToWorker: Schema.Boolean,
-}).annotations(strict);
+});
 export type PullRequestReviewPullRequestSettingsCommand =
   typeof PullRequestReviewPullRequestSettingsCommand.Type;
 
@@ -354,8 +364,8 @@ export const PullRequestReviewPullRequestView = Schema.Struct({
   settings: PullRequestReviewPullRequestSettings,
   effective: PullRequestReviewEffectiveConfig,
   latestReview: Schema.optional(PullRequestReviewRunRecord),
-  handBackAttempts: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  handBackAttempts: NonNegativeInt,
+});
 export type PullRequestReviewPullRequestView = typeof PullRequestReviewPullRequestView.Type;
 
 /** Journal aggregate types and event names for pull request reviewer settings and runs. */
@@ -383,7 +393,7 @@ export const PullRequestReviewProjectSettingsEvent = Schema.Struct({
   route: Schema.optional(PullRequestReviewRoute),
   postSummaryComment: Schema.Boolean,
   guideRoute: Schema.optional(PullRequestReviewRoute),
-}).annotations(strict);
+});
 export type PullRequestReviewProjectSettingsEvent =
   typeof PullRequestReviewProjectSettingsEvent.Type;
 
@@ -392,14 +402,14 @@ export const PullRequestReviewThreadOverrideEvent = Schema.Struct({
   threadId: CodeThreadId,
   mode: PullRequestReviewThreadOverrideMode,
   route: Schema.optional(PullRequestReviewRoute),
-}).annotations(strict);
+});
 export type PullRequestReviewThreadOverrideEvent = typeof PullRequestReviewThreadOverrideEvent.Type;
 
 export const PullRequestReviewPullRequestSettingsEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-review-pr-settings-updated"),
   target: PullRequestReviewTarget,
   sendBlockingFindingsToWorker: Schema.Boolean,
-}).annotations(strict);
+});
 export type PullRequestReviewPullRequestSettingsEvent =
   typeof PullRequestReviewPullRequestSettingsEvent.Type;
 
@@ -412,7 +422,7 @@ export const PullRequestReviewRunStartedEvent = Schema.Struct({
   headSha: GitObjectId,
   route: Schema.optional(PullRequestReviewRoute),
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PullRequestReviewRunStartedEvent = typeof PullRequestReviewRunStartedEvent.Type;
 
 export const PullRequestReviewPublicationRecordedEvent = Schema.Struct({
@@ -421,57 +431,81 @@ export const PullRequestReviewPublicationRecordedEvent = Schema.Struct({
   target: PullRequestReviewTarget,
   threadId: CodeThreadId,
   headSha: GitObjectId,
-  action: Schema.Literal("summary-comment", "worker-hand-back"),
-  phase: Schema.Literal("intent", "completed", "failed"),
-  attempt: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  action: Schema.Literals(["summary-comment", "worker-hand-back"]),
+  phase: Schema.Literals(["intent", "completed", "failed"]),
+  attempt: Schema.optional(PositiveInt),
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PullRequestReviewPublicationRecordedEvent =
   typeof PullRequestReviewPublicationRecordedEvent.Type;
 
 export const PullRequestReviewRunRecordedEvent = Schema.Struct({
   kind: Schema.Literal("pull-request-review-run-recorded"),
   record: PullRequestReviewRunRecord,
-}).annotations(strict);
+});
 export type PullRequestReviewRunRecordedEvent = typeof PullRequestReviewRunRecordedEvent.Type;
 
-export const decodePullRequestReviewerId = Schema.decodeUnknownSync(PullRequestReviewerId);
-export const decodePullRequestReviewId = Schema.decodeUnknownSync(PullRequestReviewId);
-export const decodePullRequestReviewRequest = Schema.decodeUnknownSync(PullRequestReviewRequest);
+export const decodePullRequestReviewerId = Schema.decodeUnknownSync(
+  PullRequestReviewerId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestReviewId = Schema.decodeUnknownSync(
+  PullRequestReviewId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePullRequestReviewRequest = Schema.decodeUnknownSync(
+  PullRequestReviewRequest,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePullRequestReviewDiffSnapshot = Schema.decodeUnknownSync(
   PullRequestReviewDiffSnapshot,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewFindingProposal = Schema.decodeUnknownSync(
   PullRequestReviewFindingProposal,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodePullRequestReviewOutcome = Schema.decodeUnknownSync(PullRequestReviewOutcome);
+export const decodePullRequestReviewOutcome = Schema.decodeUnknownSync(
+  PullRequestReviewOutcome,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodePullRequestReviewProjectQuery = Schema.decodeUnknownSync(
   PullRequestReviewProjectQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewProjectSettingsCommand = Schema.decodeUnknownSync(
   PullRequestReviewProjectSettingsCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewProjectView = Schema.decodeUnknownSync(
   PullRequestReviewProjectView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewThreadQuery = Schema.decodeUnknownSync(
   PullRequestReviewThreadQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewThreadOverrideCommand = Schema.decodeUnknownSync(
   PullRequestReviewThreadOverrideCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewThreadView = Schema.decodeUnknownSync(
   PullRequestReviewThreadView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewPullRequestQuery = Schema.decodeUnknownSync(
   PullRequestReviewPullRequestQuery,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewPullRequestSettingsCommand = Schema.decodeUnknownSync(
   PullRequestReviewPullRequestSettingsCommand,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewPullRequestView = Schema.decodeUnknownSync(
   PullRequestReviewPullRequestView,
+  STRICT_DECODE_OPTIONS,
 );
 export const decodePullRequestReviewRunRecord = Schema.decodeUnknownSync(
   PullRequestReviewRunRecord,
+  STRICT_DECODE_OPTIONS,
 );

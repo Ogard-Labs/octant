@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import {
@@ -11,8 +12,8 @@ import {
 // in the Apple toolchain, which pulls in `code`, and `code` now names a profile.
 import { HostId } from "./host";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 export const AgentProfileId = brandedUuid("AgentProfileId");
 export type AgentProfileId = typeof AgentProfileId.Type;
@@ -25,14 +26,18 @@ export type AgentProfileId = typeof AgentProfileId.Type;
  */
 export const AgentProfile = Schema.Struct({
   id: AgentProfileId,
-  displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-  description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
+  displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  description: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048))),
   /** Approved system instructions injected into context composition. */
-  instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
+  instructions: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(100_000)),
+  ),
   /** Approved skill identifiers that may be loaded when this profile is active. */
-  approvedSkillIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  approvedSkillIds: Schema.Array(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  ),
   /** Tool capability constraints — only these capabilities are permitted. */
-  toolConstraints: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  toolConstraints: Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
   /** Model constraints — only these models may be selected with this profile. */
   modelConstraints: Schema.Array(ProviderModelId),
   /** Default execution policy when this profile is active. */
@@ -44,7 +49,7 @@ export const AgentProfile = Schema.Struct({
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type AgentProfile = typeof AgentProfile.Type;
 
 /**
@@ -66,8 +71,8 @@ export const ExecutionContext = Schema.Struct({
     network: Schema.Boolean,
     tools: Schema.Boolean,
     subagents: Schema.Boolean,
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type ExecutionContext = typeof ExecutionContext.Type;
 
 /**
@@ -76,13 +81,15 @@ export type ExecutionContext = typeof ExecutionContext.Type;
  */
 export const ExecutionContextPickerEntry = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
-  providerDisplayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  providerDisplayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   modelId: ProviderModelId,
-  modelDisplayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  modelDisplayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   profileId: Schema.optional(AgentProfileId),
-  profileDisplayName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
+  profileDisplayName: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+  ),
   hostId: HostId,
-  hostLabel: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+  hostLabel: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
   executionPolicy: ProviderExecutionPolicy,
   effectivePermissions: Schema.Struct({
     filesystem: Schema.Boolean,
@@ -91,10 +98,12 @@ export const ExecutionContextPickerEntry = Schema.Struct({
     network: Schema.Boolean,
     tools: Schema.Boolean,
     subagents: Schema.Boolean,
-  }).annotations(strict),
+  }),
   /** Why this combination is unavailable, if applicable. */
-  unavailableReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
-}).annotations(strict);
+  unavailableReason: Schema.optional(
+    Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+  ),
+});
 export type ExecutionContextPickerEntry = typeof ExecutionContextPickerEntry.Type;
 
 /**
@@ -104,9 +113,12 @@ export type ExecutionContextPickerEntry = typeof ExecutionContextPickerEntry.Typ
  * - project: a per-Project profile (scopeRef is the Project ID)
  * - one-off: a single-thread override profile (scopeRef is the thread ID)
  */
-export const ProfileScopeKind = Schema.Literal("user", "mode", "project", "one-off");
+export const ProfileScopeKind = Schema.Literals(["user", "mode", "project", "one-off"]);
 export type ProfileScopeKind = typeof ProfileScopeKind.Type;
-export const decodeProfileScopeKind = Schema.decodeUnknownSync(ProfileScopeKind);
+export const decodeProfileScopeKind = Schema.decodeUnknownSync(
+  ProfileScopeKind,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The scope a profile belongs to. Profiles are partitioned by scope so
@@ -116,81 +128,102 @@ export const decodeProfileScopeKind = Schema.decodeUnknownSync(ProfileScopeKind)
 export const AgentProfileScope = Schema.Struct({
   scopeKind: ProfileScopeKind,
   /** Mode name for mode scope, Project ID for project scope, thread ID for one-off, user ID for user. */
-  scopeRef: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-}).annotations(strict);
+  scopeRef: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+});
 export type AgentProfileScope = typeof AgentProfileScope.Type;
-export const decodeAgentProfileScope = Schema.decodeUnknownSync(AgentProfileScope);
+export const decodeAgentProfileScope = Schema.decodeUnknownSync(
+  AgentProfileScope,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Agent profile CRUD commands.
  */
-export const AgentProfileCommand = Schema.Union(
+export const AgentProfileCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("create-agent-profile"),
     profileId: AgentProfileId,
     scope: AgentProfileScope,
-    displayName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
-    description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
-    instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
-    approvedSkillIds: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
-    toolConstraints: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    displayName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+    description: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+    ),
+    instructions: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(100_000)),
+    ),
+    approvedSkillIds: Schema.Array(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+    ),
+    toolConstraints: Schema.Array(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+    ),
     modelConstraints: Schema.Array(ProviderModelId),
     defaultExecutionPolicy: ProviderExecutionPolicy,
     defaultPermissionPersistence: PermissionPersistence,
     compatibleModes: Schema.Array(OctantMode),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("update-agent-profile"),
     profileId: AgentProfileId,
     expectedVersion: AggregateVersion,
-    displayName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255))),
-    description: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048))),
-    instructions: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(100_000))),
+    displayName: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(255)),
+    ),
+    description: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(2048)),
+    ),
+    instructions: Schema.optional(
+      Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(100_000)),
+    ),
     approvedSkillIds: Schema.optional(
-      Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+      Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
     ),
     toolConstraints: Schema.optional(
-      Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+      Schema.Array(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128))),
     ),
     modelConstraints: Schema.optional(Schema.Array(ProviderModelId)),
     defaultExecutionPolicy: Schema.optional(ProviderExecutionPolicy),
     defaultPermissionPersistence: Schema.optional(PermissionPersistence),
     compatibleModes: Schema.optional(Schema.Array(OctantMode)),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("remove-agent-profile"),
     profileId: AgentProfileId,
     expectedVersion: AggregateVersion,
-  }).annotations(strict),
-);
+  }),
+]);
 export type AgentProfileCommand = typeof AgentProfileCommand.Type;
 
-export const AgentProfileCommandResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("profile-created"), profile: AgentProfile }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("profile-updated"), profile: AgentProfile }).annotations(
-    strict,
-  ),
-  Schema.Struct({ kind: Schema.Literal("profile-removed"), profileId: AgentProfileId }).annotations(
-    strict,
-  ),
+export const AgentProfileCommandResult = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("profile-created"), profile: AgentProfile }),
+  Schema.Struct({ kind: Schema.Literal("profile-updated"), profile: AgentProfile }),
+  Schema.Struct({ kind: Schema.Literal("profile-removed"), profileId: AgentProfileId }),
   Schema.Struct({
     kind: Schema.Literal("profile-command-failed"),
-    reason: Schema.Literal("invalid", "stale-version", "unauthorized", "in-use"),
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["invalid", "stale-version", "unauthorized", "in-use"]),
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type AgentProfileCommandResult = typeof AgentProfileCommandResult.Type;
 
-export const decodeAgentProfileId = Schema.decodeUnknownSync(AgentProfileId);
-export const decodeAgentProfile = Schema.decodeUnknownSync(AgentProfile);
-export const decodeExecutionContext = Schema.decodeUnknownSync(ExecutionContext);
+export const decodeAgentProfileId = Schema.decodeUnknownSync(AgentProfileId, STRICT_DECODE_OPTIONS);
+export const decodeAgentProfile = Schema.decodeUnknownSync(AgentProfile, STRICT_DECODE_OPTIONS);
+export const decodeExecutionContext = Schema.decodeUnknownSync(
+  ExecutionContext,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeExecutionContextPickerEntry = Schema.decodeUnknownSync(
   ExecutionContextPickerEntry,
+  STRICT_DECODE_OPTIONS,
 );
-export const decodeAgentProfileCommand = Schema.decodeUnknownSync(AgentProfileCommand);
-export const decodeAgentProfileCommandResult = Schema.decodeUnknownSync(AgentProfileCommandResult);
+export const decodeAgentProfileCommand = Schema.decodeUnknownSync(
+  AgentProfileCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeAgentProfileCommandResult = Schema.decodeUnknownSync(
+  AgentProfileCommandResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Event payload for agent.profile-created@1.
@@ -199,9 +232,12 @@ export const decodeAgentProfileCommandResult = Schema.decodeUnknownSync(AgentPro
 export const AgentProfileCreated = Schema.Struct({
   profile: AgentProfile,
   scope: AgentProfileScope,
-}).annotations(strict);
+});
 export type AgentProfileCreated = typeof AgentProfileCreated.Type;
-export const decodeAgentProfileCreated = Schema.decodeUnknownSync(AgentProfileCreated);
+export const decodeAgentProfileCreated = Schema.decodeUnknownSync(
+  AgentProfileCreated,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Event payload for agent.profile-updated@1.
@@ -210,9 +246,12 @@ export const decodeAgentProfileCreated = Schema.decodeUnknownSync(AgentProfileCr
 export const AgentProfileUpdated = Schema.Struct({
   profile: AgentProfile,
   scope: AgentProfileScope,
-}).annotations(strict);
+});
 export type AgentProfileUpdated = typeof AgentProfileUpdated.Type;
-export const decodeAgentProfileUpdated = Schema.decodeUnknownSync(AgentProfileUpdated);
+export const decodeAgentProfileUpdated = Schema.decodeUnknownSync(
+  AgentProfileUpdated,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * Event payload for agent.profile-removed@1.
@@ -221,9 +260,12 @@ export const decodeAgentProfileUpdated = Schema.decodeUnknownSync(AgentProfileUp
 export const AgentProfileRemoved = Schema.Struct({
   profileId: AgentProfileId,
   version: AggregateVersion,
-}).annotations(strict);
+});
 export type AgentProfileRemoved = typeof AgentProfileRemoved.Type;
-export const decodeAgentProfileRemoved = Schema.decodeUnknownSync(AgentProfileRemoved);
+export const decodeAgentProfileRemoved = Schema.decodeUnknownSync(
+  AgentProfileRemoved,
+  STRICT_DECODE_OPTIONS,
+);
 
 /**
  * The source of an effective execution resolution, in deterministic
@@ -234,13 +276,13 @@ export const decodeAgentProfileRemoved = Schema.decodeUnknownSync(AgentProfileRe
  * - user-default: the user's global default profile
  * - none: no profile resolved; no implicit privileged fallback
  */
-export const ExecutionResolutionSource = Schema.Literal(
+export const ExecutionResolutionSource = Schema.Literals([
   "one-off-override",
   "project-default",
   "mode-default",
   "user-default",
   "none",
-);
+]);
 export type ExecutionResolutionSource = typeof ExecutionResolutionSource.Type;
 
 /**
@@ -250,8 +292,8 @@ export type ExecutionResolutionSource = typeof ExecutionResolutionSource.Type;
  */
 export const ExecutionDowngradeReason = Schema.Struct({
   step: ExecutionResolutionSource,
-  reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024)),
-}).annotations(strict);
+  reason: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1024)),
+});
 export type ExecutionDowngradeReason = typeof ExecutionDowngradeReason.Type;
 
 /**
@@ -279,17 +321,18 @@ export const ExecutionResolutionReceipt = Schema.Struct({
     network: Schema.Boolean,
     tools: Schema.Boolean,
     subagents: Schema.Boolean,
-  }).annotations(strict),
+  }),
   /** Which resolution source produced this effective context. */
   source: ExecutionResolutionSource,
   /** The full fallback chain attempted, in priority order. */
   fallbackChain: Schema.Array(ExecutionResolutionSource),
   /** Reasons for each downgraded or skipped step. */
   downgradeReasons: Schema.Array(ExecutionDowngradeReason),
-}).annotations(strict);
+});
 export type ExecutionResolutionReceipt = typeof ExecutionResolutionReceipt.Type;
 export const decodeExecutionResolutionReceipt = Schema.decodeUnknownSync(
   ExecutionResolutionReceipt,
+  STRICT_DECODE_OPTIONS,
 );
 
 /**
@@ -325,8 +368,9 @@ export const ResolveEffectiveProfileRequest = Schema.Struct({
       modelId: ProviderModelId,
     }),
   ),
-}).annotations(strict);
+});
 export type ResolveEffectiveProfileRequest = typeof ResolveEffectiveProfileRequest.Type;
 export const decodeResolveEffectiveProfileRequest = Schema.decodeUnknownSync(
   ResolveEffectiveProfileRequest,
+  STRICT_DECODE_OPTIONS,
 );

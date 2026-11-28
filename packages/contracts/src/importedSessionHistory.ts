@@ -1,14 +1,17 @@
 import { Schema } from "effect";
+import { PositiveInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ProviderInstanceId } from "./providers";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedText = (maximumBytes: number) =>
-  Schema.String.pipe(Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes));
+  Schema.String.check(
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  );
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /** The most earlier messages a thread keeps of a session it was started from; the newest are kept. */
@@ -28,16 +31,16 @@ export const MAX_IMPORTED_SESSION_TOOL_BYTES = 255;
  * was longer than one imported message keeps.
  */
 export const ImportedSessionMessage = Schema.Struct({
-  role: Schema.Literal("person", "agent"),
+  role: Schema.Literals(["person", "agent"]),
   text: boundedText(MAX_IMPORTED_SESSION_MESSAGE_BYTES),
   tools: Schema.optional(
-    Schema.Array(boundedNonEmptyText(MAX_IMPORTED_SESSION_TOOL_BYTES)).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_IMPORTED_SESSION_MESSAGE_TOOLS),
+    Schema.Array(boundedNonEmptyText(MAX_IMPORTED_SESSION_TOOL_BYTES)).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_IMPORTED_SESSION_MESSAGE_TOOLS),
     ),
   ),
   clipped: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type ImportedSessionMessage = typeof ImportedSessionMessage.Type;
 
 /**
@@ -49,20 +52,20 @@ export type ImportedSessionMessage = typeof ImportedSessionMessage.Type;
  * read failed or ran out of time (`unreadable`). It is the thread's record,
  * never prompt context: the provider already holds the session.
  */
-export const ImportedSessionHistory = Schema.Union(
+export const ImportedSessionHistory = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("imported"),
-    messages: Schema.Array(ImportedSessionMessage).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_IMPORTED_SESSION_MESSAGES),
+    messages: Schema.Array(ImportedSessionMessage).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_IMPORTED_SESSION_MESSAGES),
     ),
-    omittedMessages: Schema.optional(Schema.Int.pipe(Schema.positive())),
-  }).annotations(strict),
+    omittedMessages: Schema.optional(PositiveInt),
+  }),
   Schema.Struct({
     status: Schema.Literal("none"),
-    reason: Schema.Literal("unsupported", "empty", "unreadable"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["unsupported", "empty", "unreadable"]),
+  }),
+]);
 export type ImportedSessionHistory = typeof ImportedSessionHistory.Type;
 
 /**
@@ -72,15 +75,16 @@ export type ImportedSessionHistory = typeof ImportedSessionHistory.Type;
  * so no turn, handoff, or usage read ever folds it.
  */
 export const NativeSessionHistoryImported = Schema.Struct({
-  threadId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-  mode: Schema.Literal("work", "code"),
+  threadId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  mode: Schema.Literals(["work", "code"]),
   providerInstanceId: ProviderInstanceId,
   nativeSessionId: ProviderNativeSessionId,
   history: ImportedSessionHistory,
-}).annotations(strict);
+});
 export type NativeSessionHistoryImported = typeof NativeSessionHistoryImported.Type;
 export const decodeNativeSessionHistoryImported = Schema.decodeUnknownSync(
   NativeSessionHistoryImported,
+  STRICT_DECODE_OPTIONS,
 );
 export const NATIVE_SESSION_HISTORY_AGGREGATE_TYPE = "native-session-history";
 export const NATIVE_SESSION_HISTORY_IMPORTED_EVENT = "native-session.history-imported@1";

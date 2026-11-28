@@ -1,9 +1,9 @@
 import { Schema } from "effect";
+import { GuidString } from "./schemaPrimitives";
 import { SecretStoreKind, SecretStoreItemReference } from "./secretStores";
 import { MAX_THREAD_SECRET_COMMAND_LENGTH, MAX_THREAD_SECRET_FIELDS } from "./threadSecrets";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-export const CredentialRequestState = Schema.Literal(
+export const CredentialRequestState = Schema.Literals([
   "pending",
   "using",
   "used",
@@ -11,32 +11,32 @@ export const CredentialRequestState = Schema.Literal(
   "cancelled",
   "expired",
   "failed",
-);
-export const CredentialRequestFailure = Schema.Literal(
+]);
+export const CredentialRequestFailure = Schema.Literals([
   "locked",
   "missing",
   "unavailable",
   "not-linked",
   "invalid-reference",
   "changed",
-);
+]);
 export type CredentialRequestFailure = typeof CredentialRequestFailure.Type;
 export const CredentialRequestReference = Schema.Struct({
   store: SecretStoreKind,
   reference: SecretStoreItemReference,
-}).annotations(strict);
+});
 export type CredentialRequestReference = typeof CredentialRequestReference.Type;
 /** Broker-to-host only. Never a renderer response, tool result or journal record. */
-export const CredentialRequestResolution = Schema.Union(
+export const CredentialRequestResolution = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("read"),
-    value: Schema.String.pipe(Schema.maxLength(4096)),
-  }).annotations(strict),
-  Schema.Struct({ status: CredentialRequestFailure }).annotations(strict),
-);
+    value: Schema.String.check(Schema.isMaxLength(4096)),
+  }),
+  Schema.Struct({ status: CredentialRequestFailure }),
+]);
 export type CredentialRequestResolution = typeof CredentialRequestResolution.Type;
 export const CredentialRequestCard = Schema.Struct({
-  id: Schema.UUID,
+  id: GuidString,
   threadId: Schema.String,
   label: Schema.String,
   reason: Schema.String,
@@ -45,27 +45,27 @@ export const CredentialRequestCard = Schema.Struct({
   actionLabel: Schema.String,
   state: CredentialRequestState,
   failure: Schema.optional(CredentialRequestFailure),
-}).annotations(strict);
+});
 export type CredentialRequestCard = typeof CredentialRequestCard.Type;
 export const CredentialRequestView = Schema.Struct({
-  requests: Schema.Array(CredentialRequestCard).pipe(Schema.maxItems(8)),
-}).annotations(strict);
+  requests: Schema.Array(CredentialRequestCard).check(Schema.isMaxLength(8)),
+});
 export type CredentialRequestView = typeof CredentialRequestView.Type;
 
 /** Private submission only. This schema must never be used as a journal event. */
-export const CredentialRequestAnswer = Schema.Union(
-  Schema.Struct({ id: Schema.UUID, action: Schema.Literal("decline") }).annotations(strict),
+export const CredentialRequestAnswer = Schema.Union([
+  Schema.Struct({ id: GuidString, action: Schema.Literal("decline") }),
   Schema.Struct({
-    id: Schema.UUID,
+    id: GuidString,
     action: Schema.Literal("allow-linked"),
     ...CredentialRequestReference.fields,
-  }).annotations(strict),
+  }),
   Schema.Struct({
-    id: Schema.UUID,
+    id: GuidString,
     action: Schema.Literal("allow"),
-    secret: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4096)),
-  }).annotations(strict),
-);
+    secret: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
+  }),
+]);
 export type CredentialRequestAnswer = typeof CredentialRequestAnswer.Type;
 
 export const CREDENTIAL_TOOL_OPERATIONS = [

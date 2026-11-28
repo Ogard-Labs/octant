@@ -1,4 +1,5 @@
 import { ChildWorktreeSnapshotId, ChildWorktreeSourceReview } from "./childWorktreeSources";
+import { NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { WorkThreadId } from "./workThreads";
 import { CodeTerminalId, CodeThreadId, CodeCheckoutId, WorktreeReceiptId } from "./code";
@@ -16,7 +17,6 @@ import {
 import { WindowId } from "./shell";
 import { AgentRunRequestId } from "./agentRun";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 
 /**
@@ -33,8 +33,8 @@ export const PROJECT_TERMINAL_EVENT_NAMES = {
 } as const;
 
 const TerminalGeometry = {
-  columns: Schema.Int.pipe(Schema.between(1, 500)),
-  rows: Schema.Int.pipe(Schema.between(1, 500)),
+  columns: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
+  rows: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
 } as const;
 
 /**
@@ -44,7 +44,7 @@ const TerminalGeometry = {
  * grants nothing the Project's own list does not.
  */
 const Folder = {
-  folder: Schema.optional(Schema.String.pipe(Schema.maxLength(4_096))),
+  folder: Schema.optional(Schema.String.check(Schema.isMaxLength(4_096))),
 } as const;
 
 const Target = {
@@ -57,7 +57,7 @@ const Target = {
  * the same Project starts with, never Plan: nothing plans in a Project
  * terminal, and a shell a person opens is not read-only.
  */
-export const ProjectTerminalPosture = Schema.Literal("approval-gated", "full-access");
+export const ProjectTerminalPosture = Schema.Literals(["approval-gated", "full-access"]);
 export type ProjectTerminalPosture = typeof ProjectTerminalPosture.Type;
 
 /**
@@ -71,13 +71,13 @@ export type ProjectTerminalPosture = typeof ProjectTerminalPosture.Type;
 const ActionThread = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
-  head: Schema.optional(Schema.String.pipe(Schema.pattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/))),
-}).annotations(strict);
+  head: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/))),
+});
 const ActionRun = Schema.Struct({
   actionId: ProjectActionId,
-  name: Schema.String.pipe(Schema.maxLength(40)),
-  folder: Schema.String.pipe(Schema.maxLength(4608)),
-  branch: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+  name: Schema.String.check(Schema.isMaxLength(40)),
+  folder: Schema.String.check(Schema.isMaxLength(4608)),
+  branch: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
   thread: Schema.optional(ActionThread),
   workThreadId: Schema.optional(WorkThreadId),
   server: Schema.optional(
@@ -86,16 +86,16 @@ const ActionRun = Schema.Struct({
       alias: ShieldServerAlias,
       user: ShieldServerUser,
       profile: ShieldServerProfile,
-      placementRevision: Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/)),
+      placementRevision: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
       taskExecutionPolicy: Schema.optional(ProviderExecutionPolicy),
       confinement: Schema.Literal("none"),
-    }).annotations(strict),
+    }),
   ),
-}).annotations(strict);
+});
 
 export const WorktreePreparation = Schema.Struct({
   recipe: ProjectAction,
-  state: Schema.Literal(
+  state: Schema.Literals([
     "pending",
     "running",
     "succeeded",
@@ -104,15 +104,18 @@ export const WorktreePreparation = Schema.Struct({
     "interrupted",
     "skipped",
     "cleanup-uncertain",
-  ),
+  ]),
   attemptId: Schema.optional(CodeOperationId),
   startedAt: Schema.optional(UtcTimestamp),
   completedAt: Schema.optional(UtcTimestamp),
   exitCode: Schema.optional(Schema.Int),
-  reason: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
-}).annotations(strict);
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(512))),
+});
 export type WorktreePreparation = typeof WorktreePreparation.Type;
-export const decodeWorktreePreparation = Schema.decodeUnknownSync(WorktreePreparation);
+export const decodeWorktreePreparation = Schema.decodeUnknownSync(
+  WorktreePreparation,
+  STRICT_DECODE_OPTIONS,
+);
 export const WORKTREE_PREPARATION_UPDATED = "code.worktree-preparation-updated@1";
 export const WorktreePreparationUpdated = Schema.Struct({
   kind: Schema.Literal("worktree-preparation-updated"),
@@ -121,30 +124,30 @@ export const WorktreePreparationUpdated = Schema.Struct({
   checkoutId: CodeCheckoutId,
   preparation: WorktreePreparation,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export const decodeWorktreePreparationUpdated = Schema.decodeUnknownSync(
   WorktreePreparationUpdated,
+  STRICT_DECODE_OPTIONS,
 );
 
-export const ProjectTerminalCommand = Schema.Union(
+export const ProjectTerminalCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("child-worktree-source"),
     projectId: ProjectId,
     thread: ActionThread,
-    action: Schema.Literal("inspect", "capture", "use-committed", "use-snapshot"),
+    action: Schema.Literals(["inspect", "capture", "use-committed", "use-snapshot"]),
     snapshotId: Schema.optional(ChildWorktreeSnapshotId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("worktree-preparation"),
     projectId: ProjectId,
     thread: ActionThread,
     childRequestId: Schema.optional(AgentRunRequestId),
     attemptId: Schema.optional(CodeOperationId),
-    action: Schema.Literal("inspect", "retry", "cancel", "skip"),
-  })
-    .pipe(Schema.filter((command) => command.action !== "retry" || command.attemptId !== undefined))
-    .annotations(strict),
-
+    action: Schema.Literals(["inspect", "retry", "cancel", "skip"]),
+  }).check(
+    Schema.makeFilter((command) => command.action !== "retry" || command.attemptId !== undefined),
+  ),
   Schema.Struct({
     kind: Schema.Literal("preview-action"),
     projectId: ProjectId,
@@ -152,8 +155,7 @@ export const ProjectTerminalCommand = Schema.Union(
     ...Folder,
     thread: Schema.optional(ActionThread),
     workThreadId: Schema.optional(WorkThreadId),
-  }).annotations(strict),
-
+  }),
   Schema.Struct({
     kind: Schema.Literal("start-action"),
     ...Target,
@@ -163,9 +165,10 @@ export const ProjectTerminalCommand = Schema.Union(
     thread: Schema.optional(ActionThread),
     workThreadId: Schema.optional(WorkThreadId),
     projectVersion: Schema.optional(AggregateVersion),
-    placementRevision: Schema.optional(Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/))),
-  }).annotations(strict),
-
+    placementRevision: Schema.optional(
+      Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+    ),
+  }),
   Schema.Struct({
     kind: Schema.Literal("start"),
     workThreadId: Schema.optional(WorkThreadId),
@@ -179,61 +182,53 @@ export const ProjectTerminalCommand = Schema.Union(
      * provider, and the command names none of them.
      */
     program: Schema.optional(Schema.Literal("provider")),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("attach"), ...Target }).annotations(strict),
+  }),
+  Schema.Struct({ kind: Schema.Literal("attach"), ...Target }),
   Schema.Struct({
     kind: Schema.Literal("write"),
     ...Target,
-    data: Schema.String.pipe(
-      Schema.filter(
+    data: Schema.String.check(
+      Schema.makeFilter(
         (value) =>
           !value.includes("\0") &&
           encoder.encode(value).byteLength <= MAX_CODE_OPERATION_TERMINAL_INPUT_BYTES,
       ),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resize"),
     ...Target,
     ...TerminalGeometry,
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("stop"), ...Target }).annotations(strict),
-  /**
-   * Legacy clients may still name this command; the host refuses it and asks
-   * for a dedicated action run, because an existing shell may be busy.
-   */
+  }),
+  Schema.Struct({ kind: Schema.Literal("stop"), ...Target }),
   Schema.Struct({
     kind: Schema.Literal("run-action"),
     ...Target,
     actionId: ProjectActionId,
     ...Folder,
-  }).annotations(strict),
-  /** Ask which commands the Project's own files suggest saving as actions. */
+  }),
   Schema.Struct({
     kind: Schema.Literal("suggest-actions"),
     projectId: ProjectId,
-  }).annotations(strict),
-  /**
-   * What the shell printed after an absolute character offset. The reader
-   * holds the offset, so catching up costs what was printed since it last
-   * looked.
-   */
+  }),
   Schema.Struct({
     kind: Schema.Literal("read-output"),
     ...Target,
-    afterCharacters: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-);
+    afterCharacters: NonNegativeInt,
+  }),
+]);
 export type ProjectTerminalCommand = typeof ProjectTerminalCommand.Type;
 
 export const ProjectTerminalView = Schema.Struct({
   action: Schema.optional(ActionRun),
   ...Target,
-  state: Schema.Literal("running", "exited", "interrupted"),
+  state: Schema.Literals(["running", "exited", "interrupted"]),
   exitCode: Schema.optional(Schema.Int),
   posture: ProjectTerminalPosture,
-  uncertainty: Schema.optional(Schema.Literal("server-transport-lost", "server-stop-unconfirmed")),
-}).annotations(strict);
+  uncertainty: Schema.optional(
+    Schema.Literals(["server-transport-lost", "server-stop-unconfirmed"]),
+  ),
+});
 export type ProjectTerminalView = typeof ProjectTerminalView.Type;
 
 /**
@@ -242,10 +237,10 @@ export type ProjectTerminalView = typeof ProjectTerminalView.Type;
  * reader shows; `characters` is where the next read starts.
  */
 export const ProjectTerminalOutput = Schema.Struct({
-  text: Schema.String.pipe(Schema.maxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
+  text: Schema.String.check(Schema.isMaxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
   replace: Schema.Boolean,
-  characters: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  characters: NonNegativeInt,
+});
 export type ProjectTerminalOutput = typeof ProjectTerminalOutput.Type;
 
 /**
@@ -256,61 +251,60 @@ export type ProjectTerminalOutput = typeof ProjectTerminalOutput.Type;
  * `host-restarted` is a shell the last run of the host left running and a
  * restart ended, which a new start may replace.
  */
-export const ProjectTerminalRefusalReason = Schema.Literal(
+export const ProjectTerminalRefusalReason = Schema.Literals([
   "unauthorized",
   "unavailable",
   "authority-revoked",
   "host-restarted",
-);
+]);
 export type ProjectTerminalRefusalReason = typeof ProjectTerminalRefusalReason.Type;
 
 /** Where a suggested action was found, shown beside it so the person can judge it. */
-export const ProjectActionSuggestionSource = Schema.Literal("package.json", "Makefile");
+export const ProjectActionSuggestionSource = Schema.Literals(["package.json", "Makefile"]);
 export type ProjectActionSuggestionSource = typeof ProjectActionSuggestionSource.Type;
 
 export const ProjectActionSuggestion = Schema.Struct({
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(40)),
-  command: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000)),
+  name: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(40)),
+  command: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
   directory: ProjectActionDirectory,
   source: ProjectActionSuggestionSource,
-}).annotations(strict);
+});
 export type ProjectActionSuggestion = typeof ProjectActionSuggestion.Type;
 
-export const ProjectTerminalResult = Schema.Union(
+export const ProjectTerminalResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("child-worktree-source"),
     review: ChildWorktreeSourceReview,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("worktree-preparation"),
     receiptId: WorktreeReceiptId,
     preparation: Schema.optional(WorktreePreparation),
-    output: Schema.String.pipe(Schema.maxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
+    output: Schema.String.check(Schema.isMaxLength(MAX_PROJECT_TERMINAL_OUTPUT_CHARACTERS)),
     outputTruncated: Schema.Boolean,
-  }).annotations(strict),
-
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-action-preview"),
     projectId: ProjectId,
     projectVersion: AggregateVersion,
     action: ActionRun,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-terminal"),
     terminal: ProjectTerminalView,
     output: Schema.optional(ProjectTerminalOutput),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-action-suggestions"),
     projectId: ProjectId,
-    suggestions: Schema.Array(ProjectActionSuggestion).pipe(Schema.maxItems(24)),
-  }).annotations(strict),
+    suggestions: Schema.Array(ProjectActionSuggestion).check(Schema.isMaxLength(24)),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-terminal-refused"),
     reason: ProjectTerminalRefusalReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ProjectTerminalResult = typeof ProjectTerminalResult.Type;
 
 /**
@@ -331,10 +325,10 @@ export const ProjectTerminalStarted = Schema.Struct({
    * Absent is a shell, which every start recorded before the field existed was.
    */
   program: Schema.optional(Schema.Literal("provider")),
-}).annotations(strict);
+});
 export type ProjectTerminalStarted = typeof ProjectTerminalStarted.Type;
 
-export const ProjectTerminalEndReason = Schema.Literal(
+export const ProjectTerminalEndReason = Schema.Literals([
   "stopped",
   "exited",
   "authority-revoked",
@@ -342,7 +336,7 @@ export const ProjectTerminalEndReason = Schema.Literal(
   "transport-lost",
   "start-unconfirmed",
   "server-stop-unconfirmed",
-);
+]);
 export type ProjectTerminalEndReason = typeof ProjectTerminalEndReason.Type;
 
 export const ProjectTerminalEnded = Schema.Struct({
@@ -351,10 +345,22 @@ export const ProjectTerminalEnded = Schema.Struct({
   reason: ProjectTerminalEndReason,
   exitCode: Schema.optional(Schema.Int),
   endedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ProjectTerminalEnded = typeof ProjectTerminalEnded.Type;
 
-export const decodeProjectTerminalCommand = Schema.decodeUnknownSync(ProjectTerminalCommand);
-export const decodeProjectTerminalResult = Schema.decodeUnknownSync(ProjectTerminalResult);
-export const decodeProjectTerminalStarted = Schema.decodeUnknownSync(ProjectTerminalStarted);
-export const decodeProjectTerminalEnded = Schema.decodeUnknownSync(ProjectTerminalEnded);
+export const decodeProjectTerminalCommand = Schema.decodeUnknownSync(
+  ProjectTerminalCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectTerminalResult = Schema.decodeUnknownSync(
+  ProjectTerminalResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectTerminalStarted = Schema.decodeUnknownSync(
+  ProjectTerminalStarted,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectTerminalEnded = Schema.decodeUnknownSync(
+  ProjectTerminalEnded,
+  STRICT_DECODE_OPTIONS,
+);

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { GuidString, NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProviderInstanceId, ProviderModelId, ProviderProcessDiagnostic } from "./providers";
@@ -11,10 +12,9 @@ import {
 } from "./turnMetrics";
 import { UsageQueryFilter } from "./usageRpc";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
-const PositiveInt = Schema.Int.pipe(Schema.positive());
-const NonNegativeNumber = Schema.Number.pipe(Schema.nonNegative(), Schema.finite());
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0));
+const NonNegativeNumber = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0), Schema.isFinite());
 
 export const MAX_DIAGNOSTICS_MODELS = 100;
 export const MAX_DIAGNOSTICS_TOOLS = 100;
@@ -26,7 +26,7 @@ export const MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS = 8;
 /** Thirty-one days of hours. */
 export const MAX_DIAGNOSTICS_TREND_BUCKETS = 744;
 
-export const TurnDiagnosticsBucketSize = Schema.Literal("hour", "day");
+export const TurnDiagnosticsBucketSize = Schema.Literals(["hour", "day"]);
 export type TurnDiagnosticsBucketSize = typeof TurnDiagnosticsBucketSize.Type;
 
 /**
@@ -37,8 +37,8 @@ export type TurnDiagnosticsBucketSize = typeof TurnDiagnosticsBucketSize.Type;
 export const UsageDiagnosticsRequest = Schema.Struct({
   filter: Schema.optional(UsageQueryFilter),
   bucket: Schema.optional(TurnDiagnosticsBucketSize),
-  timeZone: Schema.optional(Schema.NonEmptyTrimmedString),
-}).annotations(strict);
+  timeZone: Schema.optional(NonEmptyTrimmedString),
+});
 export type UsageDiagnosticsRequest = typeof UsageDiagnosticsRequest.Type;
 
 /** How many turns ended each way. */
@@ -48,7 +48,7 @@ export const TurnStopReasonCounts = Schema.Struct({
   cancelled: NonNegativeInt,
   failed: NonNegativeInt,
   waiting: NonNegativeInt,
-}).annotations(strict);
+});
 export type TurnStopReasonCounts = typeof TurnStopReasonCounts.Type;
 
 /**
@@ -60,7 +60,7 @@ export const DiagnosticsPercentiles = Schema.Struct({
   p50: NonNegativeNumber,
   p95: NonNegativeNumber,
   max: NonNegativeNumber,
-}).annotations(strict);
+});
 export type DiagnosticsPercentiles = typeof DiagnosticsPercentiles.Type;
 
 /**
@@ -98,7 +98,7 @@ export const TurnDiagnosticsModelRow = Schema.Struct({
       inputTokens: NonNegativeInt,
       readTokens: NonNegativeInt,
       writeTokens: NonNegativeInt,
-    }).annotations(strict),
+    }),
   ),
   likelyCacheMisses: NonNegativeInt,
   costUsd: Schema.optional(NonNegativeNumber),
@@ -107,12 +107,12 @@ export const TurnDiagnosticsModelRow = Schema.Struct({
    * A mean cost per turn divides by this, not by `turns`. Absent with `costUsd`.
    */
   costTurns: Schema.optional(NonNegativeInt),
-}).annotations(strict);
+});
 export type TurnDiagnosticsModelRow = typeof TurnDiagnosticsModelRow.Type;
 
 /** One tool across every matching turn. `turns` counts the turns that called it. */
 export const TurnDiagnosticsToolRow = Schema.Struct({
-  toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  toolName: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
   turns: PositiveInt,
   calls: PositiveInt,
   failed: NonNegativeInt,
@@ -121,7 +121,7 @@ export const TurnDiagnosticsToolRow = Schema.Struct({
   /** Over calls that finished. */
   totalMs: NonNegativeInt,
   maxMs: NonNegativeInt,
-}).annotations(strict);
+});
 export type TurnDiagnosticsToolRow = typeof TurnDiagnosticsToolRow.Type;
 
 /**
@@ -135,12 +135,12 @@ export const TurnDiagnosticsFailureGroup = Schema.Struct({
   firstAt: UtcTimestamp,
   lastAt: UtcTimestamp,
   lastMessage: Schema.optional(TurnFailureMessage),
-}).annotations(strict);
+});
 export type TurnDiagnosticsFailureGroup = typeof TurnDiagnosticsFailureGroup.Type;
 
 /** A turn that failed, was cancelled, or had a tool fail, newest first: the drill-in list. */
 export const TurnDiagnosticsTroubledTurn = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   mode: OctantMode,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -150,7 +150,7 @@ export const TurnDiagnosticsTroubledTurn = Schema.Struct({
   toolFailures: NonNegativeInt,
   retries: NonNegativeInt,
   failure: Schema.optional(TurnFailureFacts),
-}).annotations(strict);
+});
 export type TurnDiagnosticsTroubledTurn = typeof TurnDiagnosticsTroubledTurn.Type;
 
 /**
@@ -161,14 +161,14 @@ export type TurnDiagnosticsTroubledTurn = typeof TurnDiagnosticsTroubledTurn.Typ
  * reported; a changed system prompt or tool list also breaks the cache.
  */
 export const TurnDiagnosticsCacheMiss = Schema.Struct({
-  threadId: Schema.UUID,
+  threadId: GuidString,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
   endedAt: UtcTimestamp,
   inputTokens: PositiveInt,
   /** From the previous turn's end to this turn's start. */
   gapMs: NonNegativeInt,
-}).annotations(strict);
+});
 export type TurnDiagnosticsCacheMiss = typeof TurnDiagnosticsCacheMiss.Type;
 
 /**
@@ -186,7 +186,7 @@ export const TurnDiagnosticsSamePromptPair = Schema.Struct({
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
   costUsd: Schema.optional(NonNegativeNumber),
-}).annotations(strict);
+});
 export type TurnDiagnosticsSamePromptPair = typeof TurnDiagnosticsSamePromptPair.Type;
 
 /**
@@ -196,22 +196,22 @@ export type TurnDiagnosticsSamePromptPair = typeof TurnDiagnosticsSamePromptPair
  */
 export const TurnDiagnosticsSamePrompt = Schema.Struct({
   promptDigest: PromptDigest,
-  threadId: Schema.UUID,
+  threadId: GuidString,
   /** The newest turn's mode, which says what kind of thread `threadId` is. */
   mode: OctantMode,
   /** When the newest turn that sent the prompt started. */
   lastSentAt: UtcTimestamp,
   /** Most turns first, cut to `MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS`. */
-  pairs: Schema.Array(TurnDiagnosticsSamePromptPair).pipe(
-    Schema.minItems(2),
-    Schema.maxItems(MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS),
+  pairs: Schema.Array(TurnDiagnosticsSamePromptPair).check(
+    Schema.isMinLength(2),
+    Schema.isMaxLength(MAX_DIAGNOSTICS_SAME_PROMPT_PAIRS),
   ),
-}).annotations(strict);
+});
 export type TurnDiagnosticsSamePrompt = typeof TurnDiagnosticsSamePrompt.Type;
 
 export const TurnDiagnosticsBucket = Schema.Struct({
   /** The bucket's start: an ISO hour in UTC, or a calendar date in the request's time zone. */
-  key: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(32)),
+  key: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(32)),
   turns: PositiveInt,
   /** Turns that ended normally or at the output limit: the same definition as the headline. */
   finished: NonNegativeInt,
@@ -222,7 +222,7 @@ export const TurnDiagnosticsBucket = Schema.Struct({
   retries: NonNegativeInt,
   timeToFirstTokenP50Ms: Schema.optional(NonNegativeNumber),
   decodeTokensPerSecondP50: Schema.optional(NonNegativeNumber),
-}).annotations(strict);
+});
 export type TurnDiagnosticsBucket = typeof TurnDiagnosticsBucket.Type;
 
 export const TurnDiagnosticsTotals = Schema.Struct({
@@ -237,7 +237,7 @@ export const TurnDiagnosticsTotals = Schema.Struct({
    * partial; the call and failure totals above are not.
    */
   toolTalliesTruncatedTurns: Schema.optional(NonNegativeInt),
-  retries: Schema.Array(TurnRetryTally).pipe(Schema.maxItems(4)),
+  retries: Schema.Array(TurnRetryTally).check(Schema.isMaxLength(4)),
   approvalRequests: NonNegativeInt,
   inputRequests: NonNegativeInt,
   rateLimitWarnings: NonNegativeInt,
@@ -247,7 +247,7 @@ export const TurnDiagnosticsTotals = Schema.Struct({
   timeToFirstTokenMs: Schema.optional(DiagnosticsPercentiles),
   decodeTokensPerSecond: Schema.optional(DiagnosticsPercentiles),
   wallMs: Schema.optional(DiagnosticsPercentiles),
-}).annotations(strict);
+});
 export type TurnDiagnosticsTotals = typeof TurnDiagnosticsTotals.Type;
 
 /**
@@ -260,24 +260,32 @@ export const TurnDiagnosticsReport = Schema.Struct({
   turns: NonNegativeInt,
   diagnosedTurns: NonNegativeInt,
   totals: TurnDiagnosticsTotals,
-  models: Schema.Array(TurnDiagnosticsModelRow).pipe(Schema.maxItems(MAX_DIAGNOSTICS_MODELS)),
-  tools: Schema.Array(TurnDiagnosticsToolRow).pipe(Schema.maxItems(MAX_DIAGNOSTICS_TOOLS)),
-  failureGroups: Schema.Array(TurnDiagnosticsFailureGroup).pipe(
-    Schema.maxItems(MAX_DIAGNOSTICS_FAILURE_GROUPS),
+  models: Schema.Array(TurnDiagnosticsModelRow).check(Schema.isMaxLength(MAX_DIAGNOSTICS_MODELS)),
+  tools: Schema.Array(TurnDiagnosticsToolRow).check(Schema.isMaxLength(MAX_DIAGNOSTICS_TOOLS)),
+  failureGroups: Schema.Array(TurnDiagnosticsFailureGroup).check(
+    Schema.isMaxLength(MAX_DIAGNOSTICS_FAILURE_GROUPS),
   ),
-  troubledTurns: Schema.Array(TurnDiagnosticsTroubledTurn).pipe(
-    Schema.maxItems(MAX_DIAGNOSTICS_RECENT_FAILURES),
+  troubledTurns: Schema.Array(TurnDiagnosticsTroubledTurn).check(
+    Schema.isMaxLength(MAX_DIAGNOSTICS_RECENT_FAILURES),
   ),
-  cacheMisses: Schema.Array(TurnDiagnosticsCacheMiss).pipe(
-    Schema.maxItems(MAX_DIAGNOSTICS_CACHE_MISSES),
+  cacheMisses: Schema.Array(TurnDiagnosticsCacheMiss).check(
+    Schema.isMaxLength(MAX_DIAGNOSTICS_CACHE_MISSES),
   ),
   /** Newest first. */
-  samePrompt: Schema.Array(TurnDiagnosticsSamePrompt).pipe(
-    Schema.maxItems(MAX_DIAGNOSTICS_SAME_PROMPTS),
+  samePrompt: Schema.Array(TurnDiagnosticsSamePrompt).check(
+    Schema.isMaxLength(MAX_DIAGNOSTICS_SAME_PROMPTS),
   ),
-  trend: Schema.Array(TurnDiagnosticsBucket).pipe(Schema.maxItems(MAX_DIAGNOSTICS_TREND_BUCKETS)),
-}).annotations(strict);
+  trend: Schema.Array(TurnDiagnosticsBucket).check(
+    Schema.isMaxLength(MAX_DIAGNOSTICS_TREND_BUCKETS),
+  ),
+});
 export type TurnDiagnosticsReport = typeof TurnDiagnosticsReport.Type;
 
-export const decodeUsageDiagnosticsRequest = Schema.decodeUnknownSync(UsageDiagnosticsRequest);
-export const decodeTurnDiagnosticsReport = Schema.decodeUnknownSync(TurnDiagnosticsReport);
+export const decodeUsageDiagnosticsRequest = Schema.decodeUnknownSync(
+  UsageDiagnosticsRequest,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeTurnDiagnosticsReport = Schema.decodeUnknownSync(
+  TurnDiagnosticsReport,
+  STRICT_DECODE_OPTIONS,
+);

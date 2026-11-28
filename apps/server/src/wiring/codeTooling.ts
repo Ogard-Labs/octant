@@ -1422,7 +1422,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
   });
 }
 
-export type CodeToolingWiring = Effect.Effect.Success<ReturnType<typeof wireCodeTooling>>;
+export type CodeToolingWiring = Effect.Success<ReturnType<typeof wireCodeTooling>>;
 
 /**
  * The bundled TypeScript server's binary for this host, from the pinned

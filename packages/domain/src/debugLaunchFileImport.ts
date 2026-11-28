@@ -68,7 +68,7 @@ const CURRENT_FILE_VARIABLES: ReadonlySet<string> = new Set([
 ]);
 const VARIABLE = /\$\{([^}]*)\}/g;
 
-const decodeConfiguration = Schema.decodeUnknownEither(CodeDebugConfiguration);
+const decodeConfiguration = Schema.decodeUnknownResult(CodeDebugConfiguration);
 const isConfigurationName = Schema.is(CodeDebugConfigurationName);
 
 export function proposeDebugConfigurations(
@@ -168,8 +168,8 @@ function proposeEntry(
     env: environment.map(({ key, value }) => ({ key, value: resolve(value) })),
     stopOnEntry: stopOnEntry === true,
   });
-  if (configuration._tag === "Left") return unmappable("invalid");
-  return { status: "proposed", configuration: configuration.right, unusedFields };
+  if (configuration._tag === "Failure") return unmappable("invalid");
+  return { status: "proposed", configuration: configuration.success, unusedFields };
 }
 
 /**

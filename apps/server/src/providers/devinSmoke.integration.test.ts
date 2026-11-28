@@ -89,7 +89,7 @@ describe("installed Devin runtime", () => {
               };
               assertSettings();
               const events = yield* connection.subscribe;
-              const terminal = yield* Effect.fork(
+              const terminal = yield* Effect.forkChild(
                 Stream.runCollect(
                   events.pipe(
                     Stream.filter((event) => event.sessionId === sessionId),

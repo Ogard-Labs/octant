@@ -29,8 +29,7 @@ const SUBDIR = "hub";
 const FILE = "thread-moves.json";
 /** Where the parts of each move are staged, one folder per move id. */
 export const THREAD_MOVE_PARTS_SUBDIR = join(SUBDIR, "thread-moves");
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const NonNegativeInt = Schema.Int.pipe(Schema.nonNegative());
+const NonNegativeInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 
 /**
  * A move this host is receiving. `receiving` counts the chunks each part has
@@ -43,21 +42,21 @@ export const ReceivedMove = Schema.Struct({
   senderMemberId: HubMemberId,
   ownerMemberId: HubMemberId,
   offer: ThreadMoveOffer,
-  state: Schema.Literal("receiving", "arrived", "committed", "discarded"),
-  chunks: Schema.Record({ key: Schema.String, value: NonNegativeInt }),
+  state: Schema.Literals(["receiving", "arrived", "committed", "discarded"]),
+  chunks: Schema.Record(Schema.String, NonNegativeInt),
   thread: Schema.optional(MovedThreadReference),
   receivedAt: UtcTimestamp,
   /** Updated on every request from the source, so Activate anyway can tell silence. */
   lastHeardAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ReceivedMove = typeof ReceivedMove.Type;
 
 /** A part this host packed for a move it is sending, staged until the move commits. */
 export const SentMovePart = Schema.Struct({
-  partId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  partId: Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(64))),
   /** Chunks the destination acknowledged, so a resumed transfer starts after them. */
   acknowledgedChunks: NonNegativeInt,
-}).annotations(strict);
+});
 export type SentMovePart = typeof SentMovePart.Type;
 
 /**
@@ -70,18 +69,18 @@ export const SentMove = Schema.Struct({
   targetMemberId: HubMemberId,
   offer: Schema.optional(ThreadMoveOffer),
   parts: Schema.Array(SentMovePart),
-  state: Schema.Literal("frozen", "offered", "arrived", "committed"),
+  state: Schema.Literals(["frozen", "offered", "arrived", "committed"]),
   destinationThread: Schema.optional(MovedThreadReference),
   /** Parts the thread owned that could not be read when it was packed, for the receipt. */
   partsLeftBehind: Schema.optional(
     Schema.Array(ThreadMovePartLeftBehind).pipe(
-      Schema.maxItems(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED),
+      Schema.check(Schema.isMaxLength(THREAD_MOVE_PARTS_LEFT_BEHIND_NAMED)),
     ),
   ),
   /** How many parts could not be read, named or not. */
-  partsLeftBehindCount: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  partsLeftBehindCount: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
   startedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SentMove = typeof SentMove.Type;
 
 /**
@@ -93,7 +92,7 @@ export const ThreadMoveFailureNotice = Schema.Struct({
   thread: MovedThreadReference,
   reason: ThreadMoveFailureReason,
   failedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMoveFailureNotice = typeof ThreadMoveFailureNotice.Type;
 
 /** A handover a member told this computer about, kept until it is continued here. */
@@ -101,7 +100,7 @@ export const ReceivedHandover = Schema.Struct({
   senderMemberId: HubMemberId,
   notice: HandoverNotice,
   receivedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ReceivedHandover = typeof ReceivedHandover.Type;
 
 /**
@@ -113,7 +112,7 @@ export const PendingContinuedReport = Schema.Struct({
   sourceMemberId: HubMemberId,
   report: HandoverContinuedReport,
   continuedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PendingContinuedReport = typeof PendingContinuedReport.Type;
 
 /**
@@ -158,12 +157,12 @@ export const ThreadMoveState = Schema.Struct({
   pendingContinuedReports: Schema.optional(Schema.Array(PendingContinuedReport)),
   /** Handovers settled here, so a branch found later is not offered again. */
   settledHandoverIds: Schema.optional(Schema.Array(HandoverId)),
-}).annotations(strict);
+});
 export type ThreadMoveState = typeof ThreadMoveState.Type;
 
 export const EMPTY_THREAD_MOVE_STATE: ThreadMoveState = { received: [], sent: [] };
 
-const decodeState = Schema.decodeUnknownSync(ThreadMoveState);
+const decodeState = Schema.decodeUnknownSync(ThreadMoveState, { onExcessProperty: "error" });
 
 /**
  * The threads a move holds when the host starts: every thread a move is still

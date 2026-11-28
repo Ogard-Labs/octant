@@ -1,8 +1,17 @@
-import { Schema } from "effect";
+import { Option, Schema, SchemaGetter, SchemaTransformation } from "effect";
 
-const decode = <A, I>(schema: Schema.Schema<A, I>) => Schema.decodeUnknownSync(schema);
+const decode = <A, I>(schema: Schema.Codec<A, I>) => Schema.decodeUnknownSync(schema);
+const nullableOptional = <S extends Schema.Top>(schema: S) =>
+  Schema.optional(Schema.NullOr(schema)).pipe(
+    Schema.decodeTo(Schema.optional(schema), {
+      decode: SchemaGetter.transformOptional((o) =>
+        Option.filter(o, (v): v is Exclude<typeof v, null> => v !== null),
+      ),
+      encode: SchemaGetter.passthrough(),
+    }),
+  );
 
-export const CodexRpcId = Schema.Union(Schema.String, Schema.Int);
+export const CodexRpcId = Schema.Union([Schema.String, Schema.Int]);
 export type CodexRpcId = typeof CodexRpcId.Type;
 
 const CodexRpcError = Schema.Struct({
@@ -25,7 +34,7 @@ export type CodexRpcResponse =
   | typeof CodexRpcSuccessResponse.Type
   | typeof CodexRpcErrorResponse.Type;
 
-const NonNegativeInteger = Schema.Int.pipe(Schema.nonNegative());
+const NonNegativeInteger = Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0)));
 const NullableString = Schema.NullOr(Schema.String);
 const NullableNonNegativeInteger = Schema.NullOr(NonNegativeInteger);
 
@@ -35,18 +44,14 @@ const InitializeResult = Schema.Struct({
 export type CodexInitializeResult = typeof InitializeResult.Type;
 export const decodeInitializeResult = decode(InitializeResult);
 
-const Account = Schema.Union(
+const Account = Schema.Union([
   Schema.Struct({ type: Schema.Literal("apiKey") }),
   Schema.Struct({ type: Schema.Literal("chatgpt") }),
-  // Codex reports `usesCodexManagedCredentials` when the Bedrock key or access
-  // keys it signs in with are the ones stored in this account's own home
-  // (`account_state` in codex-rs `model-provider/src/amazon_bedrock/mod.rs`,
-  // rust-v0.162.1). Releases before that send no field, which reads as false.
   Schema.Struct({
     type: Schema.Literal("amazonBedrock"),
     usesCodexManagedCredentials: Schema.optional(Schema.Boolean),
   }),
-);
+]);
 
 const AccountReadResult = Schema.Struct({
   account: Schema.NullOr(Account),
@@ -87,17 +92,17 @@ const Model = Schema.Struct({
   defaultReasoningEffort: Schema.String,
   // A modality a newer Codex lists is left out, so one new name cannot fail
   // the whole model list.
-  inputModalities: Schema.transform(
-    Schema.Array(Schema.String),
-    Schema.Array(Schema.Literal("text", "image")),
-    {
-      strict: true,
-      decode: (modalities) =>
-        modalities.filter(
-          (modality): modality is "text" | "image" => modality === "text" || modality === "image",
-        ),
-      encode: (modalities) => modalities,
-    },
+  inputModalities: Schema.Array(Schema.String).pipe(
+    Schema.decodeTo(
+      Schema.Array(Schema.Literals(["text", "image"])),
+      SchemaTransformation.transform({
+        decode: (modalities): ReadonlyArray<"text" | "image"> =>
+          modalities.filter(
+            (modality): modality is "text" | "image" => modality === "text" || modality === "image",
+          ),
+        encode: (modalities) => modalities,
+      }),
+    ),
   ),
   serviceTiers: Schema.Array(ModelServiceTier),
   defaultServiceTier: NullableString,
@@ -126,9 +131,8 @@ const TurnStatus = Schema.String;
  */
 const TurnError = Schema.Struct({
   message: Schema.String,
-  codexErrorInfo: Schema.optionalWith(
-    Schema.Union(Schema.String, Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-    { nullable: true },
+  codexErrorInfo: nullableOptional(
+    Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Unknown)]),
   ),
   additionalDetails: Schema.optional(NullableString),
 });
@@ -136,7 +140,7 @@ const TurnReference = Schema.Struct({
   id: Schema.String,
   status: TurnStatus,
   // 0.157.x emits `"error": null` on healthy turns; null reads as absent.
-  error: Schema.optionalWith(TurnError, { nullable: true }),
+  error: nullableOptional(TurnError),
 });
 export type CodexTurnReference = typeof TurnReference.Type;
 
@@ -199,11 +203,10 @@ const PluginInstalledResult = Schema.Struct({
           name: Schema.NonEmptyString,
           installed: Schema.Boolean,
           enabled: Schema.Boolean,
-          interface: Schema.optionalWith(
+          interface: nullableOptional(
             Schema.Struct({
-              shortDescription: Schema.optionalWith(Schema.String, { nullable: true }),
+              shortDescription: nullableOptional(Schema.String),
             }),
-            { nullable: true },
           ),
         }),
       ),
@@ -222,16 +225,13 @@ export const decodePluginInstalledResult = decode(PluginInstalledResult);
 const StoredThread = Schema.Struct({
   id: Schema.NonEmptyString,
   cwd: Schema.String,
-  preview: Schema.optionalWith(Schema.String, { nullable: true }),
-  name: Schema.optionalWith(Schema.String, { nullable: true }),
+  preview: nullableOptional(Schema.String),
+  name: nullableOptional(Schema.String),
   updatedAt: Schema.Number,
-  ephemeral: Schema.optionalWith(Schema.Boolean, { nullable: true }),
-  parentThreadId: Schema.optionalWith(Schema.String, { nullable: true }),
-  originator: Schema.optionalWith(Schema.String, { nullable: true }),
-  gitInfo: Schema.optionalWith(
-    Schema.Struct({ branch: Schema.optionalWith(Schema.String, { nullable: true }) }),
-    { nullable: true },
-  ),
+  ephemeral: nullableOptional(Schema.Boolean),
+  parentThreadId: nullableOptional(Schema.String),
+  originator: nullableOptional(Schema.String),
+  gitInfo: nullableOptional(Schema.Struct({ branch: nullableOptional(Schema.String) })),
 });
 export type CodexStoredThread = typeof StoredThread.Type;
 
@@ -253,10 +253,7 @@ const ThreadReadResult = Schema.Struct({ thread: StoredThread });
 const ThreadTurnsReadResult = Schema.Struct({
   thread: Schema.Struct({
     id: Schema.NonEmptyString,
-    turns: Schema.optionalWith(
-      Schema.Array(Schema.Struct({ items: Schema.Array(Schema.Unknown) })),
-      { nullable: true },
-    ),
+    turns: nullableOptional(Schema.Array(Schema.Struct({ items: Schema.Array(Schema.Unknown) }))),
   }),
 });
 export type CodexThreadTurnsReadResult = typeof ThreadTurnsReadResult.Type;
@@ -272,14 +269,9 @@ export const decodeThreadReadResult = decode(ThreadReadResult);
  */
 const ConfigReadResult = Schema.Struct({
   config: Schema.Struct({
-    mcp_servers: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.Unknown }), {
-      nullable: true,
-    }),
-    model_provider: Schema.optionalWith(Schema.String, { nullable: true }),
-    model_providers: Schema.optionalWith(
-      Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-      { nullable: true },
-    ),
+    mcp_servers: nullableOptional(Schema.Record(Schema.String, Schema.Unknown)),
+    model_provider: nullableOptional(Schema.String),
+    model_providers: nullableOptional(Schema.Record(Schema.String, Schema.Unknown)),
   }),
 });
 export type CodexConfigReadResult = typeof ConfigReadResult.Type;
@@ -318,19 +310,19 @@ export const decodeTurnSteerResult = decode(TurnSteerResult);
 const TurnInterruptResult = Schema.Struct({});
 export type CodexTurnInterruptResult = typeof TurnInterruptResult.Type;
 export const decodeTurnInterruptResult = (value: unknown): CodexTurnInterruptResult => {
-  decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
+  decode(Schema.Record(Schema.String, Schema.Unknown))(value);
   return {};
 };
 
 /** `thread/inject_items` answers `{}` once the items are in the thread's history. */
 export const decodeThreadInjectItemsResult = (value: unknown): Record<string, never> => {
-  decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
+  decode(Schema.Record(Schema.String, Schema.Unknown))(value);
   return {};
 };
 
 /** `thread/compact/start` answers `{}` once it has queued the compaction. */
 export const decodeThreadCompactStartResult = (value: unknown): Record<string, never> => {
-  decode(Schema.Record({ key: Schema.String, value: Schema.Unknown }))(value);
+  decode(Schema.Record(Schema.String, Schema.Unknown))(value);
   return {};
 };
 
@@ -364,14 +356,14 @@ const ReasoningTextDeltaNotification = Schema.Struct({
   contentIndex: NonNegativeInteger,
 });
 
-const FileUpdateKind = Schema.Union(
+const FileUpdateKind = Schema.Union([
   Schema.Struct({ type: Schema.Literal("add") }),
   Schema.Struct({ type: Schema.Literal("delete") }),
   Schema.Struct({
     type: Schema.Literal("update"),
     move_path: NullableString,
   }),
-);
+]);
 
 const FileUpdate = Schema.Struct({
   path: Schema.String,
@@ -403,7 +395,7 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
  */
 const UnmodeledThreadItem = Schema.Struct({
   type: Schema.String.pipe(
-    Schema.filter((type) => !MODELED_ITEM_TYPES.has(type)),
+    Schema.check(Schema.makeFilter((type) => !MODELED_ITEM_TYPES.has(type))),
     Schema.brand("UnmodeledCodexItemType"),
   ),
   id: Schema.String,
@@ -416,7 +408,7 @@ export function isUnmodeledThreadItem(item: {
   return !MODELED_ITEM_TYPES.has(item.type);
 }
 
-const ThreadItem = Schema.Union(
+const ThreadItem = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("userMessage"),
     id: Schema.String,
@@ -435,10 +427,8 @@ const ThreadItem = Schema.Union(
     id: Schema.String,
     text: Schema.String,
   }),
-  // A review run's markers: `review` is the hint shown on entering, and on
-  // leaving the review's findings as Codex renders them (`review_output_text`).
   Schema.Struct({
-    type: Schema.Literal("enteredReviewMode", "exitedReviewMode"),
+    type: Schema.Literals(["enteredReviewMode", "exitedReviewMode"]),
     id: Schema.String,
     review: Schema.String,
   }),
@@ -492,37 +482,27 @@ const ThreadItem = Schema.Union(
      */
     results: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
   }),
-  /**
-   * One of Codex's own subagent calls (codex-cli 0.164.0 `ThreadItem`):
-   * starting a subagent, waiting on one, or closing it. Only a thread the
-   * person let run Codex's own subagents ever carries one; Octant reads which
-   * agent threads it names and how they stand, not what they said.
-   */
   Schema.Struct({
     type: Schema.Literal("collabAgentToolCall"),
     id: Schema.String,
     tool: Schema.String,
     status: Schema.String,
-    receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
+    receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.check(Schema.isMaxLength(32))),
     prompt: Schema.optional(Schema.NullOr(Schema.String)),
     /** The model a `spawnAgent` call asked for, when it named one. */
     model: Schema.optional(Schema.NullOr(Schema.String)),
     agentsStates: Schema.optional(
-      Schema.Record({
-        key: Schema.String,
-        /**
-         * `message` is the agent's last answer once it completed, or its
-         * error once it errored (codex-cli 0.164.0 `CollabAgentState`).
-         */
-        value: Schema.Struct({
+      Schema.Record(
+        Schema.String,
+        Schema.Struct({
           status: Schema.String,
           message: Schema.optional(Schema.NullOr(Schema.String)),
         }),
-      }),
+      ),
     ),
   }),
   UnmodeledThreadItem,
-);
+]);
 
 const ItemStartedNotification = Schema.Struct({
   threadId: Schema.String,
@@ -612,7 +592,7 @@ const AccountRateLimitsReadResult = Schema.Struct({
   rateLimits: RateLimitSnapshot,
   ordinaryUsageAllowed: Schema.optional(Schema.NullOr(Schema.Boolean)),
   rateLimitsByLimitId: Schema.optional(
-    Schema.NullOr(Schema.Record({ key: Schema.String, value: RateLimitSnapshot })),
+    Schema.NullOr(Schema.Record(Schema.String, RateLimitSnapshot)),
   ),
 });
 export type CodexRateLimitsReadResult = typeof AccountRateLimitsReadResult.Type;
@@ -738,7 +718,7 @@ const CommandApprovalParams = Schema.Struct({
     Schema.NullOr(
       Schema.Struct({
         host: Schema.String,
-        protocol: Schema.Literal("http", "https", "socks5Tcp", "socks5Udp"),
+        protocol: Schema.Literals(["http", "https", "socks5Tcp", "socks5Udp"]),
       }),
     ),
   ),
@@ -755,12 +735,12 @@ const FileChangeApprovalParams = Schema.Struct({
 export type CodexFileChangeApprovalParams = typeof FileChangeApprovalParams.Type;
 export const decodeFileChangeApprovalParams = decode(FileChangeApprovalParams);
 
-const FileSystemPath = Schema.Union(
+const FileSystemPath = Schema.Union([
   Schema.Struct({ type: Schema.Literal("path"), path: Schema.String }),
   Schema.Struct({ type: Schema.Literal("glob_pattern"), pattern: Schema.String }),
   Schema.Struct({
     type: Schema.Literal("special"),
-    value: Schema.Union(
+    value: Schema.Union([
       Schema.Struct({ kind: Schema.Literal("root") }),
       Schema.Struct({ kind: Schema.Literal("minimal") }),
       Schema.Struct({ kind: Schema.Literal("project_roots"), subpath: NullableString }),
@@ -771,9 +751,9 @@ const FileSystemPath = Schema.Union(
         path: Schema.String,
         subpath: NullableString,
       }),
-    ),
+    ]),
   }),
-);
+]);
 
 const PermissionsApprovalParams = Schema.Struct({
   ...CorrelatedItemParams,
@@ -791,7 +771,7 @@ const PermissionsApprovalParams = Schema.Struct({
           Schema.Array(
             Schema.Struct({
               path: FileSystemPath,
-              access: Schema.Literal("read", "write", "deny"),
+              access: Schema.Literals(["read", "write", "deny"]),
             }),
           ),
         ),
@@ -888,7 +868,9 @@ export type CodexServerMessage =
   | { readonly kind: "unsupported-request"; readonly id: CodexRpcId; readonly method: string };
 
 const decodeRpcId = decode(CodexRpcId);
-const decodeMethod = decode(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)));
+const decodeMethod = decode(
+  Schema.Trimmed.check(Schema.isNonEmpty()).pipe(Schema.check(Schema.isMaxLength(256))),
+);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

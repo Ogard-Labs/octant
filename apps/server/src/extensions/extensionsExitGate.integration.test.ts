@@ -637,7 +637,7 @@ async function sendSelectedSkillToGenericProvider(
           modelId,
           executionPolicy: "approval-gated",
         });
-        const terminal = yield* Effect.fork(
+        const terminal = yield* Effect.forkChild(
           Stream.runCollect(
             (yield* connection.subscribe).pipe(
               Stream.filter((event) => event.sessionId === providerSessionId),
@@ -1519,7 +1519,7 @@ describe("extensions marketplace integrated exit gate", () => {
             modelId,
             executionPolicy: "approval-gated",
           });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === providerSessionId),

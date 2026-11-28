@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import {
   BrowserContextId,
   BrowserContextState,
@@ -8,24 +9,25 @@ import {
 } from "./browserAutomation";
 import { ProjectId } from "./projects";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-
 /** Which Project mode a Project browser belongs to. Chat Projects have none. */
-export const ProjectBrowserMode = Schema.Literal("work", "code");
+export const ProjectBrowserMode = Schema.Literals(["work", "code"]);
 export type ProjectBrowserMode = typeof ProjectBrowserMode.Type;
 
-const PageAddress = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096));
+const PageAddress = Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(4096));
 
 /** The profile a person picks for a page; the host adds the Project it belongs to. */
-export const BrowserAccountProfileChoice = Schema.TemplateLiteral("account:", Schema.String).pipe(
-  Schema.pattern(
+export const BrowserAccountProfileChoice = Schema.TemplateLiteral([
+  "account:",
+  Schema.String,
+]).check(
+  Schema.isPattern(
     /^account:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   ),
 );
-export const BrowserProfileChoice = Schema.Union(
-  Schema.Literal("private", "project", "personal"),
+export const BrowserProfileChoice = Schema.Union([
+  Schema.Literals(["private", "project", "personal"]),
   BrowserAccountProfileChoice,
-);
+]);
 export type BrowserProfileChoice = typeof BrowserProfileChoice.Type;
 
 /**
@@ -37,7 +39,7 @@ export type BrowserProfileChoice = typeof BrowserProfileChoice.Type;
  * page lives in — so a caller cannot describe its way into a thread's
  * browsing context or its origin approval.
  */
-export const ProjectBrowserCommand = Schema.Union(
+export const ProjectBrowserCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("open"),
     projectId: ProjectId,
@@ -48,19 +50,19 @@ export const ProjectBrowserCommand = Schema.Union(
      * Project's. Absent means Private.
      */
     profile: Schema.optional(BrowserProfileChoice),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("current"), projectId: ProjectId }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("stop"), projectId: ProjectId }).annotations(strict),
-);
+  }),
+  Schema.Struct({ kind: Schema.Literal("current"), projectId: ProjectId }),
+  Schema.Struct({ kind: Schema.Literal("stop"), projectId: ProjectId }),
+]);
 export type ProjectBrowserCommand = typeof ProjectBrowserCommand.Type;
 
 export const ProjectBrowserPage = Schema.Struct({
   url: Schema.optional(PageAddress),
-  title: Schema.optional(Schema.String.pipe(Schema.maxLength(1024))),
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(1024))),
   screenshotDataUrl: Schema.optional(
-    Schema.String.pipe(Schema.maxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS)),
+    Schema.String.check(Schema.isMaxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS)),
   ),
-}).annotations(strict);
+});
 export type ProjectBrowserPage = typeof ProjectBrowserPage.Type;
 
 /**
@@ -81,10 +83,10 @@ export const ProjectBrowserView = Schema.Struct({
       state: BrowserContextState,
       presentation: Schema.optional(BrowserPresentationKind),
       profile: Schema.optional(BrowserProfileChoice),
-    }).annotations(strict),
+    }),
   ),
   page: Schema.optional(ProjectBrowserPage),
-}).annotations(strict);
+});
 export type ProjectBrowserView = typeof ProjectBrowserView.Type;
 
 /**
@@ -94,32 +96,36 @@ export type ProjectBrowserView = typeof ProjectBrowserView.Type;
  * `authority-revoked` is a page the host closed because its Project was
  * archived or rebound.
  */
-export const ProjectBrowserRefusalReason = Schema.Literal(
+export const ProjectBrowserRefusalReason = Schema.Literals([
   "unauthorized",
   "unavailable",
   "invalid",
   "authority-revoked",
-  // The page asked for a profile the host cannot open: a Browser that is not
-  // the desktop app's own, or a Project whose store is locked.
   "profile-unavailable",
-);
+]);
 export type ProjectBrowserRefusalReason = typeof ProjectBrowserRefusalReason.Type;
 
-export const ProjectBrowserResult = Schema.Union(
+export const ProjectBrowserResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("project-browser"),
     browser: ProjectBrowserView,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-browser-refused"),
     reason: ProjectBrowserRefusalReason,
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ProjectBrowserResult = typeof ProjectBrowserResult.Type;
 
-export const decodeProjectBrowserCommand = Schema.decodeUnknownSync(ProjectBrowserCommand);
-export const decodeProjectBrowserResult = Schema.decodeUnknownSync(ProjectBrowserResult);
+export const decodeProjectBrowserCommand = Schema.decodeUnknownSync(
+  ProjectBrowserCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectBrowserResult = Schema.decodeUnknownSync(
+  ProjectBrowserResult,
+  STRICT_DECODE_OPTIONS,
+);
 
 /** The most live agent pages a Project's tab strip lists, one per thread context. */
 export const MAX_PROJECT_AGENT_PAGES = 64;
@@ -128,7 +134,7 @@ export const MAX_PROJECT_AGENT_PAGES = 64;
 export const ProjectAgentPagesCommand = Schema.Struct({
   projectId: ProjectId,
   mode: ProjectBrowserMode,
-}).annotations(strict);
+});
 export type ProjectAgentPagesCommand = typeof ProjectAgentPagesCommand.Type;
 
 /**
@@ -142,23 +148,32 @@ export type ProjectAgentPagesCommand = typeof ProjectAgentPagesCommand.Type;
 export const ProjectAgentPage = Schema.Struct({
   threadId: BrowserThreadId,
   contextId: BrowserContextId,
-  threadTitle: Schema.String.pipe(Schema.maxLength(512)),
-  title: Schema.optional(Schema.String.pipe(Schema.maxLength(1024))),
-  host: Schema.optional(Schema.String.pipe(Schema.maxLength(253))),
+  threadTitle: Schema.String.check(Schema.isMaxLength(512)),
+  title: Schema.optional(Schema.String.check(Schema.isMaxLength(1024))),
+  host: Schema.optional(Schema.String.check(Schema.isMaxLength(253))),
   /** An agent action is running on the page, or ran moments ago. */
   agentActive: Schema.Boolean,
   signedIn: Schema.optional(Schema.Literal(true)),
-}).annotations(strict);
+});
 export type ProjectAgentPage = typeof ProjectAgentPage.Type;
 
 export const ProjectAgentPages = Schema.Struct({
   projectId: ProjectId,
   mode: ProjectBrowserMode,
-  pages: Schema.Array(ProjectAgentPage).pipe(Schema.maxItems(MAX_PROJECT_AGENT_PAGES)),
-}).annotations(strict);
+  pages: Schema.Array(ProjectAgentPage).check(Schema.isMaxLength(MAX_PROJECT_AGENT_PAGES)),
+});
 export type ProjectAgentPages = typeof ProjectAgentPages.Type;
 
-export const decodeProjectAgentPagesCommand = Schema.decodeUnknownSync(ProjectAgentPagesCommand);
-export const decodeProjectAgentPages = Schema.decodeUnknownSync(ProjectAgentPages);
+export const decodeProjectAgentPagesCommand = Schema.decodeUnknownSync(
+  ProjectAgentPagesCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeProjectAgentPages = Schema.decodeUnknownSync(
+  ProjectAgentPages,
+  STRICT_DECODE_OPTIONS,
+);
 
-export const decodeBrowserProfileChoice = Schema.decodeUnknownSync(BrowserProfileChoice);
+export const decodeBrowserProfileChoice = Schema.decodeUnknownSync(
+  BrowserProfileChoice,
+  STRICT_DECODE_OPTIONS,
+);

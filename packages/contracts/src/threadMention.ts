@@ -1,4 +1,5 @@
 import { SideChatDraftPrepared } from "./sideChatReturn";
+import { GuidString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { Schema } from "effect";
 import { ChatThreadId } from "./chat";
 import { UtcTimestamp } from "./events";
@@ -7,8 +8,8 @@ import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMenti
 
 export * from "./threadMentionIdentity";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
+const brandedUuid = <B extends string>(brand: Parameters<typeof Schema.brand<B>>[0]) =>
+  Schema.String.pipe(Schema.check(Schema.isGUID()), Schema.brand<B>(brand));
 
 /**
  * Correlation id for one thread-mention command/result pair. The
@@ -24,13 +25,13 @@ export type ThreadMentionRequestId = typeof ThreadMentionRequestId.Type;
  * server-owned fact, and guessing it in the browser would let the chip claim a
  * Project the principal cannot actually Open.
  */
-export const ThreadMentionPlacement = Schema.Union(
+export const ThreadMentionPlacement = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("project"),
-    label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200)),
-  }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("recents") }).annotations(strict),
-);
+    label: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  }),
+  Schema.Struct({ kind: Schema.Literal("recents") }),
+]);
 export type ThreadMentionPlacement = typeof ThreadMentionPlacement.Type;
 
 /**
@@ -44,11 +45,11 @@ export type ThreadMentionPlacement = typeof ThreadMentionPlacement.Type;
 export const ThreadMentionCandidate = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
   placement: ThreadMentionPlacement,
   updatedAt: UtcTimestamp,
   sideChatThreadId: Schema.optional(ChatThreadId),
-}).annotations(strict);
+});
 export type ThreadMentionCandidate = typeof ThreadMentionCandidate.Type;
 
 /**
@@ -61,7 +62,7 @@ export type ThreadMentionCandidate = typeof ThreadMentionCandidate.Type;
  * safer. The bound that matters here is length, enforced per entry and again
  * across the window by the mention policy.
  */
-const ThreadMentionTranscriptText = Schema.String.pipe(Schema.maxLength(4_000));
+const ThreadMentionTranscriptText = Schema.String.check(Schema.isMaxLength(4_000));
 
 /**
  * One read-only line of a mentioned thread's recent transcript. Roles mirror
@@ -70,10 +71,10 @@ const ThreadMentionTranscriptText = Schema.String.pipe(Schema.maxLength(4_000));
  * grants reading and nothing else.
  */
 export const ThreadMentionTranscriptEntry = Schema.Struct({
-  role: Schema.Literal("user", "assistant"),
+  role: Schema.Literals(["user", "assistant"]),
   text: ThreadMentionTranscriptText,
   occurredAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ThreadMentionTranscriptEntry = typeof ThreadMentionTranscriptEntry.Type;
 
 /**
@@ -97,13 +98,13 @@ export const MAX_THREAD_MENTION_CANDIDATES = 8;
 export const ResolvedThreadMention = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
   placement: ThreadMentionPlacement,
-  transcript: Schema.Array(ThreadMentionTranscriptEntry).pipe(
-    Schema.maxItems(MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES),
+  transcript: Schema.Array(ThreadMentionTranscriptEntry).check(
+    Schema.isMaxLength(MAX_THREAD_MENTION_TRANSCRIPT_ENTRIES),
   ),
   truncated: Schema.Boolean,
-}).annotations(strict);
+});
 export type ResolvedThreadMention = typeof ResolvedThreadMention.Type;
 
 /**
@@ -113,8 +114,8 @@ export type ResolvedThreadMention = typeof ResolvedThreadMention.Type;
  */
 export const UnavailableThreadMention = Schema.Struct({
   threadId: MentionableThreadId,
-  reason: Schema.Literal("unauthorized", "not-found", "unsupported-mode"),
-}).annotations(strict);
+  reason: Schema.Literals(["unauthorized", "not-found", "unsupported-mode"]),
+});
 export type UnavailableThreadMention = typeof UnavailableThreadMention.Type;
 
 /**
@@ -131,9 +132,9 @@ export const SideChatSidecar = Schema.Struct({
   sourceThreadId: MentionableThreadId,
   sourceMode: OctantMode,
   sidecarThreadId: ChatThreadId,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400)),
+  title: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(400)),
   createdAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type SideChatSidecar = typeof SideChatSidecar.Type;
 
 /**
@@ -193,19 +194,19 @@ export const MAX_SIDE_CHAT_TOOL_READ_LINES = 400;
  * thread. No variant can steer, approve, append to, or otherwise mutate the
  * mentioned or source thread — that is denied for this surface entirely.
  */
-export const ThreadMentionCommand = Schema.Union(
+export const ThreadMentionCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("prepare-side-chat-return"),
     requestId: ThreadMentionRequestId,
     sidecarThreadId: MentionableThreadId,
     expectedSourceThreadId: MentionableThreadId,
-    turnId: Schema.UUID,
-    attemptId: Schema.UUID,
-  }).annotations(strict),
+    turnId: GuidString,
+    attemptId: GuidString,
+  }),
   Schema.Struct({
     kind: Schema.Literal("search-mentions"),
     requestId: ThreadMentionRequestId,
-    query: Schema.String.pipe(Schema.maxLength(200)),
+    query: Schema.String.check(Schema.isMaxLength(200)),
     threadId: Schema.optional(MentionableThreadId),
     /**
      * The thread whose composer is searching, when it has one. It only narrows
@@ -213,23 +214,23 @@ export const ThreadMentionCommand = Schema.Union(
      * host still judges every mention again when the message is sent.
      */
     readerThreadId: Schema.optional(MentionableThreadId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("resolve-mentions"),
     requestId: ThreadMentionRequestId,
-    threadIds: Schema.Array(MentionableThreadId).pipe(
-      Schema.minItems(1),
-      Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
+    threadIds: Schema.Array(MentionableThreadId).check(
+      Schema.isMinLength(1),
+      Schema.isMaxLength(MAX_THREAD_MENTIONS_PER_TURN),
     ),
     /** The composing thread, so a send's preflight judges the reach its search did. */
     readerThreadId: Schema.optional(MentionableThreadId),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("open-side-chat"),
     requestId: ThreadMentionRequestId,
     sourceThreadId: MentionableThreadId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ThreadMentionCommand = typeof ThreadMentionCommand.Type;
 
 /**
@@ -238,47 +239,64 @@ export type ThreadMentionCommand = typeof ThreadMentionCommand.Type;
  * `unauthorized` carries no title, mode, or placement, only the opaque id the
  * caller already had.
  */
-export const ThreadMentionCommandResult = Schema.Union(
-  Schema.Struct({ ...SideChatDraftPrepared.fields, requestId: ThreadMentionRequestId }).annotations(
-    strict,
-  ),
+export const ThreadMentionCommandResult = Schema.Union([
+  Schema.Struct({ ...SideChatDraftPrepared.fields, requestId: ThreadMentionRequestId }),
   Schema.Struct({
     kind: Schema.Literal("mentions-searched"),
     requestId: ThreadMentionRequestId,
-    candidates: Schema.Array(ThreadMentionCandidate).pipe(
-      Schema.maxItems(MAX_THREAD_MENTION_CANDIDATES),
+    candidates: Schema.Array(ThreadMentionCandidate).check(
+      Schema.isMaxLength(MAX_THREAD_MENTION_CANDIDATES),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("mentions-resolved"),
     requestId: ThreadMentionRequestId,
-    mentions: Schema.Array(ResolvedThreadMention).pipe(
-      Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
+    mentions: Schema.Array(ResolvedThreadMention).check(
+      Schema.isMaxLength(MAX_THREAD_MENTIONS_PER_TURN),
     ),
-    unavailable: Schema.Array(UnavailableThreadMention).pipe(
-      Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
+    unavailable: Schema.Array(UnavailableThreadMention).check(
+      Schema.isMaxLength(MAX_THREAD_MENTIONS_PER_TURN),
     ),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("side-chat-opened"),
     requestId: ThreadMentionRequestId,
     sidecar: SideChatSidecar,
     created: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("failed"),
     requestId: ThreadMentionRequestId,
-    reason: Schema.Literal("unauthorized", "not-found", "unsupported-mode", "unavailable"),
-  }).annotations(strict),
-);
+    reason: Schema.Literals(["unauthorized", "not-found", "unsupported-mode", "unavailable"]),
+  }),
+]);
 export type ThreadMentionCommandResult = typeof ThreadMentionCommandResult.Type;
 
-export const decodeThreadMentionRequestId = Schema.decodeUnknownSync(ThreadMentionRequestId);
-export const decodeMentionableThreadId = Schema.decodeUnknownSync(MentionableThreadId);
-export const decodeThreadMentionCandidate = Schema.decodeUnknownSync(ThreadMentionCandidate);
-export const decodeResolvedThreadMention = Schema.decodeUnknownSync(ResolvedThreadMention);
-export const decodeSideChatSidecar = Schema.decodeUnknownSync(SideChatSidecar);
-export const decodeThreadMentionCommand = Schema.decodeUnknownSync(ThreadMentionCommand);
+export const decodeThreadMentionRequestId = Schema.decodeUnknownSync(
+  ThreadMentionRequestId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeMentionableThreadId = Schema.decodeUnknownSync(
+  MentionableThreadId,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMentionCandidate = Schema.decodeUnknownSync(
+  ThreadMentionCandidate,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeResolvedThreadMention = Schema.decodeUnknownSync(
+  ResolvedThreadMention,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeSideChatSidecar = Schema.decodeUnknownSync(
+  SideChatSidecar,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeThreadMentionCommand = Schema.decodeUnknownSync(
+  ThreadMentionCommand,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeThreadMentionCommandResult = Schema.decodeUnknownSync(
   ThreadMentionCommandResult,
+  STRICT_DECODE_OPTIONS,
 );

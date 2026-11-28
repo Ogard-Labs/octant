@@ -1,11 +1,10 @@
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, NonNegativeInt, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, type ProviderToolDefinition } from "./providers";
 import { MentionableThreadId } from "./threadMentionIdentity";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 /**
  * Person memory: what Octant learned about the person and their work from
@@ -14,7 +13,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * architecture's Person memory section.
  */
 
-export const PersonMemoryEntryId = Schema.UUID.pipe(Schema.brand("PersonMemoryEntryId"));
+export const PersonMemoryEntryId = Schema.String.pipe(
+  Schema.check(Schema.isGUID()),
+  Schema.brand("PersonMemoryEntryId"),
+);
 export type PersonMemoryEntryId = typeof PersonMemoryEntryId.Type;
 
 export const PERSON_MEMORY_ENTRY_MAX_CHARACTERS = 400;
@@ -24,58 +26,62 @@ export const PERSON_MEMORY_TITLE_MAX_CHARACTERS = 200;
 export const PERSON_MEMORY_MAX_SOURCES = 20;
 export const PERSON_MEMORY_MAX_EXCLUDED_PROJECTS = 512;
 
-export const PersonMemoryKind = Schema.Literal("preference", "working-style", "past-work");
+export const PersonMemoryKind = Schema.Literals(["preference", "working-style", "past-work"]);
 export type PersonMemoryKind = typeof PersonMemoryKind.Type;
 
-export const PersonMemoryText = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(PERSON_MEMORY_ENTRY_MAX_CHARACTERS),
+export const PersonMemoryText = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(PERSON_MEMORY_ENTRY_MAX_CHARACTERS),
 );
 
 /** The thread a memory came from, as it stood when it ended. */
 export const PersonMemorySource = Schema.Struct({
   mode: OctantMode,
   threadId: MentionableThreadId,
-  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS)),
+  title: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS),
+  ),
   projectId: Schema.optional(ProjectId),
   providerInstanceId: ProviderInstanceId,
   endedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PersonMemorySource = typeof PersonMemorySource.Type;
 
 export const PersonMemoryEntry = Schema.Struct({
   id: PersonMemoryEntryId,
   kind: PersonMemoryKind,
   content: PersonMemoryText,
-  sources: Schema.Array(PersonMemorySource).pipe(
-    Schema.minItems(1),
-    Schema.maxItems(PERSON_MEMORY_MAX_SOURCES),
+  sources: Schema.Array(PersonMemorySource).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(PERSON_MEMORY_MAX_SOURCES),
   ),
   /** Set once the person rewrote the entry in Settings. */
   editedAt: Schema.optional(UtcTimestamp),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PersonMemoryEntry = typeof PersonMemoryEntry.Type;
 
 /** What one ended thread left behind for searching past threads. */
 export const PersonMemoryThreadDigest = Schema.Struct({
   source: PersonMemorySource,
-  summary: Schema.String.pipe(Schema.maxLength(PERSON_MEMORY_SUMMARY_MAX_CHARACTERS)),
-}).annotations(strict);
+  summary: Schema.String.check(Schema.isMaxLength(PERSON_MEMORY_SUMMARY_MAX_CHARACTERS)),
+});
 export type PersonMemoryThreadDigest = typeof PersonMemoryThreadDigest.Type;
 
 /** A model other than the thread's own provider's smallest one, chosen in Settings. */
 export const PersonMemoryModelChoice = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
-}).annotations(strict);
+});
 export type PersonMemoryModelChoice = typeof PersonMemoryModelChoice.Type;
 
 export const PersonMemorySettings = Schema.Struct({
   enabled: Schema.Boolean,
   pastThreadSearch: Schema.Boolean,
-  excludedProjectIds: Schema.Array(ProjectId).pipe(
-    Schema.maxItems(PERSON_MEMORY_MAX_EXCLUDED_PROJECTS),
+  excludedProjectIds: Schema.Array(ProjectId).check(
+    Schema.isMaxLength(PERSON_MEMORY_MAX_EXCLUDED_PROJECTS),
   ),
   distillModel: Schema.optional(PersonMemoryModelChoice),
   /**
@@ -86,7 +92,7 @@ export const PersonMemorySettings = Schema.Struct({
    * host-wide settings record only a window on this computer can change.
    */
   decisionReviewModel: Schema.optional(PersonMemoryModelChoice),
-}).annotations(strict);
+});
 export type PersonMemorySettings = typeof PersonMemorySettings.Type;
 
 export const DEFAULT_PERSON_MEMORY_SETTINGS: PersonMemorySettings = {
@@ -98,17 +104,20 @@ export const DEFAULT_PERSON_MEMORY_SETTINGS: PersonMemorySettings = {
 export const PersonMemoryThreadRef = Schema.Struct({
   mode: OctantMode,
   threadId: MentionableThreadId,
-}).annotations(strict);
+});
 export type PersonMemoryThreadRef = typeof PersonMemoryThreadRef.Type;
 
 export const PersonMemoryUntracedThread = Schema.Struct({
   mode: OctantMode,
   threadId: MentionableThreadId,
   title: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS)),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS),
+    ),
   ),
   markedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type PersonMemoryUntracedThread = typeof PersonMemoryUntracedThread.Type;
 
 /** Everything Settings › Memory shows. Read by a local window only. */
@@ -116,60 +125,63 @@ export const PersonMemoryView = Schema.Struct({
   kind: Schema.Literal("person-memory"),
   settings: PersonMemorySettings,
   /** The settings aggregate's version; a change names the one it read. */
-  version: Schema.Int.pipe(Schema.nonNegative()),
+  version: NonNegativeInt,
   entries: Schema.Array(PersonMemoryEntry),
-  rememberedThreads: Schema.Int.pipe(Schema.nonNegative()),
+  rememberedThreads: NonNegativeInt,
   untracedThreads: Schema.Array(PersonMemoryUntracedThread),
-}).annotations(strict);
+});
 export type PersonMemoryView = typeof PersonMemoryView.Type;
 
-export const PersonMemoryCommand = Schema.Union(
+export const PersonMemoryCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("change-person-memory-settings"),
-    expectedVersion: Schema.Int.pipe(Schema.nonNegative()),
+    expectedVersion: NonNegativeInt,
     settings: PersonMemorySettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("edit-person-memory-entry"),
     entryId: PersonMemoryEntryId,
     content: PersonMemoryText,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("delete-person-memory-entry"),
     entryId: PersonMemoryEntryId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("forget-person-memory"),
     confirmed: Schema.Literal(true),
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-thread-leaves-no-trace"),
     mode: OctantMode,
     threadId: MentionableThreadId,
     title: Schema.optional(
-      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS)),
+      Schema.Trimmed.check(
+        Schema.isNonEmpty(),
+        Schema.isMaxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS),
+      ),
     ),
     leavesNoTrace: Schema.Boolean,
-  }).annotations(strict),
-);
+  }),
+]);
 export type PersonMemoryCommand = typeof PersonMemoryCommand.Type;
 
-export const PersonMemoryRefusalReason = Schema.Literal(
+export const PersonMemoryRefusalReason = Schema.Literals([
   "malformed",
   "stale-version",
   "unauthorized",
   "not-found",
-);
+]);
 export type PersonMemoryRefusalReason = typeof PersonMemoryRefusalReason.Type;
 
-export const PersonMemoryResult = Schema.Union(
+export const PersonMemoryResult = Schema.Union([
   PersonMemoryView,
   Schema.Struct({
     kind: Schema.Literal("person-memory-refused"),
     reason: PersonMemoryRefusalReason,
-    message: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-);
+    message: NonEmptyTrimmedString,
+  }),
+]);
 export type PersonMemoryResult = typeof PersonMemoryResult.Type;
 
 export const PERSON_MEMORY_SETTINGS_AGGREGATE_TYPE = "person-memory-settings";
@@ -204,13 +216,13 @@ export const PersonMemorySettingsChanged = Schema.Struct({
    * every old turn back into one that counts.
    */
   typedSince: Schema.optional(UtcTimestamp),
-}).annotations(strict);
+});
 export type PersonMemorySettingsChanged = typeof PersonMemorySettingsChanged.Type;
 
 /** An entry's whole current state: on creation, a new source, or the person's edit. */
 export const PersonMemoryEntryRecorded = Schema.Struct({
   entry: PersonMemoryEntry,
-}).annotations(strict);
+});
 export type PersonMemoryEntryRecorded = typeof PersonMemoryEntryRecorded.Type;
 
 /**
@@ -222,7 +234,7 @@ export type PersonMemoryEntryRecorded = typeof PersonMemoryEntryRecorded.Type;
  */
 export const PersonMemoryEntrySaved = Schema.Struct({
   entry: PersonMemoryEntry,
-}).annotations(strict);
+});
 export type PersonMemoryEntrySaved = typeof PersonMemoryEntrySaved.Type;
 
 /**
@@ -232,7 +244,7 @@ export type PersonMemoryEntrySaved = typeof PersonMemoryEntrySaved.Type;
 export const PersonMemoryThreadRemembered = Schema.Struct({
   threadId: MentionableThreadId,
   digest: PersonMemoryThreadDigest,
-}).annotations(strict);
+});
 export type PersonMemoryThreadRemembered = typeof PersonMemoryThreadRemembered.Type;
 
 /**
@@ -247,20 +259,23 @@ export const PersonMemoryThreadDistilled = Schema.Struct({
   digest: PersonMemoryThreadDigest,
   /** The last message learned from: its turn id, and when the person said it. */
   lastMessage: Schema.Struct({
-    id: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+    id: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
     at: UtcTimestamp,
-  }).annotations(strict),
-}).annotations(strict);
+  }),
+});
 export type PersonMemoryThreadDistilled = typeof PersonMemoryThreadDistilled.Type;
 
 export const PersonMemoryThreadUntraced = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
   title: Schema.optional(
-    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS)),
+    Schema.Trimmed.check(
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(PERSON_MEMORY_TITLE_MAX_CHARACTERS),
+    ),
   ),
   leavesNoTrace: Schema.Boolean,
-}).annotations(strict);
+});
 export type PersonMemoryThreadUntraced = typeof PersonMemoryThreadUntraced.Type;
 
 /**
@@ -273,8 +288,8 @@ export type PersonMemoryThreadUntraced = typeof PersonMemoryThreadUntraced.Type;
 export const PersonMemoryTurnTyped = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
-  turnId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
-}).annotations(strict);
+  turnId: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),
+});
 export type PersonMemoryTurnTyped = typeof PersonMemoryTurnTyped.Type;
 
 /**
@@ -288,7 +303,7 @@ export const PersonMemoryBlockCut = Schema.Struct({
   threadId: MentionableThreadId,
   mode: OctantMode,
   cutOff: UtcTimestamp,
-}).annotations(strict);
+});
 export type PersonMemoryBlockCut = typeof PersonMemoryBlockCut.Type;
 
 export const PAST_THREADS_TOOL_NAME = "octant_past_threads";
@@ -313,8 +328,11 @@ export const PAST_THREADS_TOOL_DEFINITION: ProviderToolDefinition = {
 };
 
 export const PastThreadsToolInput = Schema.Struct({
-  query: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(PAST_THREADS_QUERY_MAX_CHARACTERS)),
-}).annotations(strict);
+  query: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(PAST_THREADS_QUERY_MAX_CHARACTERS),
+  ),
+});
 export type PastThreadsToolInput = typeof PastThreadsToolInput.Type;
 
 export const REMEMBER_PERSON_TOOL_NAME = "octant_remember_person";
@@ -342,14 +360,32 @@ export const REMEMBER_PERSON_TOOL_DEFINITION: ProviderToolDefinition = {
 };
 
 export const RememberPersonToolInput = Schema.Struct({
-  text: Schema.String.pipe(Schema.maxLength(PERSON_MEMORY_ENTRY_MAX_CHARACTERS * 4)),
+  text: Schema.String.check(Schema.isMaxLength(PERSON_MEMORY_ENTRY_MAX_CHARACTERS * 4)),
   kind: PersonMemoryKind,
-}).annotations(strict);
+});
 export type RememberPersonToolInput = typeof RememberPersonToolInput.Type;
 
-export const decodePersonMemoryCommand = Schema.decodeUnknownSync(PersonMemoryCommand);
-export const decodePersonMemoryResult = Schema.decodeUnknownSync(PersonMemoryResult);
-export const decodePersonMemoryView = Schema.decodeUnknownSync(PersonMemoryView);
-export const decodePersonMemoryEntry = Schema.decodeUnknownSync(PersonMemoryEntry);
-export const decodePastThreadsToolInput = Schema.decodeUnknownSync(PastThreadsToolInput);
-export const decodeRememberPersonToolInput = Schema.decodeUnknownSync(RememberPersonToolInput);
+export const decodePersonMemoryCommand = Schema.decodeUnknownSync(
+  PersonMemoryCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePersonMemoryResult = Schema.decodeUnknownSync(
+  PersonMemoryResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePersonMemoryView = Schema.decodeUnknownSync(
+  PersonMemoryView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePersonMemoryEntry = Schema.decodeUnknownSync(
+  PersonMemoryEntry,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodePastThreadsToolInput = Schema.decodeUnknownSync(
+  PastThreadsToolInput,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeRememberPersonToolInput = Schema.decodeUnknownSync(
+  RememberPersonToolInput,
+  STRICT_DECODE_OPTIONS,
+);

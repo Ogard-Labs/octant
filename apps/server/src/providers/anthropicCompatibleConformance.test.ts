@@ -200,7 +200,7 @@ describe("Anthropic-compatible provider conformance", () => {
             modelId,
             executionPolicy: "approval-gated",
           });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
@@ -274,7 +274,7 @@ describe("Anthropic-compatible provider conformance", () => {
             modelId,
             executionPolicy: "approval-gated",
           });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "completed"),
@@ -444,7 +444,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
             modelId: model,
             executionPolicy: "approval-gated",
           });
-          const outcome = yield* Effect.either(
+          const outcome = yield* Effect.result(
             connection.send({
               sessionId: successfulSessionId,
               prompt: "list agents",
@@ -463,7 +463,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
     const { driver, runtimeRegistry } = makeDriver(() => messagesStream("ok"));
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 
-    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Left");
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Failure");
     // A routine probe reports tools unsupported and runs no generating request.
     expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
       "unsupported",
@@ -471,13 +471,13 @@ describe("Anthropic-compatible per-model tool verification", () => {
     // Verify tools sends its capability echo outside any session, so a
     // session offers an unverified model not even the echo.
     expect((await sendWithTools(driver, modelId, [capabilityEchoToolDefinition()]))._tag).toBe(
-      "Left",
+      "Failure",
     );
 
     verify(runtimeRegistry, modelId);
 
-    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Right");
-    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Success");
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Failure");
   });
 
   it("keeps Octant tools to the verified model after it calls a tool in a real turn", async () => {
@@ -498,7 +498,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
             modelId,
             executionPolicy: "approval-gated",
           });
-          const collected = yield* Effect.fork(
+          const collected = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.takeUntil((event: ProviderRuntimeEvent) => event.kind === "tool-request"),
@@ -522,10 +522,10 @@ describe("Anthropic-compatible per-model tool verification", () => {
     expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
       "unsupported",
     );
-    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Failure");
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Left");
-    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Right");
+    expect((await sendWithTools(driver, siblingModelId, [octantTool]))._tag).toBe("Failure");
+    expect((await sendWithTools(driver, modelId, [octantTool]))._tag).toBe("Success");
   });
 });
 

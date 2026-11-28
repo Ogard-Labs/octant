@@ -411,7 +411,7 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
             modelId,
             executionPolicy: "approval-gated",
           });
-          const terminal = yield* Effect.fork(
+          const terminal = yield* Effect.forkChild(
             Stream.runCollect(
               (yield* connection.subscribe).pipe(
                 Stream.filter((event) => event.sessionId === providerSessionId),

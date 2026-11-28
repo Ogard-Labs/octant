@@ -2,11 +2,11 @@ import { Schema } from "effect";
 import { AutomationScheduledTrigger, MAX_AUTOMATION_DISPLAY_NAME_LENGTH } from "./automation";
 import { UtcTimestamp } from "./events";
 
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
 const boundedNonEmptyText = (maximumBytes: number) =>
-  Schema.NonEmptyTrimmedString.pipe(
-    Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
+  Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
 /**
@@ -21,9 +21,12 @@ export const ThreadRoutineReceipt = Schema.Struct({
   routineId: boundedNonEmptyText(255),
   // The routine's own name limit, in characters: a byte limit would reject a
   // long non-ASCII name the routine accepted, after the routine already exists.
-  name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_AUTOMATION_DISPLAY_NAME_LENGTH)),
+  name: Schema.Trimmed.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAX_AUTOMATION_DISPLAY_NAME_LENGTH),
+  ),
   trigger: AutomationScheduledTrigger,
   firstRunAt: UtcTimestamp,
   paused: Schema.Boolean,
-}).annotations(strict);
+});
 export type ThreadRoutineReceipt = typeof ThreadRoutineReceipt.Type;

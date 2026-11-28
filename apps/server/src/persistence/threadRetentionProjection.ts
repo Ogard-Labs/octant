@@ -18,7 +18,7 @@ import type { SqliteConnection } from "./sqlitePort";
 
 export const THREAD_RETENTION_AGGREGATE = "thread-retention";
 export const THREAD_RETENTION_AGGREGATE_ID = Schema.decodeUnknownSync(
-  Schema.UUID.pipe(Schema.brand("AggregateId")),
+  Schema.String.check(Schema.isGUID()).pipe(Schema.brand("AggregateId")),
 )("00000000-0000-4000-8000-000000000032");
 
 interface WindowRow {

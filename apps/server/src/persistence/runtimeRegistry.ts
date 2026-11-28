@@ -612,7 +612,10 @@ import {
 import { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
 import { registerReplicaStoreSettingsEvents } from "../replica/replicaStoreSettingsEvents";
 
-const fixtureRecordedPayload = Schema.Struct({ value: Schema.String });
+const fixtureRecordedPayload = Schema.Struct({
+  value: Schema.String,
+  threadId: Schema.optional(Schema.String),
+});
 
 export interface Phase1RuntimeRegistries {
   readonly events: EventRegistry;

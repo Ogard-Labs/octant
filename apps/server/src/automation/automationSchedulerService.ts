@@ -198,7 +198,7 @@ export class AutomationSchedulerService {
   readonly #offered = new Set<string>();
   #notify: (() => void) | undefined;
   #pokedWhileWorking = false;
-  #fiber: Fiber.RuntimeFiber<never, never> | undefined;
+  #fiber: Fiber.Fiber<never, never> | undefined;
 
   constructor(options: AutomationSchedulerServiceOptions) {
     this.#store = options.store;
@@ -1224,7 +1224,7 @@ export class AutomationSchedulerService {
       }
       return Effect.race(
         Effect.sleep(Duration.millis(delayMs)),
-        Effect.async<void>((resume) => {
+        Effect.callback<void>((resume) => {
           this.#notify = () => resume(Effect.void);
           return Effect.sync(() => {
             this.#notify = undefined;

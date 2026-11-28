@@ -9,11 +9,10 @@
  */
 
 import { Schema } from "effect";
+import { NonEmptyTrimmedString, STRICT_DECODE_OPTIONS } from "./schemaPrimitives";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
-
-const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
 export const MAX_ARTIFACT_MIRROR_OVERRIDES = 64;
 export const MAX_ARTIFACT_BUNDLE_BYTES = 4 * 1024 * 1024;
@@ -25,9 +24,9 @@ export const MAX_ARTIFACT_BUNDLE_BYTES = 4 * 1024 * 1024;
  * no `.git`: a mirror that could write there would be rewriting the repository
  * it was asked to sit inside.
  */
-export const ArtifactMirrorRelativePath = Schema.String.pipe(
-  Schema.maxLength(512),
-  Schema.filter(
+export const ArtifactMirrorRelativePath = Schema.String.check(
+  Schema.isMaxLength(512),
+  Schema.makeFilter(
     (value) =>
       value.length > 0 &&
       value === value.normalize("NFC") &&
@@ -49,9 +48,10 @@ export const ArtifactMirrorRelativePath = Schema.String.pipe(
 );
 
 /** An absolute path the user picked, as the host canonicalized it. */
-const CanonicalRoot = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(4_096),
-  Schema.filter((value) => value.startsWith("/") && !value.includes("\0")),
+const CanonicalRoot = Schema.Trimmed.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => value.startsWith("/") && !value.includes("\0")),
 );
 
 /**
@@ -62,33 +62,33 @@ const CanonicalRoot = Schema.NonEmptyTrimmedString.pipe(
  * two name a place, and the host still checks its own authority before writing
  * to either.
  */
-export const ArtifactMirrorDestination = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("internal-only") }).annotations(strict),
+export const ArtifactMirrorDestination = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("internal-only") }),
   Schema.Struct({
     kind: Schema.Literal("global-folder"),
     canonicalRoot: CanonicalRoot,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("project-repository"),
     /** Where inside the Project's bound repository, e.g. `docs/artifacts`. */
     relativeDirectory: ArtifactMirrorRelativePath,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ArtifactMirrorDestination = typeof ArtifactMirrorDestination.Type;
 
 /** One Project choosing something other than the host-wide default. */
 export const ArtifactMirrorOverride = Schema.Struct({
   projectId: ProjectId,
   destination: ArtifactMirrorDestination,
-}).annotations(strict);
+});
 export type ArtifactMirrorOverride = typeof ArtifactMirrorOverride.Type;
 
 export const ArtifactMirrorSettings = Schema.Struct({
   kind: Schema.Literal("artifact-mirror-settings"),
   /** What every Project does unless it says otherwise. */
   fallback: ArtifactMirrorDestination,
-  overrides: Schema.Array(ArtifactMirrorOverride).pipe(
-    Schema.filter(
+  overrides: Schema.Array(ArtifactMirrorOverride).check(
+    Schema.makeFilter(
       (overrides) =>
         overrides.length <= MAX_ARTIFACT_MIRROR_OVERRIDES &&
         new Set(overrides.map((override) => String(override.projectId))).size === overrides.length,
@@ -106,19 +106,19 @@ export const ArtifactMirrorSettings = Schema.Struct({
   autoCommit: Schema.Boolean,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
-})
-  .annotations(strict)
-  .pipe(
-    // Committing is meaningless without a repository to commit in, and leaving
-    // the flag set while nothing uses it is how it gets forgotten and surprises
-    // someone later.
-    Schema.filter(
+}).pipe(
+  // Committing is meaningless without a repository to commit in, and leaving
+  // the flag set while nothing uses it is how it gets forgotten and surprises
+  // someone later.
+  Schema.check(
+    Schema.makeFilter(
       (settings) =>
         !settings.autoCommit ||
         settings.fallback.kind === "project-repository" ||
         settings.overrides.some((override) => override.destination.kind === "project-repository"),
     ),
-  );
+  ),
+);
 export type ArtifactMirrorSettings = typeof ArtifactMirrorSettings.Type;
 
 /**
@@ -129,33 +129,31 @@ export type ArtifactMirrorSettings = typeof ArtifactMirrorSettings.Type;
  * commit it. There is no outcome here that reaches a remote, because nothing
  * is ever pushed at any setting.
  */
-export const ArtifactMirrorCommitOutcome = Schema.Union(
-  Schema.Struct({ status: Schema.Literal("not-requested") }).annotations(strict),
-  Schema.Struct({ status: Schema.Literal("committed") }).annotations(strict),
+export const ArtifactMirrorCommitOutcome = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("not-requested") }),
+  Schema.Struct({ status: Schema.Literal("committed") }),
   Schema.Struct({
     status: Schema.Literal("refused"),
-    reason: Schema.Literal(
-      // Committing with anything else staged would sweep someone's work into
-      // a commit they did not write. Refusing is the only safe answer.
+    reason: Schema.Literals([
       "index-holds-other-work",
       "nothing-to-commit",
       "commit-unavailable",
       "commit-rejected",
-    ),
-  }).annotations(strict),
-);
+    ]),
+  }),
+]);
 export type ArtifactMirrorCommitOutcome = typeof ArtifactMirrorCommitOutcome.Type;
 
 /**
  * Why a materialization wrote nothing although the Project names a destination,
  * as a code a reader can act on rather than words it can only show.
  */
-export const ArtifactMirrorRefusal = Schema.Literal(
+export const ArtifactMirrorRefusal = Schema.Literals([
   "destination-unavailable",
   "destination-unauthorized",
   "project-not-bound",
   "plan-mode-is-read-only",
-);
+]);
 export type ArtifactMirrorRefusal = typeof ArtifactMirrorRefusal.Type;
 
 /** What one materialization did, recorded so a file can be traced to a version. */
@@ -166,10 +164,10 @@ export const ArtifactMirrorReceipt = Schema.Struct({
   projectId: Schema.NullOr(ProjectId),
   destination: ArtifactMirrorDestination,
   /** Paths written, relative to the destination's own root. */
-  paths: Schema.Array(ArtifactMirrorRelativePath).pipe(
-    Schema.filter((paths) => paths.length <= 8 && new Set(paths).size === paths.length),
+  paths: Schema.Array(ArtifactMirrorRelativePath).check(
+    Schema.makeFilter((paths) => paths.length <= 8 && new Set(paths).size === paths.length),
   ),
-  outcome: Schema.Literal("written", "skipped", "refused", "failed"),
+  outcome: Schema.Literals(["written", "skipped", "refused", "failed"]),
   /**
    * Why a refused materialization wrote nothing. Receipts journaled before it
    * was recorded carry only `detail`.
@@ -178,17 +176,22 @@ export const ArtifactMirrorReceipt = Schema.Struct({
   /** Whether the files written were also committed, and why not when they were not. */
   commit: ArtifactMirrorCommitOutcome,
   /** Present on anything but a plain write, in the words the user reads. */
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
   observedAt: UtcTimestamp,
 })
-  .annotations(strict)
-  .pipe(Schema.filter((receipt) => (receipt.outcome === "written") === receipt.paths.length > 0))
-  .pipe(Schema.filter((receipt) => receipt.reason === undefined || receipt.outcome === "refused"))
-  .pipe(Schema.filter((receipt) => receipt.outcome === "written" || receipt.detail !== undefined))
+  .check(
+    Schema.makeFilter((receipt) => (receipt.outcome === "written") === receipt.paths.length > 0),
+  )
+  .check(
+    Schema.makeFilter((receipt) => receipt.reason === undefined || receipt.outcome === "refused"),
+  )
+  .check(
+    Schema.makeFilter((receipt) => receipt.outcome === "written" || receipt.detail !== undefined),
+  )
   // Nothing was written, so there was nothing to commit: a receipt claiming
   // otherwise would be describing a commit of files that do not exist.
-  .pipe(
-    Schema.filter(
+  .check(
+    Schema.makeFilter(
       (receipt) => receipt.commit.status === "not-requested" || receipt.outcome === "written",
     ),
   );
@@ -205,22 +208,22 @@ export type ArtifactMirrorReceipt = typeof ArtifactMirrorReceipt.Type;
  */
 export const ArtifactMirrorProjectStatus = Schema.Struct({
   projectId: ProjectId,
-  projectName: Schema.NonEmptyTrimmedString,
+  projectName: NonEmptyTrimmedString,
   /** Whether the destination is the Project's own choice or the host-wide one. */
-  source: Schema.Literal("project", "host"),
+  source: Schema.Literals(["project", "host"]),
   destination: ArtifactMirrorDestination,
-  outcome: Schema.Literal("written", "skipped", "refused", "failed"),
+  outcome: Schema.Literals(["written", "skipped", "refused", "failed"]),
   reason: Schema.optional(ArtifactMirrorRefusal),
-  detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+  detail: Schema.optional(Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512))),
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ArtifactMirrorProjectStatus = typeof ArtifactMirrorProjectStatus.Type;
 
 /** The mirror settings read: the settings in effect and how each Project's mirror last went. */
 export const ArtifactMirrorView = Schema.Struct({
   settings: ArtifactMirrorSettings,
   projects: Schema.Array(ArtifactMirrorProjectStatus),
-}).annotations(strict);
+});
 export type ArtifactMirrorView = typeof ArtifactMirrorView.Type;
 
 /**
@@ -235,53 +238,53 @@ export const ArtifactMirrorDrift = Schema.Struct({
   mirroredVersionId: CanvasVersionId,
   path: ArtifactMirrorRelativePath,
   observedAt: UtcTimestamp,
-}).annotations(strict);
+});
 export type ArtifactMirrorDrift = typeof ArtifactMirrorDrift.Type;
 
-export const ArtifactMirrorCommand = Schema.Union(
+export const ArtifactMirrorCommand = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("set-artifact-mirror-fallback"),
     expectedVersion: AggregateVersion,
     destination: ArtifactMirrorDestination,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-artifact-mirror-override"),
     expectedVersion: AggregateVersion,
     projectId: ProjectId,
     destination: ArtifactMirrorDestination,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("clear-artifact-mirror-override"),
     expectedVersion: AggregateVersion,
     projectId: ProjectId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("set-artifact-mirror-auto-commit"),
     expectedVersion: AggregateVersion,
     autoCommit: Schema.Boolean,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("reimport-artifact-from-file"),
     canvasId: CanvasId,
     /** The version the caller believes is current, so a stale ask is refused. */
     expectedVersionId: CanvasVersionId,
-  }).annotations(strict),
-);
+  }),
+]);
 export type ArtifactMirrorCommand = typeof ArtifactMirrorCommand.Type;
 
-export const ArtifactMirrorResult = Schema.Union(
+export const ArtifactMirrorResult = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("mirror-settings"),
     settings: ArtifactMirrorSettings,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("artifact-reimported"),
     canvasId: CanvasId,
     versionId: CanvasVersionId,
-  }).annotations(strict),
+  }),
   Schema.Struct({
     kind: Schema.Literal("mirror-refused"),
-    reason: Schema.Literal(
+    reason: Schema.Literals([
       "stale-version",
       "destination-unavailable",
       "destination-unauthorized",
@@ -291,10 +294,10 @@ export const ArtifactMirrorResult = Schema.Union(
       "file-not-a-bundle",
       "file-unchanged",
       "commit-needs-repository",
-    ),
-    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
-  }).annotations(strict),
-);
+    ]),
+    message: Schema.Trimmed.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  }),
+]);
 export type ArtifactMirrorResult = typeof ArtifactMirrorResult.Type;
 
 export const ARTIFACT_MIRROR_AGGREGATE_TYPE = "artifact-mirror";
@@ -304,12 +307,31 @@ export const ARTIFACT_MIRROR_EVENT_NAMES = {
   reimported: "artifact.mirror-reimported@1",
 } as const;
 
-export const decodeArtifactMirrorSettings = Schema.decodeUnknownSync(ArtifactMirrorSettings);
-export const decodeArtifactMirrorCommand = Schema.decodeUnknownSync(ArtifactMirrorCommand);
-export const decodeArtifactMirrorResult = Schema.decodeUnknownSync(ArtifactMirrorResult);
-export const decodeArtifactMirrorView = Schema.decodeUnknownSync(ArtifactMirrorView);
-export const decodeArtifactMirrorReceipt = Schema.decodeUnknownSync(ArtifactMirrorReceipt);
-export const decodeArtifactMirrorDrift = Schema.decodeUnknownSync(ArtifactMirrorDrift);
+export const decodeArtifactMirrorSettings = Schema.decodeUnknownSync(
+  ArtifactMirrorSettings,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactMirrorCommand = Schema.decodeUnknownSync(
+  ArtifactMirrorCommand,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactMirrorResult = Schema.decodeUnknownSync(
+  ArtifactMirrorResult,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactMirrorView = Schema.decodeUnknownSync(
+  ArtifactMirrorView,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactMirrorReceipt = Schema.decodeUnknownSync(
+  ArtifactMirrorReceipt,
+  STRICT_DECODE_OPTIONS,
+);
+export const decodeArtifactMirrorDrift = Schema.decodeUnknownSync(
+  ArtifactMirrorDrift,
+  STRICT_DECODE_OPTIONS,
+);
 export const decodeArtifactMirrorCommitOutcome = Schema.decodeUnknownSync(
   ArtifactMirrorCommitOutcome,
+  STRICT_DECODE_OPTIONS,
 );
