@@ -7,7 +7,10 @@ import {
   type AutomationEventSourceCheckpoint,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { IntegrationEventSourceProvider } from "@octant/plugin-api/integration";
+import type {
+  IntegrationEventSource,
+  IntegrationEventSourceProvider,
+} from "@octant/plugin-api/integration";
 import type { AutomationProjection } from "./automationProjection";
 import type { AutomationSchedulerService } from "./automationSchedulerService";
 import {
@@ -269,18 +272,85 @@ export class AutomationEventSources {
     });
     if (committed === "committed") {
       this.#observed.add(String(definition.id));
-      const acknowledged = decision.acknowledgedEventIds;
-      if (
-        source.acknowledge !== undefined &&
-        acknowledged !== undefined &&
-        acknowledged.length > 0
-      ) {
-        try {
-          await source.acknowledge(acknowledged);
-        } catch {
-          /* Best-effort capacity release after the observation is already durable. */
+      if (source.acknowledge !== undefined) {
+        const acknowledged = await this.#reconcilableAcknowledgements({
+          definition,
+          trigger,
+          source,
+          observedEvents: observed.events,
+          directAcknowledged: decision.acknowledgedEventIds ?? [],
+          signal,
+        });
+        if (acknowledged.length > 0 && !this.#stopped && !signal.aborted && source.current()) {
+          try {
+            await source.acknowledge(acknowledged);
+          } catch {
+            /* Subsequent committed polls reconcile completed ids from the durable checkpoint. */
+          }
         }
       }
     }
+  }
+
+  async #reconcilableAcknowledgements(input: {
+    readonly definition: AutomationDefinition;
+    readonly trigger: Extract<
+      AutomationDefinition["trigger"],
+      { readonly kind: "integration-event" }
+    >;
+    readonly source: IntegrationEventSource;
+    readonly observedEvents: ReadonlyArray<AutomationIntegrationEvent>;
+    readonly directAcknowledged: ReadonlyArray<string>;
+    readonly signal: AbortSignal;
+  }): Promise<ReadonlyArray<string>> {
+    const candidates = new Set(input.directAcknowledged);
+    const checkpoint = this.#options.projection.getEventSource(input.definition.id);
+    if (checkpoint?.baselineReady === true) {
+      const seen = new Set(checkpoint.seen);
+      const pending = new Set(checkpoint.pending.map((event) => event.id));
+      for (const event of input.observedEvents) {
+        if (seen.has(event.id) && !pending.has(event.id)) candidates.add(event.id);
+      }
+    }
+    if (candidates.size === 0) return [];
+
+    const capacityKey =
+      input.source.capacityKey !== undefined ? input.source.capacityKey() : input.source.identity;
+    if (capacityKey === undefined) return [];
+
+    for (const other of this.#options.projection.listDefinitions()) {
+      if (
+        String(other.id) === String(input.definition.id) ||
+        other.lifecycle !== "enabled" ||
+        other.trigger.kind !== "integration-event" ||
+        other.trigger.integrationId !== input.trigger.integrationId ||
+        other.trigger.sourceId !== input.trigger.sourceId
+      ) {
+        continue;
+      }
+      let sharesQueue = other.trigger.sourceIdentity === input.source.identity;
+      if (!sharesQueue && input.source.capacityKey !== undefined) {
+        const otherSource = await this.#options.sources.bind(other.trigger, input.signal);
+        if (otherSource !== undefined) {
+          const otherKey =
+            otherSource.capacityKey !== undefined
+              ? otherSource.capacityKey()
+              : otherSource.identity;
+          sharesQueue = otherKey === undefined || otherKey === capacityKey;
+        }
+      }
+      if (!sharesQueue) continue;
+
+      const otherCheckpoint = this.#options.projection.getEventSource(other.id);
+      if (otherCheckpoint === undefined || !otherCheckpoint.baselineReady) return [];
+      const otherSeen = new Set(otherCheckpoint.seen);
+      const otherPending = new Set(otherCheckpoint.pending.map((event) => event.id));
+      for (const id of [...candidates]) {
+        if (!otherSeen.has(id) || otherPending.has(id)) candidates.delete(id);
+      }
+      if (candidates.size === 0) return [];
+    }
+
+    return [...candidates];
   }
 }

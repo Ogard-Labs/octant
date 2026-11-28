@@ -52,10 +52,19 @@ export interface IntegrationEventSource {
       }
   >;
   /**
-   * Reports event ids the scheduler finished with (baselined, claimed for a
-   * run, or dropped under a missed-run policy) after committing its
-   * observation. A bounded source frees capacity only for acknowledged events
-   * instead of guessing from reads while a routine is busy.
+   * Optional shared capacity key when two routines with different source
+   * identities (for example, before and after rotating a webhook endpoint)
+   * share one bounded unread queue. Defaults to `identity` when omitted; return
+   * `undefined` if the underlying target is unavailable so capacity is not
+   * released blindly.
+   */
+  readonly capacityKey?: () => string | undefined;
+  /**
+   * Reports event ids every enabled routine on this source finished with
+   * (baselined, claimed for a run, or dropped under a missed-run policy) after
+   * committing its observation. The scheduler may replay already-completed ids
+   * across later polls so a failed capacity-release write or crash recovery
+   * never strands unread slots; implementations must be idempotent.
    */
   readonly acknowledge?: (eventIds: ReadonlyArray<string>) => Promise<void> | void;
 }

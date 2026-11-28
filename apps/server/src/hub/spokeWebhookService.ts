@@ -597,6 +597,14 @@ export class SpokeWebhookService {
         const exists = () => this.#options.publicGranted() && current() !== undefined;
         return {
           identity: createHash("sha256").update(`octant-webhook|${endpointId}`).digest("hex"),
+          capacityKey: () => {
+            const live = current();
+            return live === undefined
+              ? undefined
+              : createHash("sha256")
+                  .update(`octant-webhook-capacity|${String(live.endpointId)}`)
+                  .digest("hex");
+          },
           label: `Webhook: ${endpoint.label}`,
           semantics: "assignment-set",
           heldWhileAway: true,
