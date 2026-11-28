@@ -49,10 +49,9 @@ export function resolveLinearChipAccount(input: {
         : { available: true, accountRef: matched.accountRef };
     }
     const legacy = ready.find((entry) => entry.isLegacy === true);
-    if (legacy !== undefined) return { available: true, accountRef: legacy.accountRef };
-    return ready.length === 1 && ready[0] !== undefined
-      ? { available: true, accountRef: ready[0].accountRef }
-      : { available: false };
+    return legacy === undefined
+      ? { available: false }
+      : { available: true, accountRef: legacy.accountRef };
   }
   if (ready.length === 1 && ready[0] !== undefined) {
     return { available: true, accountRef: ready[0].accountRef };

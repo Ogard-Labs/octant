@@ -98,16 +98,23 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
     if (readyAccounts.length > 1) {
       return selectedAccountRef ?? readyAccounts[0]?.accountRef;
     }
-    return defaultLinearTarget?.accountRef;
+    if (defaultLinearTarget?.accountRef !== undefined) {
+      return defaultLinearTarget.accountRef;
+    }
+    const soleReady = readyAccounts.length === 1 ? readyAccounts[0] : undefined;
+    if (soleReady !== undefined && soleReady.isLegacy !== true) {
+      return soleReady.accountRef;
+    }
+    return undefined;
   }, [readyAccounts, selectedAccountRef, defaultLinearTarget?.accountRef]);
 
   const targetMatchesAccount =
     defaultLinearTarget !== undefined &&
-    (readyAccounts.length <= 1 ||
-      activeAccountRef ===
-        (defaultLinearTarget.accountRef ??
-          readyAccounts.find((entry) => entry.isLegacy === true)?.accountRef ??
-          readyAccounts[0]?.accountRef));
+    (defaultLinearTarget.accountRef !== undefined
+      ? activeAccountRef === defaultLinearTarget.accountRef
+      : readyAccounts.length === 0 ||
+        (readyAccounts.length === 1 && readyAccounts[0]?.isLegacy === true) ||
+        activeAccountRef === readyAccounts.find((entry) => entry.isLegacy === true)?.accountRef);
   const activeTarget = scopeAll || !targetMatchesAccount ? undefined : defaultLinearTarget;
 
   const [issues, setIssues] = useState<IssueListState>(() => {

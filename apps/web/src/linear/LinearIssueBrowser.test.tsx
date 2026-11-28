@@ -319,4 +319,27 @@ describe("Linear issue browser", () => {
     await waitFor(() => expect(listIssues).toHaveBeenCalledWith({}, "acct-personal"));
     expect(listIssueFilters).toHaveBeenCalledWith("acct-personal");
   });
+
+  it("passes the sole ready non-legacy account explicitly when the legacy account is unavailable", async () => {
+    const listIssues = vi.fn(async (_input?: LinearIssueListInput, _accountRef?: string) => page);
+    const listIssueFilters = vi.fn(async (_accountRef?: string) => filters);
+    render(
+      <LinearIssueBrowser
+        accounts={[
+          {
+            accountRef: "acct-company",
+            state: "ready",
+            account: { login: "company", workspace: "Company", source: "oauth", scopes: ["read"] },
+            capabilities: [{ operationId: "list-issues", available: true }],
+          },
+        ]}
+        getIssue={vi.fn(async () => detail)}
+        listIssueFilters={listIssueFilters}
+        listIssues={listIssues}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(listIssues).toHaveBeenCalledWith({}, "acct-company"));
+    expect(listIssueFilters).toHaveBeenCalledWith("acct-company");
+  });
 });

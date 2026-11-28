@@ -577,4 +577,50 @@ describe("multi-account Linear integration service", () => {
     expect(entryB?.state).toBe("ready");
     expect(entryB?.reconnectRequired).toBeUndefined();
   });
+
+  it("promotes an unpromoted reconnect-required legacy account when that same account reconnects", async () => {
+    const vault = createMemorySecretVault();
+    const indexStore = createMemoryLinearAccountIndexStore();
+    const upstream = makeFixtureUpstream([ACCOUNT_A, ACCOUNT_B]);
+    const legacyStore = createMemoryConnectionStore({
+      source: "oauth",
+      reconnectRequired: true,
+      account: {
+        login: ACCOUNT_A.urlKey,
+        displayName: ACCOUNT_A.viewerName,
+        workspace: ACCOUNT_A.orgName,
+        source: "oauth",
+        scopes: ["read"],
+      },
+    });
+    const service = createLinearIntegrationService({
+      vault,
+      accountIndexStore: indexStore,
+      connectionStore: legacyStore,
+      config: { clientId, redirectUri },
+      fetch: upstream.fetch,
+      startCallbackListener: false,
+    });
+
+    // Connecting an unrelated account B must NOT take over the unpromoted legacy bindings.
+    expect(await connectOAuthAccount(service, ACCOUNT_B.code)).toEqual({ kind: "stored" });
+    const refA = computeLinearAccountRef(ACCOUNT_A.viewerId, ACCOUNT_A.orgId);
+    const refB = computeLinearAccountRef(ACCOUNT_B.viewerId, ACCOUNT_B.orgId);
+    const afterB = await service.accountsSnapshot?.("linear", signal());
+    expect(afterB?.accounts.find((entry) => entry.accountRef === refB)?.isLegacy).toBeUndefined();
+    expect(afterB?.accounts.some((entry) => entry.accountRef === "legacy")).toBe(true);
+
+    // Reconnecting account A promotes `legacyRef` to refA and replaces the placeholder.
+    expect(await connectOAuthAccount(service, ACCOUNT_A.code)).toEqual({ kind: "stored" });
+    const afterA = await service.accountsSnapshot?.("linear", signal());
+    expect(afterA?.accounts.some((entry) => entry.accountRef === "legacy")).toBe(false);
+    expect(afterA?.accounts.find((entry) => entry.accountRef === refA)?.isLegacy).toBe(true);
+    expect(
+      await service.executeOperation(
+        "linear",
+        { kind: "operation", operationId: LINEAR_ISSUE_LIST_OPERATION, input: {} },
+        signal(),
+      ),
+    ).toMatchObject({ kind: "ok" });
+  });
 });

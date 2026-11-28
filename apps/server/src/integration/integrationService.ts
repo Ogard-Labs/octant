@@ -453,7 +453,27 @@ export function createLinearIntegrationService(options: {
     }
     const accountRef = computeLinearAccountRef(input.viewerId, input.workspaceId);
     const existing = state.index.accounts.find((entry) => entry.accountRef === accountRef);
-    if (existing === undefined && state.index.accounts.length >= MAX_LINEAR_ACCOUNTS) {
+    // An upgraded host whose old connection already needed reconnect holds an
+    // unpromoted `legacy` placeholder with no viewer/workspace id yet. When the
+    // same account reconnects (or the placeholder had no recorded identity),
+    // promote `legacyRef` to its deterministic ref and replace the placeholder
+    // so existing bindings without `accountRef` resume working without ever
+    // handing them to a different account.
+    const unpromotedLegacy =
+      existing === undefined && state.index.legacyRef === LEGACY_PENDING_ACCOUNT_REF
+        ? state.index.accounts.find(
+            (entry) =>
+              entry.accountRef === LEGACY_PENDING_ACCOUNT_REF &&
+              entry.reconnectRequired &&
+              (entry.login === "Linear" ||
+                (entry.login.toLowerCase() === input.account.login.toLowerCase() &&
+                  (entry.workspace === undefined ||
+                    input.account.workspace === undefined ||
+                    entry.workspace.toLowerCase() === input.account.workspace.toLowerCase()))),
+          )
+        : undefined;
+    const replacing = existing ?? unpromotedLegacy;
+    if (replacing === undefined && state.index.accounts.length >= MAX_LINEAR_ACCOUNTS) {
       if (input.deleteVaultIdOnFailure) await options.vault.delete(input.vaultId);
       return {
         kind: "refused",
@@ -475,12 +495,15 @@ export function createLinearIntegrationService(options: {
       reconnectRequired: false,
     };
     const nextAccounts =
-      existing === undefined
+      replacing === undefined
         ? [...state.index.accounts, nextEntry]
         : state.index.accounts.map((entry) =>
-            entry.accountRef === accountRef ? nextEntry : entry,
+            entry.accountRef === replacing.accountRef ? nextEntry : entry,
           );
-    const nextLegacyRef = state.index.legacyRef === undefined ? accountRef : state.index.legacyRef;
+    const nextLegacyRef =
+      state.index.legacyRef === undefined || unpromotedLegacy !== undefined
+        ? accountRef
+        : state.index.legacyRef;
     const nextIndex: LinearAccountIndex = {
       version: 1,
       accounts: nextAccounts,
@@ -491,8 +514,11 @@ export function createLinearIntegrationService(options: {
       if (input.deleteVaultIdOnFailure) await options.vault.delete(input.vaultId);
       return { kind: "refused", reason: written.reason };
     }
-    if (existing !== undefined && existing.vaultId !== input.vaultId) {
-      await options.vault.delete(existing.vaultId);
+    if (replacing !== undefined && replacing.vaultId !== input.vaultId) {
+      await options.vault.delete(replacing.vaultId);
+    }
+    if (unpromotedLegacy !== undefined) {
+      await dropRuntime(LEGACY_PENDING_ACCOUNT_REF);
     }
     await dropRuntime(accountRef);
     bumpRevision(accountRef);

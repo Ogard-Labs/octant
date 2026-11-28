@@ -163,5 +163,15 @@ describe("resolveLinearChipAccount", () => {
         hasProjectLinearTarget: true,
       }),
     ).toEqual({ available: true, accountRef: "lin_acme" });
+
+    // If the legacy account is disconnected/unauthorized while another account
+    // remains ready, a legacy-bound Project must stay unavailable rather than
+    // resolving issue keys against the unrelated workspace.
+    expect(
+      resolveLinearChipAccount({
+        accounts: [betaAccount],
+        hasProjectLinearTarget: true,
+      }),
+    ).toEqual({ available: false });
   });
 });

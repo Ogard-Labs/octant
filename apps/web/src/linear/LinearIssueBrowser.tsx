@@ -80,10 +80,14 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
     return readyAccounts[0]?.accountRef;
   }, [props.defaultLinearTarget, readyAccounts]);
   const [accountRef, setAccountRef] = useState<string | undefined>(initialAccountRef);
+  const soleReadyAccount = readyAccounts.length === 1 ? readyAccounts[0] : undefined;
   const activeAccountRef =
     readyAccounts.length > 1
       ? (accountRef ?? readyAccounts[0]?.accountRef)
-      : props.defaultLinearTarget?.accountRef;
+      : (props.defaultLinearTarget?.accountRef ??
+        (soleReadyAccount !== undefined && soleReadyAccount.isLegacy !== true
+          ? soleReadyAccount.accountRef
+          : undefined));
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const [teamId, setTeamId] = useState(props.defaultLinearTarget?.teamId ?? ALL);
