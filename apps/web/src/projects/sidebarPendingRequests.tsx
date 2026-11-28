@@ -176,10 +176,12 @@ export function useSidebarPendingRequests(
   // reaches no other read). A row carries no mode, so a Code row that moves
   // after Chat moved reads once more than it needs; it is bounded by Chat's own
   // movement. Rows are noted only once the first read has landed, since that
-  // read covers every row listed before it.
+  // read covers every row listed before it. A sidebar that mounts after that
+  // read landed (collapsing the sidebar unmounts it) cannot tell what Chat
+  // did while it was gone, so it reads once when it first lists a row.
   const chatRevision = source?.chatRevision ?? 0;
-  const readAtChat = useRef(chatRevision);
   const loaded = source?.shared.read.status === "ready";
+  const readAtChat = useRef<number | undefined>(loaded ? undefined : chatRevision);
   const listed = useRef<ReadonlySet<string>>(new Set());
   const waitingList = waiting.join("\t");
   useEffect(() => {

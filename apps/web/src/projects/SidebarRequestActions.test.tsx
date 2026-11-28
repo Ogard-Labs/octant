@@ -65,6 +65,8 @@ function Sidebar(props: {
   readonly shownThreadIds?: ReadonlyArray<string>;
   readonly onSelectThread?: (threadId: string) => void;
   readonly thread?: ChatThreadNavigationItem;
+  /** False while the sidebar is collapsed: the window's read goes on without it. */
+  readonly sidebarShown?: boolean;
   /** The row properties the person chose for the Activity and Status views. */
   readonly activityRowProperties?: typeof DEFAULT_SIDEBAR_ROW_PROPERTIES.activity;
 }) {
@@ -86,6 +88,7 @@ function Sidebar(props: {
           },
     [host, shared],
   );
+  if (props.sidebarShown === false) return null;
   return (
     <SidebarPendingRequestsProvider
       shownThreadIds={props.shownThreadIds ?? props.openThreadIds ?? []}
@@ -261,6 +264,28 @@ describe("answering a Needs-you row from the sidebar", () => {
     expect(clients.codeClient.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "answer-provider-approval", decision: "approved" }),
     );
+  });
+
+  it("reads once for a Chat row that started waiting while the sidebar was collapsed", async () => {
+    const question = codeRequest({
+      threadId: "thread-waiting",
+      threadTitle: "Rotate the dev API keys",
+      kind: "question",
+      text: "Which key should go first?",
+      minutesAgo: 1,
+      options: [{ label: "Staging" }],
+    });
+    // The window read before the thread asked; only Chat moved since.
+    const host = { ...source([]), reader: pendingReader([], [question]) };
+    const { rerender } = render(<Sidebar sidebarShown={false} source={host} />);
+    await waitFor(() => expect(host.reader.list).toHaveBeenCalledOnce());
+    rerender(<Sidebar source={host} />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Rotate the dev API keys/ })).toHaveTextContent(
+        "Which key should go first?",
+      ),
+    );
+    expect(host.reader.list).toHaveBeenCalledTimes(2);
   });
 
   it("offers Allow once on the row of a thread whose pane sits behind Board", async () => {

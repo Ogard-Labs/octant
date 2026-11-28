@@ -456,13 +456,15 @@ answer, and a refusal is one quiet line under the buttons until the host stops
 listing the request. The rows list from the window's own pending-request read,
 the one that counts the threads a subagent or the agent itself holds waiting,
 which re-reads on Work, Code and tool-approval changes; the sidebar does not
-read alongside it, so one Code change is one host read. The sidebar adds a read
+follow those changes alongside it. The sidebar adds a read
 only for Chat navigation, which the window's read leaves out because a
 streaming reply moves it on every delta, and only while a waiting row the window
 does not show is listed: when Chat moved since the sidebar last read and some
 listed row offers answers, or a waiting row appears or its thread moves. A row
 does not know its mode, so a Code row that moves after Chat moved reads once
-more than it needs. Never on a timer. A thread the window shows offers nothing:
+more than it needs. A sidebar shown again after it was collapsed reads once
+when it lists a waiting row, since it cannot tell what Chat did meanwhile.
+Never on a timer. A thread the window shows offers nothing:
 its card is in the thread. A server Project's rows under On your servers keep
 the Project tree's row in every arrangement, so they offer no answers in place;
 the row opens the thread, whose card answers it. The arrangement belongs to the
