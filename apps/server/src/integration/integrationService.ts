@@ -3,12 +3,15 @@ import type { CredentialOperation } from "@octant/plugin-api/credential-request"
 import { IntegrationCredentialOperations } from "./integrationCredentialOperations";
 import type {
   IntegrationAccount,
+  IntegrationAccountEntry,
+  IntegrationAccountsSnapshot,
   IntegrationAuthenticationCommand,
   IntegrationAuthenticationSnapshot,
   IntegrationCommand,
   IntegrationExecutionResult,
 } from "@octant/contracts/integration";
 import {
+  decodeIntegrationAccountsSnapshot,
   decodeIntegrationAuthenticationSnapshot,
   decodeIntegrationExecutionResult,
 } from "@octant/contracts/integration";
@@ -51,23 +54,8 @@ import {
 import { linearIssueBrowseCapabilities } from "../plugins/linear/linearIssueBrowse";
 import { linearCredentialOperation } from "../plugins/linear/linearCredentialOperation";
 
-export interface IntegrationAccountSnapshotEntry {
-  readonly accountRef: string;
-  readonly state: IntegrationAuthenticationSnapshot["state"];
-  readonly account?: IntegrationAccount;
-  readonly capabilities: IntegrationAuthenticationSnapshot["capabilities"];
-  readonly remediation?: string;
-  readonly reconnectRequired?: boolean;
-  readonly isLegacy?: boolean;
-}
-
-export interface IntegrationAccountsListSnapshot {
-  readonly accounts: ReadonlyArray<IntegrationAccountSnapshotEntry>;
-  readonly oauthConfigured: boolean;
-  readonly unusedPersonalCredentialStored?: boolean;
-  readonly indexDamaged?: boolean;
-  readonly remediation?: string;
-}
+export type IntegrationAccountSnapshotEntry = IntegrationAccountEntry;
+export type IntegrationAccountsListSnapshot = IntegrationAccountsSnapshot;
 
 export interface StoredLinearAccountSummary {
   readonly accountRef: string;
@@ -857,14 +845,14 @@ export function createLinearIntegrationService(options: {
       }
       const latestIndex = loadedState?.kind === "ok" ? loadedState.index : state.index;
       const unusedPersonal = await hasUnusedLegacyPersonalKey(latestIndex);
-      return {
+      return decodeIntegrationAccountsSnapshot({
         accounts: entries,
         oauthConfigured,
         ...(unusedPersonal ? { unusedPersonalCredentialStored: true } : {}),
         ...(entries.length === 0 && !oauthConfigured
           ? { remediation: LINEAR_OAUTH_UNCONFIGURED }
           : {}),
-      };
+      });
     },
     snapshot: async (pluginSlug, signal, accountRef) => {
       if (!isEffective(pluginSlug)) return unavailableAuthentication();

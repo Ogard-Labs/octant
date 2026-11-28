@@ -14,6 +14,7 @@ import {
   ProviderModelId,
 } from "./providers";
 import { AutoReviewer } from "./shield";
+import { IntegrationAccountRef } from "./integration";
 import { LinearNodeId } from "./linearIssues";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -84,6 +85,8 @@ export type ConnectedGitHubRepository = typeof ConnectedGitHubRepository.Type;
  * local window on this host; never carries credentials or arbitrary URLs.
  */
 export const ProjectLinearTarget = Schema.Struct({
+  /** Absent on single-account hosts and targets bound before multi-account support. */
+  accountRef: Schema.optional(IntegrationAccountRef),
   teamId: LinearNodeId,
   teamKey: Schema.NonEmptyTrimmedString.pipe(Schema.pattern(/^[A-Z][A-Z0-9]{0,9}$/)),
   teamName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
